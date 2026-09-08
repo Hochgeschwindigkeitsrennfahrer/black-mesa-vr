@@ -1,7 +1,7 @@
 # Black Mesa VR
 
 <a href="https://www.youtube.com/watch?v=S9kmK95yqgM">
-  <img src="assets/release-2026-09-06.jpg" alt="Black Mesa VR — HL2VR weapon wheel and ammo counter">
+  <img src="assets/release-2026-09-08.jpg" alt="Black Mesa VR — Anti-Mass Spectrometer with corrected lens flares" width="50%">
 </a>
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/P5P56X4HH)
@@ -30,13 +30,14 @@ https://github.com/keyou91/l4d2vr
 * Crossbow zoom (headset aim while scoped)
 * VR main menu with a motion-controller cursor
 * Blue Shift HUD theme (weapon wheel and wrist HUD)
+* Multicore rendering
 
 ## Known Issues
 
 The VR experience is fully playable, but several features are still a work in progress:
 
 * **Quest 3:** Meta Link uses the Link / Oculus OpenXR runtime. Virtual Desktop must use Streamer Options → **OpenXR Runtime = VDXR**. SteamVR in that dropdown inverts the world
-* Performance is be poor in open and complex scenes, especially in Blue Shift and Xen
+* If shots misalign with the weapon, press the right thumbstick once to recenter. Roomscale support is coming.
 * Two-handed weapons are planned for a later update.
 * Manual reloading is not currently implemented and is planned for a future update.
 

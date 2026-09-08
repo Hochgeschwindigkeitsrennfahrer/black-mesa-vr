@@ -220,7 +220,7 @@ On the current HMD-fb **blit** path the world is rasterized into the window back
 
 `SetActionManifestPath` → `Black Mesa\VR\SteamVRActionManifest\action_manifest.json`. `UpdateActionState` after `WaitGetPoses` on the pose-waiter thread. CreateMove applies Walk (`forwardmove`/`sidemove` ×450) and held `IN_USE`/`IN_ATTACK`/etc. Right stick adds `m_RotationOffsetY` to HMD yaw (Portal 2 `TurnSpeed`).
 
-G2: `controller_type` `hpmotioncontroller` (copy of Touch). WMR: `holographic_controller`. Also Touch, Knuckles, Cosmos, Vive.
+G2: `controller_type` `hpmotioncontroller` (copy of Touch). WMR: `holographic_controller`. Also Touch, Knuckles, Cosmos, Vive. Quest 3 / Pico / Focus 3 reuse the Touch defaults (`oculus_touch_plus`, `pico_controller`, `vive_focus3_controller`) so Pause stays on left Y (and left system). OpenXR Quest 3 needs `XR_META_touch_controller_plus` or Pause never binds — helper log 2026-09-08: `meta/touch_controller_plus` was `PATH_UNSUPPORTED` until that extension was enabled.
 
 After launch, `bmvr_log.txt` next to `bms.exe` and next to the loaded `d3d9.dll`.
 

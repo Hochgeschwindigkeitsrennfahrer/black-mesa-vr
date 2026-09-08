@@ -104,7 +104,8 @@ inline uint32_t L4D2VR_ClassifyOpenXrInteractionProfile(const char* path)
     if (L4D2VR_TextContainsI(path, "touch_controller") ||
         L4D2VR_TextContainsI(path, "pico4_controller") ||
         L4D2VR_TextContainsI(path, "pico_neo") ||
-        L4D2VR_TextContainsI(path, "pico4"))
+        L4D2VR_TextContainsI(path, "pico4") ||
+        L4D2VR_TextContainsI(path, "mixed_reality_controller"))
         return L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH;
     if (L4D2VR_TextContainsI(path, "index_controller"))
         return L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES;
@@ -140,7 +141,12 @@ inline uint32_t L4D2VR_ClassifyOpenVrControllerType(const char* type)
 
 inline bool L4D2VR_ControllerFamilyPrefersAimPose(uint32_t family)
 {
-    return family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH;
+    // Touch and Index grip -Z follow the handle (up when pointing). OpenXR
+    // aim is the pointing axis. L4D2VR instead pitches every OpenVR device
+    // pose -45°. Index hands still need a 90° inward roll around that aim
+    // (thumbstick face vs palm); weapons keep the unrolled aim pose.
+    return family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH
+        || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES;
 }
 
 inline const char* L4D2VR_ControllerFamilyName(uint32_t family)
@@ -213,6 +219,9 @@ struct L4D2VROpenXrSharedTextureDesc
     uint32_t sampleCount = 0;
     uint32_t handleType = 0;
     uint32_t queueFamilyIndex = 0;
+    // L4D2VR_OPENXR_SHARED_UV_EXPLICIT: game already cropped the source
+    // (GMod ring band / eye half). Helper must not overwrite UVs with a
+    // full-texture projection crop.
     uint32_t reserved0 = 0;
     uint64_t kmtHandle = 0;
     uint64_t image = 0;
@@ -245,6 +254,9 @@ constexpr uint32_t L4D2VR_OPENXR_POSE_FLAG_MONO = 1u << 0;
 // L4D2VROpenXrOverlayDesc.reserved1. HUD overlay uses texture alpha (HL2VR
 // IgnoreTextureAlpha=false). reserved0 stays the spatial-lock epoch.
 constexpr uint32_t L4D2VR_OPENXR_OVERLAY_FLAG_BLEND_ALPHA = 1u << 0;
+// L4D2VROpenXrSharedTextureDesc.reserved0. UVs are a subrect of a shared
+// ring (or similar); do not treat 0..1 as one eye.
+constexpr uint32_t L4D2VR_OPENXR_SHARED_UV_EXPLICIT = 1u << 0;
 
 struct L4D2VROpenXrPoseDesc
 {

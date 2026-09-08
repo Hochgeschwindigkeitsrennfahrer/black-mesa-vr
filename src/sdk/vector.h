@@ -318,6 +318,13 @@ inline vec_t Vector::Length2DSqr(void) const
 	return (x * x + y * y);
 }
 
+inline void Vector::Init(vec_t ix, vec_t iy, vec_t iz)
+{
+	x = ix;
+	y = iy;
+	z = iz;
+}
+
 class VectorByValue : public Vector
 {
 public:

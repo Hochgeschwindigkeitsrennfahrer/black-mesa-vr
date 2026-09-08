@@ -46,6 +46,7 @@ namespace bmvr
     float g_IPDScale = 1.f;
     float g_HeightOffset = 0.f;
     bool g_AutoMatQueueMode = false;
+    bool g_MulticoreMode = true;
     uint32_t g_AntiAliasing = 0;
     bool g_Haptics = true;
     bool g_HideCrosshair = true;
@@ -69,6 +70,7 @@ namespace bmvr
     float g_VrHandsPoseRotX = 0.f;
     float g_VrHandsPoseRotY = 180.f;
     float g_VrHandsPoseRotZ = 0.f;
+    float g_VrHandsIndexRollDeg = 90.f;
     // ~one hand-length back along aim after yaw 180 (user: gloves sat ahead
     // of the controller). Flip the Z sign in VR/config.txt if this goes the
     // wrong way on a given headset.
@@ -464,6 +466,8 @@ namespace bmvr
                 g_HeightOffset = static_cast<float>(atof(val));
             else if (std::strcmp(n, "AutoMatQueueMode") == 0)
                 g_AutoMatQueueMode = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MulticoreMode") == 0)
+                g_MulticoreMode = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "AntiAliasing") == 0 || std::strcmp(n, "msaa") == 0)
             {
                 const int nAa = atoi(val);
@@ -522,6 +526,8 @@ namespace bmvr
                     g_VrHandsPoseRotZ = z;
                 }
             }
+            else if (std::strcmp(n, "VrHandsIndexRollDeg") == 0)
+                g_VrHandsIndexRollDeg = static_cast<float>(atof(val));
             else if (std::strcmp(n, "VrHandsPoseOffsetMeters") == 0)
             {
                 float x = 0.f, y = 0.f, z = -0.20f;
@@ -659,11 +665,11 @@ namespace bmvr
                 g_TryOffscreenWorldGrow = g_WorldEyeSizeOptIn;
             }
         }
-        Log("VR config %ls RenderScale=%.2f TurnSpeed=%.2f snap=%d vm=(%.1f,%.1f,%.1f) touchOx=%.1f tilt=%.1f ipd=%.2f autoQueue=%d aa=%u worldEyeSize=%d key=%s",
+        Log("VR config %ls RenderScale=%.2f TurnSpeed=%.2f snap=%d vm=(%.1f,%.1f,%.1f) touchOx=%.1f tilt=%.1f ipd=%.2f autoQueue=%d multicore=%d aa=%u worldEyeSize=%d key=%s",
             path.c_str(), g_RenderScale, g_TurnSpeed, g_SnapTurning ? 1 : 0,
             g_ViewmodelPosOffsetX, g_ViewmodelPosOffsetY, g_ViewmodelPosOffsetZ,
             g_ViewmodelPosOffsetXTouch,
-            g_ControllerPitchTilt, g_IPDScale, g_AutoMatQueueMode ? 1 : 0, g_AntiAliasing,
+            g_ControllerPitchTilt, g_IPDScale, g_AutoMatQueueMode ? 1 : 0, g_MulticoreMode ? 1 : 0, g_AntiAliasing,
             g_WorldEyeSizeOptIn ? 1 : 0,
             sawWorldEyeSize ? (g_WorldEyeSizeOptIn ? "true" : "false") : "missing");
         if (!g_WorldEyeSizeOptIn)

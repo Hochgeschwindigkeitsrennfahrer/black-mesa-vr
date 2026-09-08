@@ -224,6 +224,7 @@ namespace
             lhs.queueFamilyIndex == rhs.queueFamilyIndex &&
             lhs.kmtHandle == rhs.kmtHandle &&
             lhs.image == rhs.image &&
+            lhs.reserved0 == rhs.reserved0 &&
             lhs.uMin == rhs.uMin &&
             lhs.vMin == rhs.vMin &&
             lhs.uMax == rhs.uMax &&

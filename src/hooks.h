@@ -62,7 +62,10 @@ typedef void(__thiscall* tCalcViewModelView)(void* thisptr, void* owner, const V
 typedef void(__thiscall* tAdjustEngineViewport)(void* thisptr, int& x, int& y, int& width, int& height);
 typedef void(__thiscall* tViewport)(void* thisptr, int x, int y, int width, int height);
 typedef void(__thiscall* tGetViewport)(void* thisptr, int& x, int& y, int& width, int& height);
+typedef void(__thiscall* tGetRenderTargetDimensions)(void* thisptr, int& width, int& height);
+typedef void(__thiscall* tDepthRange)(void* thisptr, float zNear, float zFar);
 typedef void(__thiscall* tDrawModelExecute)(void* thisptr, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
+typedef void*(__cdecl* tLightcacheFindNearest)(int x, int y, int z, int flags);
 typedef void(__thiscall* tPushRenderTargetAndViewport)(void* thisptr, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);
 typedef void(__thiscall* tPopRenderTargetAndViewport)(void* thisptr);
 typedef void(__thiscall* tDrawScreenSpaceRectangle)(void* thisptr, IMaterial* material,
@@ -126,7 +129,14 @@ public:
     static inline Hook<tAdjustEngineViewport> hkAdjustEngineViewport;
     static inline Hook<tViewport> hkViewport;
     static inline Hook<tGetViewport> hkGetViewport;
+    static inline Hook<tGetViewport> hkGetViewportQueued;
+    static inline Hook<tGetRenderTargetDimensions> hkGetRenderTargetDimensions;
+    static inline Hook<tGetRenderTargetDimensions> hkGetRenderTargetDimensionsBase;
+    static inline Hook<tGetRenderTargetDimensions> hkGetRenderTargetDimensionsQueued;
+    static inline Hook<tDepthRange> hkDepthRange;
+    static inline Hook<tDepthRange> hkDepthRangeQueued;
     static inline Hook<tDrawModelExecute> hkDrawModelExecute;
+    static inline Hook<tLightcacheFindNearest> hkLightcacheFindNearest;
     static inline Hook<tPushRenderTargetAndViewport> hkPushRenderTargetAndViewport;
     static inline Hook<tPopRenderTargetAndViewport> hkPopRenderTargetAndViewport;
     static inline Hook<tDrawScreenSpaceRectangle> hkDrawScreenSpaceRectangle;
@@ -184,7 +194,10 @@ public:
     static void __fastcall dAdjustEngineViewport(void* ecx, void* edx, int& x, int& y, int& width, int& height);
     static void __fastcall dViewport(void* ecx, void* edx, int x, int y, int width, int height);
     static void __fastcall dGetViewport(void* ecx, void* edx, int& x, int& y, int& width, int& height);
+    static void __fastcall dGetRenderTargetDimensions(void* ecx, void* edx, int& width, int& height);
+    static void __fastcall dDepthRange(void* ecx, void* edx, float zNear, float zFar);
     static void __fastcall dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
+    static void* __cdecl dLightcacheFindNearest(int x, int y, int z, int flags);
     static void __fastcall dPushRenderTargetAndViewport(void* ecx, void* edx, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);
     static void __fastcall dPopRenderTargetAndViewport(void* ecx, void* edx);
     static void __fastcall dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial* material,

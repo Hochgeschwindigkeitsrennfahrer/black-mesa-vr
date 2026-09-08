@@ -144,10 +144,12 @@ HudDisplayRatio=0.82
 IPDScale=1.0
 HeightOffset=0.0
 
-# Stereo copies blit the shared backbuffer after each RenderView. Queued
-# mode 2 (2026-08-26) made that mono, flicker, and ~180fps stutter. Keep 0
-# until named per-eye RTs work. Do not ClientCmd mat_queue_mode.
+# Default play path: 1x-eye stereo on the material thread (mat_queue_mode 2)
+# after pass-through warmup. Menu / load stay queue 0. false = stay on 0.
+# AutoMatQueueMode is the older "always toggle the cvar" switch; leave false.
+# Do not ClientCmd mat_queue_mode.
 AutoMatQueueMode=false
+MulticoreMode=true
 
 # L4D2VR VR-menu MSAA on the private eye RTs (not mat_antialias). 0 / 2 / 4 / 8 / 16.
 # Restart required. OpenVR submits a non-MSAA resolve copy. This is GPU cost,
@@ -179,9 +181,12 @@ HideViewmodelArms=true
 VrHandsGlovesEnabled=true
 VrHandsModelScale=0.85
 # SteamVR glove local Rx,Ry,Rz. Yaw 180 points fingers with the controller.
-# Touch hands use aim orientation at the grip origin so a straight controller
-# is a straight hand (grip -Z follows the handle and points up). Add a
-# negative Rx here if a given headset still cocks the fingers up.
+# Touch and Index hands use aim orientation at the grip origin so a straight
+# controller is a straight hand (grip -Z follows the handle and points up).
+# Index aim +Y is the thumbstick face, ~90° from the palm. This rolls only
+# the hand meshes inward around aim forward; weapons stay on the aim pose.
+# Flip the sign if palms go the wrong way. 0 disables the extra roll.
+VrHandsIndexRollDeg=90
 VrHandsPoseRotationOffset=0,180,0
 # Negative Y lowers both hands in view (separate from weapon oz). Negative
 # Z is along aim (controller basis Z is -forward). -0.10 m is ~60% of a

@@ -1,4 +1,4 @@
-Black Mesa VR — drop-in (2026-09-06)
+Black Mesa VR — drop-in (2026-09-08)
 ====================================
 
 Close Black Mesa first. Copy this folder into Steam\steamapps\common\Black Mesa
@@ -8,16 +8,19 @@ so d3d9.dll lands in ALL three:
   Black Mesa\bin\d3d9.dll
   Black Mesa\bin\thirdparty\dxvk-windows-x86\d3d9.dll
 
-Keep a tuned VR\config.txt if you already have one.
+Keep a tuned VR\config.txt if you already have one. If you keep the old
+config, add these lines (or the DLL defaults apply):
+
+  MulticoreMode=true
+  VrHandsIndexRollDeg=90
 
 This build
 ----------
-- Optimization pass for smoother, more stable frame times
-- In-world transparent pause menu overlay
-- Accurate crowbar swinging (HL2VR-style melee)
-- HL2VR hexagonal weapon selection
-- Health and armor on top of the hand
-- Ammo counter on the side of the weapon
-- Per-hand item holding and use
-- Controls closer to HL2VR: double-tap sprint, reload, alt-fire, and use
-- Xen culling fixes
+- Multicore rendering — expect massive performance upgrades
+- Fixed lens flare positions
+- Fixed inability to attack after grabbing / using something with the left hand
+- Fixed Valve Index hand / weapon poses
+- Fixed missing binds on some controllers
+
+If shots misalign with the weapon position, recenter by pressing the right
+thumbstick once. Roomscale support is coming.

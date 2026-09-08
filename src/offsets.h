@@ -68,6 +68,8 @@ public:
     // so bones/render origin stay on the camera pivot.
     static constexpr int kCBaseEntity_SetAbsOrigin = 0xAF720;
     static constexpr int kCBaseEntity_SetAbsAngles = 0xAF600;
+    // C_BaseEntity abs origin written by SetAbsOrigin (Ghidra client FUN_100af720).
+    static constexpr int kCBaseEntity_AbsOrigin = 0x294;
 
     // CBaseEntity::EmitSound(name, soundtime=0, duration=NULL). Ghidra
     // FUN_101d80d0 (thiscall). Vanilla HUD uses this for Player.WeaponSelected
@@ -241,13 +243,39 @@ public:
     Offset DrawModelExecute{ "engine.dll", 0x113E80,
         "55 8B EC 81 EC 68 03 00 00 A1 ? ? ? ? 33 C5 89 45 FC 8B 45 10 53 8B 5D 0C" };
 
+    // engine.dll FindNearest lightcache (LRU walk, sentinel 0x200).
+    // mat_queue_mode 2 + GetLightForPoint/studio lighting can cycle +0x1D0
+    // next pointers; the engine walk never hits 0x200 and freezes the game
+    // thread (verified 2026-09-08, PID 25228, 12-node cycle).
+    Offset LightcacheFindNearest{ "engine.dll", 0x1D0E20,
+        "55 8B EC 83 EC 1C 0F B7 0D ? ? ? ? 33 D2 53 56 BB 00 02 00 00" };
+
     Offset VGui_Paint{ "engine.dll", 0x238C50,
         "55 8B EC 83 EC 18 53 8B D9 8B 0D ? ? ? ? FF 15" };
 
     Offset GetRenderTarget{ "materialsystem.dll", 0x68820,
         "83 79 4C 00 7E 0E 8B 41 4C 8D 14 C0" };
+    // CMatRenderContext::GetRenderTargetDimensions (vtable +0x20 after GetRT).
+    // CLensflare WorldToScreen uses this as pixel size; GetViewport (+0x9C) is
+    // the mesh NDC divisor. HWND 16:9 vs square eye parks flares off the lights.
+    Offset GetRenderTargetDimensions{ "materialsystem.dll", 0x68840,
+        "55 8B EC 8B 41 4C 56 8D 14 C0 8B 41 40 8B 74 90 DC 85 F6 74 1D" };
+    // CMatRenderContextBase copy (internal context). Optional.
+    Offset GetRenderTargetDimensionsBase{ "materialsystem.dll", 0x64180,
+        "55 8B EC 56 8B F1 57 83 7E 4C 00 74 2F 8B 46 4C 8D 14 C0 8B 46 40 8B 7C 90 DC",
+        0, true };
+    // CMatQueuedRenderContext +0x20 is `ret 8` — it never writes the outs.
+    // mat_queue_mode 2 records flares against leftover HWND / uninit size.
+    Offset GetRenderTargetDimensionsQueued{ "materialsystem.dll", 0x5F890,
+        "C2 08 00 CC CC CC CC CC CC CC CC CC CC CC CC CC CC 55 8B EC 8B 45 08 C7 00 00 00 00 00",
+        0, true };
     Offset GetViewport{ "materialsystem.dll", 0x68A70,
         "55 8B EC 8B 41 4C 56 8D 14 C0 8B 41 40 83 7C 90 F8 00" };
+    // Queued GetViewport (+0x9C). Hardware 0x68A70 is a different function;
+    // ClampStereoViewport never ran on the record thread without this.
+    Offset GetViewportQueued{ "materialsystem.dll", 0x5F8C0,
+        "55 8B EC 56 57 8B F9 8B 47 4C 8D 14 C0 8B 47 40 83 7C 90 F8 00 8D 34 90 7C 2C",
+        0, true };
     Offset Viewport{ "materialsystem.dll", 0x69F30,
         "55 8B EC 56 FF 75 14 8B F1 FF 75 10 FF 75 0C FF 75 08 E8" };
     Offset PushRenderTargetAndViewport{ "materialsystem.dll", 0x6A3D0,
@@ -276,6 +304,13 @@ public:
     static constexpr int kIMatRenderContext_EndRender = 0xC;
     static constexpr int kIMatRenderContext_SetRenderTarget = 0x18;
     static constexpr int kIMatRenderContext_GetRenderTarget = 0x1C;
+    static constexpr int kIMatRenderContext_GetRenderTargetDimensions = 0x20;
+    // IMatRenderContext::DepthRange(zNear, zFar). client.dll DrawViewModels
+    // (FUN_1020a8f0) calls this slot with (0, 0.1) so the gun wins every world
+    // Z test. Same slot as L4D2VR sdk.h. Hardware and queued vtables both
+    // implement it; hook from TryHookMatContextQueries like GetViewport.
+    static constexpr int kIMatRenderContext_DepthRange = 0x2C;
+    static constexpr int kIMatRenderContext_GetViewport = 0x9C;
     static constexpr int kIMatRenderContext_PushRT6 = 0x23C;
     static constexpr int kIMatRenderContext_PopRT = 0x24C;
     // IMatRenderContext::GetCallQueue. HL2VR/Source 2013 absolute slot 146.

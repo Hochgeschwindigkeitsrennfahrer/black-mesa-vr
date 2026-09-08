@@ -146,7 +146,8 @@ Those take effect on the next launch (config is read at DLL load).
 
 Also in VR\config.txt (defaults):
 
-  AutoMatQueueMode=false  leave engine mat_queue_mode alone (menu still 0)
+  AutoMatQueueMode=false  do not toggle the cvar except via MulticoreMode
+  MulticoreMode=true      default: mat_queue_mode 2 after stereo warmup (menu stays 0)
   VRRuntimeBackend=openxr  L4D2VR x64 OpenXR helper (openvr = SteamVR compositor)
   OpenXRHelper=true
   OpenXRHelperSubmitTestFrames=0
@@ -160,9 +161,10 @@ Also in VR\config.txt (defaults):
   LeftHanded=false        RecenterResetsYaw=true
   HideLocalPlayerModel=true
 
-If AutoMatQueueMode crashes, delete is not needed — the next launch skips
-mat_queue (bmvr_skip.txt next to bms.exe). Set AutoMatQueueMode=false to
-leave the engine's own mat_queue_mode alone (menu still forced to 0).
+Menu and load stay queue 0. Gameplay uses MulticoreMode: the DLL
+SetThreadMode(2) after stereo warmup. AutoMatQueueMode=false — do not
+ClientCmd mat_queue_mode. If that path crashes, bmvr_skip.txt next to
+bms.exe skips it on the next launch.
 
 
 6) If it does not load

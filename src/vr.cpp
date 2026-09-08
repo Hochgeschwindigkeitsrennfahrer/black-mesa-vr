@@ -56,10 +56,22 @@ namespace
     // SetViewport / Clear hook. RT0 only changes via the hooked entry point
     // (DXVK's own ResetSwapChain rebind goes through it too) or Reset, which
     // invalidates this cache.
-    IDirect3DSurface9* g_Rt0ActualPtr = nullptr;
-    UINT g_Rt0ActualW = 0;
-    UINT g_Rt0ActualH = 0;
-    bool g_Rt0ActualKnown = false;
+    thread_local IDirect3DSurface9* g_Rt0ActualPtr = nullptr;
+    thread_local UINT g_Rt0ActualW = 0;
+    thread_local UINT g_Rt0ActualH = 0;
+    thread_local bool g_Rt0ActualKnown = false;
+    // Material-thread last full-eye viewport on the MC ring. Playback has
+    // m_StereoEye == 0, so 16:9 SetViewport/Clear/Copy must not assume 0,0.
+    thread_local int g_McEyeX = 0;
+    thread_local int g_McEyeY = 0;
+    thread_local bool g_McEyeKnown = false;
+    thread_local int g_McLastRingVpX = -1;
+    // Material-thread 1x eye while a queued stereo pair is playing back.
+    // HWND must not be the 2x3 ring: BM deferred lighting/flashlight/fog
+    // assume a 1x HMD-sized dest at 0,0 (WorldRenderAtEyeSize).
+    thread_local int g_McPlayEye = 0;
+    thread_local bool g_HudPaintActive = false;
+    std::atomic<bool> g_McPauseHudBound{ false };
     // Swapchain backbuffer surface (pointer identity only, no reference held).
     // Stable between Resets; GetBackBuffer per SetRenderTarget/SetDepthStencil
     // during the eye blit was an extra locked COM round trip each.
@@ -389,17 +401,45 @@ namespace
         // every call was extra DXVK lock + COM during that nest. Capture
         // only matters while a stereo eye blit is in progress.
         bool redirectedToEye = false;
-        if (index == 0 && vr && device && !vr->m_CaptureReentry && !vr->HudPaintActive()
-            && vr->StereoEyeBlitActive())
+        // Multicore: HWND is the current 1x eye (same WorldRenderAtEyeSize
+        // path as queue 0). Binding the 2x3 ring made lighting/flashlight/fog
+        // run at ring UVs (log: 3168x3104 @0,0 remapped onto last-known eye,
+        // CopyRTEx srcRect=16,0 / 3184,0, fog overlay on the right).
+        IDirect3DSurface9* dest = nullptr;
+        if (vr && !vr->m_CaptureReentry && !vr->HudPaintActive())
         {
-            if ((bmvr::TrySteamVrEyeRt() || bmvr::OffscreenWorldMatchesEyes())
-                && vr->StereoEyeBlitDest() && rt
-                && rt != vr->StereoEyeBlitDest()
+            dest = vr->McPlaybackEyeSurface();
+            // Queue 2: StereoEyeBlitActive is shared. The material thread sets
+            // it while drawing eyes; GameUI on the game thread then dumped the
+            // pause cursor onto the 1x world RT (stuck on the 3D view, overlay
+            // flickered). Only this thread's TLS dest may steal HWND.
+            if (!dest && !vr->McPipelineEnabled() && vr->StereoEyeBlitActive())
+                dest = vr->StereoEyeBlitDest();
+        }
+        if (index == 0 && vr && device && dest)
+        {
+            if ((bmvr::TrySteamVrEyeRt() || bmvr::OffscreenWorldMatchesEyes()
+                    || vr->McPipelineEnabled())
+                && rt
+                && rt != dest
                 && SurfaceMatchesWindowOrBackbuffer(device, rt))
             {
-                rt = vr->StereoEyeBlitDest();
+                rt = dest;
                 vr->NoteStereoRedirectedToEye();
                 redirectedToEye = true;
+                static int s_mcEyeRt;
+                if (s_mcEyeRt < 8 && vr->McPipelineEnabled())
+                {
+                    D3DSURFACE_DESC d{};
+                    UINT dw = 0, dh = 0;
+                    if (SUCCEEDED(dest->GetDesc(&d)))
+                    {
+                        dw = d.Width;
+                        dh = d.Height;
+                    }
+                    Game::logMsg("MC HWND SetRT -> 1x eye %ux%u (not ring)", dw, dh);
+                    ++s_mcEyeRt;
+                }
             }
             // CaptureGameColorOnUnbind is a no-op on the native offscreen
             // path (eyes are painted via the redirect above); do not pay
@@ -462,13 +502,29 @@ namespace
             && vr->m_RenderWidth >= 640 && vr->m_RenderHeight >= 360)
         {
             D3DVIEWPORT9 eyeVp{};
-            eyeVp.X = 0;
-            eyeVp.Y = 0;
-            eyeVp.Width = vr->m_RenderWidth;
-            eyeVp.Height = vr->m_RenderHeight;
             eyeVp.MinZ = 0.f;
             eyeVp.MaxZ = 1.f;
-            device->SetViewport(&eyeVp);
+            eyeVp.Width = vr->m_RenderWidth;
+            eyeVp.Height = vr->m_RenderHeight;
+            if (vr->SurfaceIsMcRing(rt))
+            {
+                int ox = 0, oy = 0;
+                const bool have = vr->McResolveRingEyeOrigin(0, 0, 0, 0, ox, oy);
+                if (have)
+                {
+                    eyeVp.X = static_cast<DWORD>(ox);
+                    eyeVp.Y = static_cast<DWORD>(oy);
+                    device->SetViewport(&eyeVp);
+                    vr->McNoteRingEyeViewport(ox, oy,
+                        static_cast<int>(eyeVp.Width), static_cast<int>(eyeVp.Height));
+                }
+            }
+            else
+            {
+                eyeVp.X = 0;
+                eyeVp.Y = 0;
+                device->SetViewport(&eyeVp);
+            }
         }
         return hr;
     }
@@ -477,7 +533,9 @@ namespace
     {
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
         IDirect3DSurface9* eyeDepth = nullptr;
-        if (vr && vr->StereoEyeBlitActive()
+        if (vr)
+            eyeDepth = vr->McPlaybackEyeDepth();
+        if (!eyeDepth && vr && !vr->McPipelineEnabled() && vr->StereoEyeBlitActive()
             && (bmvr::TrySteamVrEyeRt() || bmvr::OffscreenWorldMatchesEyes()))
         {
             if (vr->StereoEyeBlitDest() == vr->m_D9LeftEyeSurface)
@@ -511,7 +569,8 @@ namespace
             return false;
         if (rt == vr->StereoEyeBlitDest()
             || rt == vr->m_D9LeftEyeSurface
-            || rt == vr->m_D9RightEyeSurface)
+            || rt == vr->m_D9RightEyeSurface
+            || vr->SurfaceIsMcRing(rt))
             return true;
         D3DSURFACE_DESC desc{};
         if (FAILED(rt->GetDesc(&desc)))
@@ -526,7 +585,9 @@ namespace
             return false;
         if (!bmvr::OffscreenWorldMatchesEyes())
             return false;
-        if (!vr->StereoEyeBlitActive() && vr->m_StereoEye == 0)
+        if (vr->D3dRt0IsMcRing())
+            return vr->StereoWorldPassActive();
+        if (!vr->StereoWorldPassActive())
             return false;
         return vr->D3dRt0IsEyeSized();
     }
@@ -757,7 +818,7 @@ namespace
         const bool skipVsBones = (tag && tag[0] == 'V' && start >= 32);
         if (data && vec4Count > 0 && vec4Count <= 256 && !skipVsBones && vr
             && bmvr::OffscreenWorldMatchesEyes()
-            && (vr->StereoEyeBlitActive() || vr->m_StereoEye != 0)
+            && vr->StereoWorldPassActive()
             && !vr->HudPaintActive() && !vr->m_CaptureReentry)
         {
             // Scans read the game's buffer; the block is only copied to the
@@ -809,7 +870,62 @@ namespace
         D3DVIEWPORT9 vp{};
         const D3DVIEWPORT9* use = pViewport;
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
-        if (pViewport && vr
+        if (pViewport && vr && vr->D3dRt0IsMcRing())
+        {
+            int cx = 0, cy = 0, cw = 0, ch = 0;
+            if (vr->McClipAmbiguousWindowVp(
+                static_cast<int>(pViewport->X), static_cast<int>(pViewport->Y),
+                static_cast<int>(pViewport->Width), static_cast<int>(pViewport->Height),
+                cx, cy, cw, ch))
+            {
+                vp = *pViewport;
+                vp.X = static_cast<DWORD>(cx);
+                vp.Y = static_cast<DWORD>(cy);
+                vp.Width = static_cast<DWORD>(cw);
+                vp.Height = static_cast<DWORD>(ch);
+                use = &vp;
+                static int s_clipLog;
+                if (s_clipLog < 8)
+                {
+                    Game::logMsg("MC clip leftover viewport %ux%u @%u,%u -> %dx%d",
+                        pViewport->Width, pViewport->Height, pViewport->X, pViewport->Y,
+                        cw, ch);
+                    ++s_clipLog;
+                }
+            }
+        }
+        if (use == pViewport && pViewport && vr && vr->D3dRt0IsMcRing())
+        {
+            int ox = 0, oy = 0;
+            if (vr->McResolveRingEyeOrigin(
+                static_cast<int>(pViewport->X), static_cast<int>(pViewport->Y),
+                static_cast<int>(pViewport->Width), static_cast<int>(pViewport->Height),
+                ox, oy))
+            {
+                const bool window = ViewportMatchesWindow(pViewport->Width, pViewport->Height);
+                const bool eye = pViewport->Width == vr->m_RenderWidth
+                    && pViewport->Height == vr->m_RenderHeight;
+                if (window || eye)
+                {
+                    vp = *pViewport;
+                    vp.X = static_cast<DWORD>(ox);
+                    vp.Y = static_cast<DWORD>(oy);
+                    vp.Width = vr->m_RenderWidth;
+                    vp.Height = vr->m_RenderHeight;
+                    use = &vp;
+                    static int s_vpLog;
+                    if (s_vpLog < 24)
+                    {
+                        Game::logMsg("D3D SetViewport %ux%u @%u,%u -> eye %ux%u @%u,%u (world RT) recordTid=%d",
+                            pViewport->Width, pViewport->Height, pViewport->X, pViewport->Y,
+                            vp.Width, vp.Height, vp.X, vp.Y,
+                            vr->McOnRecordThread() ? 1 : 0);
+                        ++s_vpLog;
+                    }
+                }
+            }
+        }
+        else if (use == pViewport && pViewport && vr
             && ViewportMatchesWindow(pViewport->Width, pViewport->Height)
             && ShouldExpandWindowVpOnWorldRt(device, vr))
         {
@@ -819,17 +935,25 @@ namespace
             vp.Width = vr->m_RenderWidth;
             vp.Height = vr->m_RenderHeight;
             use = &vp;
-            static int s_vpLog;
-            if (s_vpLog < 16)
+            static int s_vpLogQ0;
+            if (s_vpLogQ0 < 8)
             {
-                Game::logMsg("D3D SetViewport %ux%u -> eye %ux%u (world RT)",
-                    pViewport->Width, pViewport->Height, vp.Width, vp.Height);
-                ++s_vpLog;
+                Game::logMsg("D3D SetViewport %ux%u @%u,%u -> eye %ux%u @0,0 (q0 world RT)",
+                    pViewport->Width, pViewport->Height, pViewport->X, pViewport->Y,
+                    vp.Width, vp.Height);
+                ++s_vpLogQ0;
             }
         }
         if (!g_OrigSetViewport)
             return D3DERR_INVALIDCALL;
-        return g_OrigSetViewport(device, use);
+        const HRESULT hr = g_OrigSetViewport(device, use);
+        if (SUCCEEDED(hr) && vr && use && vr->D3dRt0IsMcRing())
+        {
+            vr->McNoteRingEyeViewport(
+                static_cast<int>(use->X), static_cast<int>(use->Y),
+                static_cast<int>(use->Width), static_cast<int>(use->Height));
+        }
+        return hr;
     }
 
     HRESULT __stdcall HookedSetScissorRect(IDirect3DDevice9* device, const RECT* pRect)
@@ -841,22 +965,54 @@ namespace
         {
             const UINT w = static_cast<UINT>(pRect->right - pRect->left);
             const UINT h = static_cast<UINT>(pRect->bottom - pRect->top);
-            if (pRect->left <= 16 && pRect->top <= 16
-                && ViewportMatchesWindow(w, h)
-                && ShouldExpandWindowVpOnWorldRt(device, vr))
+            int cx = 0, cy = 0, cw = 0, ch = 0;
+            if (vr->D3dRt0IsMcRing()
+                && vr->McClipAmbiguousWindowVp(pRect->left, pRect->top,
+                    static_cast<int>(w), static_cast<int>(h), cx, cy, cw, ch))
             {
-                expanded.left = 0;
-                expanded.top = 0;
-                expanded.right = static_cast<LONG>(vr->m_RenderWidth);
-                expanded.bottom = static_cast<LONG>(vr->m_RenderHeight);
+                expanded.left = cx;
+                expanded.top = cy;
+                expanded.right = cx + cw;
+                expanded.bottom = cy + ch;
                 use = &expanded;
-                static int s_scLog;
-                if (s_scLog < 16)
+            }
+            else if (pRect
+                && ViewportMatchesWindow(w, h)
+                && ShouldExpandWindowVpOnWorldRt(device, vr)
+                && ((pRect->left <= 16 && pRect->top <= 16)
+                    || vr->McOriginIsRingBand(pRect->left, pRect->top)))
+            {
+                LONG ox = 0;
+                LONG oy = 0;
+                bool rewrite = true;
+                if (vr->D3dRt0IsMcRing())
                 {
-                    Game::logMsg("D3D SetScissor %ldx%ld -> eye %ux%u (world RT)",
-                        pRect->right - pRect->left, pRect->bottom - pRect->top,
-                        vr->m_RenderWidth, vr->m_RenderHeight);
-                    ++s_scLog;
+                    int rx = 0, ry = 0;
+                    if (!vr->McResolveRingEyeOrigin(pRect->left, pRect->top,
+                        static_cast<int>(w), static_cast<int>(h), rx, ry))
+                        rewrite = false;
+                    else
+                    {
+                        ox = rx;
+                        oy = ry;
+                    }
+                }
+                if (rewrite)
+                {
+                    expanded.left = ox;
+                    expanded.top = oy;
+                    expanded.right = ox + static_cast<LONG>(vr->m_RenderWidth);
+                    expanded.bottom = oy + static_cast<LONG>(vr->m_RenderHeight);
+                    use = &expanded;
+                    static int s_scLog;
+                    if (s_scLog < 16)
+                    {
+                        Game::logMsg("D3D SetScissor %ldx%ld @%ld,%ld -> eye %ux%u @%ld,%ld (world RT)",
+                            pRect->right - pRect->left, pRect->bottom - pRect->top,
+                            pRect->left, pRect->top,
+                            vr->m_RenderWidth, vr->m_RenderHeight, ox, oy);
+                        ++s_scLog;
+                    }
                 }
             }
         }
@@ -883,39 +1039,113 @@ namespace
                 && ViewportMatchesWindow(vp.Width, vp.Height))
             {
                 D3DVIEWPORT9 eye = vp;
-                eye.X = 0;
-                eye.Y = 0;
-                eye.Width = vr->m_RenderWidth;
-                eye.Height = vr->m_RenderHeight;
-                g_OrigSetViewport(device, &eye);
-                static int s_clrVp;
-                if (s_clrVp < 8)
+                bool rewrite = true;
+                if (vr->D3dRt0IsMcRing())
                 {
-                    Game::logMsg("D3D Clear expand viewport %ux%u -> %ux%u flags=0x%X",
-                        vp.Width, vp.Height, eye.Width, eye.Height, flags);
-                    ++s_clrVp;
+                    int cx = 0, cy = 0, cw = 0, ch = 0;
+                    if (vr->McClipAmbiguousWindowVp(
+                        static_cast<int>(vp.X), static_cast<int>(vp.Y),
+                        static_cast<int>(vp.Width), static_cast<int>(vp.Height),
+                        cx, cy, cw, ch))
+                    {
+                        eye.X = static_cast<DWORD>(cx);
+                        eye.Y = static_cast<DWORD>(cy);
+                        eye.Width = static_cast<DWORD>(cw);
+                        eye.Height = static_cast<DWORD>(ch);
+                    }
+                    else
+                    {
+                    int ox = 0, oy = 0;
+                    if (!vr->McResolveRingEyeOrigin(static_cast<int>(vp.X), static_cast<int>(vp.Y),
+                        static_cast<int>(vp.Width), static_cast<int>(vp.Height), ox, oy))
+                        rewrite = false;
+                    else
+                    {
+                        eye.X = static_cast<DWORD>(ox);
+                        eye.Y = static_cast<DWORD>(oy);
+                        eye.Width = vr->m_RenderWidth;
+                        eye.Height = vr->m_RenderHeight;
+                    }
+                    }
+                }
+                else
+                {
+                    eye.X = 0;
+                    eye.Y = 0;
+                    eye.Width = vr->m_RenderWidth;
+                    eye.Height = vr->m_RenderHeight;
+                }
+                if (rewrite)
+                {
+                    g_OrigSetViewport(device, &eye);
+                    vr->McNoteRingEyeViewport(static_cast<int>(eye.X), static_cast<int>(eye.Y),
+                        static_cast<int>(eye.Width), static_cast<int>(eye.Height));
+                    static int s_clrVp;
+                    if (s_clrVp < 8)
+                    {
+                        Game::logMsg("D3D Clear expand viewport %ux%u @%u,%u -> %ux%u @%u,%u flags=0x%X",
+                            vp.Width, vp.Height, vp.X, vp.Y, eye.Width, eye.Height, eye.X, eye.Y, flags);
+                        ++s_clrVp;
+                    }
                 }
             }
             if (rects && count >= 1)
             {
                 const LONG w = rects[0].x2 - rects[0].x1;
                 const LONG h = rects[0].y2 - rects[0].y1;
-                if (rects[0].x1 <= 16 && rects[0].y1 <= 16
-                    && w > 0 && h > 0
-                    && ViewportMatchesWindow(static_cast<UINT>(w), static_cast<UINT>(h)))
+                if (w > 0 && h > 0
+                    && ViewportMatchesWindow(static_cast<UINT>(w), static_cast<UINT>(h))
+                    && ((rects[0].x1 <= 16 && rects[0].y1 <= 16)
+                        || vr->McOriginIsRingBand(rects[0].x1, rects[0].y1)))
                 {
-                    full.x1 = 0;
-                    full.y1 = 0;
-                    full.x2 = static_cast<LONG>(vr->m_RenderWidth);
-                    full.y2 = static_cast<LONG>(vr->m_RenderHeight);
-                    useRects = &full;
-                    useCount = 1;
-                    static int s_clrRect;
-                    if (s_clrRect < 8)
+                    LONG ox = 0;
+                    LONG oy = 0;
+                    bool rewrite = true;
+                    if (vr->D3dRt0IsMcRing())
                     {
-                        Game::logMsg("D3D Clear expand rect %ldx%ld -> %ux%u flags=0x%X",
-                            w, h, vr->m_RenderWidth, vr->m_RenderHeight, flags);
-                        ++s_clrRect;
+                        int cx = 0, cy = 0, cw = 0, ch = 0;
+                        if (vr->McClipAmbiguousWindowVp(rects[0].x1, rects[0].y1,
+                            static_cast<int>(w), static_cast<int>(h), cx, cy, cw, ch))
+                        {
+                            ox = cx;
+                            oy = cy;
+                            full.x1 = cx;
+                            full.y1 = cy;
+                            full.x2 = cx + cw;
+                            full.y2 = cy + ch;
+                            useRects = &full;
+                            useCount = 1;
+                            rewrite = false;
+                        }
+                        else
+                        {
+                        int rx = 0, ry = 0;
+                        if (!vr->McResolveRingEyeOrigin(rects[0].x1, rects[0].y1,
+                            static_cast<int>(w), static_cast<int>(h), rx, ry))
+                            rewrite = false;
+                        else
+                        {
+                            ox = rx;
+                            oy = ry;
+                        }
+                        }
+                    }
+                    if (rewrite)
+                    {
+                        full.x1 = ox;
+                        full.y1 = oy;
+                        full.x2 = ox + static_cast<LONG>(vr->m_RenderWidth);
+                        full.y2 = oy + static_cast<LONG>(vr->m_RenderHeight);
+                        useRects = &full;
+                        useCount = 1;
+                        static int s_clrRect;
+                        if (s_clrRect < 8)
+                        {
+                            Game::logMsg("D3D Clear expand rect %ldx%ld @%ld,%ld -> %ux%u @%ld,%ld flags=0x%X",
+                                w, h, rects[0].x1, rects[0].y1,
+                                vr->m_RenderWidth, vr->m_RenderHeight, ox, oy, flags);
+                            ++s_clrRect;
+                        }
                     }
                 }
             }
@@ -934,40 +1164,76 @@ namespace
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
         if (pSourceRect && pSource && pDest && vr
             && bmvr::OffscreenWorldMatchesEyes()
-            && (vr->StereoEyeBlitActive() || vr->m_StereoEye != 0)
+            && vr->StereoWorldPassActive()
             && !vr->HudPaintActive() && !vr->m_CaptureReentry)
         {
             const UINT rw = static_cast<UINT>(pSourceRect->right - pSourceRect->left);
             const UINT rh = static_cast<UINT>(pSourceRect->bottom - pSourceRect->top);
-            if (pSourceRect->left <= 16 && pSourceRect->top <= 16
-                && ViewportMatchesWindow(rw, rh))
+            const bool windowSrc = (pSourceRect->left <= 16 && pSourceRect->top <= 16
+                    && ViewportMatchesWindow(rw, rh))
+                || (vr->McPipelineEnabled() && vr->McOriginIsRingBand(pSourceRect->left, pSourceRect->top)
+                    && ViewportMatchesWindow(rw, rh));
+            if (windowSrc)
             {
                 D3DSURFACE_DESC srcDesc{};
                 D3DSURFACE_DESC dstDesc{};
                 if (SUCCEEDED(pSource->GetDesc(&srcDesc))
-                    && SUCCEEDED(pDest->GetDesc(&dstDesc))
-                    && srcDesc.Width == vr->m_RenderWidth
-                    && srcDesc.Height == vr->m_RenderHeight)
+                    && SUCCEEDED(pDest->GetDesc(&dstDesc)))
                 {
+                    const bool srcEye = srcDesc.Width == vr->m_RenderWidth
+                        && srcDesc.Height == vr->m_RenderHeight;
+                    const bool srcRing = vr->SurfaceIsMcRing(pSource);
                     const bool destWindow = ViewportMatchesWindow(dstDesc.Width, dstDesc.Height);
                     const bool destEye = dstDesc.Width == vr->m_RenderWidth
                         && dstDesc.Height == vr->m_RenderHeight;
-                    // HWND dest is desktop letterbox. PowerOfTwo / SmallFB /
-                    // FullFrame copies are fire/AMS heat-haze refraction.
-                    if (!destWindow || destEye)
+                    if ((srcEye || srcRing) && (!destWindow || destEye))
                     {
-                        expanded.left = 0;
-                        expanded.top = 0;
-                        expanded.right = static_cast<LONG>(vr->m_RenderWidth);
-                        expanded.bottom = static_cast<LONG>(vr->m_RenderHeight);
-                        useSrc = &expanded;
-                        static int s_srLog;
-                        if (s_srLog < 16)
+                        LONG ox = 0;
+                        LONG oy = 0;
+                        bool rewrite = true;
+                        if (srcRing)
                         {
-                            Game::logMsg("D3D StretchRect src %ux%u -> eye %ux%u dest=%ux%u (refract copy)",
-                                rw, rh, vr->m_RenderWidth, vr->m_RenderHeight,
-                                dstDesc.Width, dstDesc.Height);
-                            ++s_srLog;
+                            int cx = 0, cy = 0, cw = 0, ch = 0;
+                            if (vr->McClipAmbiguousWindowVp(pSourceRect->left, pSourceRect->top,
+                                static_cast<int>(rw), static_cast<int>(rh),
+                                cx, cy, cw, ch))
+                            {
+                                expanded.left = cx;
+                                expanded.top = cy;
+                                expanded.right = cx + cw;
+                                expanded.bottom = cy + ch;
+                                useSrc = &expanded;
+                                rewrite = false;
+                            }
+                            else
+                            {
+                            int rx = 0, ry = 0;
+                            if (!vr->McResolveRingEyeOrigin(pSourceRect->left, pSourceRect->top,
+                                static_cast<int>(rw), static_cast<int>(rh), rx, ry))
+                                rewrite = false;
+                            else
+                            {
+                                ox = rx;
+                                oy = ry;
+                            }
+                            }
+                        }
+                        if (rewrite)
+                        {
+                            expanded.left = ox;
+                            expanded.top = oy;
+                            expanded.right = ox + static_cast<LONG>(vr->m_RenderWidth);
+                            expanded.bottom = oy + static_cast<LONG>(vr->m_RenderHeight);
+                            useSrc = &expanded;
+                            static int s_srLog;
+                            if (s_srLog < 16)
+                            {
+                                Game::logMsg("D3D StretchRect src %ux%u @%ld,%ld -> eye %ux%u @%ld,%ld dest=%ux%u",
+                                    rw, rh, pSourceRect->left, pSourceRect->top,
+                                    vr->m_RenderWidth, vr->m_RenderHeight, ox, oy,
+                                    dstDesc.Width, dstDesc.Height);
+                                ++s_srLog;
+                            }
                         }
                     }
                 }
@@ -1023,6 +1289,50 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
         }
+    }
+
+    // StretchRect without leaving DXVK's swapchain/viewport on the eye RT.
+    // Cover-crop onto the HWND backbuffer from the material thread reset the
+    // device viewport to 2560x1440, so CLensflare WorldToScreen (eye size)
+    // and GetViewport (16:9) drifted apart. Also avoids Present-vs-swapchain
+    // StretchRect stalls when dest is the backbuffer.
+    HRESULT StretchRectKeepDeviceState(IDirect3DDevice9* device,
+        IDirect3DSurface9* src, const RECT* srcRect,
+        IDirect3DSurface9* dst, const RECT* dstRect,
+        D3DTEXTUREFILTERTYPE filter)
+    {
+        if (!device || !src || !dst)
+            return D3DERR_INVALIDCALL;
+        IDirect3DSurface9* oldRt = nullptr;
+        D3DVIEWPORT9 oldVp{};
+        device->GetRenderTarget(0, &oldRt);
+        device->GetViewport(&oldVp);
+        if (oldRt == dst && src != dst)
+        {
+            if (g_OrigSetRenderTarget)
+                g_OrigSetRenderTarget(device, 0, src);
+            else
+                device->SetRenderTarget(0, src);
+        }
+        HRESULT hr = E_FAIL;
+        if (g_OrigStretchRect)
+            hr = g_OrigStretchRect(device, src, srcRect, dst, dstRect, filter);
+        else
+            hr = device->StretchRect(src, srcRect, dst, dstRect, filter);
+        if (oldRt == dst && oldRt)
+        {
+            if (g_OrigSetRenderTarget)
+                g_OrigSetRenderTarget(device, 0, oldRt);
+            else
+                device->SetRenderTarget(0, oldRt);
+        }
+        if (g_OrigSetViewport)
+            g_OrigSetViewport(device, &oldVp);
+        else
+            device->SetViewport(&oldVp);
+        if (oldRt)
+            oldRt->Release();
+        return hr;
     }
 
     ITexture* SehCreateNamedEyeRT(tCreateNamedRTEx fn, void* mat, const char* name, int w, int h)
@@ -1222,6 +1532,103 @@ private:
     std::atomic<int> m_refs{ 0 };
 };
 
+class McMatFunctor : public CFunctor
+{
+public:
+    enum class Kind { Bind, Composite };
+
+    McMatFunctor(VR* vr, Kind kind, int stereoEye, uint32_t band, bool flushGpu)
+        : McMatFunctor(vr, kind, stereoEye, band, flushGpu, nullptr)
+    {
+    }
+
+    McMatFunctor(VR* vr, Kind kind, int stereoEye, uint32_t band, bool flushGpu,
+        const L4D2VROpenXrPoseDesc* pose)
+        : m_vr(vr)
+        , m_kind(kind)
+        , m_stereoEye(stereoEye)
+        , m_band(band)
+        , m_flushGpu(flushGpu)
+        , m_havePose(pose != nullptr && pose->valid != 0)
+    {
+        if (m_havePose)
+            m_pose = *pose;
+    }
+
+    int AddRef() override
+    {
+        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    int Release() override
+    {
+        const int n = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (n == 0)
+            delete this;
+        return n;
+    }
+
+    void operator()() override
+    {
+        if (!m_vr)
+            return;
+        if (m_kind == Kind::Composite)
+            m_vr->McCompositeEyesToRing(m_band, m_havePose ? &m_pose : nullptr);
+        else
+            m_vr->McBindPlaybackEye(m_stereoEye, m_flushGpu);
+    }
+
+private:
+    VR* m_vr;
+    Kind m_kind;
+    int m_stereoEye;
+    uint32_t m_band;
+    bool m_flushGpu;
+    bool m_havePose = false;
+    L4D2VROpenXrPoseDesc m_pose{};
+    std::atomic<int> m_refs{ 0 };
+};
+
+class McPauseHudFunctor : public CFunctor
+{
+public:
+    enum class Kind { Begin, End };
+
+    McPauseHudFunctor(VR* vr, Kind kind)
+        : m_vr(vr)
+        , m_kind(kind)
+    {
+    }
+
+    int AddRef() override
+    {
+        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    int Release() override
+    {
+        const int n = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (n == 0)
+            delete this;
+        return n;
+    }
+
+    void operator()() override
+    {
+        if (!m_vr)
+            return;
+        if (m_kind == Kind::Begin)
+            m_vr->McPauseHudBeginOnMatThread();
+        else
+            m_vr->McPauseHudEndOnMatThread();
+    }
+
+private:
+    VR* m_vr;
+    Kind m_kind;
+    std::atomic<int> m_refs{ 0 };
+};
+
 static IMatRenderContext* SehGetRenderContext(void* mat)
 {
     IMatRenderContext* ctx = nullptr;
@@ -1409,6 +1816,7 @@ void VR::OnLevelInit(const char* newmap)
     m_HmdOriginLatched = false;
     m_PassThroughMainViews = 0;
     m_AutoMatQueueModeLastRequested = -999;
+    ResetMcPipeline();
     m_GameUiVisible = false;
     m_GameUiActivateMs = 0;
     m_MenuLastVisibleMs = 0;
@@ -2249,7 +2657,8 @@ bool VR::ShouldExportOpenXrEyeTexture(TextureID texID, uint32_t sampleCount) con
         texID == Texture_LeftEyeSubmit ||
         texID == Texture_RightEyeSubmit ||
         texID == Texture_HUD ||
-        texID == Texture_OpenXrPublish;
+        texID == Texture_OpenXrPublish ||
+        texID == Texture_McRing;
 }
 
 void VR::PublishOpenXrEyeTexture(TextureID texID, const D3D9_TEXTURE_VR_DESC& desc)
@@ -2526,12 +2935,6 @@ void VR::WaitOldestOpenXrPending()
             break;
         SwitchToThread();
     }
-    if (!done && g_D3DVR9)
-    {
-        // Event never signalled (lost device, CS thread stalled): the only
-        // fence left is a device idle. Rare; logged through the rate line.
-        g_D3DVR9->WaitDeviceIdle();
-    }
     const double waited = QpcNowMs() - t0;
     ++m_OpenXrPaceWaits;
     m_OpenXrPaceWaitMs += waited;
@@ -2541,8 +2944,8 @@ void VR::WaitOldestOpenXrPending()
     PollOpenXrDeferredPublish();
     if (!done && m_OpenXrPendingCount != 0)
     {
-        // After a device idle everything is complete; if GetData still says
-        // otherwise the query object is broken. Publish the newest anyway.
+        // After a timed poll everything may still be in flight. Publish the
+        // newest anyway so a stuck EVENT query cannot pin the helper on one frame.
         const OpenXrPendingPublish newest = m_OpenXrPending[m_OpenXrPendingCount - 1];
         m_OpenXrDeferredDropped += m_OpenXrPendingCount - 1;
         m_OpenXrPendingCount = 0;
@@ -2585,6 +2988,7 @@ void VR::PublishOpenXrPair(uint32_t slot, const OpenXrPendingPublish& pend)
 
 void VR::PollOpenXrDeferredPublish()
 {
+    std::lock_guard<std::mutex> lock(m_OpenXrPublishMutex);
     if (m_OpenXrPendingCount == 0)
         return;
     // Same queue, in-order completion: if pending[i] is done, everything
@@ -2603,6 +3007,9 @@ void VR::PollOpenXrDeferredPublish()
         // CS thread and a flush here would be DXVK's implicit-sync heuristic.
         const HRESULT hr = q->GetData(nullptr, 0, 0);
         if (hr == S_OK || FAILED(hr))
+            newestDone = static_cast<int>(i);
+        else if (m_OpenXrPending[i].issuedMs > 0.0
+            && (QpcNowMs() - m_OpenXrPending[i].issuedMs) > 250.0)
             newestDone = static_cast<int>(i);
         else
             break;
@@ -2706,107 +3113,145 @@ bool VR::PrepareOpenXrEyeSurfacesForRead(const OpenXrPendingPublish& pend)
 {
     if (!m_OpenXrHelperBridgeActive || !g_D3DVR9)
         return false;
+    // Multicore: the material thread copies finished 1x eyes into publish
+    // slots after the pair. Publishing the 2x3 ring at M-2 from Present
+    // showed a late band (often still being written) — HMD stutter with
+    // solid desktop FPS and world wobble on head motion.
+    if (McPipelineEnabled())
+        return true;
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
         return false;
     ResolveMsaaEyesToSubmit(device);
     IDirect3DSurface9* left = m_D9LeftEyeSubmitSurface ? m_D9LeftEyeSubmitSurface : m_D9LeftEyeSurface;
     IDirect3DSurface9* right = m_D9RightEyeSubmitSurface ? m_D9RightEyeSubmitSurface : m_D9RightEyeSurface;
+    device->Release();
     if (!left || !right)
+        return false;
+    return CopyEyesToOpenXrPublishSlot(left, right, pend);
+}
+
+bool VR::CopyEyesToOpenXrPublishSlot(IDirect3DSurface9* left, IDirect3DSurface9* right,
+    const OpenXrPendingPublish& pend)
+{
+    if (!g_D3DVR9 || !left || !right)
+        return false;
+    IDirect3DDevice9* device = nullptr;
+    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
+        return false;
+
+    D3DSURFACE_DESC eyeDesc{};
+    if (FAILED(left->GetDesc(&eyeDesc))
+        || !EnsureOpenXrPublishTextures(device, eyeDesc.Width, eyeDesc.Height))
     {
         device->Release();
         return false;
     }
 
-    D3DSURFACE_DESC eyeDesc{};
-    if (SUCCEEDED(left->GetDesc(&eyeDesc))
-        && EnsureOpenXrPublishTextures(device, eyeDesc.Width, eyeDesc.Height))
+    std::lock_guard<std::mutex> lock(m_OpenXrPublishMutex);
+    // OpenXrDeferredPublish=false (WMR): publish this pair as soon as *this*
+    // copy's EVENT signals. Same cadence as WaitDeviceIdle without
+    // vkDeviceWaitIdle (no timeout — Xen freeze). Forcing deferred on
+    // multicore ran the CPU ahead of the GPU and made low-fps areas stutter
+    // in the HMD (2026-09-08).
+    const bool defer = bmvr::g_OpenXrDeferredPublish;
+    uint32_t slot = kOpenXrNoSlot;
+    if (defer)
     {
-        double nowMs = QpcNowMs();
-        uint32_t slot = kOpenXrNoSlot;
-        if (bmvr::g_OpenXrDeferredPublish)
+        const uint32_t maxPending = std::min<uint32_t>(
+            std::max<uint32_t>(bmvr::g_OpenXrMaxPending, 1u), kOpenXrMaxPending);
+        if (m_OpenXrPendingCount >= maxPending)
         {
-            // Do not block Present waiting for the GPU. WaitOldestOpenXrPending
-            // used SwitchToThread and hitching the engine (HMD run 2: "super
-            // stuttery" with better fps). If a copy is already in flight, skip
-            // this Present; PollOpenXrDeferredPublish will hand it over when
-            // the event signals.
-            const uint32_t maxPending = std::min<uint32_t>(
-                std::max<uint32_t>(bmvr::g_OpenXrMaxPending, 1u), kOpenXrMaxPending);
-            if (m_OpenXrPendingCount >= maxPending)
-            {
-                ++m_OpenXrDeferredThrottles;
-                device->Release();
-                return false;
-            }
-            nowMs = QpcNowMs();
-            RefreshOpenXrHelperConsumed(nowMs);
-            slot = PickFreeOpenXrPublishSlot(nowMs);
-            if (slot == kOpenXrNoSlot)
-            {
-                ++m_OpenXrDeferredThrottles;
-                if (m_OpenXrHelperFeedbackLive)
-                    ++m_OpenXrDeferredHelperHolds;
-                device->Release();
-                return false;
-            }
+            ++m_OpenXrDeferredThrottles;
+            device->Release();
+            return false;
         }
-        else
-            slot = (m_OpenXrPublishSlot + 1) % kOpenXrPublishSlots;
-
-        IDirect3DSurface9* dstLeft = m_D9OpenXrPublishSurface[L4D2VR_OPENXR_EYE_LEFT][slot];
-        IDirect3DSurface9* dstRight = m_D9OpenXrPublishSurface[L4D2VR_OPENXR_EYE_RIGHT][slot];
-        if (dstLeft && dstRight
-            && SUCCEEDED(device->StretchRect(left, nullptr, dstLeft, nullptr, D3DTEXF_NONE))
-            && SUCCEEDED(device->StretchRect(right, nullptr, dstRight, nullptr, D3DTEXF_NONE)))
+        const double nowMs = QpcNowMs();
+        RefreshOpenXrHelperConsumed(nowMs);
+        slot = PickFreeOpenXrPublishSlot(nowMs);
+        if (slot == kOpenXrNoSlot)
         {
-            if (FAILED(g_D3DVR9->TransferSurface(dstLeft, FALSE)) ||
-                FAILED(g_D3DVR9->TransferSurface(dstRight, FALSE)))
-            {
-                device->Release();
-                return false;
-            }
-            if (bmvr::g_OpenXrDeferredPublish && m_OpenXrPendingCount < kOpenXrMaxPending)
-            {
-                IDirect3DQuery9*& q = m_OpenXrPublishQuery[slot];
-                if (!q && FAILED(device->CreateQuery(D3DQUERYTYPE_EVENT, &q)))
-                    q = nullptr;
-                device->Release();
-                if (q)
-                {
-                    // Event lands behind the copies + layout barriers on the
-                    // same queue. Flush so it is submitted this frame; no CS
-                    // drain and no device idle.
-                    q->Issue(D3DISSUE_END);
-                    g_D3DVR9->FlushCommands();
-                    OpenXrPendingPublish& entry = m_OpenXrPending[m_OpenXrPendingCount++];
-                    entry = pend;
-                    entry.slot = slot;
-                    if (m_OpenXrPendingCount > m_OpenXrDeferredMaxPending)
-                        m_OpenXrDeferredMaxPending = m_OpenXrPendingCount;
-                    return true;
-                }
-                // No event query on this device: fall through to the
-                // synchronous publish of this slot.
-            }
-            else
-                device->Release();
-            if (FAILED(g_D3DVR9->WaitDeviceIdle()))
-                return false;
-            PublishOpenXrPair(slot, pend);
-            return true;
+            ++m_OpenXrDeferredThrottles;
+            if (m_OpenXrHelperFeedbackLive)
+                ++m_OpenXrDeferredHelperHolds;
+            device->Release();
+            return false;
         }
     }
+    else
+        slot = (m_OpenXrPublishSlot + 1) % kOpenXrPublishSlots;
 
-    // No publish ring: the helper reads the live eye RTs, which the next
-    // RenderView overwrites, so they must be complete before the descriptor
-    // goes out. Device idle is the only fence available here.
+    IDirect3DSurface9* dstLeft = m_D9OpenXrPublishSurface[L4D2VR_OPENXR_EYE_LEFT][slot];
+    IDirect3DSurface9* dstRight = m_D9OpenXrPublishSurface[L4D2VR_OPENXR_EYE_RIGHT][slot];
+    auto stretch = [&](IDirect3DSurface9* src, IDirect3DSurface9* dst) {
+        if (g_OrigStretchRect)
+            return g_OrigStretchRect(device, src, nullptr, dst, nullptr, D3DTEXF_NONE);
+        return device->StretchRect(src, nullptr, dst, nullptr, D3DTEXF_NONE);
+    };
+    auto finishCopy = [&](IDirect3DQuery9* q) {
+        if (q)
+            q->Issue(D3DISSUE_END);
+        g_D3DVR9->FlushCommands();
+        static int s_noIdle;
+        if (s_noIdle < 4)
+        {
+            Game::logMsg("OpenXR copy: bounded EVENT wait, no WaitDeviceIdle");
+            ++s_noIdle;
+        }
+    };
+    auto pollEvent = [&](IDirect3DQuery9* q, double timeoutMs) {
+        if (!q)
+            return;
+        const double t0 = QpcNowMs();
+        while ((QpcNowMs() - t0) <= timeoutMs)
+        {
+            const HRESULT hr = q->GetData(nullptr, 0, 0);
+            if (hr == S_OK || FAILED(hr))
+                return;
+            SwitchToThread();
+        }
+    };
+    const bool prevReentry = m_CaptureReentry;
+    m_CaptureReentry = true;
+    const HRESULT hrL = (dstLeft && dstRight) ? stretch(left, dstLeft) : E_FAIL;
+    const HRESULT hrR = SUCCEEDED(hrL) ? stretch(right, dstRight) : E_FAIL;
+    m_CaptureReentry = prevReentry;
+    if (dstLeft && dstRight && SUCCEEDED(hrL) && SUCCEEDED(hrR))
+    {
+        if (FAILED(g_D3DVR9->TransferSurface(dstLeft, FALSE)) ||
+            FAILED(g_D3DVR9->TransferSurface(dstRight, FALSE)))
+        {
+            device->Release();
+            return false;
+        }
+        IDirect3DQuery9*& q = m_OpenXrPublishQuery[slot];
+        if (!q && FAILED(device->CreateQuery(D3DQUERYTYPE_EVENT, &q)))
+            q = nullptr;
+        device->Release();
+        finishCopy(q);
+        if (defer && q && m_OpenXrPendingCount < kOpenXrMaxPending)
+        {
+            OpenXrPendingPublish& entry = m_OpenXrPending[m_OpenXrPendingCount++];
+            entry = pend;
+            entry.slot = slot;
+            entry.issuedMs = QpcNowMs();
+            if (m_OpenXrPendingCount > m_OpenXrDeferredMaxPending)
+                m_OpenXrDeferredMaxPending = m_OpenXrPendingCount;
+            return true;
+        }
+        // WaitDeviceIdle used to drain the whole device. Cap this copy's
+        // event so a stuck GPU cannot hang the process; 250ms is still
+        // several compositor frames in a low-fps Xen scene.
+        pollEvent(q, 250.0);
+        PublishOpenXrPair(slot, pend);
+        return true;
+    }
+
     device->Release();
     if (FAILED(g_D3DVR9->TransferSurface(left, FALSE)) ||
         FAILED(g_D3DVR9->TransferSurface(right, FALSE)))
         return false;
-    if (FAILED(g_D3DVR9->WaitDeviceIdle()))
-        return false;
+    g_D3DVR9->FlushCommands();
     PublishOpenXrPair(kOpenXrNoSlot, pend);
     return true;
 }
@@ -3324,8 +3769,6 @@ void VR::ProcessInput()
         else if (nx < -0.5f)
             buttons |= IN_MOVELEFT;
     }
-    if (m_GrabHoldingPhysics)
-        buttons &= ~IN_ATTACK;
     m_HeldButtons.store(buttons, std::memory_order_release);
 
     if ((buttons & IN_ATTACK) && !m_FirstAttackLogged)
@@ -3838,8 +4281,11 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
 
     Vector arm = trackingPos - hmdPos;
     PivotYaw(arm, yaw);
-    if (!std::isfinite(arm.x) || !std::isfinite(arm.y) || !std::isfinite(arm.z)
-        || VectorLength(arm) > 80.f)
+    // Do not snap to the camera when the arm looks long. After a playspace
+    // step a stale controller sample vs the current HMD is often >80 HU;
+    // parenting to GetViewOrigin made the gloves float onto the face until
+    // tracking recovered. Stick turn is independent of this path.
+    if (!std::isfinite(arm.x) || !std::isfinite(arm.y) || !std::isfinite(arm.z))
         return GetViewOrigin(setupOrigin);
 
     if (m_HmdOriginLatched
@@ -4200,6 +4646,7 @@ void VR::ClearUseGrab()
     m_GrabLatched = false;
     m_GrabHandLeft = false;
     m_GrabHoldingPhysics = false;
+    m_GrabUseEntityHeld = false;
     m_UseWasHeld = false;
     m_UseDropGapUntilMs = 0.0;
     m_UseDropPulseUntilMs = 0.0;
@@ -4215,6 +4662,7 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
     const double now = QpcNowMs();
     const bool worldToggle = UseEntityIsWorldToggle(m_Game);
     const bool heldProp = UseEntityIsHeldProp(m_Game);
+    m_GrabUseEntityHeld = heldProp;
     if (heldProp)
         m_GrabHoldingPhysics = true;
 
@@ -4251,8 +4699,6 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
         else if (m_UseHeldSinceMs > 0.0 && (now - m_UseHeldSinceMs) >= 100.0)
             m_GrabHoldingPhysics = true;
         buttons |= IN_USE;
-        if (m_GrabHoldingPhysics)
-            buttons &= ~IN_ATTACK;
         m_UseWasHeld = true;
         return;
     }
@@ -4300,8 +4746,6 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
     {
         if (now >= m_UseDropGapUntilMs && now < m_UseDropPulseUntilMs)
             buttons |= IN_USE;
-        if (m_GrabHoldingPhysics)
-            buttons &= ~IN_ATTACK;
         if (now >= m_UseDropPulseUntilMs)
         {
             m_UseDropGapUntilMs = 0.0;
@@ -4330,10 +4774,7 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
     }
 
     if (m_GrabLatched && (heldProp || m_GrabHoldingPhysics))
-    {
-        buttons &= ~IN_ATTACK;
         return;
-    }
     if (!heldProp && !m_GrabHoldingPhysics)
         ClearUseGrab();
 }
@@ -5477,6 +5918,21 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
         dst.right = src.right;
         dst.up = src.up;
     };
+    auto rollAroundForward = [](Sample& s, float deg) {
+        if (!s.valid || deg == 0.f)
+            return;
+        s.up = VectorRotate(s.up, s.fwd, deg);
+        s.right = VectorRotate(s.right, s.fwd, deg);
+        QAngle ctrlAng{};
+        QAngle::VectorAngles(s.fwd, s.up, ctrlAng);
+        ctrlAng.y = WrapYaw(ctrlAng.y);
+        Vector fwd, right, up;
+        QAngle::AngleVectors(ctrlAng, &fwd, &right, &up);
+        s.ang = ctrlAng;
+        s.fwd = fwd;
+        s.right = right;
+        s.up = up;
+    };
 
     Sample physLeft{};
     Sample physRight{};
@@ -5504,9 +5960,10 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
         weaponRight = physRight;
         if (L4D2VR_ControllerFamilyPrefersAimPose(family))
         {
-            // Touch grip -Z follows the handle, which points up relative to a
-            // straight controller. Keep the palm on the grip origin and point
-            // the mesh with the aim pose so hands match the controller body.
+            // Touch / Index grip -Z follows the handle. Point with the aim
+            // pose; keep the palm at the grip origin. Weapons use the full
+            // aim pose (Index user-verified). Index aim +Y is the controller
+            // face, ~90° from the palm — roll only the hands inward.
             if (aimLeft.valid)
             {
                 weaponLeft = aimLeft;
@@ -5516,6 +5973,12 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
             {
                 weaponRight = aimRight;
                 copyOrientation(aimRight, physRight);
+            }
+            if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES)
+            {
+                const float roll = bmvr::g_VrHandsIndexRollDeg;
+                rollAroundForward(physLeft, -roll);
+                rollAroundForward(physRight, roll);
             }
         }
     }
@@ -5647,12 +6110,14 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
     static int s_ctrlLog;
     if (s_ctrlLog < 4)
     {
-        Game::logMsg("Controller tracking aim=(%.1f,%.1f,%.1f) left=%d right=%d tilt=%.1f family=%s",
+        Game::logMsg("Controller tracking aim=(%.1f,%.1f,%.1f) left=%d right=%d tilt=%.1f family=%s aimPose=%d indexRoll=%.1f",
             m_RightControllerPosAbs.x, m_RightControllerPosAbs.y, m_RightControllerPosAbs.z,
             m_LeftControllerTrackingValid ? 1 : 0,
             m_PhysicalRightTrackingValid ? 1 : 0,
             tilt,
-            L4D2VR_ControllerFamilyName(family));
+            L4D2VR_ControllerFamilyName(family),
+            L4D2VR_ControllerFamilyPrefersAimPose(family) ? 1 : 0,
+            (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES) ? bmvr::g_VrHandsIndexRollDeg : 0.f);
         ++s_ctrlLog;
     }
     bmvr::EndRisky(L"ctrl_pose");
@@ -6194,9 +6659,17 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         if (gloveDepth)
         {
             device->SetDepthStencilSurface(gloveDepth);
-            // Private eye depth is not the G-buffer. Clear it so WorldDepth
-            // self-occludes (fingers vs palm) without testing leftover Z.
-            if (gloveDepth != oldDepth)
+            // Private eye depth is the stereo scene when HookedSetDepthStencil
+            // redirects the eye RenderView into it (world + gun). Clearing it
+            // made gloves an IgnoreZ overlay on top of the gun and through
+            // walls; WorldDepth writes still self-occlude fingers vs palm.
+            // Only clear a leftover private buffer that did not receive the
+            // eye pass (desktop blit / size mismatch).
+            const bool sceneEyeDepth =
+                gloveDepth == oldDepth
+                || (stereoEye == 1 && gloveDepth == m_D9LeftEyeDepthSurface)
+                || (stereoEye == 2 && gloveDepth == m_D9RightEyeDepthSurface);
+            if (!sceneEyeDepth)
             {
                 if (g_OrigClear)
                     g_OrigClear(device, 0, nullptr, D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0, 1.f, 0);
@@ -6238,8 +6711,12 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         static int s_gloveDepthLog;
         if (s_gloveDepthLog < 4)
         {
-            Game::logMsg("VR gloves scene eye=%d %ux%u depth=%d light+zNear=%.2f zFar=%.0f",
-                stereoEye, w, h, gloveDepth ? 1 : 0, m_StereoZNear, m_StereoZFar);
+            Game::logMsg("VR gloves scene eye=%d %ux%u depth=%d sceneZ=%d light+zNear=%.2f zFar=%.0f",
+                stereoEye, w, h, gloveDepth ? 1 : 0,
+                (gloveDepth && (gloveDepth == oldDepth
+                    || (stereoEye == 1 && gloveDepth == m_D9LeftEyeDepthSurface)
+                    || (stereoEye == 2 && gloveDepth == m_D9RightEyeDepthSurface))) ? 1 : 0,
+                m_StereoZNear, m_StereoZFar);
             ++s_gloveDepthLog;
         }
     }
@@ -7532,10 +8009,11 @@ void VR::UpdateAutoMatQueueMode()
     static int s_qlog;
     if (s_qlog < 8)
     {
-        Game::logMsg("GetMatQueueMode=%d vtableOk=%d slots=%d auto=%d try=%d set=%d get=%d eq=%d",
+        Game::logMsg("GetMatQueueMode=%d vtableOk=%d slots=%d auto=%d multicore=%d ring=%d try=%d set=%d get=%d eq=%d",
             current, m_Game->MaterialVTableMatchesDump() ? 1 : 0,
             m_Game->MaterialThreadSlotsValid() ? 1 : 0,
-            bmvr::g_AutoMatQueueMode ? 1 : 0, bmvr::TryMatQueue() ? 1 : 0,
+            bmvr::g_AutoMatQueueMode ? 1 : 0, bmvr::g_MulticoreMode ? 1 : 0, m_McRingReady ? 1 : 0,
+            bmvr::TryMatQueue() ? 1 : 0,
             m_Game->m_MatSetThreadSlot, m_Game->m_MatGetThreadSlot,
             m_Game->m_MatExecuteQueuedSlot);
         ++s_qlog;
@@ -7571,7 +8049,9 @@ void VR::UpdateAutoMatQueueMode()
     const bool loadingMap = inGame && !hasLocalPlayer;
 
     int desired = 0;
-    if (bmvr::g_AutoMatQueueMode)
+    const bool autoQueue = bmvr::g_AutoMatQueueMode
+        || (bmvr::g_MulticoreMode && m_McRingReady && m_OpenXrHelperBridgeActive);
+    if (autoQueue)
     {
         const bool warmup = !PassThroughWarmupDone();
         desired = (!inGame || !m_GameplayEligible || paused || loadingMap || warmup) ? 0 : 2;
@@ -7580,7 +8060,7 @@ void VR::UpdateAutoMatQueueMode()
     static bool s_forcedSingleThreadOnce;
     if (current == desired)
     {
-        if (bmvr::g_AutoMatQueueMode || s_forcedSingleThreadOnce)
+        if (bmvr::g_AutoMatQueueMode || bmvr::g_MulticoreMode || s_forcedSingleThreadOnce)
         {
             m_AutoMatQueueModeLastRequested = desired;
             return;
@@ -7598,6 +8078,9 @@ void VR::UpdateAutoMatQueueMode()
     if (desired == 2 && m_AutoMatQueueModeLastRequested != 2)
         bmvr::BeginRisky(L"mat_queue");
 
+    if (desired != current)
+        ResetMcPipeline();
+
     const bool ok = m_Game->SetMatQueueMode(desired);
     m_AutoMatQueueModeLastRequested = desired;
     m_AutoMatQueueModeLastCmdTime = now;
@@ -7611,8 +8094,8 @@ void VR::UpdateAutoMatQueueMode()
     else if (loadingMap) reason = "no-local-player";
     else if (!PassThroughWarmupDone()) reason = "pass-through";
     else if (paused) reason = "paused";
-    Game::logMsg("AutoMatQueueMode set %d (was %d) ok=%d reason=%s",
-        desired, current, ok ? 1 : 0, reason);
+    Game::logMsg("AutoMatQueueMode set %d (was %d) ok=%d reason=%s multicore=%d ring=%d",
+        desired, current, ok ? 1 : 0, reason, bmvr::g_MulticoreMode ? 1 : 0, m_McRingReady ? 1 : 0);
 }
 
 void VR::TryApplySteamVrRecommendedEyeSize()
@@ -8089,6 +8572,206 @@ bool VR::QueueMatAwaitFrame(uint64_t frameId)
     return true;
 }
 
+bool VR::QueueMcMatFunctor(CFunctor* functor, const char* failTag)
+{
+    if (!functor)
+        return false;
+    ICallQueue* q = ProbeCallQueue();
+    if (!q)
+    {
+        static int s_noQ;
+        if (s_noQ < 4)
+        {
+            Game::logMsg("MC %s: no ICallQueue", failTag ? failTag : "functor");
+            ++s_noQ;
+        }
+        functor->Release();
+        return false;
+    }
+    if (!SehQueueFunctorInternal(q, functor))
+    {
+        functor->Release();
+        static int s_fail;
+        if (s_fail < 4)
+        {
+            Game::logMsg("MC %s: QueueFunctorInternal failed slot=%d",
+                failTag ? failTag : "functor", m_Hl2vrCallQueueSlot);
+            ++s_fail;
+        }
+        return false;
+    }
+    return true;
+}
+
+bool VR::HudPaintActive() const
+{
+    return g_HudPaintActive;
+}
+
+void VR::SetHudPaintActive(bool active)
+{
+    g_HudPaintActive = active;
+}
+
+IDirect3DSurface9* VR::McPlaybackEyeSurface() const
+{
+    if (g_McPlayEye == 2)
+        return m_D9RightEyeSurface;
+    if (g_McPlayEye == 1)
+        return m_D9LeftEyeSurface;
+    return nullptr;
+}
+
+IDirect3DSurface9* VR::McPlaybackEyeDepth() const
+{
+    if (g_McPlayEye == 2)
+        return m_D9RightEyeDepthSurface;
+    if (g_McPlayEye == 1)
+        return m_D9LeftEyeDepthSurface;
+    return nullptr;
+}
+
+void VR::McBindPlaybackEye(int stereoEye, bool flushGpu)
+{
+    g_McPlayEye = (stereoEye == 2) ? 2 : 1;
+    IDirect3DSurface9* dest = McPlaybackEyeSurface();
+    BeginStereoEyeBlit(dest);
+    ClearStereoEyeSurfaces();
+    if (flushGpu)
+    {
+        if (g_D3DVR9)
+            g_D3DVR9->FlushCommands();
+        FlushStereoBlitGpu();
+    }
+    static int s_run;
+    if (s_run < 8)
+    {
+        Game::logMsg("MC mat-thread bind 1x eye=%d flush=%d dest=%p",
+            g_McPlayEye, flushGpu ? 1 : 0, (void*)dest);
+        ++s_run;
+    }
+}
+
+void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
+{
+    IDirect3DSurface9* left = m_D9LeftEyeSurface;
+    IDirect3DSurface9* right = m_D9RightEyeSurface;
+    if (!IsMenuUp()
+        && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
+            || WeaponMenuOpen() || AimCrosshairVisible()))
+    {
+        DrawIndependentHandMarkers(left, 1, true, true);
+        DrawIndependentHandMarkers(right, 2, true, true);
+    }
+
+    OpenXrPendingPublish pend{};
+    if (pose && pose->valid)
+    {
+        pend.pose = *pose;
+        pend.havePose = true;
+    }
+    else if (m_OpenXrStereoRenderPoseValid)
+    {
+        pend.pose = m_OpenXrStereoRenderPose;
+        pend.havePose = true;
+    }
+    else if (m_OpenXrLastHmdPose.valid)
+    {
+        pend.pose = m_OpenXrLastHmdPose;
+        pend.havePose = true;
+    }
+
+    // Drop TLS eye redirect before copies. StretchRect dest must not steal
+    // HWND onto the right eye.
+    EndStereoEyeBlit();
+    g_McPlayEye = 0;
+
+    const bool copied = CopyEyesToOpenXrPublishSlot(left, right, pend);
+    static int s_comp;
+    if (s_comp < 8)
+    {
+        Game::logMsg("MC 1x eyes -> OpenXR publish slot copied=%d pose=%d band=%u",
+            copied ? 1 : 0, pend.havePose ? 1 : 0, band);
+        ++s_comp;
+    }
+
+    // Spectator after HMD publish so the EVENT wait does not include this
+    // blit. Offscreen dest — not the swapchain (that clobbered the eye
+    // viewport / stalled Present).
+    if (!Want2dMenuPanel() && !WantPauseWorldOverlay())
+        MirrorStereoToDesktopWindow();
+}
+
+bool VR::QueueMcEyeBind(int stereoEye, bool flushGpu)
+{
+    auto* functor = new (std::nothrow) McMatFunctor(
+        this, McMatFunctor::Kind::Bind, stereoEye, 0, flushGpu);
+    if (!functor)
+        return false;
+    functor->AddRef();
+    if (!QueueMcMatFunctor(functor, "QueueMcEyeBind"))
+        return false;
+    static int s_qLog;
+    if (s_qLog < 8)
+    {
+        Game::logMsg("MC queued 1x eye bind eye=%d flush=%d slot=%d",
+            stereoEye, flushGpu ? 1 : 0, m_Hl2vrCallQueueSlot);
+        ++s_qLog;
+    }
+    return true;
+}
+
+bool VR::QueueMcCompositeToRing(uint32_t band)
+{
+    const L4D2VROpenXrPoseDesc* pose = m_OpenXrStereoRenderPoseValid
+        ? &m_OpenXrStereoRenderPose : nullptr;
+    auto* functor = new (std::nothrow) McMatFunctor(
+        this, McMatFunctor::Kind::Composite, 0, band, false, pose);
+    if (!functor)
+        return false;
+    functor->AddRef();
+    if (!QueueMcMatFunctor(functor, "QueueMcCompositeToRing"))
+        return false;
+    static int s_qLog;
+    if (s_qLog < 8)
+    {
+        Game::logMsg("MC queued 1x-eye OpenXR copy band=%u slot=%d",
+            band, m_Hl2vrCallQueueSlot);
+        ++s_qLog;
+    }
+    return true;
+}
+
+bool VR::QueueMcPauseHudBegin()
+{
+    auto* functor = new (std::nothrow) McPauseHudFunctor(
+        this, McPauseHudFunctor::Kind::Begin);
+    if (!functor)
+        return false;
+    functor->AddRef();
+    if (!QueueMcMatFunctor(functor, "QueueMcPauseHudBegin"))
+        return false;
+    static int s_qLog;
+    if (s_qLog < 8)
+    {
+        Game::logMsg("MC queued pause HUD bind slot=%d", m_Hl2vrCallQueueSlot);
+        ++s_qLog;
+    }
+    return true;
+}
+
+bool VR::QueueMcPauseHudEnd()
+{
+    auto* functor = new (std::nothrow) McPauseHudFunctor(
+        this, McPauseHudFunctor::Kind::End);
+    if (!functor)
+        return false;
+    functor->AddRef();
+    if (!QueueMcMatFunctor(functor, "QueueMcPauseHudEnd"))
+        return false;
+    return true;
+}
+
 bool VR::RefreshBackBufferTexture(bool forceRefresh)
 {
     if (!g_D3DVR9)
@@ -8156,7 +8839,8 @@ bool VR::D3dRt0IsEyeSized() const
         IDirect3DSurface9* rt = g_Rt0ActualPtr;
         if (!rt)
             return false;
-        if (rt == m_StereoEyeBlitDest || rt == m_D9LeftEyeSurface || rt == m_D9RightEyeSurface)
+        if (rt == m_StereoEyeBlitDest || rt == m_D9LeftEyeSurface || rt == m_D9RightEyeSurface
+            || SurfaceIsMcRing(rt))
             return true;
         return g_Rt0ActualW == m_RenderWidth && g_Rt0ActualH == m_RenderHeight;
     }
@@ -8169,7 +8853,8 @@ bool VR::D3dRt0IsEyeSized() const
     {
         D3DSURFACE_DESC desc{};
         const bool haveDesc = SUCCEEDED(rt->GetDesc(&desc));
-        if (rt == m_StereoEyeBlitDest || rt == m_D9LeftEyeSurface || rt == m_D9RightEyeSurface)
+        if (rt == m_StereoEyeBlitDest || rt == m_D9LeftEyeSurface || rt == m_D9RightEyeSurface
+            || SurfaceIsMcRing(rt))
             world = true;
         else if (haveDesc)
             world = desc.Width == m_RenderWidth && desc.Height == m_RenderHeight;
@@ -8194,6 +8879,361 @@ void VR::NoteCachedRt0Size(UINT w, UINT h)
 {
     g_Rt0W = w;
     g_Rt0H = h;
+}
+
+bool VR::McPipelineEnabled() const
+{
+    if (!bmvr::g_MulticoreMode || !bmvr::TryMatQueue())
+        return false;
+    if (!m_McRingReady || !m_OpenXrHelperBridgeActive)
+        return false;
+    if (!m_IsVREnabled || !m_GameplayEligible)
+        return false;
+    if (!PassThroughWarmupDone())
+        return false;
+    if (!m_Game || m_Game->GetMatQueueMode() == 0)
+        return false;
+    if (Want2dMenuPanel())
+        return false;
+    return true;
+}
+
+bool VR::StereoWorldPassActive() const
+{
+    if (m_StereoEye != 0)
+        return true;
+    if (McPlaybackEyeSurface())
+        return true;
+    if (!McPipelineEnabled() && StereoEyeBlitActive())
+        return true;
+    return false;
+}
+
+bool VR::SurfaceIsMcRing(IDirect3DSurface9* s) const
+{
+    return s && m_D9McRingSurface && s == m_D9McRingSurface;
+}
+
+bool VR::D3dRt0IsMcRing() const
+{
+    return g_Rt0ActualKnown && SurfaceIsMcRing(g_Rt0ActualPtr);
+}
+
+bool VR::McOriginIsRingBand(int x, int y) const
+{
+    const int w = static_cast<int>(m_RenderWidth);
+    const int h = static_cast<int>(m_RenderHeight);
+    if (w < 640 || h < 360)
+        return false;
+    const int leftX = McLeftOriginX();
+    const int rightX = McRightOriginX();
+    if (!(std::abs(x - leftX) <= 8 || std::abs(x - rightX) <= 8))
+        return false;
+    for (int b = 0; b < 3; ++b)
+    {
+        if (std::abs(y - b * h) <= 8)
+            return true;
+    }
+    return false;
+}
+
+bool VR::McClipAmbiguousWindowVp(int inX, int inY, int inW, int inH, int& x, int& y, int& w, int& h) const
+{
+    if (!McPipelineEnabled() || McOnRecordThread())
+        return false;
+    if (inX > 8 || inY > 8)
+        return false;
+    const int eyeW = static_cast<int>(m_RenderWidth);
+    const int eyeH = static_cast<int>(m_RenderHeight);
+    // Eye-sized @0,0 is deferred lighting / flashlight apply (log:
+    // 3168x3104 @0,0). Clipping those to 1x1 left unlit world on the ring
+    // and the lit frames z-fought through geometry. Only HWND 16:9 leftover.
+    if (eyeW >= 640 && inW == eyeW && inH == eyeH)
+        return false;
+    if (inW < 1600 || inH < 900)
+        return false;
+    x = 0;
+    y = 0;
+    w = 1;
+    h = 1;
+    return true;
+}
+
+void VR::NoteMcRecordThread()
+{
+    m_McRecordThreadId.store(GetCurrentThreadId(), std::memory_order_release);
+}
+
+bool VR::McOnRecordThread() const
+{
+    const DWORD id = m_McRecordThreadId.load(std::memory_order_acquire);
+    return id != 0 && id == GetCurrentThreadId();
+}
+
+bool VR::McResolveRingEyeOrigin(int inX, int inY, int inW, int inH, int& outX, int& outY) const
+{
+    const int eyeW = static_cast<int>(m_RenderWidth);
+    const int eyeH = static_cast<int>(m_RenderHeight);
+    if (eyeW < 640 || eyeH < 360)
+        return false;
+    // Only the game thread that recorded this pair may use m_StereoEye +
+    // McWriteBand. D3D/IMat playback runs on the material thread while that
+    // thread is already inside the *next* pair (bmvr_log: MC mat-thread origin
+    // y=0 then D3D 2560x1440 @0,0 -> @0,3104 / @3168,3104). That stamped the
+    // previous left eye onto the current right rect: left flicker, smeared
+    // right 3D sky, tearing on lookaround.
+    if (m_StereoEye != 0 && McOnRecordThread())
+    {
+        outX = (m_StereoEye == 2) ? McRightOriginX() : McLeftOriginX();
+        outY = static_cast<int>(McWriteBand() * m_RenderHeight);
+        return true;
+    }
+    const bool atBand = McOriginIsRingBand(inX, inY);
+    const bool origin00 = inX <= 8 && inY <= 8;
+    const bool fullEye = inW == eyeW && inH == eyeH;
+    if (atBand && (fullEye || !origin00))
+    {
+        outX = inX;
+        outY = inY;
+        return true;
+    }
+    // Eye-sized @0,0 on the ring is lighting apply (G-buffer/FullFrame are
+    // 1x at 0,0). Remap to the current eye. Window 16:9 @0,0 is leftover.
+    if (origin00)
+    {
+        if (fullEye && g_McEyeKnown)
+        {
+            outX = g_McEyeX;
+            outY = g_McEyeY;
+            return true;
+        }
+        return false;
+    }
+    if (g_McEyeKnown)
+    {
+        outX = g_McEyeX;
+        outY = g_McEyeY;
+        return true;
+    }
+    outX = McLeftOriginX();
+    outY = 0;
+    return true;
+}
+
+void VR::McNoteRingEyeViewport(int x, int y, int w, int h)
+{
+    const int eyeW = static_cast<int>(m_RenderWidth);
+    const int eyeH = static_cast<int>(m_RenderHeight);
+    if (w != eyeW || h != eyeH || !McOriginIsRingBand(x, y))
+        return;
+    if (std::abs(g_McLastRingVpX - McLeftOriginX()) <= 8
+        && std::abs(x - McRightOriginX()) <= 8 && g_D3DVR9)
+        g_D3DVR9->FlushCommands();
+    g_McLastRingVpX = x;
+    g_McEyeX = x;
+    g_McEyeY = y;
+    g_McEyeKnown = true;
+}
+
+bool VR::McLastRingEyeOrigin(int& x, int& y) const
+{
+    if (!g_McEyeKnown)
+        return false;
+    x = g_McEyeX;
+    y = g_McEyeY;
+    return true;
+}
+
+void VR::ResetMcPipeline()
+{
+    m_McFrame = 0;
+    m_McPoses[0] = L4D2VROpenXrPoseDesc{};
+    m_McPoses[1] = L4D2VROpenXrPoseDesc{};
+    m_McPoses[2] = L4D2VROpenXrPoseDesc{};
+}
+
+void VR::FinishMcStereoPair()
+{
+    const uint32_t band = McWriteBand();
+    if (m_OpenXrStereoRenderPoseValid)
+        m_McPoses[band] = m_OpenXrStereoRenderPose;
+    else
+        m_McPoses[band] = m_OpenXrLastHmdPose;
+    ++m_McFrame;
+    static int s_mcPair;
+    if (s_mcPair < 8)
+    {
+        Game::logMsg("MC stereo pair write band=%u frame=%u", band, m_McFrame);
+        ++s_mcPair;
+    }
+}
+
+void VR::ReleaseMcRing()
+{
+    m_McRingReady = false;
+    m_OpenXrMcRingDesc = L4D2VROpenXrSharedTextureDesc{};
+    m_VKMcRing = SharedTextureHolder{};
+    ReleaseT(m_D9McRingDepth);
+    ReleaseT(m_D9McRingSurface);
+    ReleaseT(m_D9McRingTexture);
+    ResetMcPipeline();
+}
+
+bool VR::EnsureMcRing(IDirect3DDevice9* device)
+{
+    if (!device || !g_D3DVR9)
+        return false;
+    if (!bmvr::g_MulticoreMode || !m_OpenXrHelperBridgeActive)
+    {
+        if (m_McRingReady)
+            ReleaseMcRing();
+        return false;
+    }
+    const UINT w = m_RenderWidth;
+    const UINT h = m_RenderHeight;
+    if (w < 640 || h < 360)
+        return false;
+    const UINT ringW = McRingWidth();
+    const UINT ringH = McRingHeight();
+    if (m_McRingReady && m_D9McRingSurface)
+    {
+        D3DSURFACE_DESC desc{};
+        if (SUCCEEDED(m_D9McRingSurface->GetDesc(&desc))
+            && desc.Width == ringW && desc.Height == ringH)
+            return true;
+    }
+    ReleaseMcRing();
+
+    D3DCAPS9 caps{};
+    if (SUCCEEDED(device->GetDeviceCaps(&caps)))
+    {
+        if (ringW > caps.MaxTextureWidth || ringH > caps.MaxTextureHeight)
+        {
+            Game::logMsg("MC ring %ux%u exceeds D3D caps %ux%u — stay mat_queue_mode 0",
+                ringW, ringH, caps.MaxTextureWidth, caps.MaxTextureHeight);
+            return false;
+        }
+    }
+
+    m_CreatingTextureID = Texture_McRing;
+    const HRESULT hr = device->CreateTexture(
+        ringW, ringH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+        &m_D9McRingTexture, nullptr);
+    m_CreatingTextureID = Texture_None;
+    if (FAILED(hr) || !m_D9McRingTexture)
+    {
+        Game::logMsg("MC ring CreateTexture %ux%u hr=0x%08X", ringW, ringH, (unsigned)hr);
+        ReleaseMcRing();
+        return false;
+    }
+    if (FAILED(m_D9McRingTexture->GetSurfaceLevel(0, &m_D9McRingSurface)) || !m_D9McRingSurface)
+    {
+        Game::logMsg("MC ring GetSurfaceLevel failed");
+        ReleaseMcRing();
+        return false;
+    }
+    const HRESULT depthHr = device->CreateDepthStencilSurface(
+        ringW, ringH, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, TRUE, &m_D9McRingDepth, nullptr);
+    if (FAILED(depthHr) || !m_D9McRingDepth)
+    {
+        Game::logMsg("MC ring depth %ux%u hr=0x%08X", ringW, ringH, (unsigned)depthHr);
+        ReleaseMcRing();
+        return false;
+    }
+    if (!FillSharedTexture(m_D9McRingSurface, m_VKMcRing)
+        || !m_VKMcRing.m_SharedHandleValid || m_VKMcRing.m_SharedHandle == 0)
+    {
+        Game::logMsg("MC ring GetVRDesc/export failed surf=%p", (void*)m_D9McRingSurface);
+        ReleaseMcRing();
+        return false;
+    }
+
+    m_OpenXrMcRingDesc = L4D2VROpenXrSharedTextureDesc{};
+    m_OpenXrMcRingDesc.valid = 1;
+    m_OpenXrMcRingDesc.width = m_VKMcRing.m_VulkanData.m_nWidth;
+    m_OpenXrMcRingDesc.height = m_VKMcRing.m_VulkanData.m_nHeight;
+    m_OpenXrMcRingDesc.format = m_VKMcRing.m_VulkanData.m_nFormat;
+    m_OpenXrMcRingDesc.sampleCount = m_VKMcRing.m_VulkanData.m_nSampleCount;
+    m_OpenXrMcRingDesc.handleType = m_VKMcRing.m_SharedHandleType;
+    m_OpenXrMcRingDesc.queueFamilyIndex = m_VKMcRing.m_VulkanData.m_nQueueFamilyIndex;
+    m_OpenXrMcRingDesc.kmtHandle = m_VKMcRing.m_SharedHandle;
+    m_OpenXrMcRingDesc.image = static_cast<uint64_t>(m_VKMcRing.m_VulkanData.m_nImage);
+    m_OpenXrMcRingDesc.reserved0 = L4D2VR_OPENXR_SHARED_UV_EXPLICIT;
+    m_McRingReady = true;
+    Game::logMsg("MC ring ready %ux%u (2x3 +%d gutter) img=%llu handle=0x%llX",
+        ringW, ringH, kMcGutter,
+        (unsigned long long)m_OpenXrMcRingDesc.image,
+        (unsigned long long)m_OpenXrMcRingDesc.kmtHandle);
+    return true;
+}
+
+bool VR::PublishMcRingBand(const OpenXrPendingPublish& pend)
+{
+    if (!m_McRingReady || m_McFrame < 2 || !m_OpenXrMcRingDesc.valid)
+        return false;
+    const uint32_t band = (m_McFrame - 2) % 3u;
+    const float v0 = static_cast<float>(band) / 3.0f;
+    const float v1 = static_cast<float>(band + 1u) / 3.0f;
+    const float eyeAspect = (m_RenderHeight > 0)
+        ? (static_cast<float>(m_RenderWidth) / static_cast<float>(m_RenderHeight))
+        : 1.0f;
+    const float fovX = (std::isfinite(m_Fov) && m_Fov > 1.0f && m_Fov < 179.0f) ? m_Fov : 90.0f;
+
+    auto eyeDesc = [&](uint32_t eyeIndex) {
+        L4D2VROpenXrSharedTextureDesc d = m_OpenXrMcRingDesc;
+        const float invW = 1.0f / static_cast<float>(McRingWidth());
+        const float u0 = (eyeIndex == L4D2VR_OPENXR_EYE_LEFT)
+            ? static_cast<float>(McLeftOriginX()) * invW
+            : static_cast<float>(McRightOriginX()) * invW;
+        const float u1 = u0 + static_cast<float>(m_RenderWidth) * invW;
+        const vr::VRTextureBounds_t& tb = m_TextureBounds[eyeIndex];
+        const float tu0 = std::clamp(tb.uMin, 0.0f, 1.0f);
+        const float tu1 = std::clamp(tb.uMax, 0.0f, 1.0f);
+        const float tv0 = std::clamp(tb.vMin, 0.0f, 1.0f);
+        const float tv1 = std::clamp(tb.vMax, 0.0f, 1.0f);
+        d.uMin = u0 + (u1 - u0) * tu0;
+        d.uMax = u0 + (u1 - u0) * tu1;
+        d.vMin = v0 + (v1 - v0) * tv0;
+        d.vMax = v0 + (v1 - v0) * tv1;
+        if (d.uMax <= d.uMin)
+        {
+            d.uMin = u0;
+            d.uMax = u1;
+        }
+        if (d.vMax <= d.vMin)
+        {
+            d.vMin = v0;
+            d.vMax = v1;
+        }
+        d.renderFovXDeg = fovX;
+        d.renderAspect = eyeAspect;
+        d.reserved0 = L4D2VR_OPENXR_SHARED_UV_EXPLICIT;
+        return d;
+    };
+
+    L4D2VROpenXrPoseDesc pose = m_McPoses[band];
+    if (!pose.valid && pend.havePose)
+        pose = pend.pose;
+    if (pose.valid)
+        L4D2VR_PublishOpenXrGameRenderPose(pose);
+
+    const L4D2VROpenXrSharedTextureDesc left = eyeDesc(L4D2VR_OPENXR_EYE_LEFT);
+    const L4D2VROpenXrSharedTextureDesc right = eyeDesc(L4D2VR_OPENXR_EYE_RIGHT);
+    L4D2VR_PublishOpenXrSharedTexturePair(left, right);
+    const uint32_t frameId = m_OpenXrSubmitFrameId.fetch_add(1, std::memory_order_acq_rel);
+    L4D2VR_PublishOpenXrSharedTextureFrame(frameId);
+    m_OpenXrLastPublishedSharedTextureFrameId.store(frameId, std::memory_order_release);
+    ++m_OpenXrPublishes;
+    m_HasSubmittedSceneFrame.store(true, std::memory_order_release);
+    ++m_SubmitCount;
+    static int s_mcSubmit;
+    if (s_mcSubmit < 8)
+    {
+        Game::logMsg("MC submit band=%u frame=%u uvL=(%.3f %.3f)-(%.3f %.3f) pose=%d",
+            band, m_McFrame, left.uMin, left.vMin, left.uMax, left.vMax, pose.valid ? 1 : 0);
+        ++s_mcSubmit;
+    }
+    return true;
 }
 
 void VR::NoteMsaaEyeScene(IDirect3DSurface9* dst, bool copied)
@@ -8274,6 +9314,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     ReleaseT(m_D9RightEyeTexture);
     ReleaseT(m_D9LeftEyeSubmitTexture);
     ReleaseT(m_D9RightEyeSubmitTexture);
+    ReleaseMcRing();
     ReleaseOpenXrPublishTextures();
     m_LeftEyeMsaaHasScene = false;
     m_RightEyeMsaaHasScene = false;
@@ -8281,6 +9322,9 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     ReleaseT(m_BlitEventQuery);
     ReleaseT(m_D9HUDSurface);
     ReleaseT(m_D9HUDTexture);
+    ReleaseT(m_D9DesktopMirrorSurface);
+    ReleaseT(m_D9DesktopMirrorTexture);
+    m_DesktopMirrorHasImage.store(false, std::memory_order_release);
     m_VKHUD = SharedTextureHolder{};
     m_HudOverlayReady = false;
     if (m_PauseHudPrevRt)
@@ -8468,7 +9512,11 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
         const UINT haveW = m_VKLeftEye.m_VulkanData.m_nWidth;
         const UINT haveH = m_VKLeftEye.m_VulkanData.m_nHeight;
         if (haveW == w && haveH == h)
+        {
+            if (bmvr::g_MulticoreMode)
+                EnsureMcRing(device);
             return true;
+        }
         const bool growForFullFrame = bmvr::TryFullFrameStereo()
             && w > haveW + 32
             && !m_StereoEyeBlitActive;
@@ -8489,6 +9537,8 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
                 haveW, haveH, w, h);
             m_RenderWidth = haveW;
             m_RenderHeight = haveH;
+            if (bmvr::g_MulticoreMode)
+                EnsureMcRing(device);
             return true;
         }
         Game::logMsg("Recreating D3D eyes %ux%u -> %ux%u (%s)",
@@ -8618,6 +9668,8 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
     Game::logMsg("VR D3D eye RTs ready=%d depth=%d msaa=%u submit=%d L=%p R=%p copy=%p %ux%u",
         m_CreatedVRTextures.load() ? 1 : 0, depthOk ? 1 : 0, m_AntiAliasing, submitOk ? 1 : 0,
         (void*)m_D9LeftEyeSurface, (void*)m_D9RightEyeSurface, (void*)m_D9FrameColorSurface, w, h);
+    if (m_CreatedVRTextures.load(std::memory_order_acquire) && bmvr::g_MulticoreMode)
+        EnsureMcRing(device);
     return m_CreatedVRTextures.load();
 }
 
@@ -8693,6 +9745,73 @@ void VR::ClearUnusedDesktopBackbuffer()
     device->Release();
 }
 
+bool VR::EnsureDesktopMirrorSurface(IDirect3DDevice9* device, UINT w, UINT h)
+{
+    if (!device || w < 640 || h < 360)
+        return false;
+    if (m_D9DesktopMirrorSurface)
+    {
+        D3DSURFACE_DESC desc{};
+        if (SUCCEEDED(m_D9DesktopMirrorSurface->GetDesc(&desc))
+            && desc.Width == w && desc.Height == h)
+            return true;
+    }
+    ReleaseT(m_D9DesktopMirrorSurface);
+    ReleaseT(m_D9DesktopMirrorTexture);
+    m_DesktopMirrorHasImage.store(false, std::memory_order_release);
+    const HRESULT hr = device->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET,
+        D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &m_D9DesktopMirrorTexture, nullptr);
+    if (FAILED(hr) || !m_D9DesktopMirrorTexture)
+    {
+        static int s_fail;
+        if (s_fail < 4)
+        {
+            Game::logMsg("Desktop mirror CreateTexture failed hr=0x%08X %ux%u",
+                (unsigned)hr, w, h);
+            ++s_fail;
+        }
+        return false;
+    }
+    if (FAILED(m_D9DesktopMirrorTexture->GetSurfaceLevel(0, &m_D9DesktopMirrorSurface))
+        || !m_D9DesktopMirrorSurface)
+    {
+        ReleaseT(m_D9DesktopMirrorTexture);
+        return false;
+    }
+    Game::logMsg("Desktop mirror RT %ux%u", w, h);
+    return true;
+}
+
+void VR::BlitDesktopMirrorToBackbuffer()
+{
+    if (!m_DesktopMirrorHasImage.load(std::memory_order_acquire)
+        || !m_D9DesktopMirrorSurface || !g_D3DVR9)
+        return;
+    if (Want2dMenuPanel() || WantPauseWorldOverlay())
+        return;
+    IDirect3DDevice9* device = nullptr;
+    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
+        return;
+    IDirect3DSurface9* bb = nullptr;
+    if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
+    {
+        device->Release();
+        return;
+    }
+    m_CaptureReentry = true;
+    HRESULT hr = StretchRectKeepDeviceState(
+        device, m_D9DesktopMirrorSurface, nullptr, bb, nullptr, D3DTEXF_NONE);
+    m_CaptureReentry = false;
+    static int s_bb;
+    if (s_bb < 4 || FAILED(hr))
+    {
+        Game::logMsg("Desktop mirror -> BB hr=0x%08X", (unsigned)hr);
+        ++s_bb;
+    }
+    bb->Release();
+    device->Release();
+}
+
 void VR::MirrorStereoToDesktopWindow()
 {
     if (!m_D9LeftEyeSurface || !g_D3DVR9)
@@ -8717,55 +9836,76 @@ void VR::MirrorStereoToDesktopWindow()
         return;
     }
 
+    // Cover-crop: same one StretchRect as letterbox. The ~1:1 eye is cropped
+    // to the HWND aspect (top/bottom on 16:9) and scaled to the full window.
     const float srcAspect = static_cast<float>(eyeW) / static_cast<float>(eyeH);
     const float dstAspect = static_cast<float>(bbDesc.Width) / static_cast<float>(bbDesc.Height);
-    UINT dw = bbDesc.Width;
-    UINT dh = bbDesc.Height;
-    UINT dx = 0;
-    UINT dy = 0;
+    UINT cropW = eyeW;
+    UINT cropH = eyeH;
+    UINT sx = 0;
+    UINT sy = 0;
     if (srcAspect > dstAspect)
     {
-        dh = static_cast<UINT>(static_cast<float>(bbDesc.Width) / srcAspect + 0.5f);
-        if (dh > bbDesc.Height)
-            dh = bbDesc.Height;
-        dy = (bbDesc.Height - dh) / 2;
+        cropW = static_cast<UINT>(static_cast<float>(eyeH) * dstAspect + 0.5f);
+        if (cropW > eyeW)
+            cropW = eyeW;
+        sx = (eyeW - cropW) / 2;
     }
-    else
+    else if (dstAspect > srcAspect)
     {
-        dw = static_cast<UINT>(static_cast<float>(bbDesc.Height) * srcAspect + 0.5f);
-        if (dw > bbDesc.Width)
-            dw = bbDesc.Width;
-        dx = (bbDesc.Width - dw) / 2;
+        cropH = static_cast<UINT>(static_cast<float>(eyeW) / dstAspect + 0.5f);
+        if (cropH > eyeH)
+            cropH = eyeH;
+        sy = (eyeH - cropH) / 2;
     }
-    RECT dest = {
-        static_cast<LONG>(dx), static_cast<LONG>(dy),
-        static_cast<LONG>(dx + dw), static_cast<LONG>(dy + dh)
+    if (sx + cropW > eyeW)
+        cropW = eyeW - sx;
+    if (sy + cropH > eyeH)
+        cropH = eyeH - sy;
+    if (cropW < 64 || cropH < 64)
+    {
+        bb->Release();
+        device->Release();
+        return;
+    }
+    RECT src = {
+        static_cast<LONG>(sx), static_cast<LONG>(sy),
+        static_cast<LONG>(sx + cropW), static_cast<LONG>(sy + cropH)
     };
+    const RECT* srcPtr = (cropW != eyeW || cropH != eyeH) ? &src : nullptr;
 
-    IDirect3DSurface9* oldRt = nullptr;
-    device->GetRenderTarget(0, &oldRt);
+    IDirect3DSurface9* dest = bb;
+    const bool mcOffscreen = McPipelineEnabled();
+    if (mcOffscreen)
+    {
+        if (!EnsureDesktopMirrorSurface(device, bbDesc.Width, bbDesc.Height))
+        {
+            bb->Release();
+            device->Release();
+            return;
+        }
+        dest = m_D9DesktopMirrorSurface;
+    }
+
     m_CaptureReentry = true;
-    if (oldRt == bb)
-        device->SetRenderTarget(0, m_D9LeftEyeSurface);
-    device->ColorFill(bb, nullptr, D3DCOLOR_XRGB(0, 0, 0));
-    HRESULT hr = device->StretchRect(m_D9LeftEyeSurface, nullptr, bb, &dest, D3DTEXF_LINEAR);
+    HRESULT hr = StretchRectKeepDeviceState(
+        device, m_D9LeftEyeSurface, srcPtr, dest, nullptr, D3DTEXF_LINEAR);
     if (FAILED(hr))
-        hr = device->StretchRect(m_D9LeftEyeSurface, nullptr, bb, &dest, D3DTEXF_NONE);
-    if (oldRt)
-        device->SetRenderTarget(0, oldRt);
+        hr = StretchRectKeepDeviceState(
+            device, m_D9LeftEyeSurface, srcPtr, dest, nullptr, D3DTEXF_NONE);
     m_CaptureReentry = false;
+    if (SUCCEEDED(hr) && dest == m_D9DesktopMirrorSurface)
+        m_DesktopMirrorHasImage.store(true, std::memory_order_release);
 
     static int s_mirrorLog;
     if (s_mirrorLog < 4 || FAILED(hr))
     {
-        Game::logMsg("Desktop letterbox left eye %ux%u -> BB %ux%u dest=%d,%d %ux%u hr=0x%08X",
-            eyeW, eyeH, bbDesc.Width, bbDesc.Height,
-            dest.left, dest.top, dw, dh, (unsigned)hr);
+        Game::logMsg("Desktop cover-crop left eye %ux%u src=%d,%d %ux%u -> %s %ux%u hr=0x%08X",
+            eyeW, eyeH, src.left, src.top, cropW, cropH,
+            dest == bb ? "BB" : "offscreen", bbDesc.Width, bbDesc.Height, (unsigned)hr);
         ++s_mirrorLog;
     }
 
-    if (oldRt)
-        oldRt->Release();
     bb->Release();
     device->Release();
 }
@@ -8995,6 +10135,44 @@ void VR::StampPauseOverlayCursor()
         return;
     DrawMenuCursorOnSurface(device, m_D9HUDSurface);
     device->Release();
+}
+
+void VR::McPauseHudBeginOnMatThread()
+{
+    SetHudPaintActive(true);
+    // Present must not TransferSurface this RT while it is cleared. That
+    // published a transparent overlay for one frame (world flicker through
+    // the pause menu).
+    m_HudPaintedThisFrame.store(false, std::memory_order_release);
+    if (!BindPauseHudForExtraPaint())
+    {
+        SetHudPaintActive(false);
+        g_McPauseHudBound.store(false, std::memory_order_release);
+        return;
+    }
+    IMatRenderContext* ctx = nullptr;
+    if (m_Game && m_Game->m_MaterialSystem)
+        ctx = SehGetRenderContext(m_Game->m_MaterialSystem);
+    PreparePauseHudForVgui(ctx);
+    if (ctx)
+        SehReleaseMatContext(ctx);
+    g_McPauseHudBound.store(true, std::memory_order_release);
+}
+
+void VR::McPauseHudEndOnMatThread()
+{
+    IMatRenderContext* ctx = nullptr;
+    if (m_Game && m_Game->m_MaterialSystem)
+        ctx = SehGetRenderContext(m_Game->m_MaterialSystem);
+    FinishPauseHudExtraPaint(ctx);
+    if (ctx)
+        SehReleaseMatContext(ctx);
+    if (g_McPauseHudBound.load(std::memory_order_acquire))
+        StampPauseOverlayCursor();
+    UnbindPauseHudAfterExtraPaint();
+    SetHudPaintActive(false);
+    if (g_McPauseHudBound.exchange(false, std::memory_order_acq_rel))
+        NoteHudPainted();
 }
 
 void VR::EnsureHudOverlay()
@@ -9622,6 +10800,11 @@ void VR::CaptureFrameBeforePresent()
 {
     if (!m_IsVREnabled || !g_D3DVR9)
         return;
+    if (McPipelineEnabled())
+    {
+        BlitDesktopMirrorToBackbuffer();
+        return;
+    }
     if (!ShouldCompositorSubmit())
         return;
 
@@ -9781,6 +10964,31 @@ void VR::SubmitVRTextures()
         // Deferred publish: hand over any slot whose GPU copy has completed
         // since the last Present, before deciding whether to copy new eyes.
         PollOpenXrDeferredPublish();
+        if (McPipelineEnabled())
+        {
+            LogOpenXrPublishRate();
+            if (WantPauseWorldOverlay())
+            {
+                if (m_HudOverlayReady && m_D9HUDSurface)
+                {
+                    if (HudPaintedThisFrame())
+                    {
+                        g_D3DVR9->TransferSurface(m_D9HUDSurface, FALSE);
+                        FillSharedTexture(m_D9HUDSurface, m_VKHUD);
+                        m_HudPaintedThisFrame.store(false, std::memory_order_release);
+                        m_HudOverlayHasImage = true;
+                    }
+                    if (m_HudOverlayHasImage)
+                    {
+                        const uint32_t overlayFrameId = m_OpenXrSubmitFrameId.fetch_add(1, std::memory_order_acq_rel);
+                        PublishOpenXrHudOverlay(overlayFrameId);
+                    }
+                }
+            }
+            else if (m_OpenXrHudOverlayPublished)
+                HideOpenXrHudOverlay();
+            return;
+        }
         const bool haveNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
         // Present runs far faster than the compositor consumes (measured
         // 2026-08-30: ~212 publishes/s against 90Hz SteamVR, stereo pair only
@@ -9889,7 +11097,7 @@ void VR::SubmitVRTextures()
         // The overlay has its own generation on the helper side; it does not
         // need to match the eye frame id.
         const uint32_t overlayFrameId = m_OpenXrSubmitFrameId.fetch_add(1, std::memory_order_acq_rel);
-        if (WantPauseWorldOverlay())
+        if (WantPauseWorldOverlay() && !McPipelineEnabled())
         {
             static int s_pause3dLog;
             if (s_pause3dLog < 8)

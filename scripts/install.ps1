@@ -15,9 +15,12 @@ if (-not (Test-Path $OpenVrSrc)) {
 
 $running = @(Get-Process -Name "bms" -ErrorAction SilentlyContinue)
 if ($running.Count -gt 0) {
-  Write-Host "Black Mesa is running (PID $($running.Id -join ', ')). Stopping it so d3d9.dll can be replaced."
-  $running | Stop-Process -Force
-  Start-Sleep -Seconds 2
+  throw "Black Mesa is running (PID $($running.Id -join ', ')). Close it from Steam (do not kill it) so d3d9.dll can be replaced. Force-stopping mid-stereo blacks the HWND and the HMD."
+}
+
+$helpers = @(Get-Process -Name "OpenXRHelper64" -ErrorAction SilentlyContinue)
+if ($helpers.Count -gt 0) {
+  throw "OpenXR helper is still running (PID $($helpers.Id -join ', ')). Close Black Mesa first, then install."
 }
 
 # Killing bms.exe mid-stereo leaves bmvr_in_hmd_world.flag next to the DLL.
@@ -224,6 +227,9 @@ if (-not (Test-Path $CfgDst)) {
   $cfgText = [regex]::Replace($cfgText, '(?m)^VrHandsPoseOffsetMeters=.*$', 'VrHandsPoseOffsetMeters=0,-0.008,-0.10')
   if ($cfgText -notmatch '(?m)^AutoMatQueueMode=') { $cfgText += "`r`nAutoMatQueueMode=false`r`n" }
   $cfgText = [regex]::Replace($cfgText, '(?m)^AutoMatQueueMode=.*$', 'AutoMatQueueMode=false')
+  if ($cfgText -notmatch '(?m)^MulticoreMode=') { $cfgText += "`r`nMulticoreMode=true`r`n" }
+  $cfgText = [regex]::Replace($cfgText, '(?m)^MulticoreMode=.*$', 'MulticoreMode=true')
+  Write-Host "MulticoreMode=true (mat_queue_mode 2 after stereo warmup; menu stays 0)."
   if ($cfgText -notmatch '(?m)^AntiAliasing=') { $cfgText += "`r`nAntiAliasing=0`r`n" }
   if ($cfgText -notmatch '(?m)^VrHandsUseHevGloves=') { $cfgText += "`r`nVrHandsUseHevGloves=true`r`n" }
   if ($cfgText -notmatch '(?m)^VrHandsDebugBoxes=') { $cfgText += "`r`nVrHandsDebugBoxes=false`r`n" }
@@ -255,6 +261,8 @@ if (-not (Test-Path $CfgDst)) {
   if ($cfgText -notmatch '(?m)^WorldRenderAtEyeSize=') { $cfgText += "`r`nWorldRenderAtEyeSize=true`r`n" }
   $cfgText = [regex]::Replace($cfgText, '(?m)^WorldRenderAtEyeSize=.*$', 'WorldRenderAtEyeSize=true')
   $cfgText = [regex]::Replace($cfgText, '(?m)^Roomscale1To1.*\r?\n', '')
+  $cfgText = [regex]::Replace($cfgText, '(?m)^PhysicalCrouch=.*\r?\n', '')
+  $cfgText = [regex]::Replace($cfgText, '(?m)^RoomscaleMovement=.*\r?\n', '')
   Set-Content -LiteralPath $CfgDst -Value $cfgText -Encoding ASCII -NoNewline
   Write-Host "Updated HudDistance/HudSize/ViewmodelScale/CompositorPostPresentHandoff/gloves/wrist HUD/OpenXR in $CfgDst"
   Write-Host "WorldRenderAtEyeSize=true (world at eye size, same as github.com/.../black-mesa-vr)."
@@ -267,7 +275,7 @@ if (-not (Test-Path $CfgGame)) { throw "Missing $CfgGame" }
 $BmvrCfgSrc = Join-Path $VrSrc "bmvr.cfg"
 $BmvrCfgDst = Join-Path $CfgGame "bmvr.cfg"
 Copy-Item -Force $BmvrCfgSrc $BmvrCfgDst
-Write-Host "Installed $BmvrCfgDst (PVS on, r_visocclusion 0, no video-quality override)"
+Write-Host "Installed $BmvrCfgDst (PVS on; mat_queue_mode 2 is set by the DLL after warmup)"
 $Autoexec = Join-Path $CfgGame "autoexec.cfg"
 if (Test-Path $Autoexec) {
   $autoText = Get-Content -LiteralPath $Autoexec -Raw

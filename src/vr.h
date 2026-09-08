@@ -23,9 +23,11 @@ class Game;
 class ITexture;
 class IMatRenderContext;
 class ICallQueue;
+class CFunctor;
 class CViewSetup;
 class CUserCmd;
 class Hl2vrAwaitFrameFunctor;
+class McPauseHudFunctor;
 
 struct IDirect3DDevice9;
 struct IDirect3DTexture9;
@@ -116,6 +118,7 @@ public:
         bool havePose = false;
         bool panel2d = false;
         L4D2VROpenXrPoseDesc pose{};
+        double issuedMs = 0.0;
     };
     static constexpr uint32_t kOpenXrNoSlot = 0xffffffffu;
     static constexpr uint32_t kOpenXrMaxPending = kOpenXrPublishSlots - 1;
@@ -151,7 +154,8 @@ public:
     // wins; older completed ones are dropped as stale).
     void PollOpenXrDeferredPublish();
     // Block until the oldest pending copy's event signals (bounded GPU
-    // run-ahead, OpenXrMaxPending). Falls back to WaitDeviceIdle on timeout.
+    // run-ahead, OpenXrMaxPending). Never WaitDeviceIdle: that is
+    // vkDeviceWaitIdle with no timeout and hangs the process.
     void WaitOldestOpenXrPending();
     void RefreshOpenXrHelperConsumed(double nowMs);
     uint32_t PickFreeOpenXrPublishSlot(double nowMs) const;
@@ -315,7 +319,10 @@ public:
         // Rotating OpenXR publish copies. Deliberately has no branch in the
         // DXVK CreateTexture post-create chain: it must only make the texture
         // exportable, never bind itself to m_D9*EyeSurface / m_VK*.
-        Texture_OpenXrPublish
+        Texture_OpenXrPublish,
+        // GMod vrmod 2W x 3H shared ring. Exportable so the helper can UV-crop
+        // band (M-2) without a game-thread StretchRect.
+        Texture_McRing
     };
 
     TextureID m_CreatingTextureID = Texture_None;
@@ -350,6 +357,7 @@ public:
     IDirect3DTexture9* m_D9ScopeLensTexture = nullptr;
     IDirect3DSurface9* m_D9ScopeLensSurface = nullptr;
     IDirect3DSurface9* m_D9RearMirrorSurface = nullptr;
+    IDirect3DTexture9* m_D9DesktopMirrorTexture = nullptr;
     IDirect3DSurface9* m_D9DesktopMirrorSurface = nullptr;
     IDirect3DSurface9* m_D9BlankSurface = nullptr;
     IDirect3DSurface9* m_D9FrameColorSurface = nullptr;
@@ -367,6 +375,7 @@ public:
     SharedTextureHolder m_VKScopeLens;
     SharedTextureHolder m_VKRearMirror;
     SharedTextureHolder m_VKBlankTexture;
+    SharedTextureHolder m_VKMcRing;
     bool m_BackBufferTextureValid = false;
 
     mutable TextureStateMutex m_TextureMutex;
@@ -410,6 +419,7 @@ public:
     bool m_RenderPipelineDebugLog = false;
     float m_RenderPipelineDebugLogHz = 1.0f;
     bool m_ShadowTweaksEnabled = false;
+    std::atomic<bool> m_DesktopMirrorHasImage{ false };
     bool m_DesktopMirrorEnabled = false;
     int m_DesktopMirrorEye = 1;
     bool m_DesktopMirrorKeepAspect = true;
@@ -546,7 +556,6 @@ public:
     int m_StereoEye = 0;
     bool m_HasStereoBodyOrigin = false;
     Vector m_StereoBodyOrigin{};
-    bool m_RoomscaleActive = false;
     bool m_StereoCopyOffset = false;
     bool m_SeenGameplay = false;
     bool m_GameplayEligible = false;
@@ -618,7 +627,9 @@ public:
     QAngle GetUseAimAngles() const;
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
-    bool SuppressThrowWhileGrabbing() const { return m_GrabHoldingPhysics; }
+    // Weapon fire, shoot origin, and flashlight must not follow a leftover
+    // left-hand Use latch. Only a live physics hold redirects those.
+    bool UseGrabRedirectsFire() const { return m_GrabLatched && m_GrabUseEntityHeld; }
     bool GrabHandTrackingValid() const
     {
         if (!m_GrabLatched)
@@ -661,6 +672,8 @@ public:
     bool StereoUnbindMatchesEye() const;
     void CaptureGameColorOnUnbind(IDirect3DSurface9* oldRt, uint32_t vpX, uint32_t vpY, uint32_t vpW, uint32_t vpH);
     void MirrorStereoToDesktopWindow();
+    void BlitDesktopMirrorToBackbuffer();
+    bool EnsureDesktopMirrorSurface(IDirect3DDevice9* device, UINT w, UINT h);
     void ReleaseVRRenderTargetsForDeviceReset();
     bool RefreshBackBufferTexture(bool forceRefresh = false);
     void EnsureOpticsRTTTextures() {}
@@ -681,8 +694,57 @@ public:
     bool HasEngineMap() const { return !m_CurrentMapName.empty(); }
     bool ShouldCompositorSubmit() const;
     bool StereoEyeBlitActive() const { return m_StereoEyeBlitActive; }
-    bool HudPaintActive() const { return m_HudPaintActive; }
-    void SetHudPaintActive(bool active) { m_HudPaintActive = active; }
+    // GMod: queued material system writes band M of a 2W x 3H ring; helper
+    // copies band (M-2). False keeps the verified single-core 1x-eye path.
+    bool McPipelineEnabled() const;
+    // True only while *this thread* is in a stereo world pass. Shared
+    // StereoEyeBlitActive / McPipelineEnabled stay on during pause VGUI and
+    // must not steal GameUI onto the 1x eyes or lie GetScreenSize to HMD.
+    bool StereoWorldPassActive() const;
+    bool McRingReady() const { return m_McRingReady; }
+    uint32_t McWriteBand() const { return m_McFrame % 3u; }
+    // HWND leftover is always D3D 16:9 @0,0. World+lighting draw to 1x eyes
+    // (WorldRenderAtEyeSize); the ring is only the helper submit atlas.
+    // Gutter keeps leftover 16:9 @0,0 off the left submit slice if anything
+    // still stamps the ring.
+    static constexpr int kMcGutter = 16;
+    int McLeftOriginX() const { return kMcGutter; }
+    int McRightOriginX() const { return kMcGutter + static_cast<int>(m_RenderWidth); }
+    UINT McRingWidth() const
+    {
+        return static_cast<UINT>(McRightOriginX() + static_cast<int>(m_RenderWidth));
+    }
+    UINT McRingHeight() const { return m_RenderHeight * 3u; }
+    bool McOriginIsRingBand(int x, int y) const;
+    bool McClipAmbiguousWindowVp(int inX, int inY, int inW, int inH, int& x, int& y, int& w, int& h) const;
+    // Ring dest origin for a window or eye rect. Recording (game thread) uses
+    // m_StereoEye + write band. Playback (material thread) must not: queue 2
+    // overlaps the next pair, so McWriteBand/m_StereoEye are the *next* frame
+    // (log: functor y=0 then D3D @0,3104 / @3168,3104). Playback keeps a
+    // baked band origin or the last-known eye rect on this thread.
+    bool McResolveRingEyeOrigin(int inX, int inY, int inW, int inH, int& outX, int& outY) const;
+    void McNoteRingEyeViewport(int x, int y, int w, int h);
+    bool McLastRingEyeOrigin(int& x, int& y) const;
+    bool QueueMcEyeBind(int stereoEye, bool flushGpu);
+    bool QueueMcCompositeToRing(uint32_t band);
+    bool QueueMcPauseHudBegin();
+    bool QueueMcPauseHudEnd();
+    void McBindPlaybackEye(int stereoEye, bool flushGpu);
+    void McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose);
+    bool CopyEyesToOpenXrPublishSlot(IDirect3DSurface9* left, IDirect3DSurface9* right,
+        const OpenXrPendingPublish& pend);
+    IDirect3DSurface9* McPlaybackEyeSurface() const;
+    IDirect3DSurface9* McPlaybackEyeDepth() const;
+    void NoteMcRecordThread();
+    bool McOnRecordThread() const;
+    bool SurfaceIsMcRing(IDirect3DSurface9* s) const;
+    bool D3dRt0IsMcRing() const;
+    IDirect3DSurface9* McRingSurface() const { return m_D9McRingSurface; }
+    IDirect3DSurface9* McRingDepth() const { return m_D9McRingDepth; }
+    void FinishMcStereoPair();
+    void ResetMcPipeline();
+    bool HudPaintActive() const;
+    void SetHudPaintActive(bool active);
     bool ShouldRedirectHudRt() const { return false; }
     void SetRedirectHudRt(bool) {}
     void SetVguiPaintActive(bool active) { m_VguiPaintActive = active; }
@@ -861,6 +923,7 @@ public:
 
 private:
     friend class Hl2vrAwaitFrameFunctor;
+    friend class McPauseHudFunctor;
     void MatAwaitFrame(uint64_t frameId);
     void SyncFrameGetPoses(uint64_t frameId);
     bool QueueMatAwaitFrame(uint64_t frameId);
@@ -881,6 +944,12 @@ private:
     // behind a GPU event (deferred) or publishes it right away after a device
     // idle (fallback). Returns false when nothing was consumed this Present.
     bool PrepareOpenXrEyeSurfacesForRead(const OpenXrPendingPublish& pend);
+    bool EnsureMcRing(IDirect3DDevice9* device);
+    void ReleaseMcRing();
+    bool PublishMcRingBand(const OpenXrPendingPublish& pend);
+    bool QueueMcMatFunctor(CFunctor* functor, const char* failTag);
+    void McPauseHudBeginOnMatThread();
+    void McPauseHudEndOnMatThread();
     void BindOpenXrActionHandles();
     bool PublishOpenXrHudOverlay(uint32_t frameId);
     void HideOpenXrHudOverlay();
@@ -932,12 +1001,20 @@ private:
     UINT KnownWindowHeight() const;
     static bool ResolveSurfaceSize(IDirect3DSurface9* surf, UINT& w, UINT& h, D3DSURFACE_DESC* outDesc = nullptr);
 
+    IDirect3DTexture9* m_D9McRingTexture = nullptr;
+    IDirect3DSurface9* m_D9McRingSurface = nullptr;
+    IDirect3DSurface9* m_D9McRingDepth = nullptr;
+    L4D2VROpenXrSharedTextureDesc m_OpenXrMcRingDesc{};
+    L4D2VROpenXrPoseDesc m_McPoses[3]{};
+    uint32_t m_McFrame = 0;
+    std::atomic<DWORD> m_McRecordThreadId{ 0 };
+    bool m_McRingReady = false;
+    std::mutex m_OpenXrPublishMutex;
     IDirect3DSurface9* m_StereoEyeBlitDest = nullptr;
     bool m_StereoEyeBlitActive = false;
     bool m_LeftEyeMsaaHasScene = false;
     bool m_RightEyeMsaaHasScene = false;
     bool m_StereoRedirectedToEye = false;
-    bool m_HudPaintActive = false;
     bool m_EngineHudRtPushed = false;
     bool m_VguiPaintActive = false;
     bool m_RedirectHudRt = false;
@@ -1026,6 +1103,7 @@ private:
     bool m_GrabHandLeft = false;
     bool m_LastGrabHandLeft = true;
     bool m_GrabHoldingPhysics = false;
+    bool m_GrabUseEntityHeld = false;
     bool m_UseWasHeld = false;
     double m_UseDropGapUntilMs = 0.0;
     double m_UseDropPulseUntilMs = 0.0;

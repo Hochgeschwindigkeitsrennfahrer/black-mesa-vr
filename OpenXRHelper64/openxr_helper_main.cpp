@@ -201,6 +201,57 @@ namespace
         return ExeDirectory() + L"\\openxr_helper64.log";
     }
 
+    bool OpenXrExtensionAvailable(
+        const std::vector<XrExtensionProperties>& extensions,
+        const char* name)
+    {
+        if (!name || !name[0])
+            return false;
+        for (const XrExtensionProperties& extension : extensions)
+        {
+            if (std::strcmp(extension.extensionName, name) == 0)
+                return true;
+        }
+        return false;
+    }
+
+    void AppendOpenXrExtensionIfSupported(
+        const std::vector<XrExtensionProperties>& available,
+        std::vector<const char*>& enabled,
+        const char* name,
+        Logger& log)
+    {
+        if (!OpenXrExtensionAvailable(available, name))
+            return;
+        for (const char* already : enabled)
+        {
+            if (already && std::strcmp(already, name) == 0)
+                return;
+        }
+        enabled.push_back(name);
+        log.Print("Enabling OpenXR extension %s", name);
+    }
+
+    // Quest 3 / Touch Plus, Touch Pro, Pico, Cosmos, Focus 3, and G2 profiles
+    // are extension-gated. Suggesting them without the extension returns
+    // XR_ERROR_PATH_UNSUPPORTED for the whole profile, so Pause never binds.
+    void AppendInteractionProfileExtensions(
+        const std::vector<XrExtensionProperties>& available,
+        std::vector<const char*>& enabled,
+        Logger& log)
+    {
+        static const char* kOptional[] = {
+            XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME,
+            XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME,
+            XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME,
+            XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME,
+            XR_HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION_EXTENSION_NAME,
+            XR_EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME,
+        };
+        for (const char* name : kOptional)
+            AppendOpenXrExtensionIfSupported(available, enabled, name, log);
+    }
+
     bool ParseUintArg(const wchar_t* value, uint32_t& out)
     {
         if (!value || !*value)
@@ -1356,6 +1407,7 @@ namespace
         float vMax = 1.0f;
         float renderFovXDeg = 90.0f;
         float renderAspect = 1.0f;
+        bool ownsImport = true;
     };
 
     class BridgeWriter
@@ -2181,6 +2233,7 @@ namespace
         bool CreateFloatDigitalActions(Logger& log);
         bool CreateAnalogActions(Logger& log);
         void AddBinding(std::vector<XrActionSuggestedBinding>& bindings, XrAction action, const char* bindingPath);
+        XrResult SuggestProfileOnce(XrPath profile, const std::vector<XrActionSuggestedBinding>& bindings);
         void SuggestProfile(Logger& log, const char* profilePath, const std::vector<XrActionSuggestedBinding>& bindings);
         void AddPoseAndHapticBindings(std::vector<XrActionSuggestedBinding>& bindings);
         void AddStickAndTriggerBindings(std::vector<XrActionSuggestedBinding>& bindings, const char* stickName);
@@ -4772,6 +4825,20 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             bindings.push_back(XrActionSuggestedBinding{ action, path });
     }
 
+    XrResult OpenXrInputBridge::SuggestProfileOnce(
+        XrPath profile,
+        const std::vector<XrActionSuggestedBinding>& bindings)
+    {
+        if (bindings.empty())
+            return XR_ERROR_VALIDATION_FAILURE;
+
+        XrInteractionProfileSuggestedBinding suggested{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+        suggested.interactionProfile = profile;
+        suggested.countSuggestedBindings = static_cast<uint32_t>(bindings.size());
+        suggested.suggestedBindings = bindings.data();
+        return m_Xr->xrSuggestInteractionProfileBindings(m_Instance, &suggested);
+    }
+
     void OpenXrInputBridge::SuggestProfile(Logger& log, const char* profilePath, const std::vector<XrActionSuggestedBinding>& bindings)
     {
         if (bindings.empty())
@@ -4781,26 +4848,58 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         if (!TryPath(profilePath, profile))
             return;
 
-        XrInteractionProfileSuggestedBinding suggested{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggested.interactionProfile = profile;
-        suggested.countSuggestedBindings = static_cast<uint32_t>(bindings.size());
-        suggested.suggestedBindings = bindings.data();
-        const XrResult result = m_Xr->xrSuggestInteractionProfileBindings(m_Instance, &suggested);
-        if (XR_FAILED(result))
-        {
-            log.Print(
-                "xrSuggestInteractionProfileBindings(%s) failed/nonfatal: %s (%d)",
-                profilePath,
-                XrResultName(result),
-                static_cast<int>(result));
-        }
-        else
+        XrResult result = SuggestProfileOnce(profile, bindings);
+        if (!XR_FAILED(result))
         {
             log.Print(
                 "xrSuggestInteractionProfileBindings(%s) ok count=%u",
                 profilePath,
-                suggested.countSuggestedBindings);
+                static_cast<uint32_t>(bindings.size()));
+            return;
         }
+
+        log.Print(
+            "xrSuggestInteractionProfileBindings(%s) failed/nonfatal: %s (%d); retrying without unsupported paths",
+            profilePath,
+            XrResultName(result),
+            static_cast<int>(result));
+
+        // One invalid component (Quest menu, Pico squeeze, etc.) fails the
+        // whole suggest. Rebuild a valid subset so Pause on Y still applies.
+        std::vector<XrActionSuggestedBinding> accepted;
+        accepted.reserve(bindings.size());
+        uint32_t dropped = 0;
+        for (const XrActionSuggestedBinding& binding : bindings)
+        {
+            std::vector<XrActionSuggestedBinding> trial = accepted;
+            trial.push_back(binding);
+            result = SuggestProfileOnce(profile, trial);
+            if (XR_FAILED(result))
+            {
+                ++dropped;
+                if (accepted.empty())
+                {
+                    log.Print(
+                        "xrSuggestInteractionProfileBindings(%s) profile unsupported; skip",
+                        profilePath);
+                    return;
+                }
+                continue;
+            }
+            accepted.swap(trial);
+        }
+
+        if (accepted.empty())
+        {
+            log.Print("xrSuggestInteractionProfileBindings(%s) no valid paths", profilePath);
+            return;
+        }
+
+        log.Print(
+            "xrSuggestInteractionProfileBindings(%s) ok count=%u dropped=%u",
+            profilePath,
+            static_cast<uint32_t>(accepted.size()),
+            dropped);
     }
 
     void OpenXrInputBridge::AddPoseAndHapticBindings(std::vector<XrActionSuggestedBinding>& b)
@@ -4848,6 +4947,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::MenuBack)], "/user/hand/right/input/b/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::PrevItem)], "/user/hand/left/input/x/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/y/click");
+        // Quest OS often swallows menu. Pico uses system. Keep both as extras;
+        // SuggestProfile drops any path the active profile does not expose.
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/system/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/menu/click");
     }
 
@@ -4859,6 +4961,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::MenuBack)], "/user/hand/right/input/b/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Scoreboard)], "/user/hand/left/input/a/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/b/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/system/click");
     }
 
     void OpenXrInputBridge::AddMenuButtonBindings(std::vector<XrActionSuggestedBinding>& b)
@@ -4866,6 +4969,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::ActivateVR)], "/user/hand/right/input/menu/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::MenuSelect)], "/user/hand/right/input/menu/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::MenuBack)], "/user/hand/left/input/menu/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/y/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/system/click");
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/menu/click");
     }
 
@@ -4878,6 +4983,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             "/interaction_profiles/meta/touch_controller_plus",
             "/interaction_profiles/valve/index_controller",
             "/interaction_profiles/microsoft/motion_controller",
+            "/interaction_profiles/hp/mixed_reality_controller",
             "/interaction_profiles/htc/vive_cosmos_controller",
             "/interaction_profiles/htc/vive_focus3_controller",
             "/interaction_profiles/htc/vive_controller",
@@ -4898,6 +5004,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             "/interaction_profiles/facebook/touch_controller_pro",
             "/interaction_profiles/meta/touch_controller_plus",
             "/interaction_profiles/bytedance/pico4_controller",
+            "/interaction_profiles/hp/mixed_reality_controller",
         };
         for (const char* profile : touchLikeProfiles)
         {
@@ -5745,6 +5852,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             {
                 m_Log.Print("%s is not supported by the active runtime", XR_KHR_VISIBILITY_MASK_EXTENSION_NAME);
             }
+            AppendInteractionProfileExtensions(extensions, enabledExtensions, m_Log);
 
             XrInstanceCreateInfo createInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
             std::snprintf(createInfo.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "Black Mesa VR");
@@ -5759,10 +5867,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             if (!Succeeded(m_Log, "xrCreateInstance(Vulkan)", result) || m_Instance == XR_NULL_HANDLE)
                 return false;
 
-            m_Log.Print("Created OpenXR instance with %s handTracking=%u visibilityMask=%u",
+            m_Log.Print("Created OpenXR instance with %s handTracking=%u visibilityMask=%u extensions=%u",
                 XR_KHR_VULKAN_ENABLE_EXTENSION_NAME,
                 m_HandTrackingExtensionEnabled ? 1u : 0u,
-                m_VisibilityMaskExtensionEnabled ? 1u : 0u);
+                m_VisibilityMaskExtensionEnabled ? 1u : 0u,
+                static_cast<uint32_t>(enabledExtensions.size()));
             m_Bridge.Update(L4D2VROpenXrBridgeStatus::InstanceCreated, 0, 0, "OpenXR instance created");
             return true;
         }
@@ -6970,12 +7079,15 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
         void DestroyImportedGameEye(VulkanGameEyeTexture& eye)
         {
-            if (eye.view != VK_NULL_HANDLE && m_Vk.vkDestroyImageView)
-                m_Vk.vkDestroyImageView(m_VkDevice, eye.view, nullptr);
-            if (eye.image != VK_NULL_HANDLE && m_Vk.vkDestroyImage)
-                m_Vk.vkDestroyImage(m_VkDevice, eye.image, nullptr);
-            if (eye.memory != VK_NULL_HANDLE && m_Vk.vkFreeMemory)
-                m_Vk.vkFreeMemory(m_VkDevice, eye.memory, nullptr);
+            if (eye.ownsImport)
+            {
+                if (eye.view != VK_NULL_HANDLE && m_Vk.vkDestroyImageView)
+                    m_Vk.vkDestroyImageView(m_VkDevice, eye.view, nullptr);
+                if (eye.image != VK_NULL_HANDLE && m_Vk.vkDestroyImage)
+                    m_Vk.vkDestroyImage(m_VkDevice, eye.image, nullptr);
+                if (eye.memory != VK_NULL_HANDLE && m_Vk.vkFreeMemory)
+                    m_Vk.vkFreeMemory(m_VkDevice, eye.memory, nullptr);
+            }
             eye = VulkanGameEyeTexture{};
         }
 
@@ -7503,6 +7615,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         void ParkCurrentGameEye(uint32_t eyeIndex)
         {
             VulkanGameEyeTexture& eye = m_GameEyes[eyeIndex];
+            if (!eye.ownsImport)
+            {
+                eye = VulkanGameEyeTexture{};
+                return;
+            }
             if (eye.image == VK_NULL_HANDLE)
                 return;
             for (VulkanGameEyeTexture& cached : m_GameEyeCache[eyeIndex])
@@ -7522,6 +7639,21 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             if (eyeIndex >= L4D2VR_OPENXR_EYE_COUNT)
                 return false;
             VulkanGameEyeTexture& eye = m_GameEyes[eyeIndex];
+            if (eyeIndex == L4D2VR_OPENXR_EYE_RIGHT
+                && GameEyeMatchesDesc(m_GameEyes[L4D2VR_OPENXR_EYE_LEFT], desc))
+            {
+                if (!(GameEyeMatchesDesc(eye, desc) && !eye.ownsImport))
+                {
+                    if (eye.ownsImport)
+                        ParkCurrentGameEye(eyeIndex);
+                    else
+                        eye = VulkanGameEyeTexture{};
+                    eye = m_GameEyes[L4D2VR_OPENXR_EYE_LEFT];
+                    eye.ownsImport = false;
+                }
+                ApplyGameEyeSourceBounds(eye, desc, generation);
+                return UpdateBlitDescriptorSet(eyeIndex);
+            }
             if (GameEyeMatchesDesc(eye, desc))
             {
                 ApplyGameEyeSourceBounds(eye, desc, generation);
@@ -8481,7 +8613,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 const bool poseMono =
                     m_Bridge.ReadGameRenderPose(cropPose) &&
                     (cropPose.reserved1 & L4D2VR_OPENXR_POSE_FLAG_MONO) != 0;
-                const bool cropProjection = m_UseRuntimeProjectionFov && m_HaveLocatedFov && !poseMono;
+                const bool explicitUv =
+                    source.uMin > 0.001f || source.vMin > 0.001f
+                    || source.uMax < 0.999f || source.vMax < 0.999f;
+                const bool cropProjection = m_UseRuntimeProjectionFov && m_HaveLocatedFov
+                    && !poseMono && !explicitUv;
                 if (cropProjection)
                 {
                     float uMin = 0.0f, vMin = 0.0f, uMax = 1.0f, vMax = 1.0f;

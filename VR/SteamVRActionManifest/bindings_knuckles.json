@@ -206,15 +206,6 @@
                   }
                },
                "mode": "button",
-               "path": "/user/hand/left/input/application_menu"
-            },
-            {
-               "inputs": {
-                  "click": {
-                     "output": "/actions/main/in/Pause"
-                  }
-               },
-               "mode": "button",
                "path": "/user/hand/left/input/system"
             }
          ]

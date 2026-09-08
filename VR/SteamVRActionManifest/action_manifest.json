@@ -5,7 +5,31 @@
          "binding_url": "bindings_oculus_touch.json"
       },
       {
+         "controller_type": "oculus_touch_plus",
+         "binding_url": "bindings_oculus_touch.json"
+      },
+      {
+         "controller_type": "oculus_touch_v3",
+         "binding_url": "bindings_oculus_touch.json"
+      },
+      {
+         "controller_type": "oculus_touch_pro",
+         "binding_url": "bindings_oculus_touch.json"
+      },
+      {
+         "controller_type": "pico_controller",
+         "binding_url": "bindings_oculus_touch.json"
+      },
+      {
+         "controller_type": "vive_focus3_controller",
+         "binding_url": "bindings_oculus_touch.json"
+      },
+      {
          "controller_type": "knuckles",
+         "binding_url": "bindings_knuckles.json"
+      },
+      {
+         "controller_type": "knuckles_ev1",
          "binding_url": "bindings_knuckles.json"
       },
       {

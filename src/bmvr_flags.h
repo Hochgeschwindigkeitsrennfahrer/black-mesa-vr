@@ -129,6 +129,9 @@ namespace bmvr
     extern float g_IPDScale;
     extern float g_HeightOffset;
     extern bool g_AutoMatQueueMode;
+    // Default play path: 1x-eye stereo + SetThreadMode(2) after warmup.
+    // Menu / load stay queue 0. Config MulticoreMode=false turns it off.
+    extern bool g_MulticoreMode;
     // L4D2VR overlay AntiAliasing: 0 / 2 / 4 / 8 / 16. DXVK MSAA on the
     // private eye RTs, resolved into non-MSAA submit textures. Restart.
     extern uint32_t g_AntiAliasing;
@@ -180,6 +183,10 @@ namespace bmvr
     extern float g_VrHandsPoseRotX;
     extern float g_VrHandsPoseRotY;
     extern float g_VrHandsPoseRotZ;
+    // Index OpenXR: aim +Y is the controller face, ~90° from the palm.
+    // Applied only to hand poses around aim forward (weapons stay unrolled).
+    // Left = -deg, right = +deg. Flip the sign if palms go the wrong way.
+    extern float g_VrHandsIndexRollDeg;
     // L4D2VR BuildControllerWorld local translation (meters, before model
     // scale). Controller basis Z is -forward, so a negative local Z moves the
     // mesh further along aim. HEV gloves sat behind the controller; -0.10 m
