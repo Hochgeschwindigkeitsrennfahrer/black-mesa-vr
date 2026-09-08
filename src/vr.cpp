@@ -8577,30 +8577,26 @@ bool VR::QueueMcMatFunctor(CFunctor* functor, const char* failTag)
     if (!functor)
         return false;
     ICallQueue* q = ProbeCallQueue();
-    if (!q)
+    if (q && SehQueueFunctorInternal(q, functor))
+        return true;
+
+    // Quest Horizon Link: slot 146 is not a working ICallQueue
+    // (QueueFunctorInternal throws, then GetCallQueue returns null).
+    // McPipelineEnabled skips Present publish, so dropping the functor
+    // froze the HMD on the last 2D menu frame. Disable the MC publish
+    // path; hooks fall back to the single-thread 1x-eye blit.
+    m_McCallQueueDead = true;
+    static int s_dead;
+    if (s_dead < 8)
     {
-        static int s_noQ;
-        if (s_noQ < 4)
-        {
-            Game::logMsg("MC %s: no ICallQueue", failTag ? failTag : "functor");
-            ++s_noQ;
-        }
-        functor->Release();
-        return false;
+        Game::logMsg("MC %s: call queue %s slot=%d — single-thread stereo publish",
+            failTag ? failTag : "functor",
+            q ? "failed" : "missing",
+            m_Hl2vrCallQueueSlot);
+        ++s_dead;
     }
-    if (!SehQueueFunctorInternal(q, functor))
-    {
-        functor->Release();
-        static int s_fail;
-        if (s_fail < 4)
-        {
-            Game::logMsg("MC %s: QueueFunctorInternal failed slot=%d",
-                failTag ? failTag : "functor", m_Hl2vrCallQueueSlot);
-            ++s_fail;
-        }
-        return false;
-    }
-    return true;
+    functor->Release();
+    return false;
 }
 
 bool VR::HudPaintActive() const
@@ -8894,6 +8890,8 @@ bool VR::McPipelineEnabled() const
     if (!m_Game || m_Game->GetMatQueueMode() == 0)
         return false;
     if (Want2dMenuPanel())
+        return false;
+    if (m_McCallQueueDead)
         return false;
     return true;
 }

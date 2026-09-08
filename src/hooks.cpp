@@ -3651,14 +3651,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         StereoCostBegin();
         g_Cost.eye = 1;
         m_VR->m_StereoEye = 1;
-        if (!mc)
+        const bool mcLeft = mc && m_VR->QueueMcEyeBind(1, false);
+        if (!mcLeft)
         {
             m_VR->BeginStereoEyeBlit(m_VR->m_D9LeftEyeSurface);
             m_VR->ClearStereoEyeSurfaces();
-        }
-        else
-        {
-            m_VR->QueueMcEyeBind(1, false);
         }
         {
             const int eyeDraw = whatToDraw & ~kRenderViewDrawHud;
@@ -3666,7 +3663,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             callOriginal(leftEyeView, nClearFlags, eyeDraw);
             g_Cost.leftTicks += QpcNow() - t0;
         }
-        if (!mc)
+        if (!mcLeft)
         {
         const bool leftUnbind = m_VR->EndStereoEyeBlit();
         {
@@ -3727,17 +3724,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         g_Cost.eye = 2;
         g_Cost.eye = 2;
         m_VR->m_StereoEye = 2;
-        if (!mc)
+        const bool mcRight = mc && m_VR->QueueMcEyeBind(2, true);
+        if (!mcRight)
         {
             m_VR->BeginStereoEyeBlit(m_VR->m_D9RightEyeSurface);
             m_VR->ClearStereoEyeSurfaces();
-        }
-        else
-        {
-            // Flush so left's shared FullFrame copy can land on the 1x eye
-            // before the right RenderView reuses it. Do not IMat Viewport
-            // the HWND at eye size (nvogl crash).
-            m_VR->QueueMcEyeBind(2, true);
         }
         {
             const int eyeDraw = whatToDraw & ~kRenderViewDrawHud;
@@ -3745,7 +3736,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             callOriginal(rightEyeView, nClearFlags, eyeDraw);
             g_Cost.rightTicks += QpcNow() - t0;
         }
-        if (!mc)
+        if (!mcRight)
         {
         const bool rightUnbind = m_VR->EndStereoEyeBlit();
         {
@@ -3781,7 +3772,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         }
         } // !mc right post-RV
         m_VR->m_StereoEye = 0;
-        if (mc)
+        if (mcLeft && mcRight)
         {
             m_VR->QueueMcCompositeToRing(mcBand);
             m_VR->FinishMcStereoPair();
@@ -3793,7 +3784,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         // thread; Present copies it onto the HWND. StretchRect of 1x eyes
         // from this thread races playback. Do not blit onto the swapchain
         // from the mat thread (viewport clobber / Present stall).
-        if (!mc)
+        if (!(mcLeft && mcRight))
         {
         if (bmvr::OffscreenWorldMatchesEyes())
             m_VR->MirrorStereoToDesktopWindow();
@@ -3803,7 +3794,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         // gbmatch already draws flashlight in the eye passes. A third window
         // DRAWHUD pass was a 15fps regression. Keep it only for the fused
         // fallback (eyes stripped HUD).
-        const bool runDrawHudPass = !mc && !bmvr::TryFlashlightGbMatch() && bmvr::TryDrawHud();
+        const bool runDrawHudPass = !(mcLeft && mcRight) && !bmvr::TryFlashlightGbMatch() && bmvr::TryDrawHud();
         if (runDrawHudPass)
         {
             static int s_drawHudFrames;
@@ -3823,7 +3814,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         // rendered into it with depth. Adding the no-depth desktop overlay on
         // top of that put a second, slightly offset copy of each hand on the
         // window, which is what read as the hands being see-through there.
-        if (!mc
+        if (!(mcLeft && mcRight)
             && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes)
             && !m_VR->IsMenuUp()
             && !bmvr::OffscreenWorldMatchesEyes()

@@ -13,10 +13,13 @@ config, add these lines (or the DLL defaults apply):
 
   MulticoreMode=true
   VrHandsIndexRollDeg=90
+  OpenXRHelperFlipSubmitY=false
 
 This build
 ----------
 - Multicore rendering — expect massive performance upgrades
+- SteamVR submit Y-flip off by default (was inverted with auto)
+- Quest Horizon Link no longer freezes after multicore
 - Fixed lens flare positions
 - Fixed inability to attack after grabbing / using something with the left hand
 - Fixed Valve Index hand / weapon poses

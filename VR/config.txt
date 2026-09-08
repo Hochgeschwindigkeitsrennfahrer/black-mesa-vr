@@ -115,11 +115,9 @@ OpenXRHelperWaitReadySeconds=45
 # Default OpenXR locate-at-submit on a late eye image jitters when you turn
 # your head. SteamVR Motion Smoothing does not apply on this helper path.
 OpenXRHelperUseGameRenderPoseForProjection=true
-# auto = Y-flip only SteamVR + Quest Touch, using a vertex NDC Y-flip (not a
-# negative viewport — that made yellow bands on G2/SteamVR; UV 0/1 swap and
-# transfer-blit Y-swap did not change the Quest image). WMR/VDXR/Oculus and
-# G2-through-SteamVR stay unflipped. true/false override.
-OpenXRHelperFlipSubmitY=auto
+# false = no submit Y-flip (default). auto used to invert SteamVR.
+# true if a runtime is still upside-down.
+OpenXRHelperFlipSubmitY=false
 # auto = do not swap L/R images. SteamVR Quest fused without a swap; Link
 # duplication is not an L/R swap. true/false override.
 OpenXRHelperSwapProjectionEyes=auto

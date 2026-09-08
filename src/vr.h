@@ -1009,6 +1009,9 @@ private:
     uint32_t m_McFrame = 0;
     std::atomic<DWORD> m_McRecordThreadId{ 0 };
     bool m_McRingReady = false;
+    // GetCallQueue / QueueFunctorInternal failed (Quest Link log 2026-09-08).
+    // Stay on the single-thread 1x-eye blit + Present publish path.
+    bool m_McCallQueueDead = false;
     std::mutex m_OpenXrPublishMutex;
     IDirect3DSurface9* m_StereoEyeBlitDest = nullptr;
     bool m_StereoEyeBlitActive = false;

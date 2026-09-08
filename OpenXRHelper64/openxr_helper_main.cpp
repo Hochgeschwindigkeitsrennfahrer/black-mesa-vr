@@ -119,8 +119,8 @@ namespace
         bool useGameRenderPoseForProjection = false;
         int forceMonoProjectionEye = -1;
         int forceMonoProjectionView = -1;
-        // -1 auto (SteamVR / VD-forwarded SteamVR), 0 off, 1 on.
-        int flipSubmitY = -1;
+        // -1 auto, 0 off (default — SteamVR was inverted with auto-on), 1 on.
+        int flipSubmitY = 0;
         DWORD parentPid = 0;
     };
 
@@ -573,14 +573,10 @@ namespace
 
     bool ShouldAutoFlipSubmitY(const char* runtimeName, uint32_t controllerFamily, std::string& reason)
     {
-        // SteamVR OpenXR on Quest (Touch) is inverted; VDXR/WMR/Oculus are not.
-        // Steam Link reports as SteamVR in Meta compatibility mode and must
-        // not get the SteamVR+Touch Y-flip (2026-09-03, Quest 3, flip on =
-        // upside-down). A negative viewport Y-flip on G2/SteamVR made
-        // yellow/white bands (2026-09-01). Transfer-blit dstOffsets Y-swap
-        // is a no-op on NVIDIA. Auto-flip only SteamVR+Touch, via a second
-        // blit VS that negates NDC Y. UV 0/1 swap did not change the Quest
-        // SteamVR image (2026-09-01).
+        // 2026-09-08: auto-on SteamVR+Touch inverted the HMD. Default and
+        // auto are no submit Y-flip. OpenXRHelperFlipSubmitY=true to force
+        // the vertex NDC Y-flip. Steam Link Meta-compat and Oculus/VDXR/WMR
+        // stay unflipped. Negative viewport Y-flip on G2 made yellow bands.
         if (RuntimeNameLooksLikeSteamVrMetaCompatibility(runtimeName))
         {
             reason = "SteamVR/OpenXR Meta compatibility (Steam Link); no submit Y-flip";
@@ -623,10 +619,11 @@ namespace
 
         if (controllerFamily == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH)
         {
+            // 2026-09-08: auto-on inverted SteamVR. false is the working default.
             reason = steamVrConvention
-                ? "SteamVR + Touch; vertex NDC Y-flip"
-                : (reason + "; Touch; vertex NDC Y-flip");
-            return true;
+                ? "SteamVR + Touch; no submit Y-flip (OpenXRHelperFlipSubmitY=false)"
+                : (reason + "; Touch; no submit Y-flip");
+            return false;
         }
 
         reason = steamVrConvention

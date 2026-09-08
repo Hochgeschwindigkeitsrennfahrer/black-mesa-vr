@@ -19,8 +19,8 @@ struct OpenXrHelperLaunchConfig
     bool useGameRenderPoseForProjection = true;
     int forceMonoProjectionEye = -1;
     int forceMonoProjectionView = -1;
-    // -1 auto (SteamVR / VD-forwarded SteamVR), 0 off, 1 on.
-    int flipSubmitY = -1;
+    // -1 auto, 0 off (default — SteamVR was inverted with auto-on), 1 on.
+    int flipSubmitY = 0;
     // 0 = run until the game process exits (L4D2VR config default after
     // 2026-06-24). A positive count is a helper self-test that then quits.
     uint32_t submitTestFrames = 0;
