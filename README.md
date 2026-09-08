@@ -1,7 +1,7 @@
 # Black Mesa VR
 
 <a href="https://www.youtube.com/watch?v=S9kmK95yqgM">
-  <img src="assets/release-2026-09-06.jpg" alt="Black Mesa VR — Weapon Menu" width="50%">
+  <img src="assets/release-2026-09-06.jpg" alt="Black Mesa VR — Weapon Menu" width="90%">
 </a>
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/P5P56X4HH)
