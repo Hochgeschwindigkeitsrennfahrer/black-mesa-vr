@@ -390,12 +390,14 @@ bool VR::DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo)
         flags = 1;
 
     auto drawOne = [&](void* model, const Vector& org, const QAngle& ang) -> bool {
-        ModelRenderInfo_t inf{};
+        // DrawModelSetup reads info.pModel+0x38 and info.pRenderable. A null
+        // renderable faults after the shader mutex is taken; SEH then returns
+        // without unlocking, and the next shot waits on that mutex forever.
+        ModelRenderInfo_t inf = vmInfo;
+        inf.pModel = reinterpret_cast<model_t*>(model);
         inf.origin = org;
         inf.angles = ang;
-        inf.pModel = reinterpret_cast<model_t*>(model);
-        inf.flags = flags;
-        inf.entity_index = -1;
+        inf.pLightingOffset = nullptr;
         float world[3][4]{};
         BuildStudioWorld(ang, org, world);
         inf.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(world);
