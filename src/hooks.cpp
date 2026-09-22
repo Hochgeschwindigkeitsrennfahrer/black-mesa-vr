@@ -4092,19 +4092,32 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
             const char* weaponModel = m_Game ? m_Game->GetActiveWeaponModelName() : nullptr;
             if (weaponModel)
                 m_VR->NoteViewmodelModel(weaponModel);
-            // NoteViewmodelModel just classified weaponModel (mp5/MP5/smg/mp5k
-            // all match on the lowercased path), so the flag is authoritative.
             const bool mp5 = m_Game && m_VR->ViewmodelIsMp5();
-            // L4D2VR: feed the aim-controller pose as CalcViewModelView eye so
-            // lag/bob and $origin are in the same frame as the hard-lock.
             const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(eyePosition);
             const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
-            // Crowbar idle-force runs in SuppressViewmodelMovementAnims.
-            // MP5 fire sequences must keep playing (never idle-force those).
             if (mp5)
                 ZeroPlayerViewRecoil(owner);
             SuppressViewmodelMovementAnims(ecx);
             CallCalcViewModelViewOriginal(ecx, owner, targetOrigin, targetAng);
+            if (weaponModel && (std::strstr(weaponModel, "glock") || std::strstr(weaponModel, "Glock")))
+            {
+                const int pistolIndex = m_VR->HlvrPistolModelIndex();
+                if (pistolIndex > 0 && pistolIndex < 32767)
+                {
+                    auto* modelIndex = reinterpret_cast<short*>(static_cast<char*>(ecx) + 0x94);
+                    if (*modelIndex != static_cast<short>(pistolIndex))
+                    {
+                        static int s_swapLog;
+                        if (s_swapLog < 4)
+                        {
+                            Game::logMsg("HL2VR pistol viewmodel modelindex %d -> %d",
+                                *modelIndex, pistolIndex);
+                            ++s_swapLog;
+                        }
+                        *modelIndex = static_cast<short>(pistolIndex);
+                    }
+                }
+            }
             const float origin3[3] = { targetOrigin.x, targetOrigin.y, targetOrigin.z };
             const float angles3[3] = { targetAng.x, targetAng.y, targetAng.z };
             CallSetAbsOriginAngles(ecx, origin3, angles3);
@@ -4250,6 +4263,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         // World props: skip GetModelName. Open maps call DME thousands of times
         // per eye; the name string was the hot cost next to the draw itself.
         isViewmodel = CachedModelIsViewmodel(pModel);
+        if (!isViewmodel && m_VR && m_VR->IsHlvrPistolModel(pModel))
+            isViewmodel = true;
         if (isViewmodel && m_Game && m_Game->m_ModelInfo)
         {
             modelName = SafeModelName(m_Game->m_ModelInfo, pModel);
@@ -4352,6 +4367,10 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     {
         const float scale = [&]() -> float {
             float s = bmvr::g_ViewmodelScale;
+            // vr_pistol is real size. The 0.64 viewmodel shrink is for the
+            // oversized v_glock mesh and collapses this model.
+            if (m_VR->IsHlvrPistolModel(pModel))
+                s = 1.f;
             if (modelName && (std::strstr(modelName, "crowbar") || std::strstr(modelName, "wrench")
                 || std::strstr(modelName, "Crowbar") || std::strstr(modelName, "Wrench")))
                 s = 1.f;

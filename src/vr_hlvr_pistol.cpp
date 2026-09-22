@@ -42,6 +42,7 @@ namespace
         void* slideModel = nullptr;
         void* clipModel = nullptr;
         int loadTries = 0;
+        int modelIndex = 0;
         bool drawFailed = false;
         bool seeded = false;
         MagState mag = MagNone;
@@ -363,6 +364,40 @@ void HlvrPistolLeaveDraw()
 
 bool VR::DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo)
 {
+    (void)modelRender;
+    (void)vmInfo;
+    // Nested DrawModelEx returns 0 while this viewmodel is already inside
+    // DrawModelExecute (setup rejects the extra draw). The mesh is selected
+    // by swapping the viewmodel model index before that setup.
+    return false;
+}
+
+int VR::HlvrPistolModelIndex()
+{
+    if (g_pistol.modelIndex > 0)
+        return g_pistol.modelIndex;
+    if (!m_Game || !m_Game->m_ModelInfo)
+        return 0;
+    EnsureModels(this);
+    const int idx = m_Game->m_ModelInfo->GetModelIndex("models/weapons/vr_pistol.mdl");
+    if (idx <= 0)
+        return 0;
+    g_pistol.modelIndex = idx;
+    void* model = m_Game->m_ModelInfo->GetModel(idx);
+    if (model)
+        g_pistol.gun = model;
+    Game::logMsg("HL2VR pistol viewmodel index=%d model=%p", idx, model);
+    return idx;
+}
+
+bool VR::IsHlvrPistolModel(void* model) const
+{
+    return model && g_pistol.gun && model == g_pistol.gun;
+}
+
+#if 0
+bool VR::DrawHlvrPistol_Unused(void* modelRender, const ModelRenderInfo_t& vmInfo)
+{
     if (g_pistol.drawFailed)
         return false;
     if (!modelRender || !m_Game || !m_Game->m_ModelRender || IsMenuUp() || EmptyHands())
@@ -473,6 +508,8 @@ bool VR::DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo)
     }
     return true;
 }
+
+#endif
 
 void VR::UpdateHlvrPistol(uint32_t& buttons)
 {

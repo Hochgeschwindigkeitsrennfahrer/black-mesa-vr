@@ -841,6 +841,9 @@ public:
     // is skipped while the meshes are loaded. Ammo still lives on weapon_glock.
     bool DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo);
     void UpdateHlvrPistol(uint32_t& buttons);
+    // Engine model index for models/weapons/vr_pistol.mdl. 0 until it loads.
+    int HlvrPistolModelIndex();
+    bool IsHlvrPistolModel(void* model) const;
     void GetRightHandAttach(Vector& posMeters, Vector& rotDeg) const;
     bool GetRightHandAttachCurls(float curls[5]) const;
     bool RightHandAttachActive() const;
