@@ -404,6 +404,12 @@ bool VR::DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo)
         HlvrPistolEnterDraw();
         const int drawn = CallDrawModelExSeh(modelRender, &inf);
         HlvrPistolLeaveDraw();
+        static int s_retLog;
+        if (s_retLog < 6)
+        {
+            Game::logMsg("HL2VR pistol DrawModelEx ret=%d", drawn);
+            ++s_retLog;
+        }
         if (drawn < 0)
         {
             Game::logMsg("HL2VR pistol DrawModelEx SEH — keeping v_glock");
@@ -411,6 +417,8 @@ bool VR::DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo)
             g_pistol.gun = nullptr;
             return false;
         }
+        if (drawn == 0)
+            return false;
         return true;
     };
 

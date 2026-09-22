@@ -4197,7 +4197,29 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             // and the world-space gun is clipped away.
             if (m_VR && m_VR->StereoWorldPassActive())
                 ForceStereoViewmodelWorldDepth(g_MatCtx);
-            hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
+            // SetupBones came from the glock viewmodel. Those matrices skin
+            // the pistol's own bones off the screen. Stamp every pistol bone
+            // with the model matrix so the mesh sits on the hand.
+            void* bonesOut = pCustomBoneToWorld;
+            const float* src = info.pModelToWorld
+                ? reinterpret_cast<const float*>(info.pModelToWorld) : nullptr;
+            int nBones = 0;
+            if (state)
+            {
+                const auto* lite = reinterpret_cast<const DrawModelStateLite*>(state);
+                if (!src && lite->modelToWorld)
+                    src = reinterpret_cast<const float*>(lite->modelToWorld);
+                if (lite->studioHdr)
+                    nBones = *reinterpret_cast<const int*>(lite->studioHdr + kStudioHdrNumBones);
+            }
+            thread_local float boneBuf[kMaxStudioBones][3][4];
+            if (src && nBones > 0 && nBones <= kMaxStudioBones)
+            {
+                for (int i = 0; i < nBones; ++i)
+                    std::memcpy(boneBuf[i], src, sizeof(float) * 12);
+                bonesOut = boneBuf;
+            }
+            hkDrawModelExecute.fOriginal(ecx, state, info, bonesOut);
         }
         return;
     }
