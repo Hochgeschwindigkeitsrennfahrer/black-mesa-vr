@@ -4191,7 +4191,14 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     if (HlvrPistolDrawDepth() > 0)
     {
         if (hkDrawModelExecute.fOriginal)
+        {
+            // The pistol DrawModelEx runs inside the viewmodel pass, before
+            // the glock draw widens depth to 0..1. Leave the range compressed
+            // and the world-space gun is clipped away.
+            if (m_VR && m_VR->StereoWorldPassActive())
+                ForceStereoViewmodelWorldDepth(g_MatCtx);
             hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
+        }
         return;
     }
     const long long dmeEnter = g_Cost.active ? QpcNow() : 0;
