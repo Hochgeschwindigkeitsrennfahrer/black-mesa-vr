@@ -136,20 +136,31 @@ namespace
         out[2][0] = fwd.z;   out[2][1] = -right.z; out[2][2] = up.z; out[2][3] = org.z;
     }
 
-    int DrawModelSeh(void* modelRender, int flags, void* model, const Vector* origin,
-        const QAngle* angles, const float* world3x4)
+    // IModelRender::DrawModel (slot 0) faults from inside DrawModelExecute on
+    // this engine. DrawModelEx is vtable +0x40 (slot 16): Setup then Execute.
+    int CallDrawModelExSeh(void* modelRender, void* info)
     {
-        if (!modelRender || !model || !origin || !angles)
+        if (!modelRender || !info)
             return -1;
-        auto* render = static_cast<IModelRender*>(modelRender);
-        const matrix3x4_t* xform = world3x4
-            ? reinterpret_cast<const matrix3x4_t*>(world3x4) : nullptr;
+        void** vt = nullptr;
+        __try
+        {
+            vt = *reinterpret_cast<void***>(modelRender);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+        if (!vt)
+            return -1;
+        using ExFn = int(__thiscall*)(void*, void*);
+        auto ex = reinterpret_cast<ExFn>(vt[16]);
+        if (!ex)
+            return -1;
         int drawn = 0;
         __try
         {
-            drawn = render->DrawModel(
-                flags, nullptr, static_cast<int>(0xFFFFu), -1, model,
-                *origin, *angles, 0, 0, 0, xform, nullptr);
+            drawn = ex(modelRender, info);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -329,10 +340,30 @@ namespace
     }
 }
 
+namespace bmvr_pistol_depth
+{
+    thread_local int g_depth = 0;
+}
+
+int HlvrPistolDrawDepth()
+{
+    return bmvr_pistol_depth::g_depth;
+}
+
+void HlvrPistolEnterDraw()
+{
+    ++bmvr_pistol_depth::g_depth;
+}
+
+void HlvrPistolLeaveDraw()
+{
+    if (bmvr_pistol_depth::g_depth > 0)
+        --bmvr_pistol_depth::g_depth;
+}
+
 bool VR::DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo)
 {
-    thread_local int depth = 0;
-    if (depth > 0 || g_pistol.drawFailed)
+    if (g_pistol.drawFailed)
         return false;
     if (!modelRender || !m_Game || !m_Game->m_ModelRender || IsMenuUp() || EmptyHands())
         return false;
@@ -359,14 +390,21 @@ bool VR::DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo)
         flags = 1;
 
     auto drawOne = [&](void* model, const Vector& org, const QAngle& ang) -> bool {
+        ModelRenderInfo_t inf{};
+        inf.origin = org;
+        inf.angles = ang;
+        inf.pModel = reinterpret_cast<model_t*>(model);
+        inf.flags = flags;
+        inf.entity_index = -1;
         float world[3][4]{};
         BuildStudioWorld(ang, org, world);
-        ++depth;
-        const int drawn = DrawModelSeh(modelRender, flags, model, &org, &ang, &world[0][0]);
-        --depth;
+        inf.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(world);
+        HlvrPistolEnterDraw();
+        const int drawn = CallDrawModelExSeh(modelRender, &inf);
+        HlvrPistolLeaveDraw();
         if (drawn < 0)
         {
-            Game::logMsg("HL2VR pistol DrawModel SEH — keeping v_glock");
+            Game::logMsg("HL2VR pistol DrawModelEx SEH — keeping v_glock");
             g_pistol.drawFailed = true;
             g_pistol.gun = nullptr;
             return false;
@@ -503,6 +541,8 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
         if (clip < g_pistol.lastClip)
         {
             int lost = g_pistol.lastClip - clip;
+            if (lost > 30)
+                lost = 30;
             while (lost-- > 0)
                 ConsumeOneFromServerDrop();
         }

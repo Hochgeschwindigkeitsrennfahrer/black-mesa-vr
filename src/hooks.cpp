@@ -4188,6 +4188,12 @@ void __fastcall Hooks::dDepthRange(void* ecx, void* edx, float zNear, float zFar
 void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld)
 {
     (void)edx;
+    if (HlvrPistolDrawDepth() > 0)
+    {
+        if (hkDrawModelExecute.fOriginal)
+            hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
+        return;
+    }
     const long long dmeEnter = g_Cost.active ? QpcNow() : 0;
     char modelNameBuf[260]{};
     bool hideArms = false;

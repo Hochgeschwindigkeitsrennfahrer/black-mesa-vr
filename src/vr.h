@@ -29,6 +29,12 @@ class CUserCmd;
 class Hl2vrAwaitFrameFunctor;
 class McPauseHudFunctor;
 
+// >0 while DrawModelEx is drawing the HL2VR pistol from inside DrawModelExecute.
+// The nested execute must call the original and return.
+int HlvrPistolDrawDepth();
+void HlvrPistolEnterDraw();
+void HlvrPistolLeaveDraw();
+
 struct IDirect3DDevice9;
 struct IDirect3DTexture9;
 struct IDirect3DSurface9;
