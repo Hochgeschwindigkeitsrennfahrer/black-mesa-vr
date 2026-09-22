@@ -307,3 +307,39 @@ Write-Host "  -enabledxvk"
 Write-Host "That is a verified load-path issue: default/native D3D9 never loads this DLL."
 Write-Host "Log: $GameRoot\bmvr_log.txt  (also next to whichever d3d9.dll actually loaded)"
 Write-Host "Close the game before the next install."
+
+# HL2VR pistol meshes for the glock replacement (vr_pistol, slide, clip).
+function Install-Hl2vrPistol {
+  $hlvr = "C:\Program Files (x86)\Steam\steamapps\common\Half-Life 2 VR\hlvr"
+  $modelSrc = Join-Path $hlvr "models\weapons"
+  $gun = Join-Path $modelSrc "vr_pistol.mdl"
+  if (-not (Test-Path -LiteralPath $gun)) {
+    Write-Host "HL2VR vr_pistol.mdl not found at $gun - glock keeps the stock viewmodel"
+    return
+  }
+  $bms = Join-Path $GameRoot "bms"
+  $modelDst = Join-Path $bms "models\weapons"
+  New-Item -ItemType Directory -Force -Path $modelDst | Out-Null
+  foreach ($stem in @("vr_pistol", "vr_pistol_slide", "vr_pistol_clip")) {
+    Copy-Item -Force (Join-Path $modelSrc "$stem.*") $modelDst
+  }
+  $matSrc = Join-Path $hlvr "materials\models\weapons\vr_pistol"
+  $matDst = Join-Path $bms "materials\models\weapons\vr_pistol"
+  if (Test-Path -LiteralPath $matSrc) {
+    New-Item -ItemType Directory -Force -Path $matDst | Out-Null
+    Get-ChildItem -LiteralPath $matSrc -File | Copy-Item -Force -Destination $matDst
+  }
+  $sndSrc = Join-Path $hlvr "sound\weapons\pistol"
+  $sndDst = Join-Path $bms "sound\weapons\pistol"
+  if (Test-Path -LiteralPath $sndSrc) {
+    New-Item -ItemType Directory -Force -Path $sndDst | Out-Null
+    foreach ($wav in @(
+        "pistol_clip_insert.wav", "pistol_clip_release.wav", "pistol_reload_finished.wav",
+        "Pistol_SlidePulled_DAv01.wav", "Pistol_SlideReleased_DAv01.wav", "Pistol_Slide_DAv01r01.wav")) {
+      $from = Join-Path $sndSrc $wav
+      if (Test-Path -LiteralPath $from) { Copy-Item -Force $from $sndDst }
+    }
+  }
+  Write-Host "Installed HL2VR pistol models into $modelDst"
+}
+Install-Hl2vrPistol

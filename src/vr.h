@@ -831,6 +831,10 @@ public:
     bool ComputePhysicalCrowbarPose(Vector& origin, QAngle& angles, Vector& topPos, Vector& topFwd, Vector& shaftStart) const;
     bool DrawPhysicalCrowbar(void* modelRender, const ModelRenderInfo_t& vmInfo);
     void EnsurePhysicalCrowbarModel();
+    // HL2VR pistol on weapon_glock: vr_pistol + slide + magazine. Stock v_glock
+    // is skipped while the meshes are loaded. Ammo still lives on weapon_glock.
+    bool DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo);
+    void UpdateHlvrPistol(uint32_t& buttons);
     void GetRightHandAttach(Vector& posMeters, Vector& rotDeg) const;
     bool GetRightHandAttachCurls(float curls[5]) const;
     bool RightHandAttachActive() const;

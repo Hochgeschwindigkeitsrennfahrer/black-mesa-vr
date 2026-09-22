@@ -4301,6 +4301,12 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     if (isViewmodel && m_VR && m_VR->IsMenuUp() && m_VR->IsGameplayEligible() && EngineInGame())
         return;
 
+    // HL2VR pistol replaces v_glock. DrawModel of vr_pistol* re-enters this
+    // hook with a non-viewmodel path, so it falls through to the original.
+    if (isViewmodel && m_VR && m_VR->IsGameplayEligible() && EngineInGame()
+        && m_VR->DrawHlvrPistol(ecx, info))
+        return;
+
     if (isViewmodel && m_VR && m_VR->IsGameplayEligible() && EngineInGame())
         ApplyViewmodelStudioWork(state, modelName, body, skin, hideArms, pCustomBoneToWorld);
 

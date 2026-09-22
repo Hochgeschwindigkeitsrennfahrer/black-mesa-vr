@@ -3769,6 +3769,8 @@ void VR::ProcessInput()
         else if (nx < -0.5f)
             buttons |= IN_MOVELEFT;
     }
+    if (!paused && !MenuGameplayBlocked() && !WeaponMenuOpen())
+        UpdateHlvrPistol(buttons);
     m_HeldButtons.store(buttons, std::memory_order_release);
 
     if ((buttons & IN_ATTACK) && !m_FirstAttackLogged)
