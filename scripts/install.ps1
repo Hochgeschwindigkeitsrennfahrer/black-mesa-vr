@@ -310,7 +310,11 @@ Write-Host "Close the game before the next install."
 
 # HL2VR pistol meshes for the glock replacement (vr_pistol, slide, clip).
 function Install-Hl2vrPistol {
+  $calibrated = "C:\Users\amien\Documents\cursor\black-mesa-vr\assets\vr_glock"
   $hlvr = "C:\Program Files (x86)\Steam\steamapps\common\Half-Life 2 VR\hlvr"
+  if (Test-Path -LiteralPath (Join-Path $calibrated "models\weapons\vr_pistol.mdl")) {
+    $hlvr = $calibrated
+  }
   $modelSrc = Join-Path $hlvr "models\weapons"
   $gun = Join-Path $modelSrc "vr_pistol.mdl"
   if (-not (Test-Path -LiteralPath $gun)) {
@@ -322,6 +326,24 @@ function Install-Hl2vrPistol {
   New-Item -ItemType Directory -Force -Path $modelDst | Out-Null
   foreach ($stem in @("vr_pistol", "vr_pistol_slide", "vr_pistol_clip")) {
     Copy-Item -Force (Join-Path $modelSrc "$stem.*") $modelDst
+  }
+  $handSrc = Join-Path $hlvr "models\player.mdl"
+  if (Test-Path -LiteralPath $handSrc) {
+    foreach ($ext in @(".mdl", ".vvd", ".dx90.vtx", ".dx80.vtx", ".sw.vtx")) {
+      Copy-Item -Force (Join-Path $hlvr "models\player$ext") (Join-Path $modelDst "vr_glock_hands$ext")
+    }
+  }
+  $glockMat = Join-Path $hlvr "materials\models\weapons\v_glock"
+  if (Test-Path -LiteralPath $glockMat) {
+    $glockDst = Join-Path $bms "materials\models\weapons\v_glock"
+    New-Item -ItemType Directory -Force -Path $glockDst | Out-Null
+    Get-ChildItem -LiteralPath $glockMat -File | Copy-Item -Force -Destination $glockDst
+  }
+  $handMat = Join-Path $hlvr "materials\models\player"
+  if (Test-Path -LiteralPath $handMat) {
+    $handMatDst = Join-Path $bms "materials\models\player"
+    New-Item -ItemType Directory -Force -Path $handMatDst | Out-Null
+    Get-ChildItem -LiteralPath $handMat -File | Copy-Item -Force -Destination $handMatDst
   }
   $matSrc = Join-Path $hlvr "materials\models\weapons\vr_pistol"
   $matDst = Join-Path $bms "materials\models\weapons\vr_pistol"

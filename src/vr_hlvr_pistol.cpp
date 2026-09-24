@@ -41,6 +41,7 @@ namespace
         void* gun = nullptr;
         void* slideModel = nullptr;
         void* clipModel = nullptr;
+        void* handModel = nullptr;
         int loadTries = 0;
         int modelIndex = 0;
         bool drawFailed = false;
@@ -203,7 +204,11 @@ namespace
         if (g_pistol.drawFailed || !vr || !vr->m_Game)
             return false;
         if (g_pistol.gun && g_pistol.slideModel && g_pistol.clipModel)
+        {
+            if (!g_pistol.handModel && vr->m_Game)
+                g_pistol.handModel = vr->m_Game->FindOrLoadModel("models/weapons/vr_glock_hands.mdl");
             return true;
+        }
         if (g_pistol.loadTries >= 180)
             return false;
         ++g_pistol.loadTries;
@@ -214,9 +219,12 @@ namespace
             g_pistol.slideModel = game->FindOrLoadModel("models/weapons/vr_pistol_slide.mdl");
         if (!g_pistol.clipModel)
             g_pistol.clipModel = game->FindOrLoadModel("models/weapons/vr_pistol_clip.mdl");
+        if (!g_pistol.handModel)
+            g_pistol.handModel = game->FindOrLoadModel("models/weapons/vr_glock_hands.mdl");
         if (g_pistol.gun && g_pistol.slideModel && g_pistol.clipModel)
         {
-            Game::logMsg("HL2VR pistol loaded vr_pistol / slide / clip tries=%d", g_pistol.loadTries);
+            Game::logMsg("HL2VR pistol loaded vr_pistol / slide / clip hand=%d tries=%d",
+                g_pistol.handModel ? 1 : 0, g_pistol.loadTries);
             return true;
         }
         if (g_pistol.loadTries == 1 || g_pistol.loadTries == 180)
@@ -455,7 +463,8 @@ bool VR::IsHlvrPistolRigged(void* model) const
 {
     if (!model)
         return false;
-    return model == g_pistol.gun || model == g_pistol.slideModel || model == g_pistol.clipModel;
+    return model == g_pistol.gun || model == g_pistol.slideModel || model == g_pistol.clipModel
+        || model == g_pistol.handModel;
 }
 
 namespace
@@ -598,22 +607,43 @@ namespace
 {
     int g_attachDepth = 0;
 
-    // Model-space bind pose of vr_pistol.mdl bones 0-7 (gun, clip release,
-    // hammer, safety, slide release, trigger, slide, magazine). Built from
-    // the mdl rest pose. Rotations are identity except the magazine bone.
+    // @idle pose of the calibrated glock. Bone 0 is yawed so the barrel,
+    // which is bone-local -Y, points along model +X (HL2VR forward).
     const float kPistolBind[8][3][4] = {
-        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 1.184739f}, {0.f, 0.f, 1.f, -1.061483f}},
-        {{1.f, 0.f, 0.f, 0.627336f}, {0.f, 1.f, 0.f, -0.064639f}, {0.f, 0.f, 1.f, -0.613199f}},
-        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 2.672362f}, {0.f, 0.f, 1.f, 0.805204f}},
-        {{1.f, 0.f, 0.f, 0.627331f}, {0.f, 1.f, 0.f, 2.172857f}, {0.f, 0.f, 1.f, 0.494675f}},
-        {{1.f, 0.f, 0.f, 0.627340f}, {0.f, 1.f, 0.f, -1.874057f}, {0.f, 0.f, 1.f, 0.512872f}},
-        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, -0.476449f}, {0.f, 0.f, 1.f, -0.201681f}},
-        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 1.000002f}, {0.f, 0.f, 1.f, 1.499997f}},
-        {{1.f, 0.f, 0.f, 0.f}, {0.f, 0.974194f, -0.225710f, 0.968598f}, {0.f, 0.225710f, 0.974194f, -1.819079f}},
+        {{-0.00000f, -1.00000f, 0.00000f, -1.18359f}, {1.00000f, -0.00000f, 0.00000f, -0.00001f}, {0.00000f, 0.00000f, 1.00000f, -1.06055f}},
+        {{-0.00000f, -1.00000f, -0.00000f, 0.06578f}, {1.00000f, -0.00000f, -0.00000f, 0.62734f}, {0.00000f, -0.00000f, 1.00000f, -0.61226f}},
+        {{-0.00000f, -1.00000f, 0.00000f, -2.67122f}, {1.00000f, -0.00000f, -0.00000f, -0.00001f}, {0.00000f, 0.00000f, 1.00000f, 0.80614f}},
+        {{-0.00000f, -1.00000f, 0.00000f, -2.17171f}, {1.00000f, -0.00000f, -0.00000f, 0.62733f}, {0.00000f, 0.00000f, 1.00000f, 0.49561f}},
+        {{-0.00000f, -1.00000f, -0.00001f, 1.87520f}, {1.00000f, -0.00000f, -0.00000f, 0.62734f}, {0.00000f, -0.00001f, 1.00000f, 0.51381f}},
+        {{-0.00000f, -1.00000f, 0.00000f, 1.07617f}, {1.00000f, -0.00000f, -0.00000f, -0.00001f}, {0.00000f, 0.00000f, 1.00000f, 0.29883f}},
+        {{-0.00000f, -1.00000f, 0.00000f, -0.99886f}, {1.00000f, -0.00000f, 0.00000f, -0.00001f}, {0.00000f, 0.00000f, 1.00000f, 1.50093f}},
+        {{-0.00001f, -0.97419f, 0.22571f, -0.96745f}, {1.00000f, -0.00001f, -0.00000f, -0.00000f}, {0.00000f, 0.22571f, 0.97419f, -1.81814f}},
     };
-    // a_slide_pull_30 moves v_pistol.slide along model +Y (back from the muzzle).
-    constexpr float kSlideClosedY = 1.000002f;
-    constexpr float kSlideOpenY = 3.413255f;
+    // Pull travels along model -X, which is back from the muzzle in this pose.
+    constexpr float kSlideClosedX = -0.99886f;
+    constexpr float kSlideOpenX = -3.413f;
+    // Grip attachment after the idle bone-0 rotation. Pivot stays in the palm.
+    const Vector kIdleGrip(-0.1836f, 0.f, 0.2395f);
+    // player.mdl right-hand bone index, then the matching @idle pistol matrix.
+    struct HandBone { int playerBone; float m[3][4]; };
+    const HandBone kRightHand[] = {
+        {27, {{0.96879f, -0.24200f, 0.05365f, -4.80140f}, {-0.24156f, -0.97028f, -0.01465f, -0.49298f}, {0.05560f, 0.00123f, -0.99845f, -1.80265f}}},
+        {28, {{0.65074f, 0.69176f, -0.31305f, -0.96609f}, {0.74301f, -0.66509f, 0.07483f, -1.31418f}, {-0.15644f, -0.28129f, -0.94679f, -2.77950f}}},
+        {29, {{-0.08275f, 0.94587f, -0.31381f, -0.11196f}, {0.99111f, 0.11102f, 0.07329f, -0.33892f}, {0.10416f, -0.30495f, -0.94665f, -2.98483f}}},
+        {30, {{-0.86163f, 0.39892f, -0.31379f, -0.17232f}, {0.39780f, 0.91475f, 0.07061f, 0.38396f}, {0.31521f, -0.06399f, -0.94686f, -2.90885f}}},
+        {31, {{0.68444f, 0.71624f, -0.13615f, -0.97119f}, {0.72162f, -0.69215f, -0.01350f, -1.50044f}, {-0.10391f, -0.08901f, -0.99060f, -2.01380f}}},
+        {32, {{-0.11842f, 0.98343f, -0.13724f, 0.08225f}, {0.99296f, 0.11738f, -0.01568f, -0.38979f}, {0.00069f, -0.13813f, -0.99041f, -2.17374f}}},
+        {33, {{-0.99015f, 0.03368f, -0.13590f, -0.05939f}, {0.03663f, 0.99914f, -0.01927f, 0.79812f}, {0.13514f, -0.02406f, -0.99053f, -2.17295f}}},
+        {34, {{0.86486f, 0.48224f, -0.13949f, -1.04989f}, {0.46843f, -0.87515f, -0.12122f, -1.37600f}, {-0.18054f, 0.03950f, -0.98278f, -1.15643f}}},
+        {35, {{-0.33872f, 0.92956f, -0.14556f, 0.43729f}, {0.93774f, 0.32088f, -0.13300f, -0.57048f}, {-0.07692f, -0.18154f, -0.98037f, -1.46686f}}},
+        {36, {{-0.98730f, 0.07791f, -0.13842f, 0.02771f}, {0.09736f, 0.98539f, -0.13974f, 0.56342f}, {0.12551f, -0.15144f, -0.98047f, -1.55988f}}},
+        {37, {{0.97617f, 0.20407f, 0.07376f, -1.09740f}, {0.20870f, -0.97604f, -0.06158f, -1.26137f}, {0.05943f, 0.07550f, -0.99537f, -0.25903f}}},
+        {38, {{0.83794f, 0.54172f, 0.06634f, 0.58104f}, {0.54543f, -0.83548f, -0.06699f, -0.90250f}, {0.01914f, 0.09231f, -0.99555f, -0.15680f}}},
+        {39, {{-0.24693f, 0.96707f, 0.06173f, 1.50250f}, {0.96487f, 0.25127f, -0.07680f, -0.30272f}, {-0.08978f, 0.04059f, -0.99513f, -0.13577f}}},
+        {40, {{0.82589f, 0.42209f, -0.37382f, -4.00418f}, {0.48839f, -0.20423f, 0.84839f, -0.31924f}, {0.28176f, -0.88325f, -0.37481f, -0.44199f}}},
+        {41, {{0.92756f, -0.02654f, -0.37273f, -2.52602f}, {0.32934f, -0.41321f, 0.84900f, 0.55486f}, {-0.17655f, -0.91025f, -0.37453f, 0.06229f}}},
+        {42, {{0.71943f, -0.58714f, -0.37106f, -1.40645f}, {0.00788f, -0.52729f, 0.84965f, 0.95237f}, {-0.69452f, -0.61419f, -0.37472f, -0.15082f}}},
+    };
     // v_pistol bone 0 rest translation. Identity rotation.
     constexpr float kGunRootT[3] = { 0.f, 1.184739f, -1.061483f };
     float g_gunMatrix[3][4]{};
@@ -636,7 +666,7 @@ namespace
     {
         std::memcpy(out, kPistolBind[6], sizeof(float) * 12);
         const float pull = g_pistol.slidePull < 0.f ? 0.f : (g_pistol.slidePull > 1.f ? 1.f : g_pistol.slidePull);
-        out[1][3] = kSlideClosedY + (kSlideOpenY - kSlideClosedY) * pull;
+        out[0][3] = kSlideClosedX + (kSlideOpenX - kSlideClosedX) * pull;
     }
 }
 
@@ -651,21 +681,19 @@ void VR::AnchorHlvrPistolGun(const float visibleBone0[3][4], const QAngle& aim, 
 
     // Keep the grip where the viewmodel bone put it. The glock bone rotation
     // points this mesh sideways; the muzzle is model -Y.
-    const Vector& grip = kGripOrigin;
+    const Vector& held = kGripOrigin;
     const Vector gripWorld(
-        placed[0][0] * grip.x + placed[0][1] * grip.y + placed[0][2] * grip.z + placed[0][3],
-        placed[1][0] * grip.x + placed[1][1] * grip.y + placed[1][2] * grip.z + placed[1][3],
-        placed[2][0] * grip.x + placed[2][1] * grip.y + placed[2][2] * grip.z + placed[2][3]);
+        placed[0][0] * held.x + placed[0][1] * held.y + placed[0][2] * held.z + placed[0][3],
+        placed[1][0] * held.x + placed[1][1] * held.y + placed[1][2] * held.z + placed[1][3],
+        placed[2][0] * held.x + placed[2][1] * held.y + placed[2][2] * held.z + placed[2][3]);
 
     Vector fwd, right, up;
     QAngle::AngleVectors(aim, &fwd, &right, &up);
-    (void)right;
-    const Vector axisY(-fwd.x, -fwd.y, -fwd.z);
-    const Vector axisZ = up;
-    const Vector axisX = CrossProduct(axisY, axisZ);
-    outGun[0][0] = axisX.x; outGun[0][1] = axisY.x; outGun[0][2] = axisZ.x;
-    outGun[1][0] = axisX.y; outGun[1][1] = axisY.y; outGun[1][2] = axisZ.y;
-    outGun[2][0] = axisX.z; outGun[2][1] = axisY.z; outGun[2][2] = axisZ.z;
+    // Idle pose points the barrel along model +X. Column 0 is aim forward.
+    outGun[0][0] = fwd.x;   outGun[0][1] = -right.x; outGun[0][2] = up.x;
+    outGun[1][0] = fwd.y;   outGun[1][1] = -right.y; outGun[1][2] = up.y;
+    outGun[2][0] = fwd.z;   outGun[2][1] = -right.z; outGun[2][2] = up.z;
+    const Vector& grip = kIdleGrip;
     outGun[0][3] = gripWorld.x - (outGun[0][0] * grip.x + outGun[0][1] * grip.y + outGun[0][2] * grip.z);
     outGun[1][3] = gripWorld.y - (outGun[1][0] * grip.x + outGun[1][1] * grip.y + outGun[1][2] * grip.z);
     outGun[2][3] = gripWorld.z - (outGun[2][0] * grip.x + outGun[2][1] * grip.y + outGun[2][2] * grip.z);
@@ -678,7 +706,8 @@ int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* 
     const bool gun = model == g_pistol.gun;
     const bool slide = model == g_pistol.slideModel;
     const bool clip = model == g_pistol.clipModel;
-    if (!gun && !slide && !clip)
+    const bool hand = model == g_pistol.handModel;
+    if (!gun && !slide && !clip && !hand)
         return 0;
     if (gun)
     {
@@ -688,7 +717,7 @@ int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* 
         g_gunMatrixValid = true;
     }
     const float (*basisSrc)[4] = modelToWorld;
-    if (!gun && g_gunMatrixValid && (slide || (clip && g_pistol.mag == MagLoaded)))
+    if (!gun && g_gunMatrixValid && (slide || hand || (clip && g_pistol.mag == MagLoaded)))
         basisSrc = g_gunMatrix;
     if (!basisSrc)
         return 0;
@@ -697,6 +726,26 @@ int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* 
 
     float slideM[3][4];
     SlideLocal(slideM);
+    if (hand)
+    {
+        const int n = maxBones < 43 ? maxBones : 43;
+        float away[3][4] = {
+            {0.f, 0.f, 0.f, 1.0e6f},
+            {0.f, 0.f, 0.f, 1.0e6f},
+            {0.f, 0.f, 0.f, 1.0e6f},
+        };
+        for (int i = 0; i < n; ++i)
+            std::memcpy(boneRows + i * 12, away, sizeof(away));
+        for (const HandBone& bone : kRightHand)
+        {
+            if (bone.playerBone < 0 || bone.playerBone >= n)
+                continue;
+            float world[3][4];
+            MulModel(basis, bone.m, world);
+            std::memcpy(boneRows + bone.playerBone * 12, world, sizeof(world));
+        }
+        return n;
+    }
     if (slide)
     {
         float bone[3][4];
@@ -766,6 +815,8 @@ void VR::DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& g
     float gunWorld[3][4]{};
     std::memcpy(gunWorld, gunInfo.pModelToWorld, sizeof(gunWorld));
     drawPart(g_pistol.slideModel, "models/weapons/vr_pistol_slide.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
+    if (g_pistol.handModel)
+        drawPart(g_pistol.handModel, "models/weapons/vr_glock_hands.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
 
     if (g_pistol.mag == MagLoaded)
     {
