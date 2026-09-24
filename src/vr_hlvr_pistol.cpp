@@ -614,6 +614,10 @@ namespace
     // a_slide_pull_30 moves v_pistol.slide along model +Y (back from the muzzle).
     constexpr float kSlideClosedY = 1.000002f;
     constexpr float kSlideOpenY = 3.413255f;
+    // v_pistol bone 0 rest translation. Identity rotation.
+    constexpr float kGunRootT[3] = { 0.f, 1.184739f, -1.061483f };
+    float g_gunMatrix[3][4]{};
+    bool g_gunMatrixValid = false;
 
     void MulModel(const float world[3][4], const float local[3][4], float out[3][4])
     {
@@ -636,51 +640,74 @@ namespace
     }
 }
 
+void VR::AnchorHlvrPistolGun(const float visibleBone0[3][4], float outGun[3][4]) const
+{
+    std::memcpy(outGun, visibleBone0, sizeof(float) * 12);
+    const float* t = kGunRootT;
+    outGun[0][3] -= visibleBone0[0][0] * t[0] + visibleBone0[0][1] * t[1] + visibleBone0[0][2] * t[2];
+    outGun[1][3] -= visibleBone0[1][0] * t[0] + visibleBone0[1][1] * t[1] + visibleBone0[1][2] * t[2];
+    outGun[2][3] -= visibleBone0[2][0] * t[0] + visibleBone0[2][1] * t[1] + visibleBone0[2][2] * t[2];
+}
+
 int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* boneRows, int maxBones)
 {
-    if (!modelToWorld || !boneRows || maxBones < 1 || !model)
+    if (!boneRows || maxBones < 1 || !model)
         return 0;
     const bool gun = model == g_pistol.gun;
     const bool slide = model == g_pistol.slideModel;
     const bool clip = model == g_pistol.clipModel;
     if (!gun && !slide && !clip)
         return 0;
+    if (gun)
+    {
+        if (!modelToWorld)
+            return 0;
+        std::memcpy(g_gunMatrix, modelToWorld, sizeof(g_gunMatrix));
+        g_gunMatrixValid = true;
+    }
+    const float (*basisSrc)[4] = modelToWorld;
+    if (!gun && g_gunMatrixValid && (slide || (clip && g_pistol.mag == MagLoaded)))
+        basisSrc = g_gunMatrix;
+    if (!basisSrc)
+        return 0;
+    float basis[3][4];
+    std::memcpy(basis, basisSrc, sizeof(basis));
 
     float slideM[3][4];
     SlideLocal(slideM);
     if (slide)
     {
-        float world[3][4];
-        MulModel(modelToWorld, slideM, world);
-        std::memcpy(boneRows, world, sizeof(world));
+        float bone[3][4];
+        MulModel(basis, slideM, bone);
+        std::memcpy(boneRows, bone, sizeof(bone));
         return 1;
     }
     if (clip)
     {
-        float world[3][4];
-        MulModel(modelToWorld, kPistolBind[7], world);
+        float bone[3][4];
+        MulModel(basis, kPistolBind[7], bone);
         const int n = maxBones < 41 ? maxBones : 41;
         for (int i = 0; i < n; ++i)
-            std::memcpy(boneRows + i * 12, world, sizeof(world));
+            std::memcpy(boneRows + i * 12, bone, sizeof(bone));
         return n;
     }
 
     const int n = maxBones < 47 ? maxBones : 47;
     float root[3][4];
-    MulModel(modelToWorld, kPistolBind[0], root);
+    MulModel(basis, kPistolBind[0], root);
     for (int i = 0; i < n; ++i)
     {
         if (i == 6)
         {
-            float world[3][4];
-            MulModel(modelToWorld, slideM, world);
-            std::memcpy(boneRows + i * 12, world, sizeof(world));
+            float bone[3][4];
+            MulModel(basis, slideM, bone);
+            std::memcpy(boneRows + i * 12, bone, sizeof(bone));
         }
         else if (i < 8)
         {
-            float world[3][4];
-            MulModel(modelToWorld, kPistolBind[i], world);
-            std::memcpy(boneRows + i * 12, world, sizeof(world));
+            float bone[3][4];
+            MulModel(basis, kPistolBind[i], bone);
+            std::memcpy(boneRows + i * 12, bone, sizeof(bone));
         }
         else
             std::memcpy(boneRows + i * 12, root, sizeof(root));

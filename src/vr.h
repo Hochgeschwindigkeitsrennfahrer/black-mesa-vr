@@ -853,6 +853,9 @@ public:
     // magazine are bone-merged onto the gun the way HL2VR FollowEntity does.
     // Returns the number of bones written.
     int WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* boneRows, int maxBones);
+    // visibleBone0 is the viewmodel root after the controller delta. The pistol
+    // body is placed on that bone; the returned matrix is the gun model matrix.
+    void AnchorHlvrPistolGun(const float visibleBone0[3][4], float outGun[3][4]) const;
     void GetRightHandAttach(Vector& posMeters, Vector& rotDeg) const;
     bool GetRightHandAttachCurls(float curls[5]) const;
     bool RightHandAttachActive() const;

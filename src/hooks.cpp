@@ -4233,6 +4233,9 @@ int __fastcall Hooks::dDrawModelEx(void* ecx, void* edx, ModelRenderInfo_t* info
 namespace
 {
     bool g_HlvrRigid = false;
+    bool g_HlvrPoseGun = false;
+    bool g_HlvrPosedBone0Valid = false;
+    float g_HlvrPosedBone0[3][4]{};
     float g_HlvrRigidM[3][4]{};
 
     void CaptureHlvrRigid(const matrix3x4_t* src)
@@ -4305,18 +4308,30 @@ namespace
 bool __fastcall Hooks::dViewmodelSetupBones(void* ecx, void* edx, void* boneToWorld, int maxBones, int boneMask, float currentTime)
 {
     (void)edx;
-    (void)boneToWorld;
-    (void)maxBones;
-    (void)boneMask;
-    (void)currentTime;
-    // The pistol is skinned from its own bind pose in DrawModelExecute.
-    // Running the viewmodel SetupBones here posed the glock skeleton three
-    // times a frame (gun, slide, magazine) and pulled the parts apart.
-    if (g_HlvrRigid)
-        return true;
     if (!hkViewmodelSetupBones.fOriginal)
         return false;
-    return hkViewmodelSetupBones.fOriginal(ecx, boneToWorld, maxBones, boneMask, currentTime);
+    // Slide and magazine draws must not pose the viewmodel again.
+    if (g_HlvrRigid && !g_HlvrPoseGun)
+        return true;
+    if (!g_HlvrPoseGun)
+        return hkViewmodelSetupBones.fOriginal(ecx, boneToWorld, maxBones, boneMask, currentTime);
+    // One pose for the gun. Bone 0 is where the visible body sat when the
+    // pistol was skinned with the viewmodel skeleton. The glock has more
+    // bones than the caller asked for, so pose into our own buffer.
+    g_HlvrPosedBone0Valid = false;
+    thread_local float posed[kMaxStudioBones][3][4];
+    const bool ok = hkViewmodelSetupBones.fOriginal(
+        ecx, posed, kMaxStudioBones, boneMask, currentTime);
+    if (!ok)
+        return false;
+    std::memcpy(g_HlvrPosedBone0, posed[0], sizeof(g_HlvrPosedBone0));
+    g_HlvrPosedBone0Valid = true;
+    if (boneToWorld && maxBones > 0)
+    {
+        const int n = maxBones < kMaxStudioBones ? maxBones : kMaxStudioBones;
+        std::memcpy(boneToWorld, posed, sizeof(float) * 12 * static_cast<size_t>(n));
+    }
+    return true;
 }
 
 bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* info, void* state, void* customBones, void** boneOut)
@@ -4361,13 +4376,16 @@ bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* 
                 && hkViewmodelSetupBones.enableHook() == 0)
                 Game::logMsg("HL2VR pistol SetupBones hook %p", vt[17]);
         }
-        if (m_VR->IsHlvrPistolRigged(info->pModel))
-            CaptureHlvrRigid(info->pModelToWorld);
+        if (swapped)
+            g_HlvrPoseGun = true;
+        else if (m_VR->IsHlvrPistolRigged(info->pModel))
+            g_HlvrRigid = true;
     }
     bool ok = false;
     if (hkDrawModelSetup.fOriginal)
         ok = hkDrawModelSetup.fOriginal(ecx, info, state, customBones, boneOut);
     g_HlvrRigid = false;
+    g_HlvrPoseGun = false;
     if (!ok && swapped && saved && hkDrawModelSetup.fOriginal)
     {
         info->pModel = saved;
@@ -4706,14 +4724,17 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             const int nBones = StudioHdrNumBones(hdr);
             bool usedBones = false;
             bool pistolSkin = false;
-            if (m_VR->IsHlvrPistolModel(pModel) && info.pModelToWorld)
+            if (m_VR->IsHlvrPistolModel(pModel) && (g_HlvrPosedBone0Valid || info.pModelToWorld))
             {
                 float placed[3][4];
-                if (SehCopyAndFixViewmodelMatrices(&placed[0][0], info.pModelToWorld,
+                const void* src = g_HlvrPosedBone0Valid ? static_cast<const void*>(g_HlvrPosedBone0) : info.pModelToWorld;
+                if (src && SehCopyAndFixViewmodelMatrices(&placed[0][0], src,
                         1, pivot3, 1.f, pivot3, right3, up3, fwd3,
                         needYFix ? yFix : 1.f, rigidPtr))
                 {
-                    const int n = m_VR->WriteHlvrPistolSkin(placed, pModel,
+                    float gunWorld[3][4];
+                    m_VR->AnchorHlvrPistolGun(placed, gunWorld);
+                    const int n = m_VR->WriteHlvrPistolSkin(gunWorld, pModel,
                         &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
                     if (n > 0)
                     {
