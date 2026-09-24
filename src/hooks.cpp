@@ -4230,6 +4230,165 @@ int __fastcall Hooks::dDrawModelEx(void* ecx, void* edx, ModelRenderInfo_t* info
     return 0;
 }
 
+namespace
+{
+    bool g_HlvrRigid = false;
+    float g_HlvrRigidM[3][4]{};
+
+    void CaptureHlvrRigid(const matrix3x4_t* src)
+    {
+        if (!src)
+        {
+            g_HlvrRigid = false;
+            return;
+        }
+        std::memcpy(g_HlvrRigidM, src, sizeof(g_HlvrRigidM));
+        g_HlvrRigid = true;
+    }
+
+    // client.dll C_BaseAnimating::DrawModel. Studio models (including the
+    // viewmodel) call DrawModelSetup here, then DrawModelExecute.
+    typedef int(__thiscall* tAnimatingDrawModel)(void* thisptr, int flags);
+    Hook<tAnimatingDrawModel> g_hkAnimatingDraw;
+    struct HlvrGunDraw
+    {
+        bool valid = false;
+        void* modelRender = nullptr;
+        ModelRenderInfo_t info{};
+        float world[3][4]{};
+    };
+    HlvrGunDraw g_hlvrGun;
+
+    void NoteHlvrGunDraw(void* modelRender, const ModelRenderInfo_t& info)
+    {
+        if (!info.pModelToWorld)
+            return;
+        g_hlvrGun.modelRender = modelRender;
+        g_hlvrGun.info = info;
+        std::memcpy(g_hlvrGun.world, info.pModelToWorld, sizeof(g_hlvrGun.world));
+        g_hlvrGun.info.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(g_hlvrGun.world);
+        g_hlvrGun.valid = true;
+    }
+
+    int __fastcall AnimatingDrawModelDetour(void* ecx, void* edx, int flags)
+    {
+        (void)edx;
+        g_hlvrGun.valid = false;
+        int drawn = 0;
+        if (g_hkAnimatingDraw.fOriginal)
+            drawn = g_hkAnimatingDraw.fOriginal(ecx, flags);
+        if (g_hlvrGun.valid && Hooks::m_VR && g_hlvrGun.modelRender)
+        {
+            HlvrGunDraw saved = g_hlvrGun;
+            saved.info.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(saved.world);
+            g_hlvrGun.valid = false;
+            Hooks::m_VR->DrawHlvrPistolAttachments(saved.modelRender, saved.info);
+        }
+        return drawn;
+    }
+
+    void EnsureAnimatingDrawHook()
+    {
+        if (g_hkAnimatingDraw.pTarget)
+            return;
+        HMODULE client = GetModuleHandleA("client.dll");
+        if (!client)
+            return;
+        // RVA of the studio DrawModel that calls modelrender Setup (+0x48).
+        auto* fn = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(client) + 0x9A280);
+        if (g_hkAnimatingDraw.createHook(fn, &AnimatingDrawModelDetour) == 0
+            && g_hkAnimatingDraw.enableHook() == 0)
+            Game::logMsg("HL2VR pistol anim draw hook %p", fn);
+    }
+}
+
+bool __fastcall Hooks::dViewmodelSetupBones(void* ecx, void* edx, void* boneToWorld, int maxBones, int boneMask, float currentTime)
+{
+    (void)edx;
+    if (g_HlvrRigid && boneToWorld && maxBones > 0 && maxBones <= kMaxStudioBones)
+    {
+        auto* out = reinterpret_cast<float*>(boneToWorld);
+        for (int i = 0; i < maxBones; ++i)
+            std::memcpy(out + i * 12, g_HlvrRigidM, sizeof(g_HlvrRigidM));
+        return true;
+    }
+    if (hkViewmodelSetupBones.fOriginal)
+        return hkViewmodelSetupBones.fOriginal(ecx, boneToWorld, maxBones, boneMask, currentTime);
+    return false;
+}
+
+bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* info, void* state, void* customBones, void** boneOut)
+{
+    (void)edx;
+    model_t* saved = nullptr;
+    bool swapped = false;
+    if (info && info->pModel && m_VR && m_VR->IsGameplayEligible() && m_Game && m_Game->m_ModelInfo)
+    {
+        static model_t* s_glock = nullptr;
+        if (info->pModel != s_glock)
+        {
+            const char* name = SafeModelName(m_Game->m_ModelInfo, info->pModel);
+            if (name && std::strstr(name, "v_glock"))
+                s_glock = info->pModel;
+        }
+        if (s_glock && info->pModel == s_glock)
+        {
+            void* pistol = m_VR->HlvrPistolDrawModel();
+            if (pistol)
+            {
+                saved = info->pModel;
+                info->pModel = static_cast<model_t*>(pistol);
+                swapped = true;
+            }
+        }
+        if (m_VR->IsHlvrPistolRigged(info->pModel) && info->pModelToWorld && info->pRenderable
+            && !hkViewmodelSetupBones.pTarget)
+        {
+            void** vt = nullptr;
+            __try
+            {
+                vt = *reinterpret_cast<void***>(info->pRenderable);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                vt = nullptr;
+            }
+            // Engine DrawModelSetup calls the renderable at vtable +0x44.
+            if (vt && vt[17]
+                && hkViewmodelSetupBones.createHook(vt[17], &dViewmodelSetupBones) == 0
+                && hkViewmodelSetupBones.enableHook() == 0)
+                Game::logMsg("HL2VR pistol SetupBones hook %p", vt[17]);
+        }
+        if (m_VR->IsHlvrPistolRigged(info->pModel))
+            CaptureHlvrRigid(info->pModelToWorld);
+    }
+    bool ok = false;
+    if (hkDrawModelSetup.fOriginal)
+        ok = hkDrawModelSetup.fOriginal(ecx, info, state, customBones, boneOut);
+    g_HlvrRigid = false;
+    if (!ok && swapped && saved && hkDrawModelSetup.fOriginal)
+    {
+        info->pModel = saved;
+        ok = hkDrawModelSetup.fOriginal(ecx, info, state, customBones, boneOut);
+        static int s_reject;
+        if (s_reject < 4)
+        {
+            Game::logMsg("HL2VR pistol setup rejected — restored v_glock");
+            ++s_reject;
+        }
+    }
+    else if (ok && swapped)
+    {
+        static int s_ok;
+        if (s_ok < 3)
+        {
+            Game::logMsg("HL2VR pistol setup swapped to vr_pistol");
+            ++s_ok;
+        }
+    }
+    return ok;
+}
+
 void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld)
 {
     (void)edx;
@@ -4253,6 +4412,13 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             Game::logMsg("DrawModelEx hook slot16=%p", vt[16]);
         else if (!hkDrawModelEx.pTarget)
             hkDrawModelEx.pTarget = vt ? vt[16] : nullptr;
+        // Viewmodels call DrawModelSetup (+0x48) and then Execute. They do not
+        // call DrawModelEx, so the model swap has to happen here.
+        if (vt && vt[18] && !hkDrawModelSetup.pTarget
+            && hkDrawModelSetup.createHook(vt[18], &dDrawModelSetup) == 0
+            && hkDrawModelSetup.enableHook() == 0)
+            Game::logMsg("DrawModelSetup hook slot18=%p", vt[18]);
+        EnsureAnimatingDrawHook();
     }
     if (HlvrPistolDrawDepth() > 0)
     {
@@ -4316,9 +4482,9 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         // World props: skip GetModelName. Open maps call DME thousands of times
         // per eye; the name string was the hot cost next to the draw itself.
         isViewmodel = CachedModelIsViewmodel(pModel);
-        if (!isViewmodel && m_VR && m_VR->IsHlvrPistolModel(pModel))
+        if (!isViewmodel && m_VR && m_VR->IsHlvrPistolRigged(pModel))
             isViewmodel = true;
-        if (isViewmodel && m_VR && m_VR->IsHlvrPistolModel(pModel) && hkDrawModelExecute.fOriginal)
+        if (isViewmodel && m_VR && m_VR->IsHlvrPistolRigged(pModel) && hkDrawModelExecute.fOriginal)
         {
             // Engine setup skinned this mesh with the glock bone cache, and the
             // 0.64 viewmodel shrink is for that oversized mesh. Draw the pistol
@@ -4345,6 +4511,11 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 bonesOut = pistolBones;
             }
             hkDrawModelExecute.fOriginal(ecx, state, info, bonesOut);
+            // Parts are drawn after this viewmodel's DrawModel returns. Calling
+            // DrawModelEx here is still inside Execute, and that re-locks the
+            // shader mutex.
+            if (m_VR->IsHlvrPistolModel(pModel))
+                NoteHlvrGunDraw(ecx, info);
             return;
         }
         if (isViewmodel && m_Game && m_Game->m_ModelInfo)
@@ -4354,6 +4525,15 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             {
                 strncpy_s(modelNameBuf, modelName, _TRUNCATE);
                 modelName = modelNameBuf;
+            }
+        }
+        if (modelName && std::strstr(modelName, "v_glock"))
+        {
+            static int s_glockCaller;
+            if (s_glockCaller < 2)
+            {
+                Game::logMsg("HL2VR pistol DME still v_glock caller=%p", _ReturnAddress());
+                ++s_glockCaller;
             }
         }
         static int s_dmeEnter;
@@ -4451,7 +4631,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             float s = bmvr::g_ViewmodelScale;
             // vr_pistol is real size. The 0.64 viewmodel shrink is for the
             // oversized v_glock mesh and collapses this model.
-            if (m_VR->IsHlvrPistolModel(pModel))
+            if (m_VR->IsHlvrPistolRigged(pModel))
                 s = 1.f;
             if (modelName && (std::strstr(modelName, "crowbar") || std::strstr(modelName, "wrench")
                 || std::strstr(modelName, "Crowbar") || std::strstr(modelName, "Wrench")))

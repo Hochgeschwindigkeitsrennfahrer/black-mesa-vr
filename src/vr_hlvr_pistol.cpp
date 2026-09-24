@@ -451,6 +451,13 @@ bool VR::IsHlvrPistolModel(void* model) const
     return model && g_pistol.gun && model == g_pistol.gun;
 }
 
+bool VR::IsHlvrPistolRigged(void* model) const
+{
+    if (!model)
+        return false;
+    return model == g_pistol.gun || model == g_pistol.slideModel || model == g_pistol.clipModel;
+}
+
 namespace
 {
     struct MdlCache
@@ -519,11 +526,11 @@ namespace
     }
 }
 
-void* VR::HlvrPistolDrawModel()
+bool EnsureHardware(void* model, const char* path)
 {
-    if (!EnsureModels(this) || !g_pistol.gun)
-        return nullptr;
-    unsigned short handle = StudioHandle(g_pistol.gun);
+    if (!model || !path)
+        return false;
+    unsigned short handle = StudioHandle(model);
     static MdlCache s_cache{};
     static bool s_cacheTried = false;
     if (!s_cacheTried)
@@ -538,7 +545,7 @@ void* VR::HlvrPistolDrawModel()
         using FindFn = unsigned short(__thiscall*)(void*, const char*);
         __try
         {
-            handle = reinterpret_cast<FindFn>(cache.vt[9])(cache.obj, "models/weapons/vr_pistol.mdl");
+            handle = reinterpret_cast<FindFn>(cache.vt[9])(cache.obj, path);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -548,7 +555,7 @@ void* VR::HlvrPistolDrawModel()
         {
             __try
             {
-                *reinterpret_cast<unsigned short*>(static_cast<char*>(g_pistol.gun) + 0x38) = handle;
+                *reinterpret_cast<unsigned short*>(static_cast<char*>(model) + 0x38) = handle;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -570,15 +577,103 @@ void* VR::HlvrPistolDrawModel()
         }
     }
     static int s_log;
-    if (s_log < 4)
+    if (s_log < 6)
     {
-        Game::logMsg("HL2VR pistol draw model=%p studio=%u hw=%p cache=%p",
-            g_pistol.gun, handle, hw, cache.obj);
+        Game::logMsg("HL2VR pistol hw %s model=%p studio=%u hw=%p", path, model, handle, hw);
         ++s_log;
     }
-    if (!hw)
+    return hw != nullptr;
+}
+
+void* VR::HlvrPistolDrawModel()
+{
+    if (!EnsureModels(this) || !g_pistol.gun)
+        return nullptr;
+    if (!EnsureHardware(g_pistol.gun, "models/weapons/vr_pistol.mdl"))
         return nullptr;
     return g_pistol.gun;
+}
+
+namespace
+{
+    int g_attachDepth = 0;
+
+    void OffsetModelY(const matrix3x4_t* src, float travel, float out[3][4])
+    {
+        std::memcpy(out, src, sizeof(float) * 12);
+        out[0][3] += out[0][1] * travel;
+        out[1][3] += out[1][1] * travel;
+        out[2][3] += out[2][1] * travel;
+    }
+}
+
+void VR::DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& gunInfo)
+{
+    if (g_attachDepth > 0 || !modelRender || !gunInfo.pModelToWorld || !EnsureModels(this))
+        return;
+    ++g_attachDepth;
+
+    auto drawPart = [&](void* model, const char* path, const float world[3][4], const Vector& origin, const QAngle& angles) {
+        if (!model || !EnsureHardware(model, path))
+            return;
+        ModelRenderInfo_t inf = gunInfo;
+        inf.pModel = static_cast<model_t*>(model);
+        inf.origin = origin;
+        inf.angles = angles;
+        inf.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(world);
+        inf.instance = -1;
+        const int drawn = CallDrawModelExSeh(modelRender, &inf);
+        static int s_partLog;
+        if (s_partLog < 6)
+        {
+            Game::logMsg("HL2VR pistol part %s DrawModelEx ret=%d", path, drawn);
+            ++s_partLog;
+        }
+    };
+
+    float slideWorld[3][4]{};
+    OffsetModelY(gunInfo.pModelToWorld, g_pistol.slidePull * kSlideTravel, slideWorld);
+    const float* gunM = reinterpret_cast<const float*>(gunInfo.pModelToWorld);
+    Vector slideOrg = gunInfo.origin;
+    slideOrg.x += slideWorld[0][3] - gunM[3];
+    slideOrg.y += slideWorld[1][3] - gunM[7];
+    slideOrg.z += slideWorld[2][3] - gunM[11];
+    drawPart(g_pistol.slideModel, "models/weapons/vr_pistol_slide.mdl", slideWorld, slideOrg, gunInfo.angles);
+
+    if (g_pistol.mag == MagLoaded)
+    {
+        float magWorld[3][4]{};
+        std::memcpy(magWorld, gunInfo.pModelToWorld, sizeof(magWorld));
+        drawPart(g_pistol.clipModel, "models/weapons/vr_pistol_clip.mdl", magWorld, gunInfo.origin, gunInfo.angles);
+    }
+    else if (g_pistol.mag == MagWorld)
+    {
+        float magWorld[3][4]{};
+        BuildStudioWorld(g_pistol.worldMagAngles, g_pistol.worldMagOrigin, magWorld);
+        drawPart(g_pistol.clipModel, "models/weapons/vr_pistol_clip.mdl", magWorld, g_pistol.worldMagOrigin, g_pistol.worldMagAngles);
+    }
+    else if (g_pistol.mag == MagInHand)
+    {
+        Vector hand{};
+        QAngle handAng{};
+        if (OffHand(this, hand, handAng))
+        {
+            VMatrix handM{};
+            AngleMatrixSource(handAng, hand, handM);
+            VMatrix grip{};
+            ClipGripMatrix(grip);
+            VMatrix magM{};
+            handM.MatrixMul(grip.InverseTR(), magM);
+            Vector magOrg{};
+            QAngle magAng{};
+            MatrixToOriginAngles(magM, magOrg, magAng);
+            float magWorld[3][4]{};
+            BuildStudioWorld(magAng, magOrg, magWorld);
+            drawPart(g_pistol.clipModel, "models/weapons/vr_pistol_clip.mdl", magWorld, magOrg, magAng);
+        }
+    }
+
+    --g_attachDepth;
 }
 
 #if 0

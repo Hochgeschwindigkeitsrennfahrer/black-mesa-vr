@@ -845,6 +845,10 @@ public:
     int HlvrPistolModelIndex();
     void* HlvrPistolDrawModel();
     bool IsHlvrPistolModel(void* model) const;
+    // Gun, slide, or magazine. Those draws stay at scale 1 on the model matrix.
+    bool IsHlvrPistolRigged(void* model) const;
+    // Slide and magazine after the gun body. Called from the gun's DrawModelExecute.
+    void DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& gunInfo);
     void GetRightHandAttach(Vector& posMeters, Vector& rotDeg) const;
     bool GetRightHandAttachCurls(float curls[5]) const;
     bool RightHandAttachActive() const;

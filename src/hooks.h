@@ -66,6 +66,10 @@ typedef void(__thiscall* tGetRenderTargetDimensions)(void* thisptr, int& width, 
 typedef void(__thiscall* tDepthRange)(void* thisptr, float zNear, float zFar);
 typedef void(__thiscall* tDrawModelExecute)(void* thisptr, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
 typedef int(__thiscall* tDrawModelEx)(void* thisptr, ModelRenderInfo_t* info);
+// DrawModelSetup is slot 18 (+0x48): studio load, then SetupBones. Viewmodels
+// call this directly and never enter DrawModelEx.
+typedef bool(__thiscall* tDrawModelSetup)(void* thisptr, ModelRenderInfo_t* info, void* state, void* customBones, void** boneOut);
+typedef bool(__thiscall* tSetupBones)(void* thisptr, void* boneToWorld, int maxBones, int boneMask, float currentTime);
 typedef void*(__cdecl* tLightcacheFindNearest)(int x, int y, int z, int flags);
 typedef void(__thiscall* tPushRenderTargetAndViewport)(void* thisptr, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);
 typedef void(__thiscall* tPopRenderTargetAndViewport)(void* thisptr);
@@ -138,6 +142,8 @@ public:
     static inline Hook<tDepthRange> hkDepthRangeQueued;
     static inline Hook<tDrawModelExecute> hkDrawModelExecute;
     static inline Hook<tDrawModelEx> hkDrawModelEx;
+    static inline Hook<tDrawModelSetup> hkDrawModelSetup;
+    static inline Hook<tSetupBones> hkViewmodelSetupBones;
     static inline Hook<tLightcacheFindNearest> hkLightcacheFindNearest;
     static inline Hook<tPushRenderTargetAndViewport> hkPushRenderTargetAndViewport;
     static inline Hook<tPopRenderTargetAndViewport> hkPopRenderTargetAndViewport;
@@ -200,6 +206,8 @@ public:
     static void __fastcall dDepthRange(void* ecx, void* edx, float zNear, float zFar);
     static void __fastcall dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
     static int __fastcall dDrawModelEx(void* ecx, void* edx, ModelRenderInfo_t* info);
+    static bool __fastcall dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* info, void* state, void* customBones, void** boneOut);
+    static bool __fastcall dViewmodelSetupBones(void* ecx, void* edx, void* boneToWorld, int maxBones, int boneMask, float currentTime);
     static void* __cdecl dLightcacheFindNearest(int x, int y, int z, int flags);
     static void __fastcall dPushRenderTargetAndViewport(void* ecx, void* edx, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);
     static void __fastcall dPopRenderTargetAndViewport(void* ecx, void* edx);
