@@ -64,3 +64,6 @@ TheRealBubble
 SilentVortiguant - [Check out his youtube](https://www.youtube.com/@SilentVortigauntVR).
 
 yakupagagaming
+
+Credits for the custom models:
+https://steamcommunity.com/sharedfiles/filedetails/?id=2969302231 (HEV Gloves)
