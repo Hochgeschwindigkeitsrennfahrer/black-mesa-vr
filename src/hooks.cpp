@@ -4305,16 +4305,34 @@ namespace
 bool __fastcall Hooks::dViewmodelSetupBones(void* ecx, void* edx, void* boneToWorld, int maxBones, int boneMask, float currentTime)
 {
     (void)edx;
-    if (g_HlvrRigid && boneToWorld && maxBones > 0 && maxBones <= kMaxStudioBones)
-    {
-        auto* out = reinterpret_cast<float*>(boneToWorld);
-        for (int i = 0; i < maxBones; ++i)
-            std::memcpy(out + i * 12, g_HlvrRigidM, sizeof(g_HlvrRigidM));
-        return true;
-    }
-    if (hkViewmodelSetupBones.fOriginal)
+    if (!hkViewmodelSetupBones.fOriginal)
+        return false;
+    // Replacing every bone with the entity matrix dropped the viewmodel pose,
+    // so the pistol was drawn inside the head and clipped away. Pose the
+    // viewmodel skeleton, which still has the glock's bone count. The pistol
+    // mesh asks for fewer bones; a short buffer makes SetupBones fail and the
+    // draw is skipped.
+    static int s_bonesDepth = 0;
+    if (!g_HlvrRigid || s_bonesDepth > 0 || !boneToWorld || maxBones <= 0)
         return hkViewmodelSetupBones.fOriginal(ecx, boneToWorld, maxBones, boneMask, currentTime);
-    return false;
+    ++s_bonesDepth;
+    thread_local float posed[kMaxStudioBones][3][4];
+    const bool posedOk = hkViewmodelSetupBones.fOriginal(
+        ecx, posed, kMaxStudioBones, boneMask, currentTime);
+    --s_bonesDepth;
+    if (!posedOk)
+    {
+        static int s_fail;
+        if (s_fail < 3)
+        {
+            Game::logMsg("HL2VR pistol SetupBones rejected max=%d", maxBones);
+            ++s_fail;
+        }
+        return false;
+    }
+    const int copy = maxBones < kMaxStudioBones ? maxBones : kMaxStudioBones;
+    std::memcpy(boneToWorld, posed, sizeof(float) * 12 * static_cast<size_t>(copy));
+    return true;
 }
 
 bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* info, void* state, void* customBones, void** boneOut)
@@ -4484,40 +4502,6 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         isViewmodel = CachedModelIsViewmodel(pModel);
         if (!isViewmodel && m_VR && m_VR->IsHlvrPistolRigged(pModel))
             isViewmodel = true;
-        if (isViewmodel && m_VR && m_VR->IsHlvrPistolRigged(pModel) && hkDrawModelExecute.fOriginal)
-        {
-            // Engine setup skinned this mesh with the glock bone cache, and the
-            // 0.64 viewmodel shrink is for that oversized mesh. Draw the pistol
-            // on its own model matrix at full size.
-            if (m_VR->StereoWorldPassActive())
-                ForceStereoViewmodelWorldDepth(g_MatCtx);
-            void* bonesOut = pCustomBoneToWorld;
-            const float* src = info.pModelToWorld
-                ? reinterpret_cast<const float*>(info.pModelToWorld) : nullptr;
-            int nBones = 0;
-            if (state)
-            {
-                const auto* lite = reinterpret_cast<const DrawModelStateLite*>(state);
-                if (!src && lite->modelToWorld)
-                    src = reinterpret_cast<const float*>(lite->modelToWorld);
-                if (lite->studioHdr)
-                    nBones = *reinterpret_cast<const int*>(lite->studioHdr + kStudioHdrNumBones);
-            }
-            thread_local float pistolBones[kMaxStudioBones][3][4];
-            if (src && nBones > 0 && nBones <= kMaxStudioBones)
-            {
-                for (int i = 0; i < nBones; ++i)
-                    std::memcpy(pistolBones[i], src, sizeof(float) * 12);
-                bonesOut = pistolBones;
-            }
-            hkDrawModelExecute.fOriginal(ecx, state, info, bonesOut);
-            // Parts are drawn after this viewmodel's DrawModel returns. Calling
-            // DrawModelEx here is still inside Execute, and that re-locks the
-            // shader mutex.
-            if (m_VR->IsHlvrPistolModel(pModel))
-                NoteHlvrGunDraw(ecx, info);
-            return;
-        }
         if (isViewmodel && m_Game && m_Game->m_ModelInfo)
         {
             modelName = SafeModelName(m_Game->m_ModelInfo, pModel);
@@ -4775,6 +4759,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         {
             if (isViewmodel && m_VR && m_VR->StereoWorldPassActive())
                 ForceStereoViewmodelWorldDepth(g_MatCtx);
+            if (isViewmodel && m_VR && m_VR->IsHlvrPistolModel(pModel) && infoToDraw)
+                NoteHlvrGunDraw(ecx, *infoToDraw);
             const long long t0 = g_Cost.active ? QpcNow() : 0;
             hkDrawModelExecute.fOriginal(ecx, state, *infoToDraw, bonesToDraw);
             if (g_Cost.active)
