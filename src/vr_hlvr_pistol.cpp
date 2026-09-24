@@ -598,13 +598,94 @@ namespace
 {
     int g_attachDepth = 0;
 
-    void OffsetModelY(const matrix3x4_t* src, float travel, float out[3][4])
+    // Model-space bind pose of vr_pistol.mdl bones 0-7 (gun, clip release,
+    // hammer, safety, slide release, trigger, slide, magazine). Built from
+    // the mdl rest pose. Rotations are identity except the magazine bone.
+    const float kPistolBind[8][3][4] = {
+        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 1.184739f}, {0.f, 0.f, 1.f, -1.061483f}},
+        {{1.f, 0.f, 0.f, 0.627336f}, {0.f, 1.f, 0.f, -0.064639f}, {0.f, 0.f, 1.f, -0.613199f}},
+        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 2.672362f}, {0.f, 0.f, 1.f, 0.805204f}},
+        {{1.f, 0.f, 0.f, 0.627331f}, {0.f, 1.f, 0.f, 2.172857f}, {0.f, 0.f, 1.f, 0.494675f}},
+        {{1.f, 0.f, 0.f, 0.627340f}, {0.f, 1.f, 0.f, -1.874057f}, {0.f, 0.f, 1.f, 0.512872f}},
+        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, -0.476449f}, {0.f, 0.f, 1.f, -0.201681f}},
+        {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 1.000002f}, {0.f, 0.f, 1.f, 1.499997f}},
+        {{1.f, 0.f, 0.f, 0.f}, {0.f, 0.974194f, -0.225710f, 0.968598f}, {0.f, 0.225710f, 0.974194f, -1.819079f}},
+    };
+    // a_slide_pull_30 moves v_pistol.slide along model +Y (back from the muzzle).
+    constexpr float kSlideClosedY = 1.000002f;
+    constexpr float kSlideOpenY = 3.413255f;
+
+    void MulModel(const float world[3][4], const float local[3][4], float out[3][4])
     {
-        std::memcpy(out, src, sizeof(float) * 12);
-        out[0][3] += out[0][1] * travel;
-        out[1][3] += out[1][1] * travel;
-        out[2][3] += out[2][1] * travel;
+        float tmp[3][4];
+        for (int r = 0; r < 3; ++r)
+        {
+            tmp[r][0] = world[r][0] * local[0][0] + world[r][1] * local[1][0] + world[r][2] * local[2][0];
+            tmp[r][1] = world[r][0] * local[0][1] + world[r][1] * local[1][1] + world[r][2] * local[2][1];
+            tmp[r][2] = world[r][0] * local[0][2] + world[r][1] * local[1][2] + world[r][2] * local[2][2];
+            tmp[r][3] = world[r][0] * local[0][3] + world[r][1] * local[1][3] + world[r][2] * local[2][3] + world[r][3];
+        }
+        std::memcpy(out, tmp, sizeof(tmp));
     }
+
+    void SlideLocal(float out[3][4])
+    {
+        std::memcpy(out, kPistolBind[6], sizeof(float) * 12);
+        const float pull = g_pistol.slidePull < 0.f ? 0.f : (g_pistol.slidePull > 1.f ? 1.f : g_pistol.slidePull);
+        out[1][3] = kSlideClosedY + (kSlideOpenY - kSlideClosedY) * pull;
+    }
+}
+
+int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* boneRows, int maxBones)
+{
+    if (!modelToWorld || !boneRows || maxBones < 1 || !model)
+        return 0;
+    const bool gun = model == g_pistol.gun;
+    const bool slide = model == g_pistol.slideModel;
+    const bool clip = model == g_pistol.clipModel;
+    if (!gun && !slide && !clip)
+        return 0;
+
+    float slideM[3][4];
+    SlideLocal(slideM);
+    if (slide)
+    {
+        float world[3][4];
+        MulModel(modelToWorld, slideM, world);
+        std::memcpy(boneRows, world, sizeof(world));
+        return 1;
+    }
+    if (clip)
+    {
+        float world[3][4];
+        MulModel(modelToWorld, kPistolBind[7], world);
+        const int n = maxBones < 41 ? maxBones : 41;
+        for (int i = 0; i < n; ++i)
+            std::memcpy(boneRows + i * 12, world, sizeof(world));
+        return n;
+    }
+
+    const int n = maxBones < 47 ? maxBones : 47;
+    float root[3][4];
+    MulModel(modelToWorld, kPistolBind[0], root);
+    for (int i = 0; i < n; ++i)
+    {
+        if (i == 6)
+        {
+            float world[3][4];
+            MulModel(modelToWorld, slideM, world);
+            std::memcpy(boneRows + i * 12, world, sizeof(world));
+        }
+        else if (i < 8)
+        {
+            float world[3][4];
+            MulModel(modelToWorld, kPistolBind[i], world);
+            std::memcpy(boneRows + i * 12, world, sizeof(world));
+        }
+        else
+            std::memcpy(boneRows + i * 12, root, sizeof(root));
+    }
+    return n;
 }
 
 void VR::DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& gunInfo)
@@ -631,14 +712,11 @@ void VR::DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& g
         }
     };
 
-    float slideWorld[3][4]{};
-    OffsetModelY(gunInfo.pModelToWorld, g_pistol.slidePull * kSlideTravel, slideWorld);
-    const float* gunM = reinterpret_cast<const float*>(gunInfo.pModelToWorld);
-    Vector slideOrg = gunInfo.origin;
-    slideOrg.x += slideWorld[0][3] - gunM[3];
-    slideOrg.y += slideWorld[1][3] - gunM[7];
-    slideOrg.z += slideWorld[2][3] - gunM[11];
-    drawPart(g_pistol.slideModel, "models/weapons/vr_pistol_slide.mdl", slideWorld, slideOrg, gunInfo.angles);
+    // Slide and loaded magazine share the gun matrix. Their meshes are
+    // bone-merged onto v_pistol.slide and v_pistol.clip in the skin writer.
+    float gunWorld[3][4]{};
+    std::memcpy(gunWorld, gunInfo.pModelToWorld, sizeof(gunWorld));
+    drawPart(g_pistol.slideModel, "models/weapons/vr_pistol_slide.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
 
     if (g_pistol.mag == MagLoaded)
     {

@@ -4305,34 +4305,18 @@ namespace
 bool __fastcall Hooks::dViewmodelSetupBones(void* ecx, void* edx, void* boneToWorld, int maxBones, int boneMask, float currentTime)
 {
     (void)edx;
+    (void)boneToWorld;
+    (void)maxBones;
+    (void)boneMask;
+    (void)currentTime;
+    // The pistol is skinned from its own bind pose in DrawModelExecute.
+    // Running the viewmodel SetupBones here posed the glock skeleton three
+    // times a frame (gun, slide, magazine) and pulled the parts apart.
+    if (g_HlvrRigid)
+        return true;
     if (!hkViewmodelSetupBones.fOriginal)
         return false;
-    // Replacing every bone with the entity matrix dropped the viewmodel pose,
-    // so the pistol was drawn inside the head and clipped away. Pose the
-    // viewmodel skeleton, which still has the glock's bone count. The pistol
-    // mesh asks for fewer bones; a short buffer makes SetupBones fail and the
-    // draw is skipped.
-    static int s_bonesDepth = 0;
-    if (!g_HlvrRigid || s_bonesDepth > 0 || !boneToWorld || maxBones <= 0)
-        return hkViewmodelSetupBones.fOriginal(ecx, boneToWorld, maxBones, boneMask, currentTime);
-    ++s_bonesDepth;
-    thread_local float posed[kMaxStudioBones][3][4];
-    const bool posedOk = hkViewmodelSetupBones.fOriginal(
-        ecx, posed, kMaxStudioBones, boneMask, currentTime);
-    --s_bonesDepth;
-    if (!posedOk)
-    {
-        static int s_fail;
-        if (s_fail < 3)
-        {
-            Game::logMsg("HL2VR pistol SetupBones rejected max=%d", maxBones);
-            ++s_fail;
-        }
-        return false;
-    }
-    const int copy = maxBones < kMaxStudioBones ? maxBones : kMaxStudioBones;
-    std::memcpy(boneToWorld, posed, sizeof(float) * 12 * static_cast<size_t>(copy));
-    return true;
+    return hkViewmodelSetupBones.fOriginal(ecx, boneToWorld, maxBones, boneMask, currentTime);
 }
 
 bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* info, void* state, void* customBones, void** boneOut)
@@ -4608,7 +4592,20 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
     void* bonesToDraw = pCustomBoneToWorld;
     const ModelRenderInfo_t* infoToDraw = &info;
-    if (isViewmodel && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
+    // Slide and magazine already carry the gun's placed matrix. Skin them
+    // here and do not run the viewmodel rigid delta a second time.
+    if (isViewmodel && m_VR && m_VR->IsHlvrPistolRigged(pModel) && !m_VR->IsHlvrPistolModel(pModel)
+        && info.pModelToWorld && m_VR->IsGameplayEligible() && EngineInGame())
+    {
+        const int slot = g_VmDrawSlot++ & (kVmDrawSlots - 1);
+        float placed[3][4];
+        std::memcpy(placed, info.pModelToWorld, sizeof(placed));
+        const int n = m_VR->WriteHlvrPistolSkin(placed, pModel,
+            &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
+        if (n > 0)
+            bonesToDraw = g_ScaledViewmodelBones[slot];
+    }
+    else if (isViewmodel && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
         && EngineInGame() && m_VR->m_ControllerPoseValid)
     {
         const float scale = [&]() -> float {
@@ -4708,7 +4705,25 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             unsigned char* hdr = ResolveStudioHdr(state);
             const int nBones = StudioHdrNumBones(hdr);
             bool usedBones = false;
-            if (pCustomBoneToWorld && nBones > 0
+            bool pistolSkin = false;
+            if (m_VR->IsHlvrPistolModel(pModel) && info.pModelToWorld)
+            {
+                float placed[3][4];
+                if (SehCopyAndFixViewmodelMatrices(&placed[0][0], info.pModelToWorld,
+                        1, pivot3, 1.f, pivot3, right3, up3, fwd3,
+                        needYFix ? yFix : 1.f, rigidPtr))
+                {
+                    const int n = m_VR->WriteHlvrPistolSkin(placed, pModel,
+                        &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
+                    if (n > 0)
+                    {
+                        bonesToDraw = g_ScaledViewmodelBones[slot];
+                        usedBones = true;
+                        pistolSkin = true;
+                    }
+                }
+            }
+            if (!pistolSkin && pCustomBoneToWorld && nBones > 0
                 && SehCopyAndFixViewmodelMatrices(&g_ScaledViewmodelBones[slot][0][0][0], pCustomBoneToWorld,
                     nBones, pivot3, needScale ? scale : 1.f, pivot3, right3, up3, fwd3,
                     needYFix ? yFix : 1.f, rigidPtr))
@@ -4716,7 +4731,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
             }
-            else if (needScale)
+            else if (!pistolSkin && needScale)
                 SehWriteModelScale(info.pRenderable, scale);
 
             std::memcpy(g_ScaledViewmodelInfo[slot], &info, sizeof(ModelRenderInfo_t));

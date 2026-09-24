@@ -849,6 +849,10 @@ public:
     bool IsHlvrPistolRigged(void* model) const;
     // Slide and magazine after the gun body. Called from the gun's DrawModelExecute.
     void DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& gunInfo);
+    // Bind-pose skin matrices for the pistol, slide, or magazine. Slide and
+    // magazine are bone-merged onto the gun the way HL2VR FollowEntity does.
+    // Returns the number of bones written.
+    int WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* boneRows, int maxBones);
     void GetRightHandAttach(Vector& posMeters, Vector& rotDeg) const;
     bool GetRightHandAttachCurls(float curls[5]) const;
     bool RightHandAttachActive() const;
