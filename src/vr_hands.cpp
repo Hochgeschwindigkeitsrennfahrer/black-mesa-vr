@@ -669,8 +669,8 @@ bool BmVrGloves::DrawForEye(
     Impl::Hand* pair = nullptr;
     int gpuBase = 0;
     const char* source = "hev";
-    // Blue Shift is Calhoun in a security uniform — never HEV gloves.
-    const bool forceBare = bmvr::IsBlueShift();
+    // Blue Shift / Azure Sheep: security uniform — never HEV gloves.
+    const bool forceBare = bmvr::IsBlueShift() || bmvr::IsAzureSheep();
     if (m_Impl->bareLoaded && (forceBare || !wearingSuit))
     {
         pair = m_Impl->bare;
@@ -705,8 +705,9 @@ bool BmVrGloves::DrawForEye(
 
         Impl::Hand& hand = pair[i];
         vr::VRSkeletalSummaryData_t summary{};
-        const bool gripCurl = rightHand && g_Game && g_Game->m_VR
-            && g_Game->m_VR->WantsRightGloveWeaponGripCurl();
+        const bool gripCurl = g_Game && g_Game->m_VR && (
+            (rightHand && g_Game->m_VR->WantsRightGloveWeaponGripCurl())
+            || (!rightHand && g_Game->m_VR->WantsOffhandGloveWeaponGripCurl()));
         if (TryGetSummary(input, actions[i], summary))
         {
             if (!BuildSummaryCurlPalette(hand.asset, hand.rig, summary, hand.palette, gripCurl ? 0.40f : 0.f))

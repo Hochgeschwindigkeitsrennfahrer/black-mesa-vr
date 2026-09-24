@@ -1,5 +1,5 @@
-Black Mesa VR — drop-in (2026-09-08)
-====================================
+Black Mesa VR — drop-in test (2026-09-21)
+==========================================
 
 Close Black Mesa first. Copy this folder into Steam\steamapps\common\Black Mesa
 so d3d9.dll lands in ALL three:
@@ -8,22 +8,16 @@ so d3d9.dll lands in ALL three:
   Black Mesa\bin\d3d9.dll
   Black Mesa\bin\thirdparty\dxvk-windows-x86\d3d9.dll
 
-Keep a tuned VR\config.txt if you already have one. If you keep the old
-config, add these lines (or the DLL defaults apply):
-
-  MulticoreMode=true
-  VrHandsIndexRollDeg=90
-  OpenXRHelperFlipSubmitY=false
+Keep a tuned VR\config.txt if you already have one.
 
 This build
 ----------
-- Multicore rendering — expect massive performance upgrades
-- SteamVR submit Y-flip off by default (was inverted with auto)
-- Quest Horizon Link no longer freezes after multicore
-- Fixed lens flare positions
-- Fixed inability to attack after grabbing / using something with the left hand
-- Fixed Valve Index hand / weapon poses
-- Fixed missing binds on some controllers
+Alt-tab audio safety check. Tab-out still mutes as usual. About 1.5 seconds
+after tabbing back in, the mod only acts if sound is still stuck:
 
-If shots misalign with the weapon position, recenter by pressing the right
-thumbstick once. Roomscale support is coming.
+- Windows session still muted, or its volume collapsed
+- playback device changed and the meter is still silent (one snd_restart)
+- the mix buffer was playing and is now lost or stopped
+
+If audio already came back, nothing is changed. A repair writes a log line
+starting with "Audio focus:".

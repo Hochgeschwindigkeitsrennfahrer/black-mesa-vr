@@ -1089,6 +1089,9 @@ namespace dxvk {
     uint32_t GetInstanceCount() const;
 
     void PrepareDraw(D3DPRIMITIVETYPE PrimitiveType, bool UploadVBOs, bool UploadIBOs);
+    void BmvrApplyHl2vrMsaa(D3D9_COMMON_TEXTURE_DESC& desc);
+    void BmvrNoteMsaaAttachmentsWritten();
+    void BmvrResolveMsaaForSample(D3D9CommonTexture* tex);
 
     void EnsureSamplerLimit();
 

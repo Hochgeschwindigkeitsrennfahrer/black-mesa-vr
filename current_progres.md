@@ -412,4 +412,49 @@ Log tags: `OpenXR publish rate ... deferred= throttled= dropped= pending= maxPen
 
 **HMD run 5 (user, 2026-09-06):** `OpenXrDeferredPublish=false` **definitely feels better** than `true`, even though `true` reports higher FPS. WMR motion smoothing / reprojection needs a regular finished pair on vsync; extra game frames that miss compositor cadence show up as stutter. Keep `false`.
 
+## Pass 2026-09-20 VR frame pacing (compiled; not HMD-verified)
+
+**Symptom A:** desktop ~180–320 FPS and smooth, HMD not native 90 Hz (reprojection-like motion).
+**Symptom B:** occasional single broken/old frame.
+
+**Diagnosed cause (logs 2026-09-20, WMR G2 90 Hz, `bm_c2a2a`):** this is not a graphics-settings problem and not "probably reprojection" without evidence.
+
+| Evidence | Meaning |
+|---|---|
+| Game `present=186-228/s published=186-228/s skipRate=0 helperFeedback=0 consumedLag=-1` | Engine firehoses pairs; consumed-id gate never armed on the default sync path |
+| Helper `Submitted OpenXR Vulkan frame` ~60/s in-world (60 frames / ~1s) | Compositor client missing 90 Hz vsync; runtime must ATW/reproject the other 30 Hz |
+| Helper `sourceGen` skips (22→26) | Extra published frames are dropped, not displayed |
+| `OpenXrDeferredPublish=false` round-robin 4 slots at ~200/s (~20 ms wrap) vs two `vkQueueWaitIdle`s per eye | Slot can be overwritten while the helper is still blitting — occasional torn/old frame |
+
+**HL2VR difference:** `OnFrameBegin` → `WaitGetPoses` on the present timeline → render with that pose → submit-thread `Submit_TextureWithPose` → `PostPresentHandoff`. One frame in flight. We had an uncapped OpenXR publish loop in another process.
+
+**This pass (handshake, compiled + installed):** OpenXR waits meant to match that lifecycle (`docs/openxr-eye-publish.md` §9). Game waited for this WaitFrame pose and previous slot consume before stereo. One pair per `displayTime`. Helper 9 ms match poll + one queue idle, then `xrEndFrame`.
+
+**HMD run 1 (user, 2026-09-20, WMR G2 90 Hz):** performance worse; felt reprojection still present; glitched frames much less often. Logs: helper `matchHit=2–6/N` `matchWaitAvg=9.01ms` (timeout every vsync), `waitFrameAvg=12.5–15.5ms`; game `handoffWait` every published frame, `await avg=5–15ms max=16–47ms`, `published≈helperHz≈44–78`, `helperFeedback=1`, `consumedLag=1–3`. Menu `published=0/s skipVsync=258` (latched panel pose). Slot gate is the glitch win. The waits are the 2026-08-30 “do not Sleep after xrWaitFrame” miss.
+
+**Follow-up 1 (compiled + installed; HMD run 2):** removed helper 9 ms poll and game 16/32 ms consume waits. Slot gate kept. User: FPS improved, still heavy reprojection, not true 90 Hz. In-game: `present=150-250/s` `await=130-190/s` 3k stereo, `helperHz` 89→45, `helperHold` climbing, helper lifetime `waitFrameAvg` 14.9 ms and blitSkip/fenceBusy climbing. Extra stereo saturated the GPU so the compositor blit missed vsync.
+
+**Follow-up 2 (HMD-verified 2026-09-20, WMR G2 90 Hz):** one stereo pair per helper `xrWaitFrame` pose (≤22 ms wait, no consume wait); skip extra 3k pairs; helper ping-pong blit CBs/fences. User: native 90 Hz. Logs: `present=180/s published=90/s await=90/s avg=3.3–3.8ms helperHz=90 helperFeedback=1 helperHold=0`; helper `waitFrameWin=11.11ms waitFrameLast=11.09ms blitSkip=0 fenceBusyFrames=0`.
+
+**Tab-out crash (same session):** pause then alt-tab → helper `exitCode=1`, no `bmvr_crash.txt`. Game log: `GameUI visible` → VGui extra-paint overlay → `MC Present fallback: ICallQueue did not copy 1x eyes`. No `App deactivated (WM_ACTIVATEAPP)` — same class as 2026-09-13 (`docs/RUNTIME.md`).
+
+**Follow-up 3 (compiled this pass; pause+tab not verified):** skip Present eye StretchRect whenever in-game pause overlay is up (`WantPauseWorldOverlay`, not all GameUI — main-menu 2D panel still copies); HUD overlay only while HWND activated; skip all copies on GameUI + deactivate; `WM_ACTIVATE` earlier than `ACTIVATEAPP`; no 22 ms pose-wait during pause overlay; extra-paint original + HUD TransferSurface SEH. Do not skip copies on focus-loss without GameUI (SteamVR).
+
 Do not claim full gameplay success.
+
+## Pass 2026-09-21 review (compiled this pass; not HMD-verified)
+
+Fresh pass over the live tree. Stereo fusion, OpenXR cadence (`OpenXrDeferredPublish=false`, one pair per helper `xrWaitFrame`, slot consume gate), flashlight RT policy, bloom skip, and water refraction-only were left as already verified. Do not reopen those.
+
+| Item | Change |
+|---|---|
+| Cross-process seqlock | Eye-pair publish already fenced. Pose, input, game-render pose, frame ids, and the HUD overlay did not. MSVC can move those payload stores outside the odd generation window, which is a torn head pose or a torn overlay handle. Writers now use `L4D2VR_SeqlockBegin` / `End`. Readers acquire before and after the copy. Overlay submit uses `ReadOverlay` instead of a bare struct load. |
+| Slot reuse flag | Helper wrote `helperConsumedFrameId` and then `helperConsumedCount`, but the game acquired **after** loading both. A new count could pair with the previous frame id and free a slot the blit still held. Count is the flag: write the id, release, then increment count. The game loads count, acquires, then loads the id. |
+| RT stack | A push past 32 entries returned without a slot, and the matching pop still removed a real entry, so aux/world class tracked the wrong target for the rest of the frame. Overflow pushes now have their own pop count. Log: `RT stack overflow`. |
+| Pose velocity clock | `ConsumeOpenXrTracking` called `QueryPerformanceFrequency` on every sample, including the compositor-pose wait. It uses the cached `QpcNowMs` clock. Menu cursor smoothing uses that same clock. |
+
+**Not changed:** frame pacing waits, fused eye size, bloom skip, water reflection, flashlight RT resize, `mat_queue` off.
+
+**Build:** Release Win32 `build\Release\d3d9.dll` and x64 `build_openxr_helper64\Release\OpenXRHelper64.exe` compiled clean (pre-existing C4099/C4319 only). **Not installed. Not launched. Not HMD-verified.** Ship both binaries together; the seqlock change is in the shared bridge.
+
+**Still open:** HMD flashlight (do not retry the rejected RT / 16:9 paths). Pause then alt-tab (`WantPauseWorldOverlay` copy skip) still needs a headset confirm. These sync fixes need a headset confirm: no torn frame on a fast head turn, pause menu still appears.

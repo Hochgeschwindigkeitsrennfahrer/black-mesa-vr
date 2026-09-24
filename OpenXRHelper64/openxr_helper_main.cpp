@@ -49,6 +49,20 @@ namespace
     constexpr uint32_t kMaxOpenXrOverlayLayers = L4D2VR_OPENXR_OVERLAY_COUNT + kMaxOpenXrHudCurveSegments - 1;
     constexpr float kPi = 3.141592654f;
 
+    double QpcNowMs()
+    {
+        static double s_toMs = 0.0;
+        if (s_toMs == 0.0)
+        {
+            LARGE_INTEGER freq{};
+            QueryPerformanceFrequency(&freq);
+            s_toMs = freq.QuadPart ? 1000.0 / static_cast<double>(freq.QuadPart) : 0.0;
+        }
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        return static_cast<double>(now.QuadPart) * s_toMs;
+    }
+
     HANDLE OpenParentProcessHandle(DWORD parentPid)
     {
         if (parentPid == 0)
@@ -1507,15 +1521,21 @@ namespace
             if (!m_State)
                 return false;
 
-            for (int attempt = 0; attempt < 8; ++attempt)
+            for (int attempt = 0; attempt < 64; ++attempt)
             {
                 const uint32_t before = m_State->sharedTextureGeneration;
                 if (before == 0 || (before & 1u) != 0)
+                {
+                    // Odd generation = the game is mid-write. Yielding lets it
+                    // finish; spinning 8 times used to miss and kill the helper.
+                    if (attempt >= 4)
+                        SwitchToThread();
                     continue;
-                std::atomic_thread_fence(std::memory_order_acquire);
+                }
+                L4D2VR_SeqlockAcquire();
                 left = m_State->eyeTextures[L4D2VR_OPENXR_EYE_LEFT];
                 right = m_State->eyeTextures[L4D2VR_OPENXR_EYE_RIGHT];
-                std::atomic_thread_fence(std::memory_order_acquire);
+                L4D2VR_SeqlockAcquire();
                 if (m_State->sharedTextureGeneration == before)
                 {
                     generation = before;
@@ -1537,6 +1557,33 @@ namespace
             return m_State->overlays[overlayIndex];
         }
 
+        // Seqlock copy. Overlay() alone can tear a shared-handle descriptor
+        // while the game republishes the HUD quad.
+        bool ReadOverlay(uint32_t overlayIndex, L4D2VROpenXrOverlayDesc& out, uint32_t& generation) const
+        {
+            if (!m_State || overlayIndex >= L4D2VR_OPENXR_OVERLAY_COUNT)
+                return false;
+
+            for (int attempt = 0; attempt < 8; ++attempt)
+            {
+                const uint32_t gen0 = m_State->overlayGeneration;
+                if (gen0 == 0 || (gen0 & 1u))
+                    continue;
+
+                L4D2VR_SeqlockAcquire();
+                const L4D2VROpenXrOverlayDesc snapshot = m_State->overlays[overlayIndex];
+                L4D2VR_SeqlockAcquire();
+                const uint32_t gen1 = m_State->overlayGeneration;
+                if (gen0 == gen1 && !(gen1 & 1u))
+                {
+                    out = snapshot;
+                    generation = gen1;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         bool ReadOverlayFrame(uint32_t& frameId, uint32_t* generation = nullptr) const
         {
             if (!m_State)
@@ -1548,7 +1595,9 @@ namespace
                 if (gen0 == 0 || (gen0 & 1u))
                     continue;
 
+                L4D2VR_SeqlockAcquire();
                 const uint32_t snapshotFrameId = m_State->overlayFrameId;
+                L4D2VR_SeqlockAcquire();
                 const uint32_t gen1 = m_State->overlayFrameGeneration;
                 if (gen0 == gen1 && !(gen1 & 1u) && snapshotFrameId != 0)
                 {
@@ -1573,7 +1622,9 @@ namespace
                 if (gen0 == 0 || (gen0 & 1u))
                     continue;
 
+                L4D2VR_SeqlockAcquire();
                 const uint32_t snapshotFrameId = m_State->sharedTextureFrameId;
+                L4D2VR_SeqlockAcquire();
                 const uint32_t gen1 = m_State->sharedTextureFrameGeneration;
                 if (gen0 == gen1 && !(gen1 & 1u) && snapshotFrameId != 0)
                 {
@@ -1598,7 +1649,9 @@ namespace
                 if (gen0 == 0 || (gen0 & 1u))
                     continue;
 
+                L4D2VR_SeqlockAcquire();
                 L4D2VROpenXrPoseDesc snapshot = m_State->gameRenderPose;
+                L4D2VR_SeqlockAcquire();
                 const uint32_t gen1 = m_State->gameRenderPoseGeneration;
                 if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
                 {
@@ -1617,9 +1670,9 @@ namespace
             if (!m_State || !pose.valid)
                 return;
 
-            ++m_State->trackingPoseGeneration;
+            L4D2VR_SeqlockBegin(m_State->trackingPoseGeneration);
             m_State->hmdPose = pose;
-            ++m_State->trackingPoseGeneration;
+            L4D2VR_SeqlockEnd(m_State->trackingPoseGeneration);
             m_State->heartbeatTickMs = GetTickCount64();
         }
 
@@ -1628,9 +1681,9 @@ namespace
             if (!m_State || !config.valid)
                 return;
 
-            ++m_State->runtimeViewConfigGeneration;
+            L4D2VR_SeqlockBegin(m_State->runtimeViewConfigGeneration);
             m_State->runtimeViewConfig = config;
-            ++m_State->runtimeViewConfigGeneration;
+            L4D2VR_SeqlockEnd(m_State->runtimeViewConfigGeneration);
             m_State->heartbeatTickMs = GetTickCount64();
         }
 
@@ -1639,9 +1692,9 @@ namespace
             if (!m_State)
                 return;
 
-            ++m_State->visibilityMaskGeneration;
+            L4D2VR_SeqlockBegin(m_State->visibilityMaskGeneration);
             m_State->visibilityMask = mask;
-            ++m_State->visibilityMaskGeneration;
+            L4D2VR_SeqlockEnd(m_State->visibilityMaskGeneration);
             m_State->heartbeatTickMs = GetTickCount64();
         }
 
@@ -1650,9 +1703,9 @@ namespace
             if (!m_State || !inputState.valid)
                 return;
 
-            ++m_State->inputStateGeneration;
+            L4D2VR_SeqlockBegin(m_State->inputStateGeneration);
             m_State->inputState = inputState;
-            ++m_State->inputStateGeneration;
+            L4D2VR_SeqlockEnd(m_State->inputStateGeneration);
             m_State->heartbeatTickMs = GetTickCount64();
         }
 
@@ -1672,12 +1725,12 @@ namespace
         {
             if (!m_State)
                 return;
-            // Written after both eye blits have vkQueueWaitIdle'd: the
-            // swapchain has the pixels and the shared images can be rewritten.
-            std::atomic_thread_fence(std::memory_order_release);
+            // Frame id, then release, then the count flag. The game loads
+            // count first and only then the frame id, so a new count cannot
+            // pair with the previous id.
             m_State->helperConsumedFrameId = frameId;
-            ++m_State->helperConsumedCount;
             std::atomic_thread_fence(std::memory_order_release);
+            ++m_State->helperConsumedCount;
         }
 
         bool ReadHapticRequest(uint32_t handIndex, L4D2VROpenXrHapticRequestDesc& request) const
@@ -2215,9 +2268,9 @@ namespace
             return static_cast<size_t>(id);
         }
 
-        static const std::array<BooleanActionDef, 31>& BooleanDefs();
+        static const std::array<BooleanActionDef, 30>& BooleanDefs();
         static const std::array<BooleanActionDef, 4>& ExtraBooleanDefs();
-        static const std::array<FloatDigitalActionDef, 4>& FloatDigitalDefs();
+        static const std::array<FloatDigitalActionDef, 5>& FloatDigitalDefs();
         static const std::array<AnalogActionDef, 2>& AnalogDefs();
 
         bool Path(const char* text, XrPath& out, Logger& log);
@@ -3995,6 +4048,11 @@ namespace
 
                 if (!m_SessionRunning)
                 {
+                    if (submittedFrames > 0)
+                    {
+                        Sleep(10);
+                        continue;
+                    }
                     const ULONGLONG elapsedMs = GetTickCount64() - startTicks;
                     if (options.waitReadySeconds > 0 && elapsedMs > static_cast<ULONGLONG>(options.waitReadySeconds) * 1000ull)
                     {
@@ -4043,7 +4101,17 @@ namespace
                     }
 
                     if (requireSharedTextures && (!EnsureBlitPipeline() || !OpenSharedGameTexturesIfNeeded()))
-                        return 28;
+                    {
+                        if (submittedFrames == 0)
+                            return 28;
+                        static ULONGLONG s_lastImportMissLogMs = 0;
+                        const ULONGLONG nowMs = GetTickCount64();
+                        if (s_lastImportMissLogMs == 0 || nowMs - s_lastImportMissLogMs >= 1000ull)
+                        {
+                            s_lastImportMissLogMs = nowMs;
+                            m_Log.Print("Shared game eye import miss after submit; keeping last textures");
+                        }
+                    }
                 }
 
                 XrFrameWaitInfo waitInfo{ XR_TYPE_FRAME_WAIT_INFO };
@@ -4564,9 +4632,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
     };
 
 #endif
-    const std::array<OpenXrInputBridge::BooleanActionDef, 31>& OpenXrInputBridge::BooleanDefs()
+    const std::array<OpenXrInputBridge::BooleanActionDef, 30>& OpenXrInputBridge::BooleanDefs()
     {
-        static const std::array<BooleanActionDef, 31> defs =
+        static const std::array<BooleanActionDef, 30> defs =
         {{
             { L4D2VROpenXrActionId::ActivateVR, "activate_vr", "Activate VR" },
             { L4D2VROpenXrActionId::Jump, "jump", "Jump" },
@@ -4576,7 +4644,6 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             { L4D2VROpenXrActionId::PrevItem, "prev_item", "Previous Item" },
             { L4D2VROpenXrActionId::ResetPosition, "reset_position", "Reset Position" },
             { L4D2VROpenXrActionId::Flashlight, "flashlight", "Flashlight" },
-            { L4D2VROpenXrActionId::InventoryGripLeft, "inventory_grip_left", "Inventory Grip Left" },
             { L4D2VROpenXrActionId::InventoryGripRight, "inventory_grip_right", "Inventory Grip Right" },
             { L4D2VROpenXrActionId::InventoryQuickSwitch, "inventory_quick_switch", "Inventory Quick Switch" },
             { L4D2VROpenXrActionId::SpecialInfectedAutoAimToggle, "special_infected_auto_aim", "Special Infected Auto Aim" },
@@ -4616,14 +4683,15 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         return defs;
     }
 
-    const std::array<OpenXrInputBridge::FloatDigitalActionDef, 4>& OpenXrInputBridge::FloatDigitalDefs()
+    const std::array<OpenXrInputBridge::FloatDigitalActionDef, 5>& OpenXrInputBridge::FloatDigitalDefs()
     {
-        static const std::array<FloatDigitalActionDef, 4> defs =
+        static const std::array<FloatDigitalActionDef, 5> defs =
         {{
             { L4D2VROpenXrActionId::PrimaryAttack, "primary_attack", "Primary Attack", 0.45f },
             { L4D2VROpenXrActionId::Use, "use", "Use", 0.45f },
             { L4D2VROpenXrActionId::Reload, "reload", "Reload", 0.45f },
             { L4D2VROpenXrActionId::Flashlight, "flashlight_value", "Flashlight Grip", 0.55f },
+            { L4D2VROpenXrActionId::InventoryGripLeft, "inventory_grip_left", "Inventory Grip Left", 0.35f },
         }};
         return defs;
     }
@@ -4932,7 +5000,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         std::vector<XrActionSuggestedBinding>& b,
         const char* gripValueName)
     {
+        const std::string leftGripValue = std::string("/user/hand/left/input/") + gripValueName;
         const std::string rightGripValue = std::string("/user/hand/right/input/") + gripValueName;
+        AddBinding(b, m_FloatDigitalActions[Index(L4D2VROpenXrActionId::InventoryGripLeft)], leftGripValue.c_str());
         AddBinding(b, m_FloatDigitalActions[Index(L4D2VROpenXrActionId::Flashlight)], rightGripValue.c_str());
     }
 
@@ -5420,7 +5490,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         synthesizeHand(
             L4D2VR_OPENXR_HAND_LEFT,
             L4D2VROpenXrActionId::Use,
-            L4D2VROpenXrActionId::Reload);
+            L4D2VROpenXrActionId::InventoryGripLeft);
         synthesizeHand(
             L4D2VR_OPENXR_HAND_RIGHT,
             L4D2VROpenXrActionId::PrimaryAttack,
@@ -6023,6 +6093,14 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                     static_cast<unsigned long long>(XR_VERSION_MAJOR(instanceProperties.runtimeVersion)),
                     static_cast<unsigned long long>(XR_VERSION_MINOR(instanceProperties.runtimeVersion)),
                     static_cast<unsigned long long>(XR_VERSION_PATCH(instanceProperties.runtimeVersion)));
+                if (std::strstr(instanceProperties.runtimeName, "Simulator"))
+                {
+                    wchar_t timeline[8]{};
+                    const DWORD n = GetEnvironmentVariableW(L"SIMXR_VK_NO_TIMELINE", timeline, 8);
+                    m_Log.Print(
+                        "OpenXR Simulator Vulkan compositor is D3D12-shared; SIMXR_VK_NO_TIMELINE=%s",
+                        (n > 0 && timeline[0] == L'1') ? "1" : "unset");
+                }
                 ResolveFlipSubmitY(instanceProperties.runtimeName);
                 ResolveSwapProjectionEyes(instanceProperties.runtimeName);
             }
@@ -6517,20 +6595,36 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             m_CommandBuffer = m_CommandBuffers[0];
 
             VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-            vkResult = m_Vk.vkCreateFence(m_VkDevice, &fenceInfo, nullptr, &m_BlitFence);
-            if (vkResult != VK_SUCCESS || m_BlitFence == VK_NULL_HANDLE)
+            uint32_t fencesCreated = 0;
+            for (uint32_t i = 0; i < kHelperBlitSets; ++i)
             {
-                m_Log.Print("vkCreateFence failed: %s (%d); helper will WaitIdle before xrEndFrame",
-                    VkResultName(vkResult), static_cast<int>(vkResult));
-                m_BlitFence = VK_NULL_HANDLE;
+                vkResult = m_Vk.vkCreateFence(m_VkDevice, &fenceInfo, nullptr, &m_BlitFence[i]);
+                if (vkResult != VK_SUCCESS || m_BlitFence[i] == VK_NULL_HANDLE)
+                {
+                    m_Log.Print("vkCreateFence set=%u failed: %s (%d)", i, VkResultName(vkResult), static_cast<int>(vkResult));
+                    m_BlitFence[i] = VK_NULL_HANDLE;
+                    break;
+                }
+                ++fencesCreated;
+            }
+            if (fencesCreated != kHelperBlitSets)
+            {
+                m_Log.Print("vkCreateFence: helper will WaitIdle before xrEndFrame");
+                for (uint32_t i = 0; i < kHelperBlitSets; ++i)
+                {
+                    if (m_BlitFence[i] != VK_NULL_HANDLE && m_Vk.vkDestroyFence)
+                        m_Vk.vkDestroyFence(m_VkDevice, m_BlitFence[i], nullptr);
+                    m_BlitFence[i] = VK_NULL_HANDLE;
+                }
             }
 
             m_Log.Print(
-                "Created Vulkan device queueFamily=%u extensions=%zu commandBuffers=%u blitFence=%u",
+                "Created Vulkan device queueFamily=%u extensions=%zu commandBuffers=%u blitSets=%u blitFence=%u",
                 m_GraphicsQueueFamily,
                 enabledDeviceExtensions.size(),
                 kHelperCommandBufferCount,
-                m_BlitFence != VK_NULL_HANDLE ? 1u : 0u);
+                kHelperBlitSets,
+                fencesCreated);
             return true;
         }
 
@@ -7649,7 +7743,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                     eye.ownsImport = false;
                 }
                 ApplyGameEyeSourceBounds(eye, desc, generation);
-                return UpdateBlitDescriptorSet(eyeIndex);
+                if (!UpdateBlitDescriptorSet(eyeIndex))
+                    m_Log.Print("UpdateBlitDescriptorSet failed aliasing right onto left");
+                return eye.image != VK_NULL_HANDLE;
             }
             if (GameEyeMatchesDesc(eye, desc))
             {
@@ -7665,9 +7761,6 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
             if (SwapInCachedGameEye(eyeIndex, desc, generation))
                 return true;
-
-            ParkCurrentGameEye(eyeIndex);
-            DestroyImportedGameEye(eye);
 
             const VkExternalMemoryHandleTypeFlagBits handleType = desc.handleType != 0
                 ? static_cast<VkExternalMemoryHandleTypeFlagBits>(desc.handleType)
@@ -7800,6 +7893,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 return false;
             }
 
+            ParkCurrentGameEye(eyeIndex);
+            DestroyImportedGameEye(eye);
+
             eye.generation = generation;
             eye.kmtHandle = desc.kmtHandle;
             eye.width = desc.width;
@@ -7808,6 +7904,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             eye.image = importedImage;
             eye.view = importedView;
             eye.memory = importedMemory;
+            eye.ownsImport = true;
             eye.layout = VK_IMAGE_LAYOUT_GENERAL;
             eye.uMin = std::clamp(desc.uMin, 0.0f, 1.0f);
             eye.vMin = std::clamp(desc.vMin, 0.0f, 1.0f);
@@ -7831,7 +7928,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             }
 
             if (!UpdateBlitDescriptorSet(eyeIndex))
-                return false;
+            {
+                m_Log.Print("UpdateBlitDescriptorSet failed after import eye=%u; keeping imported image", eyeIndex);
+            }
 
             m_Log.Print("Imported Vulkan shared eye texture eye=%s(%u) gen=%u handle=0x%llX image=0x%llX size=%ux%u format=%u layout=%u bounds=(%.3f %.3f %.3f %.3f) projection=(fovX=%.2f aspect=%.4f) memorySize=%llu",
                 EyeName(eyeIndex), eyeIndex, generation, static_cast<unsigned long long>(desc.kmtHandle),
@@ -7891,15 +7990,33 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
         bool ImportSharedGameTexturesIfNeeded()
         {
+            const bool haveEyes =
+                m_GameEyes[L4D2VR_OPENXR_EYE_LEFT].image != VK_NULL_HANDLE &&
+                m_GameEyes[L4D2VR_OPENXR_EYE_RIGHT].image != VK_NULL_HANDLE;
             L4D2VROpenXrSharedTextureDesc eyes[L4D2VR_OPENXR_EYE_COUNT]{};
             uint32_t generation = 0;
             if (!m_Bridge.ReadSharedTexturePair(
                     eyes[L4D2VR_OPENXR_EYE_LEFT], eyes[L4D2VR_OPENXR_EYE_RIGHT], generation))
-                return false;
+            {
+                static ULONGLONG s_lastSeqlockLogMs = 0;
+                const ULONGLONG nowMs = GetTickCount64();
+                if (s_lastSeqlockLogMs == 0 || nowMs - s_lastSeqlockLogMs >= 1000ull)
+                {
+                    s_lastSeqlockLogMs = nowMs;
+                    m_Log.Print("Shared texture seqlock missed%s",
+                        haveEyes ? "; keeping last imported eyes" : "");
+                }
+                return haveEyes;
+            }
             for (uint32_t eyeIndex = 0; eyeIndex < L4D2VR_OPENXR_EYE_COUNT; ++eyeIndex)
             {
-                if (!ImportGameEyeTexture(eyeIndex, eyes[eyeIndex], generation))
+                if (!ImportGameEyeTexture(eyeIndex, eyes[eyeIndex], generation)
+                    || !GameEyeMatchesDesc(m_GameEyes[eyeIndex], eyes[eyeIndex]))
+                {
+                    m_Log.Print("ImportGameEyeTexture eye=%u failed%s",
+                        eyeIndex, haveEyes ? "; keeping last swapchain pair" : "");
                     return false;
+                }
             }
             return true;
         }
@@ -8165,11 +8282,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             return true;
         }
 
-        bool RenderOverlaySwapchain(uint32_t overlayIndex, const L4D2VROpenXrOverlayDesc& overlay)
+        bool RenderOverlaySwapchain(uint32_t overlayIndex, const L4D2VROpenXrOverlayDesc& overlay, uint32_t overlayGeneration)
         {
             if (overlayIndex >= L4D2VR_OPENXR_OVERLAY_COUNT)
                 return false;
-            if (!ImportOverlayTexture(overlayIndex, overlay, m_Bridge.OverlayGeneration()))
+            if (!ImportOverlayTexture(overlayIndex, overlay, overlayGeneration))
                 return false;
             if (!EnsureOverlaySwapchain(overlayIndex, overlay))
                 return false;
@@ -8179,7 +8296,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             if (m_UseShaderBlit && !UpdateOverlayBlitDescriptorSet(overlayIndex))
                 return false;
 
-            m_CommandBuffer = m_CommandBuffers[2];
+            m_CommandBuffer = BlitCommandBuffer(2);
 
             XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
             uint32_t imageIndex = 0;
@@ -8253,9 +8370,6 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             submitInfo.commandBufferCount = 1;
             submitInfo.pCommandBuffers = &m_CommandBuffer;
             vkResult = m_Vk.vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-            if (vkResult != VK_SUCCESS)
-                return false;
-            vkResult = m_Vk.vkQueueWaitIdle(m_GraphicsQueue);
             if (vkResult != VK_SUCCESS)
                 return false;
 
@@ -8521,37 +8635,72 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             return CmdRenderShaderBlitWithDescriptor(swapchain, imageIndex, source, m_BlitDescriptorSets[descriptorIndex], false, false);
         }
 
-        bool PollBlitFence(uint64_t timeoutNs = 0)
+        VkCommandBuffer BlitCommandBuffer(uint32_t index) const
         {
-            if (!m_BlitFenceOutstanding)
-                return true;
-            if (m_BlitFence == VK_NULL_HANDLE || !m_Vk.vkWaitForFences)
+            return m_CommandBuffers[m_BlitSet * kHelperCommandBuffersPerSet + index];
+        }
+
+        uint32_t OutstandingBlitFences() const
+        {
+            uint32_t n = 0;
+            for (uint32_t i = 0; i < kHelperBlitSets; ++i)
             {
-                m_BlitFenceOutstanding = false;
+                if (m_BlitFenceOutstanding[i])
+                    ++n;
+            }
+            return n;
+        }
+
+        bool PollBlitFenceSet(uint32_t set, uint64_t timeoutNs)
+        {
+            if (set >= kHelperBlitSets || !m_BlitFenceOutstanding[set])
+                return true;
+            if (m_BlitFence[set] == VK_NULL_HANDLE || !m_Vk.vkWaitForFences)
+            {
+                m_BlitFenceOutstanding[set] = false;
                 return true;
             }
-            const VkResult vkResult = m_Vk.vkWaitForFences(m_VkDevice, 1, &m_BlitFence, VK_TRUE, timeoutNs);
+            const VkResult vkResult = m_Vk.vkWaitForFences(m_VkDevice, 1, &m_BlitFence[set], VK_TRUE, timeoutNs);
             if (vkResult == VK_TIMEOUT)
                 return false;
             if (vkResult != VK_SUCCESS)
             {
-                m_Log.Print("vkWaitForFences failed: %s (%d)", VkResultName(vkResult), static_cast<int>(vkResult));
+                m_Log.Print("vkWaitForFences set=%u failed: %s (%d)", set, VkResultName(vkResult), static_cast<int>(vkResult));
                 return false;
             }
             if (m_Vk.vkResetFences)
-                m_Vk.vkResetFences(m_VkDevice, 1, &m_BlitFence);
-            m_BlitFenceOutstanding = false;
-            if (m_BlitFenceFrameId != 0)
+                m_Vk.vkResetFences(m_VkDevice, 1, &m_BlitFence[set]);
+            m_BlitFenceOutstanding[set] = false;
+            if (m_BlitFenceFrameId[set] != 0)
             {
-                m_Bridge.NoteConsumedFrame(m_BlitFenceFrameId);
-                m_BlitFenceFrameId = 0;
+                m_Bridge.NoteConsumedFrame(m_BlitFenceFrameId[set]);
+                m_BlitFenceFrameId[set] = 0;
             }
             return true;
         }
 
+        void PollBlitFences(uint64_t timeoutNs = 0)
+        {
+            for (uint32_t i = 0; i < kHelperBlitSets; ++i)
+                PollBlitFenceSet(i, timeoutNs);
+        }
+
+        bool SelectBlitSet()
+        {
+            PollBlitFences(0);
+            const uint32_t next = m_BlitSet ^ 1u;
+            if (!m_BlitFenceOutstanding[next])
+            {
+                m_BlitSet = next;
+                return true;
+            }
+            return !m_BlitFenceOutstanding[m_BlitSet];
+        }
+
         bool SignalBlitFence(uint32_t consumedFrameId)
         {
-            if (m_BlitFence == VK_NULL_HANDLE || !m_Vk.vkQueueSubmit)
+            const uint32_t set = m_BlitSet;
+            if (set >= kHelperBlitSets || m_BlitFence[set] == VK_NULL_HANDLE || !m_Vk.vkQueueSubmit)
             {
                 if (m_Vk.vkQueueWaitIdle)
                     m_Vk.vkQueueWaitIdle(m_GraphicsQueue);
@@ -8560,43 +8709,87 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 return true;
             }
             VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
-            const VkResult vkResult = m_Vk.vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_BlitFence);
+            const VkResult vkResult = m_Vk.vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_BlitFence[set]);
             if (vkResult != VK_SUCCESS)
             {
-                m_Log.Print("vkQueueSubmit(blit fence) failed: %s (%d)", VkResultName(vkResult), static_cast<int>(vkResult));
+                m_Log.Print("vkQueueSubmit(blit fence) set=%u failed: %s (%d)", set, VkResultName(vkResult), static_cast<int>(vkResult));
                 return false;
             }
-            m_BlitFenceOutstanding = true;
-            m_BlitFenceFrameId = consumedFrameId;
+            m_BlitFenceOutstanding[set] = true;
+            m_BlitFenceFrameId[set] = consumedFrameId;
             return true;
         }
 
-        bool RenderEye(uint32_t eyeIndex, uint32_t frameIndex, uint32_t sharedFrameId, bool waitForQueueIdle = true)
+        bool ReleaseEyeSwapchain(uint32_t eyeIndex)
+        {
+            if (eyeIndex >= L4D2VR_OPENXR_EYE_COUNT || !m_EyeSwapchainAcquired[eyeIndex])
+                return true;
+            m_EyeSwapchainAcquired[eyeIndex] = false;
+            if (eyeIndex >= m_Eyes.size() || m_Eyes[eyeIndex].handle == XR_NULL_HANDLE
+                || !m_Xr.xrReleaseSwapchainImage)
+                return false;
+            XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+            return Succeeded(m_Log, "xrReleaseSwapchainImage",
+                m_Xr.xrReleaseSwapchainImage(m_Eyes[eyeIndex].handle, &releaseInfo));
+        }
+
+        void ReleaseAllAcquiredEyeSwapchains()
+        {
+            for (uint32_t eye = 0; eye < L4D2VR_OPENXR_EYE_COUNT; ++eye)
+                ReleaseEyeSwapchain(eye);
+        }
+
+        bool WaitGraphicsQueueIdle()
+        {
+            if (!m_Vk.vkQueueWaitIdle || m_GraphicsQueue == VK_NULL_HANDLE)
+                return true;
+            const VkResult vkResult = m_Vk.vkQueueWaitIdle(m_GraphicsQueue);
+            if (vkResult != VK_SUCCESS)
+            {
+                m_Log.Print("vkQueueWaitIdle(stereo pair) failed: %s (%d)",
+                    VkResultName(vkResult), static_cast<int>(vkResult));
+                return false;
+            }
+            return true;
+        }
+
+        bool RenderEye(uint32_t eyeIndex, uint32_t frameIndex, uint32_t sharedFrameId,
+            bool waitForQueueIdle = true, bool releaseSwapchain = true)
         {
             if (eyeIndex >= L4D2VR_OPENXR_EYE_COUNT)
                 return false;
-            m_CommandBuffer = m_CommandBuffers[eyeIndex];
+            m_CommandBuffer = BlitCommandBuffer(eyeIndex);
             VulkanEyeSwapchain& eye = m_Eyes[eyeIndex];
             XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
             uint32_t imageIndex = 0;
             XrResult xrResult = m_Xr.xrAcquireSwapchainImage(eye.handle, &acquireInfo, &imageIndex);
             if (!Succeeded(m_Log, "xrAcquireSwapchainImage", xrResult))
                 return false;
+            m_EyeSwapchainAcquired[eyeIndex] = true;
             XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
             waitInfo.timeout = XR_INFINITE_DURATION;
             xrResult = m_Xr.xrWaitSwapchainImage(eye.handle, &waitInfo);
             if (!Succeeded(m_Log, "xrWaitSwapchainImage", xrResult))
+            {
+                ReleaseEyeSwapchain(eyeIndex);
                 return false;
+            }
 
             const VkImage dstImage = eye.images[imageIndex].image;
             VkResult vkResult = m_Vk.vkResetCommandBuffer(m_CommandBuffer, 0);
             if (vkResult != VK_SUCCESS)
+            {
+                ReleaseEyeSwapchain(eyeIndex);
                 return false;
+            }
             VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
             beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
             vkResult = m_Vk.vkBeginCommandBuffer(m_CommandBuffer, &beginInfo);
             if (vkResult != VK_SUCCESS)
+            {
+                ReleaseEyeSwapchain(eyeIndex);
                 return false;
+            }
 
             VulkanImageDumpTarget sourceDump;
             VulkanImageDumpTarget swapchainDump;
@@ -8604,7 +8797,10 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             {
                 const VulkanGameEyeTexture& source = m_GameEyes[eyeIndex];
                 if (source.image == VK_NULL_HANDLE)
+                {
+                    ReleaseEyeSwapchain(eyeIndex);
                     return false;
+                }
                 VulkanGameEyeTexture blitSource = source;
                 L4D2VROpenXrPoseDesc cropPose{};
                 const bool poseMono =
@@ -8709,7 +8905,10 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                         0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
                     if (!CmdRenderShaderBlit(eyeIndex, eye, imageIndex, blitSource, containFit))
+                    {
+                        ReleaseEyeSwapchain(eyeIndex);
                         return false;
+                    }
                     eye.layouts[imageIndex] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
                 }
                 else
@@ -8819,6 +9018,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             {
                 DestroyImageDumpTarget(sourceDump);
                 DestroyImageDumpTarget(swapchainDump);
+                ReleaseEyeSwapchain(eyeIndex);
                 return false;
             }
             VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -8829,6 +9029,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             {
                 DestroyImageDumpTarget(sourceDump);
                 DestroyImageDumpTarget(swapchainDump);
+                ReleaseEyeSwapchain(eyeIndex);
                 return false;
             }
             if (waitForQueueIdle || sourceDump.buffer != VK_NULL_HANDLE || swapchainDump.buffer != VK_NULL_HANDLE)
@@ -8838,15 +9039,19 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 {
                     DestroyImageDumpTarget(sourceDump);
                     DestroyImageDumpTarget(swapchainDump);
+                    ReleaseEyeSwapchain(eyeIndex);
                     return false;
                 }
             }
             CompleteImageDumpTarget(sourceDump);
             CompleteImageDumpTarget(swapchainDump);
 
-            XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-            xrResult = m_Xr.xrReleaseSwapchainImage(eye.handle, &releaseInfo);
-            return Succeeded(m_Log, "xrReleaseSwapchainImage", xrResult);
+            if (releaseSwapchain)
+            {
+                if (!ReleaseEyeSwapchain(eyeIndex))
+                    return false;
+            }
+            return true;
         }
 
         XrRect2Di BuildProjectionImageRect(const VulkanGameEyeTexture& source, const VulkanEyeSwapchain& eye)
@@ -8949,9 +9154,18 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             L4D2VROpenXrPoseDesc lastGameRenderPose{};
             uint32_t lastGameRenderPoseGeneration = 0;
             bool eyeSwapchainsHaveContent = false;
+            uint32_t blittedSharedTextureFrameId = 0;
             ULONGLONG lastWaitingTextureLog = 0;
             ULONGLONG lastWaitingFrameLog = 0;
             uint32_t compositorFrames = 0;
+            uint32_t fenceBusyFrames = 0;
+            double waitFrameDtMsSum = 0.0;
+            double lastWaitFrameMs = 0.0;
+            double waitFrameWindow[64]{};
+            double waitFrameWindowSum = 0.0;
+            uint32_t waitFrameWindowCount = 0;
+            uint32_t waitFrameWindowI = 0;
+            double waitFrameLastMs = 0.0;
             m_Log.Print("Entering Vulkan frame loop targetFrames=%u waitReadySeconds=%u parentPid=%lu requireSharedTextures=%u",
                 options.targetFrames, options.waitReadySeconds, static_cast<unsigned long>(options.parentPid), requireSharedTextures ? 1u : 0u);
 
@@ -8975,6 +9189,14 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                     break;
                 if (!m_SessionRunning)
                 {
+                    // After a live session, SteamVR can STOPPING -> IDLE -> READY.
+                    // The old timer was from FrameLoop start, so any STOPPING after
+                    // waitReadySeconds (45s) immediately exited and dropped Home.
+                    if (submittedFrames > 0 || compositorFrames > 0)
+                    {
+                        Sleep(10);
+                        continue;
+                    }
                     const ULONGLONG elapsedMs = GetTickCount64() - startTicks;
                     if (options.waitReadySeconds > 0 && elapsedMs > static_cast<ULONGLONG>(options.waitReadySeconds) * 1000ull)
                     {
@@ -9022,7 +9244,17 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                         lastLoggedSharedTextureGeneration = sharedTextureLayout;
                     }
                     if (requireSharedTextures && !ImportSharedGameTexturesIfNeeded())
-                        return 28;
+                    {
+                        if (submittedFrames == 0 && compositorFrames == 0)
+                            return 28;
+                        static ULONGLONG s_lastKeepLogMs = 0;
+                        const ULONGLONG nowMs = GetTickCount64();
+                        if (s_lastKeepLogMs == 0 || nowMs - s_lastKeepLogMs >= 1000ull)
+                        {
+                            s_lastKeepLogMs = nowMs;
+                            m_Log.Print("Shared eye import miss after live session; keeping last swapchain");
+                        }
+                    }
                 }
 
                 uint32_t sharedTextureFrameId = 0;
@@ -9049,6 +9281,22 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 XrResult result = m_Xr.xrWaitFrame(m_Session, &waitInfo, &frameState);
                 if (!Succeeded(m_Log, "xrWaitFrame", result))
                     return 22;
+                {
+                    const double waitFrameMs = QpcNowMs();
+                    if (lastWaitFrameMs > 0.0)
+                    {
+                        const double dt = waitFrameMs - lastWaitFrameMs;
+                        waitFrameDtMsSum += dt;
+                        waitFrameLastMs = dt;
+                        waitFrameWindowSum -= waitFrameWindow[waitFrameWindowI];
+                        waitFrameWindow[waitFrameWindowI] = dt;
+                        waitFrameWindowSum += dt;
+                        waitFrameWindowI = (waitFrameWindowI + 1u) % 64u;
+                        if (waitFrameWindowCount < 64u)
+                            ++waitFrameWindowCount;
+                    }
+                    lastWaitFrameMs = waitFrameMs;
+                }
                 XrFrameBeginInfo beginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
                 result = m_Xr.xrBeginFrame(m_Session, &beginInfo);
                 if (!Succeeded(m_Log, "xrBeginFrame", result))
@@ -9056,6 +9304,12 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
                 m_InputBridge.UpdateFrame(frameState.predictedDisplayTime, m_Bridge, m_Log);
                 RefreshFlipSubmitY();
+                blittedSharedTextureFrameId = 0;
+                bool blittedGpuWork = false;
+                bool blitSetReady = false;
+                PollBlitFences(0);
+                if (OutstandingBlitFences() == kHelperBlitSets)
+                    ++fenceBusyFrames;
 
                 bool layerReady = false;
                 bool poseMono2d = false;
@@ -9089,10 +9343,13 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                         locatedCount,
                         viewState.viewStateFlags,
                         frameState.predictedDisplayTime));
-                    // Do not Sleep for a game frame here. Waiting ~8ms past
-                    // xrWaitFrame made xrEndFrame late, and displayTime matching
-                    // then flipped submit poses between game-render and located
-                    // views (headset twitch while the head was still, 2026-08-30).
+                    // HMD 2026-09-20: polling here for a pair tagged with
+                    // this predictedDisplayTime timed out almost every
+                    // frame (matchHit=2/N, matchWaitAvg=9.01ms) and made
+                    // xrEndFrame late — same class as the old 8 ms Sleep
+                    // after xrWaitFrame. Blit the latest published pair
+                    // immediately. Slot consume is the GPU fence below,
+                    // not a CPU wait.
                     if (requireSharedTextures)
                     {
                         sharedTextureFrameReady = m_Bridge.ReadSharedTextureFrame(
@@ -9123,6 +9380,14 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
                         if (sharedTexturesReady && haveNewResolvedSharedFrame)
                         {
+                            if (!blitSetReady)
+                                blitSetReady = SelectBlitSet();
+                            if (!blitSetReady)
+                            {
+                                ++m_BlitSkips;
+                            }
+                            else
+                            {
                             // Re-read the eye descriptors here, not only before
                             // xrWaitFrame. That earlier snapshot is up to a whole
                             // display frame old, and the game now rotates publish
@@ -9130,15 +9395,25 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             // already-superseded slot and the image drags behind the
                             // head (2026-08-31). Both eyes still resolve to the same
                             // published slot, so they stay the same game frame.
-                            if (requireSharedTextures && !ImportSharedGameTexturesIfNeeded())
-                                return 28;
+                            const bool importedPair = !requireSharedTextures
+                                || ImportSharedGameTexturesIfNeeded();
+                            if (requireSharedTextures && !importedPair)
+                            {
+                                if (submittedFrames == 0 && compositorFrames == 0)
+                                    return 28;
+                                // Keep the last left/right swapchain pair. Do not
+                                // blit a new left onto an old right.
+                            }
+                            else
+                            {
                             m_Bridge.NoteConsumingFrame(sharedTextureFrameId);
                             for (uint32_t eye = 0; eye < 2; ++eye)
                             {
-                                if (!RenderEye(eye, submittedFrames, sharedTextureFrameId))
+                                if (!RenderEye(eye, submittedFrames, sharedTextureFrameId, false))
                                     return 25;
                             }
-                            m_Bridge.NoteConsumedFrame(sharedTextureFrameId);
+                            blittedSharedTextureFrameId = sharedTextureFrameId;
+                            blittedGpuWork = true;
 
                             eyeSwapchainsHaveContent = true;
                             if (requireSharedTextures)
@@ -9149,6 +9424,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             {
                                 lastGameRenderPose = gameRenderPose;
                                 lastGameRenderPoseGeneration = gameRenderPoseGeneration;
+                            }
+                            }
                             }
                         }
 
@@ -9416,7 +9693,10 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
                             for (uint32_t overlayIndex = 0; overlayIndex < L4D2VR_OPENXR_OVERLAY_COUNT; ++overlayIndex)
                             {
-                                const L4D2VROpenXrOverlayDesc overlay = m_Bridge.Overlay(overlayIndex);
+                                L4D2VROpenXrOverlayDesc overlay{};
+                                uint32_t overlayGeneration = 0;
+                                if (!m_Bridge.ReadOverlay(overlayIndex, overlay, overlayGeneration))
+                                    continue;
                                 if (!overlay.valid || !overlay.visible || !overlay.texture.valid)
                                 {
                                     ResetOverlaySpatialLock(overlayIndex, "hidden");
@@ -9424,7 +9704,6 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                 }
 
                                 VulkanEyeSwapchain& overlaySwapchain = m_OverlaySwapchains[overlayIndex];
-                                const uint32_t overlayGeneration = m_Bridge.OverlayGeneration();
                                 const bool overlayNeedsBlit =
                                     overlayFrameReady &&
                                     (overlayFrameGeneration != lastSubmittedOverlayFrameGeneration ||
@@ -9434,9 +9713,17 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                 bool overlayReadyForSubmit = overlaySwapchain.handle != XR_NULL_HANDLE;
                                 if (overlayNeedsBlit)
                                 {
-                                    overlayReadyForSubmit = RenderOverlaySwapchain(overlayIndex, overlay);
-                                    if (overlayReadyForSubmit)
-                                        blittedAnyOverlayFrame = true;
+                                    if (!blitSetReady)
+                                        blitSetReady = SelectBlitSet();
+                                    if (blitSetReady)
+                                    {
+                                        overlayReadyForSubmit = RenderOverlaySwapchain(overlayIndex, overlay, overlayGeneration);
+                                        if (overlayReadyForSubmit)
+                                        {
+                                            blittedAnyOverlayFrame = true;
+                                            blittedGpuWork = true;
+                                        }
+                                    }
                                 }
 
                                 if (overlayReadyForSubmit && overlaySwapchain.handle != XR_NULL_HANDLE)
@@ -9704,6 +9991,12 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                     layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer);
                 for (uint32_t overlayLayerIndex = 0; overlayLayerIndex < overlayLayerCount; ++overlayLayerIndex)
                     layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&overlayLayers[overlayLayerIndex]);
+                // Do not vkQueueWaitIdle before xrEndFrame (that missed
+                // vsync). Signal a fence after the blit submits; the next
+                // WaitFrame polls it and then NoteConsumed so the game
+                // will not reuse a slot still on the GPU.
+                if (blittedGpuWork)
+                    SignalBlitFence(blittedSharedTextureFrameId);
                 XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
                 endInfo.displayTime = frameState.predictedDisplayTime;
                 endInfo.environmentBlendMode = m_BlendMode;
@@ -9763,9 +10056,16 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             ? "OpenXR Vulkan 2D menu quad submitted"
                             : "OpenXR Vulkan frame submitted without projection layer"));
                     if (submittedFrames == 1 || (submittedFrames % 60) == 0)
-                        m_Log.Print("Submitted OpenXR Vulkan frame %u layers=%u projection=%u overlays=%u mono2dQuad=%u blitSkip=%u fenceBusy=%u",
+                    {
+                        m_Log.Print("Submitted OpenXR Vulkan frame %u layers=%u projection=%u overlays=%u mono2dQuad=%u blitSkip=%u fenceBusy=%u "
+                            "waitFrameAvg=%.2fms waitFrameWin=%.2fms waitFrameLast=%.2fms fenceBusyFrames=%u",
                             submittedFrames, layerCount, submitProjectionLayer ? 1u : 0u, overlayLayerCount,
-                            addedMono2dQuad ? 1u : 0u, m_BlitSkips, m_BlitFenceOutstanding ? 1u : 0u);
+                            addedMono2dQuad ? 1u : 0u, m_BlitSkips, OutstandingBlitFences(),
+                            compositorFrames ? waitFrameDtMsSum / compositorFrames : 0.0,
+                            waitFrameWindowCount ? waitFrameWindowSum / waitFrameWindowCount : 0.0,
+                            waitFrameLastMs,
+                            fenceBusyFrames);
+                    }
                 }
                 if (options.targetFrames > 0 && submittedFrames >= options.targetFrames)
                     break;
@@ -9832,8 +10132,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 m_Vk.vkDestroySampler(m_VkDevice, m_BlitSampler, nullptr);
             if (m_BlitDescriptorSetLayout != VK_NULL_HANDLE && m_Vk.vkDestroyDescriptorSetLayout)
                 m_Vk.vkDestroyDescriptorSetLayout(m_VkDevice, m_BlitDescriptorSetLayout, nullptr);
-            if (m_BlitFence != VK_NULL_HANDLE && m_Vk.vkDestroyFence)
-                m_Vk.vkDestroyFence(m_VkDevice, m_BlitFence, nullptr);
+            for (uint32_t i = 0; i < kHelperBlitSets; ++i)
+            {
+                if (m_BlitFence[i] != VK_NULL_HANDLE && m_Vk.vkDestroyFence)
+                    m_Vk.vkDestroyFence(m_VkDevice, m_BlitFence[i], nullptr);
+            }
             if (m_CommandPool != VK_NULL_HANDLE && m_Vk.vkDestroyCommandPool)
                 m_Vk.vkDestroyCommandPool(m_VkDevice, m_CommandPool, nullptr);
             if (m_AppSpace != XR_NULL_HANDLE && m_Xr.xrDestroySpace)
@@ -9881,12 +10184,15 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         uint32_t m_GraphicsQueueFamily = UINT32_MAX;
         VkPhysicalDeviceMemoryProperties m_MemoryProperties{};
         VkCommandPool m_CommandPool = VK_NULL_HANDLE;
-        static constexpr uint32_t kHelperCommandBufferCount = 3;
+        static constexpr uint32_t kHelperBlitSets = 2;
+        static constexpr uint32_t kHelperCommandBuffersPerSet = 3;
+        static constexpr uint32_t kHelperCommandBufferCount = kHelperBlitSets * kHelperCommandBuffersPerSet;
         VkCommandBuffer m_CommandBuffers[kHelperCommandBufferCount]{};
         VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
-        VkFence m_BlitFence = VK_NULL_HANDLE;
-        bool m_BlitFenceOutstanding = false;
-        uint32_t m_BlitFenceFrameId = 0;
+        VkFence m_BlitFence[kHelperBlitSets]{};
+        bool m_BlitFenceOutstanding[kHelperBlitSets]{};
+        uint32_t m_BlitFenceFrameId[kHelperBlitSets]{};
+        uint32_t m_BlitSet = 0;
         uint32_t m_BlitSkips = 0;
         bool m_UseShaderBlit = false;
         int m_FlipSubmitYOption = -1;
@@ -9910,6 +10216,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         std::vector<XrViewConfigurationView> m_ViewConfigs;
         std::vector<VulkanEyeSwapchain> m_Eyes;
         std::array<VulkanGameEyeTexture, L4D2VR_OPENXR_EYE_COUNT> m_GameEyes;
+        bool m_EyeSwapchainAcquired[L4D2VR_OPENXR_EYE_COUNT]{};
         static constexpr uint32_t kGameEyeCacheSlots = 4;
         std::array<std::array<VulkanGameEyeTexture, kGameEyeCacheSlots>, L4D2VR_OPENXR_EYE_COUNT> m_GameEyeCache{};
         std::array<VulkanGameEyeTexture, L4D2VR_OPENXR_OVERLAY_COUNT> m_OverlayTextures;
@@ -9933,6 +10240,13 @@ int wmain(int argc, wchar_t** argv)
 
     log.Print("L4D2VR OpenXR Helper64 starting");
     log.Print("Log path: %s", Narrow(options.logPath).c_str());
+    // OpenXR Simulator's Vulkan swapchains are D3D12 SHARED images + a
+    // timeline VkSemaphore. WMR uses XR_APILAYER_MBUCCHIA_vulkan_d3d12_interop
+    // instead. Stereo projection after map load killed bms.exe (exitCode=1)
+    // on Simulator 1.0.27 while the same DLL ran on WMR. The runtime's own
+    // CPU-wait fallback is ignored by other runtimes.
+    SetEnvironmentVariableW(L"SIMXR_VK_NO_TIMELINE", L"1");
+    log.Print("SIMXR_VK_NO_TIMELINE=1 (OpenXR Simulator Vulkan/D3D12 timeline fallback)");
     log.Print("OpenXR projection eye swap option: %s", FlipSubmitYOptionName(options.swapProjectionEyes));
     log.Print("OpenXR projection view-order swap: %s", options.swapProjectionViewOrder ? "enabled" : "disabled");
     log.Print("OpenXR projection horizontal mirror: %s", options.mirrorProjectionHorizontal ? "enabled" : "disabled");

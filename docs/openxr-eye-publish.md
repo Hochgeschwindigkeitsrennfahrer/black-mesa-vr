@@ -329,6 +329,98 @@ reproject; motion smoothing needs the slower regular cadence.
 - Keep GPU run-ahead bounded (`OpenXrMaxPending`); the published pose must
   not be more than one GPU frame behind the helper's read.
 
+### 8. Multicore Present skip with a dead ICallQueue (Index, 2026-09-09)
+
+`MulticoreMode=true` grows a 2×3 atlas (`MC ring ready`) and, after
+pass-through warmup, sets `mat_queue_mode` 2. `McPipelineEnabled()` then made
+`SubmitVRTextures` return without copying 1x eyes, expecting
+`QueueMcCompositeToRing` → material-thread `CopyEyesToOpenXrPublishSlot`.
+
+Black Mesa's IMatRenderContext is shifted vs Source. Slot 146 can return a
+non-null object that is **not** `ICallQueue`; `QueueFunctorInternal` SEH-fails
+and is later `no ICallQueue`. Stereo still runs (`mc=1`, `direct=1`, NPCs
+audible) but `published=0/s`. The helper keeps the last 2D menu letterbox
+(stuck cursor, dark HMD). SteamVR's desktop preview can still flicker the
+live game because the HWND Present path is unrelated.
+
+Index 1848×2052 → ring ~3728×6192, which fits typical D3D9 caps so this path
+**arms**. A taller HMD (WMR G2 3168×3104 → ring height ~9312) can fail ring
+create and stay on the single-thread publish path — that is the headset
+split, not an Index compositor quirk.
+
+Fix: do not skip Present copy unless a composite actually queued or finished.
+If `QueueFunctorInternal` SEH-fails, forget that slot and copy 1x eyes from
+Present. Do not retry the other vtable slot in the same call, and do not
+bind/copy on the game thread — that killed `bms.exe` at first stereo
+(2026-09-09, exitCode=1). `mat_queue_mode` 2 stays on.
+
+## 9. High FPS, non-native 90 Hz, occasional broken frame (2026-09-20)
+
+Desktop Present and `bmvr_log.txt` `present tick` can sit at 180–320/s while
+the helper's `Submitted OpenXR Vulkan frame` timestamps are ~60/s against a
+90 Hz G2. That is not "probably reprojection" as a guess: the compositor
+client is missing vsync, so the runtime fills the other 30 Hz with ATW /
+reprojection. Extra game frames do not help.
+
+Same log interval in-game:
+
+```
+present=186-228/s published=186-228/s skipRate=0/s helperFeedback=0 consumedLag=-1
+```
+
+Helper gen skips (`sourceGen=22` then `26`) show dropped publishes. Slot reuse
+on `OpenXrDeferredPublish=false` ignored `helperConsumedFrameId` and
+round-robined 4 slots at ~200/s (~20 ms wrap) while two `vkQueueWaitIdle`s
+per eye plus overlay idle held the blit ~16 ms — a slot the compositor was
+still reading could be overwritten. That is the occasional broken / old frame.
+
+HL2VR does not do this. `OnFrameBegin` → `Mat_AwaitFrame` (`WaitGetPoses`) →
+render with that pose → DXVK submit thread `Submit_TextureWithPose` →
+`PostPresentHandoff`. One compositor frame in flight. Next `WaitGetPoses`
+waits for that handoff.
+
+OpenXR equivalent that **failed on HMD** (2026-09-20, WMR G2 90 Hz):
+
+1. Game waited up to 16 ms for `helperConsumedFrameId` and 32 ms for a new
+   `displayTime` before stereo (`handoffWait` every published frame,
+   `await avg=5–15ms max=16–47ms`).
+2. Helper polled ≤9 ms after `xrWaitFrame` for a pair tagged with this
+   `predictedDisplayTime` (`matchHit=2–6` out of thousands,
+   `matchWaitAvg=9.01ms` — the timeout every frame).
+3. Same-`displayTime` skip starved the menu (`published=0/s skipVsync=258`
+   because the latched panel pose never changes).
+
+`waitFrameAvg` sat at 12.5–15.5 ms, in-game `published≈helperHz≈44–78`.
+That is the documented 2026-08-30 failure: waiting after `xrWaitFrame`
+makes `xrEndFrame` late, so WMR cannot hold 90 Hz and ATW/reprojects.
+Glitched frames did drop (`helperFeedback=1` slot gate). Keep the gate;
+do not keep the waits.
+
+Corrected path after HMD run 1 (removed helper 9 ms poll and consume waits).
+**HMD run 2 (user, 2026-09-20):** desktop FPS improved; still heavy
+reprojection; “not true 90 Hz”. In-game logs: `present=150-250/s`
+`await=130-190/s` stereo pairs of 3168x3088, `helperHz` 89 → 45,
+`helperHold` 9 → 132, `consumedLag=2-4`. Helper `waitFrameWin` lifetime
+avg ended at 14.9 ms (~67 Hz) with `blitSkip`/`fenceBusyFrames` climbing.
+Stereo CPU is ~1 ms; the extra pairs saturate the GPU so the helper blit
+fence misses vsync and the runtime ATWs.
+
+HL2VR waits `WaitGetPoses` then draws **one** pair with that pose. OpenXR
+now:
+
+1. Game `AwaitOpenXrCompositorFrame`: wait ≤22 ms for a new helper
+   `displayTime`/`gen` only (no consume wait). No new pose → skip this
+   engine frame’s stereo (last swapchain stays). Desktop FPS in a map
+   should sit near 90.
+2. Helper still EndFrames immediately. Two blit command-buffer/fence sets
+   so one in-flight blit does not skip the next vsync.
+3. Slot consume-id gate stays.
+
+Expect in-game `await≈90/s`, `helperHz≈90`, helper `waitFrameWin≈11ms`,
+`blitSkip` not climbing. Do not claim native 90 Hz until the headset run
+shows that. Desktop FPS will look lower in-map; that is the compositor
+cadence, not a settings cut.
+
 ## Status
 
 Defects 1-5 are implemented and confirmed live in the game/helper logs (publish

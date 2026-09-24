@@ -1,8 +1,29 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <cctype>
 #include <cstring>
+
+// Odd generation = writer is in the middle of the payload. Release fences
+// keep MSVC from moving the payload outside that window. The game and the
+// helper are different processes; a process-local mutex does not order them.
+inline void L4D2VR_SeqlockBegin(uint32_t& generation)
+{
+    ++generation;
+    std::atomic_thread_fence(std::memory_order_release);
+}
+
+inline void L4D2VR_SeqlockEnd(uint32_t& generation)
+{
+    std::atomic_thread_fence(std::memory_order_release);
+    ++generation;
+}
+
+inline void L4D2VR_SeqlockAcquire()
+{
+    std::atomic_thread_fence(std::memory_order_acquire);
+}
 
 constexpr uint32_t L4D2VR_OPENXR_BRIDGE_MAGIC = 0x5258344Cu; // L4XR
 constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 14;

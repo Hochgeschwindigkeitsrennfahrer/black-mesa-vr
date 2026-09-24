@@ -81,7 +81,7 @@ public:
     void EmitEntitySound(C_BaseEntity* entity, const char* soundName);
     void PlayUiSound(const char* sample);
     void ScanWristHudNetVars();
-    bool ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary);
+    bool ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air);
     // False only when m_bWearingSuit resolved and reads 0 (pre-HEV intro).
     bool LocalPlayerHasSuit();
     // True only when m_bZooming resolved and reads 1 (crossbow scope).
@@ -125,6 +125,7 @@ public:
     bool SetConVarInt(const char* name, int value) const;
     bool SetConVarFloat(const char* name, float value) const;
     bool GetConVarInt(const char* name, int& value) const;
+    bool GetConVarFloat(const char* name, float& value) const;
     bool MaterialVTableMatchesDump() const;
 
     static void logMsg(const char* fmt, ...);

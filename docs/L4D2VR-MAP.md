@@ -41,7 +41,7 @@ Look: HMD yaw/pitch on stereo `CViewSetup` copies after LevelInit gate (reject `
 
 L4D2VR: `CreateNamedRenderTargetTextureEx` (`leftEye0` / `rightEye0`) with `m_CreatingTextureID`. Overlay `AntiAliasing` is DXVK MSAA on those named eyes, resolved into `leftEyeSubmit0` / `rightEyeSubmit0`.
 
-BMVR: retry that **without** poking L4D2’s `isGameRunning` offset (wrong on BM and a likely prototype crash). If it returns null or AVs (SEH), private `CreateTexture` + unbind/pre-Present capture. `AntiAliasing` in `VR/config.txt` is the same DXVK MSAA + submit-resolve pair on those private eyes (restart). World MSAA still needs named per-eye RTs.
+BMVR: retry that **without** poking L4D2’s `isGameRunning` offset (wrong on BM and a likely prototype crash). If it returns null or AVs (SEH), private `CreateTexture` + unbind/pre-Present capture. Scene AA is HL2VR `Msaa` on separate-depth `_rt_FullFrame*` and `_rt_gb*` (resolve-on-sample). `Msaa` in `VR/config.txt` (restart). Do not hook Advanced Video Antialiasing mode. Private eyes stay single-sample. Do not retry named per-eye RTs for MSAA.
 
 Eye size is OpenVR recommended × `RenderScale` (`hmd_offscreen`), not HWND-clamped. Gameplay `_rt_FullFrameFB` / `_rt_gb*` stay at the window (`hmd_world` persist-skip): LITERAL grow to 2544×2480 still PushRT'd 2560×1440, so the HMD showed a warped top strip and garbage below. SetRT redirect only if those RTs actually match the eyes. `steamvr_rt` (redirect without a matching G-buffer) stays persist-skipped.
 

@@ -62,9 +62,19 @@ namespace dxvk
 
     if (message == WM_DESTROY)
       ResetWindowProc(window);
+    else if (message == WM_ACTIVATE) {
+      // ACTIVATEAPP often arrives after Steam/NVIDIA overlay GL has already
+      // started tearing down. Pause+tab crashed with exitCode=1 and no
+      // deactivated log (2026-09-13, 2026-09-20). WA_INACTIVE is earlier.
+      if (vrSession)
+        g_Game->m_VR->NoteAppActivated(LOWORD(wparam) != WA_INACTIVE);
+    }
     else if (message == WM_ACTIVATEAPP) {
       D3DDEVICE_CREATION_PARAMETERS create_parms;
       device->GetCreationParameters(&create_parms);
+
+      if (vrSession)
+        g_Game->m_VR->NoteAppActivated(wparam != 0);
 
       if (!vrSession && !(create_parms.BehaviorFlags & D3DCREATE_NOWINDOWCHANGES)) {
         D3D9WindowMessageFilter filter(window);

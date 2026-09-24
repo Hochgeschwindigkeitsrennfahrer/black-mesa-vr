@@ -1,0 +1,10 @@
+"VertexlitGeneric"
+{
+	"$basetexture"		"models/player/player_alt"
+	"$phongexponenttexture"	"models/player/player_alt_exp"
+	"$lightwarptexture"		"models/player/skin_lightwarp"
+	"$phong"			"1"
+	"$phongboost"		"1"
+	"$phongalbedotint"		"1"
+	"$phongfresnelranges"	"[0 0.5 1]"
+}

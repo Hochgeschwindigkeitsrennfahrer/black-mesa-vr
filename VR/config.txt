@@ -1,199 +1,55 @@
-# Black Mesa VR — RenderScale is a multiplier on SteamVR's recommended
-# per-eye size. The SteamVR overlay SS / resolution slider applies live
-# (eye textures recreate after ~300ms). RenderScale itself is still read
-# at DLL load; restart after editing this file.
+# Black Mesa VR. Read once at launch. Quit and restart after edits.
+# Player settings only. Other behavior uses the built-in defaults.
 
-# Multiplier on SteamVR's recommended per-eye size (OpenVR
-# GetRecommendedRenderTargetSize). Independent of the desktop window.
-# 16-aligned, cap 4096.
-#
-# 1.0 = full SteamVR recommended (can be taller than the HWND).
-# 0.5–0.75 if GPU bound. Above 1.0 is extra supersampling on top of SteamVR SS.
-#
-# false (default working path): world still draws at the desktop window
-# (2560x1440) and is stretched into the SteamVR-sized eyes. Raising SS does
-# not add world pixels.
-# true: grow FullFrame + G-buffer to the eye size so SteamVR SS is real
-# source resolution. Revert: set false and restart. A crash disables it
-# for the next launch only.
-# FullFrame grows on this map load (not the next one). Log should say
-# worldMatch=1 / grow LITERAL, not "upscaling window" and not
-# "G-buffer must not outgrow FullFrame" after spawn. Flashlight + no
-# ghost world means G-buffer and FullFrame actually match.
-WorldRenderAtEyeSize=true
-#
-# Dragging SteamVR's resolution / SS slider recreates the eye textures after a
-# short settle (no game restart). World G-buffers still need a map load to grow.
-# VRRenderScale=1.25
+# Multiplier on the runtime's recommended per-eye size. 1.0 = recommended.
+# 0.75 if the GPU is bound. Above 1.0 is extra supersampling.
 RenderScale=1.0
 
-# Perf: false (default) skips the leftover 16:9 desktop scene render after the
-# stereo pair — saves ~30% frame time. Headset flashlight uses gbmatch eyes.
-# true = proper 16:9 desktop at extra cost.
-DesktopLeftoverRender=false
+# true: the world renders at the eye size.
+# false: the world stays at the desktop window and is stretched into the eyes.
+WorldRenderAtEyeSize=true
 
-# Stereo vis: false keeps PVS + r_occlusion + r_portalsopenall 0. true is
-# the old whole-map pair (occlusion off, portals open) — tanks FPS.
-ForceOpenVis=false
-
-# Hidden-area mesh early-Z. Off — OpenXR visibility-mask draw was a black
-# overlay on the world and did not improve FPS (2026-09-05). Do not retry.
-HiddenAreaMesh=false
-
-# Dummy-draw materials after a gameplay map load. Off — that path
-# null-called shaderapidx9 after the first stereo pair (2026-09-05).
-MaterialPredraw=false
-
-# CPU-wait GPU after the left-eye StretchRect from the shared backbuffer.
-# The stereo blit path always waits (same-image-both-eyes hazard). This key
-# is kept for the log / leftover fallback copy.
-StereoBlitGpuFlush=true
-
-# OpenXR helper path only. false: device idle + publish in the same Present
-# (pre-2026-09-06 pass). WMR motion smoothing can hide framedrops. true: D3D
-# event fence, no WaitDeviceIdle — higher fps, but the headset feels stuttery
-# because reprojection no longer gets a regular cadence. See
-# docs/performance-pass.md.
-OpenXrDeferredPublish=false
-# Extra ms a publish slot rests after the helper moved to a newer one. Safety
-# margin only: the helper now reports which frame it finished blitting and a
-# slot is never rewritten before that. 0-50.
-OpenXrSlotCoolingMs=4
-# How many eye copies may be in flight on the GPU before Present blocks on the
-# oldest one. 1 = CPU at most one frame ahead of the GPU: the pose sent with a
-# frame is at most one GPU frame old, reprojection has little to correct and
-# walking stays smooth in low-fps areas. 2-3 = more throughput, more latency
-# and judder (unbounded run-ahead measured at 2 frames on a 90Hz headset at
-# ~75fps: tearing while turning, stutter while walking). 1-3.
-OpenXrMaxPending=1
-
-# Portal 2 VR / L4D2VR right-stick look. Degrees per ms at full deflection.
+# Right-stick turn. Degrees per millisecond at full deflection.
 TurnSpeed=0.25
 SnapTurning=false
 SnapTurnAngle=45.0
 
-# Fallback viewmodel pos if the per-weapon L4D2VR table has no match.
-# Per-weapon pos/ang (including crowbar 19.5,6,-13.5 / -24.5,-6.5,-6) are
-# applied in code. These are extra global tweaks on top.
-# Numpad (NumLock on): 4/6 Y, 8/2 Z, 7/9 X (Source units on top of the
-# baked table). Ctrl+those = angles. 5 save to VR/viewmodel_offsets.txt,
-# 0 reset this weapon, Shift = fine. Ctrl+Numpad+/- still trims aim pitch.
+# Extra nudge on top of the built-in weapon poses (Source units / degrees).
 ViewmodelPosOffsetX=0.0
 ViewmodelPosOffsetY=0.0
 ViewmodelPosOffsetZ=0.0
 ViewmodelAngOffsetX=0.0
 ViewmodelAngOffsetY=0.0
 ViewmodelAngOffsetZ=0.0
-# sd805 tilts Vive wands -45°. G2 points more forward.
-# Quest / Touch OpenXR aim already points; ControllerPitchTiltTouch=0
-# is applied automatically when the helper reports a Touch profile.
-# Do not set this to 0 globally — G2 still needs -35.
+ViewmodelScale=0.68
+
+# Grip tilt, degrees. WMR uses ControllerPitchTilt. Touch and Index use their own.
 ControllerPitchTilt=-35.0
 ControllerPitchTiltTouch=0
 ControllerPitchTiltIndex=0
 ControllerPitchTiltVive=-45.0
-# Touch aim origin sits ahead of grip. Extra ox pulls the gun back along
-# -forward (same as numpad 7/9). If you already saved 5.5 extras in
-# VR/viewmodel_offsets.txt for crowbar/glock/grenade, reset those (numpad 0)
-# or they will double with this default.
+# Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
 ViewmodelPosOffsetXTouch=5.5
 
-# 0.91 was BM/L4D2 scale; user 2026-08-25: ~25% smaller than that → 0.68.
-# Crowbar forced to 1.0 in DME. Hands use VrHandsModelScale separately.
-ViewmodelScale=0.68
-
-# L4D2VR openxr branch: a 64-bit helper owns the OpenXR session because
-# 32-bit SteamVR/Meta OpenXR Vulkan is unreliable. The Win32 d3d9.dll still
-# renders through DXVK and publishes OPAQUE_WIN32_KMT eye handles.
-# openvr = SteamVR compositor (fallback if the helper is missing).
+# openxr = 64-bit helper. openvr = SteamVR compositor.
 VRRuntimeBackend=openxr
 OpenXRHelper=true
-# 0 = keep submitting until the game exits. A positive count is a self-test.
-OpenXRHelperSubmitTestFrames=0
-OpenXRHelperWaitReadySeconds=45
-# Pair xrEndFrame projection poses with the pose the game actually rendered.
-# Default OpenXR locate-at-submit on a late eye image jitters when you turn
-# your head. SteamVR Motion Smoothing does not apply on this helper path.
-OpenXRHelperUseGameRenderPoseForProjection=true
-# false = no submit Y-flip (default). auto used to invert SteamVR.
-# true if a runtime is still upside-down.
-OpenXRHelperFlipSubmitY=false
-# auto = do not swap L/R images. SteamVR Quest fused without a swap; Link
-# duplication is not an L/R swap. true/false override.
-OpenXRHelperSwapProjectionEyes=auto
 
-# Articulated XR_EXT_hand_tracking (Quest/WMR bare-hand joints). Off by
-# default — that path is an unfinished remnant. Controller grip/aim + HEV
-# gloves stay on. Set true only to retry joint tracking.
-OpenXRHelperHandTracking=false
-
-# Compositor timing: true = L4D2VR app PostPresentHandoff (WaitGetPoses off the
-# Vulkan queue; ~90fps). false = runtime handoff (waiter WaitGetPoses ~110ms / ~20fps).
-CompositorPostPresentHandoff=true
-
-# SteamVR overlay quad (meters, HMD-relative). Smaller/closer than L4D2VR 1.3
-# so HUD sits in the central FOV. HudMaxFov does not drive BM HUD.
+# HUD quad, metres, relative to the headset.
 HudDistance=1.05
 HudSize=0.70
-HudMaxFov=60
-HudDisplayRatio=0.82
 
-# Stereo IPD multiplier and extra height (Source units) after 6DOF.
 IPDScale=1.0
 HeightOffset=0.0
 
-# Default play path: 1x-eye stereo on the material thread (mat_queue_mode 2)
-# after pass-through warmup. Menu / load stay queue 0. false = stay on 0.
-# AutoMatQueueMode is the older "always toggle the cvar" switch; leave false.
-# Do not ClientCmd mat_queue_mode.
-AutoMatQueueMode=false
-MulticoreMode=true
+# Scene MSAA. 0 / 2 / 4 / 8 / 16. Restart after editing. Not the video menu.
+Msaa=4
 
-# L4D2VR VR-menu MSAA on the private eye RTs (not mat_antialias). 0 / 2 / 4 / 8 / 16.
-# Restart required. OpenVR submits a non-MSAA resolve copy. This is GPU cost,
-# not a performance win. On the HMD-fb blit path the world is already resolved
-# into the window, so geometry edges stay aliased; gloves drawn into the eyes
-# still get MSAA. Named per-eye RTs would AA the scene like L4D2VR.
-AntiAliasing=0
-
-# Motion / comfort
 Haptics=true
 HideCrosshair=true
-# Crossbow zoom: render this fraction of the HMD FOV (submit FOV unchanged,
-# so the picture magnifies). 0.28 ≈ HL2's 20°/75°. Range 0.08–1.
-ScopeZoomFovScale=0.28
-# World-space VR reticle on the aim ray. Off by default; true to show it.
 VrCrosshair=false
-# MatchHmdHz no longer caps fps_max at the headset rate (that was 90 on G2).
-# fps_max is 0 (uncapped); SteamVR WaitGetPoses still paces compositor submit.
-MatchHmdHz=false
 DisableViewBob=true
 LeftHanded=false
-RecenterResetsYaw=true
-HideLocalPlayerModel=true
 
-# Hybrid VR hands (not L4D2VR NativeViewmodelHandsOnly). Hide HEV/marine FP
-# arms on the native v_* viewmodel; SteamVR vr_glove GLB at each controller.
-# Debug boxes only if gloves fail (or set true to overlay). NativeViewmodelHandsOnly stays off.
-HideViewmodelArms=true
-VrHandsGlovesEnabled=true
-VrHandsModelScale=0.85
-# SteamVR glove local Rx,Ry,Rz. Yaw 180 points fingers with the controller.
-# Touch and Index hands use aim orientation at the grip origin so a straight
-# controller is a straight hand (grip -Z follows the handle and points up).
-# Index aim +Y is the thumbstick face, ~90° from the palm. This rolls only
-# the hand meshes inward around aim forward; weapons stay on the aim pose.
-# Flip the sign if palms go the wrong way. 0 disables the extra roll.
-VrHandsIndexRollDeg=90
-VrHandsPoseRotationOffset=0,180,0
-# Negative Y lowers both hands in view (separate from weapon oz). Negative
-# Z is along aim (controller basis Z is -forward). -0.10 m is ~60% of a
-# scaled HEV glove along the controller so the mesh sits on the tracked pose.
-# Y -0.008 sits the glove on the controller (was -0.035, hanging below).
-VrHandsPoseOffsetMeters=0,-0.008,-0.10
-# Extra meters on Quest/Touch only (additive). Raise Y or shorten Z if the
-# HEV glove still sits off the Touch grip after tilt=0.
-QuestHandsPoseOffsetMeters=0,0,0
-VrHandsUseHevGloves=true
-VrHandsDebugBoxes=false
-VrHandHud=true
+# Crossbow zoom as a fraction of the headset field of view. 0.28 is about 3.5x.
+ScopeZoomFovScale=0.28

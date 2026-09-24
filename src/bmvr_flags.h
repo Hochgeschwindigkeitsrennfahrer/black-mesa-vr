@@ -61,6 +61,56 @@ namespace bmvr
     void BeginRisky(const wchar_t* name);
     void EndRisky(const wchar_t* name);
 
+    // Set around MaterialSystem CreateNamedRenderTarget for one scene RT.
+    // DXVK stamps hlvr_msaa on color and depth created on this thread at
+    // that size. Width/height 0 means "whatever size this call creates".
+    struct Hl2vrMsaaScope
+    {
+        static int& Depth()
+        {
+            static thread_local int depth = 0;
+            return depth;
+        }
+        static uint32_t& Width()
+        {
+            static thread_local uint32_t width = 0;
+            return width;
+        }
+        static uint32_t& Height()
+        {
+            static thread_local uint32_t height = 0;
+            return height;
+        }
+        static bool Active() { return Depth() > 0; }
+    };
+
+    class Hl2vrMsaaScopeGuard
+    {
+    public:
+        Hl2vrMsaaScopeGuard(bool enable, uint32_t width, uint32_t height)
+            : m_on(enable)
+        {
+            if (!m_on)
+                return;
+            int& depth = Hl2vrMsaaScope::Depth();
+            if (depth == 0)
+            {
+                Hl2vrMsaaScope::Width() = width;
+                Hl2vrMsaaScope::Height() = height;
+            }
+            ++depth;
+        }
+        ~Hl2vrMsaaScopeGuard()
+        {
+            if (m_on && Hl2vrMsaaScope::Depth() > 0)
+                --Hl2vrMsaaScope::Depth();
+        }
+        Hl2vrMsaaScopeGuard(const Hl2vrMsaaScopeGuard&) = delete;
+        Hl2vrMsaaScopeGuard& operator=(const Hl2vrMsaaScopeGuard&) = delete;
+    private:
+        bool m_on;
+    };
+
     // L4D2VR/Portal2: G-buffer = OpenVR recommended size. Window-fit is only
     // the fallback if recommended size crash-stickies. ApplyHmdAspectBackbuffer
     // rewrites the windowed D3D backbuffer to that size. GetScreenSize must
@@ -132,9 +182,14 @@ namespace bmvr
     // Default play path: 1x-eye stereo + SetThreadMode(2) after warmup.
     // Menu / load stay queue 0. Config MulticoreMode=false turns it off.
     extern bool g_MulticoreMode;
-    // L4D2VR overlay AntiAliasing: 0 / 2 / 4 / 8 / 16. DXVK MSAA on the
-    // private eye RTs, resolved into non-MSAA submit textures. Restart.
-    extern uint32_t g_AntiAliasing;
+    // HL2VR hlvr_msaa. 0 is off; 2 / 4 / 8 / 16 are sample counts. Applied in
+    // DXVK to separate-depth scene render targets (not the swapchain, not the
+    // private eye copies). Set by VR/config.txt `Msaa`. The Advanced Video
+    // dropdown stays stock (None / FXAA); rewriting it crashes that page.
+    // A crash during the scoped create persist-skips it (g_MsaaAllowed = false).
+    extern uint32_t g_Msaa;
+    extern bool g_MsaaAllowed;
+    uint32_t NormalizeMsaa(int samples);
     extern bool g_Haptics;
     extern bool g_HideCrosshair;
     extern bool g_MatchHmdHz;
@@ -213,6 +268,13 @@ namespace bmvr
     // Calhoun never wears the HEV suit — use bare-hand GLBs the whole session.
     extern bool g_IsBlueShift;
     bool IsBlueShift();
+    // True when launched with -game asheep (or an as_* map). Same security-guard
+    // HUD and bare hands as Blue Shift.
+    extern bool g_IsAzureSheep;
+    bool IsAzureSheep();
+    // Wrist HUD, weapon-wheel chrome, HUD icons, and the pause cursor use
+    // Calhoun blue (64,168,255) instead of HEV orange.
+    bool UseBlueHud();
     // false = runtime PostPresentHandoff. true = L4D2VR app handoff (default).
     extern bool g_CompositorPostPresentHandoff;
     // Old stereo vis workaround: r_portalsopenall + r_occlusion 0. Default

@@ -8,9 +8,14 @@
 namespace bmvr
 {
     // Loads materials/vgui/hud/<vtfName> from the game VPKs and uploads it as a
-    // D3D9 texture. Cached by name; returns nullptr when the asset is missing,
-    // and only attempts each name once.
+    // D3D9 texture. Cached by name; returns nullptr until the background
+    // preload has uploaded that icon (or the asset is missing).
     IDirect3DTexture9* AcquireHudIcon(IDirect3DDevice9* device, const char* vtfName);
+
+    // Decode/upscale weapon, ammo, and wrist icons off the eye thread.
+    // Pump uploads one finished icon per call; call it once per stereo pair.
+    void KickHudIconPreload();
+    void PumpHudIconUploads(IDirect3DDevice9* device);
 
     // Ammo icons for the weapon the player is holding, keyed off its model /
     // network name. Never return null.

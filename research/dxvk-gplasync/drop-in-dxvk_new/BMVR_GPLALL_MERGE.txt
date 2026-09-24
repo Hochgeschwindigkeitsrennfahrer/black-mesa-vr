@@ -1,0 +1,3 @@
+This tree is DXVK-GPLALL 2.6.8-2 with Black Mesa VR overlays replayed.
+It is a staging drop-in for third_party/l4d2vr/dxvk_new.
+See research/dxvk-gplasync/HOW-TO-APPLY.md — do not copy a prebuilt d3d9.dll.

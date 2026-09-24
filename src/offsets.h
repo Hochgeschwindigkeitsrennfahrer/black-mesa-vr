@@ -58,6 +58,33 @@ public:
     Offset CreateMove{ "client.dll", 0x110310,
         "55 8B EC E8 ? ? ? ? 8B C8 85 C9 75 06 B0 01 5D C2 08 00" };
 
+    // FindNearbyVguiScreen(eye, angles, team). cdecl. Only caller is
+    // C_BasePlayer::DetermineVguiInputMode. Hover (C_VGuiScreen::ClientThink)
+    // uses EyePosition/EyeAngles; clicks need m_nButtonState at +0x6B4, which
+    // DetermineVguiInputMode skips when ISurface::IsCursorVisible is true.
+    Offset FindNearbyVguiScreen{ "client.dll", 0xFC210,
+        "53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC B8 00 00 00" };
+    Offset SetVGuiScreenButtonState{ "client.dll", 0xFCB20,
+        "55 8B EC 8B 4D 08 85 C9 74 09 8B 45 0C 89 81 B4 06 00 00 5D C3" };
+    Offset IntersectVguiScreenRay{ "client.dll", 0xFC7D0,
+        "55 8B EC 83 EC 48 56 8B F1 8B 06 FF 50 24" };
+    static constexpr int kC_VGuiScreen_ButtonState = 0x6B4;
+    static constexpr int kC_VGuiScreen_PixelWidth = 0x6A0;
+    static constexpr int kC_VGuiScreen_PixelHeight = 0x6A4;
+    static constexpr int kC_VGuiScreen_PanelPtr = 0x72C;
+    // IClientMode* in client.dll .data. C_VGuiScreen::ClientThink 0xFB7F0.
+    static constexpr int kClientModeGlobalRva = 0x6D96B0;
+    static constexpr int kIClientMode_ActivateInGameVGuiContext = 30;
+    // vgui2 VGUI_InputInternal001 as used by ClientThink (no extra GetMouseFocus).
+    static constexpr int kVguiVtInternalCursorMoved = 0x108 / 4;
+    static constexpr int kVguiVtInternalMousePressed = 0x10C / 4;
+    static constexpr int kVguiVtInternalMouseReleased = 0x114 / 4;
+    static constexpr int kVguiVtSetMouseCodeState = 0x14C / 4;
+    static constexpr int kVguiMouseLeftCode = 0x6B;
+    static constexpr int kCBasePlayer_GetTeamNumberVt = 0x134;
+    static constexpr int kCBasePlayer_EyePositionVt = 0x268;
+    static constexpr int kCBasePlayer_EyeAnglesVt = 0x26C;
+
     Offset CalcViewModelView{ "client.dll", 0x29D930,
         "55 8B EC 83 EC 24 53 56 8B 75 08 57 8B F9 85 F6" };
 
@@ -178,6 +205,15 @@ public:
     // client.dll g_pClientLeafSystem (IClientLeafSystem*). vtable+0x38 is
     // SetRenderGroup(handle, group); AddEffect uses group 0xB for viewmodel.
     static constexpr int kClientLeafSystemPtr = 0x553D10;
+    // client.dll gpGlobals (CGlobalVarsBase*). CHudAir FUN_10271c90 subtracts
+    // curtime at +0xC from m_AirFinished. Same .data neighborhood as the leaf
+    // system pointer.
+    static constexpr int kClientGpGlobalsPtr = 0x553A04;
+    static constexpr int kCGlobalVars_curtime = 0xC;
+    // DT_LocalPlayerExclusive (FUN_100b7240): m_nWaterLevel +0x180 (byte),
+    // m_AirFinished +0x16e4 (float). WL_Eyes == 3 is fully underwater.
+    static constexpr int kCBasePlayer_nWaterLevel = 0x180;
+    static constexpr int kCBasePlayer_AirFinished = 0x16e4;
 
     // client.dll C_Weapon_RPG laser update (FUN_10291F80). CHudCrosshair Paint
     // calls weapon vtable +0x5C4. Draws ISurface circles at ScreenWidth/2,
@@ -314,8 +350,9 @@ public:
     static constexpr int kIMatRenderContext_PushRT6 = 0x23C;
     static constexpr int kIMatRenderContext_PopRT = 0x24C;
     // IMatRenderContext::GetCallQueue. HL2VR/Source 2013 absolute slot 146.
-    // BM 6-arg PushRT is slot 143 vs Source 104 (~+39). Probe 146 and 185
-    // under SEH; do not call through the fake IMatRenderContext C++ vtable.
+    // BM 6-arg PushRT is slot 143 vs Source 104 (~+39). Probe 185 first, then
+    // 146, under SEH. Do not latch 146 if QueueFunctorInternal SEH-fails — that
+    // object is not ICallQueue (Index SteamVR 2026-09-09: published=0/s).
     static constexpr int kIMatRenderContext_GetCallQueueSlotSource = 146;
     static constexpr int kIMatRenderContext_GetCallQueueSlotBmShift = 185;
 

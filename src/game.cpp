@@ -605,6 +605,8 @@ namespace
     int g_nvZooming = -1;
     int g_nvRpgLaserOn = -1;
     int g_nvRpgLaserDot = -1;
+    int g_nvWaterLevel = -1;
+    int g_nvAirFinished = -1;
     bool g_nvScanned = false;
 
     const char* FindStringInImage(const unsigned char* base, size_t size, const char* s)
@@ -761,12 +763,20 @@ void Game::ScanWristHudNetVars()
         base, imgSize, "m_bLaserOn", 0x800, 0xC00, false);
     g_nvRpgLaserDot = FindRecvPropOffsetPlus4(
         base, imgSize, "m_hLaserDot", 0x800, 0xC00);
+    g_nvWaterLevel = FindRecvPropOffsetPlus4(
+        base, imgSize, "m_nWaterLevel", 0x100, 0x200, false);
+    if (g_nvWaterLevel < 0)
+        g_nvWaterLevel = Offsets::kCBasePlayer_nWaterLevel;
+    g_nvAirFinished = FindRecvPropOffsetPlus4(
+        base, imgSize, "m_AirFinished", 0x1400, 0x1800);
+    if (g_nvAirFinished < 0)
+        g_nvAirFinished = Offsets::kCBasePlayer_AirFinished;
     Game::logMsg("Wrist HUD netvars health=%d armor=%d clip1=%d clip2=%d ammo=%d primType=%d secType=%d",
         g_nvHealth, g_nvArmor, g_nvClip1, g_nvClip2, g_nvAmmoBase, g_nvPrimaryAmmoType,
         g_nvSecondaryAmmoType);
-    Game::logMsg("VR netvars m_Local=%d m_bWearingSuit(+local)=%d suit=%d zooming=%d flashlight=%d rpgLaserOn=%d rpgLaserDot=%d",
+    Game::logMsg("VR netvars m_Local=%d m_bWearingSuit(+local)=%d suit=%d zooming=%d flashlight=%d rpgLaserOn=%d rpgLaserDot=%d water=%d airFinished=%d",
         localData, suitInLocal, g_nvWearingSuit, g_nvZooming, flashlight,
-        g_nvRpgLaserOn, g_nvRpgLaserDot);
+        g_nvRpgLaserOn, g_nvRpgLaserDot, g_nvWaterLevel, g_nvAirFinished);
 }
 
 // Reads a networked bool. Returns -1 when the offset is unresolved, has been
@@ -922,10 +932,10 @@ bool Game::WeaponHasNoAmmo(C_BaseEntity* weapon)
     return clip <= 0 && reserve <= 0;
 }
 
-bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary)
+bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air)
 {
     ScanWristHudNetVars();
-    health = armor = clip = reserve = secondary = -1;
+    health = armor = clip = reserve = secondary = air = -1;
     if (!m_EngineClient || !m_ClientEntityList)
         return false;
     const int local = m_EngineClient->GetLocalPlayer();
@@ -946,6 +956,30 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
             return -1;
         }
     };
+    auto rdByte = [](void* ent, int off) -> int {
+        if (!ent || off < 0)
+            return -1;
+        __try
+        {
+            return *reinterpret_cast<volatile unsigned char*>(reinterpret_cast<unsigned char*>(ent) + off);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    };
+    auto rdFloat = [](void* ent, int off) -> float {
+        if (!ent || off < 0)
+            return -1.f;
+        __try
+        {
+            return *reinterpret_cast<volatile float*>(reinterpret_cast<unsigned char*>(ent) + off);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1.f;
+        }
+    };
     health = rdInt(player, g_nvHealth);
     armor = rdInt(player, g_nvArmor);
     void* weapon = GetActiveWeaponEntity();
@@ -961,11 +995,50 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
         secondary = rdInt(player, g_nvAmmoBase + 4 * secType);
     else if (clip2 >= 0 && clip2 <= 255)
         secondary = clip2;
+
+    // CHudAir::OnThink (FUN_10271dd0): visible only at waterlevel == 3 (eyes).
+    // Percent is (m_AirFinished - gpGlobals->curtime) / player_airtimer * 100.
+    const int water = rdByte(player, g_nvWaterLevel);
+    if (water == 3)
+    {
+        float curtime = -1.f;
+        if (m_BaseClient)
+        {
+            __try
+            {
+                const uintptr_t gp = *reinterpret_cast<uintptr_t*>(
+                    m_BaseClient + Offsets::kClientGpGlobalsPtr);
+                if (gp)
+                    curtime = *reinterpret_cast<float*>(gp + Offsets::kCGlobalVars_curtime);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                curtime = -1.f;
+            }
+        }
+        const float finished = rdFloat(player, g_nvAirFinished);
+        float maxAir = 12.f;
+        if (!GetConVarFloat("player_airtimer", maxAir) || !(maxAir > 0.5f) || maxAir > 120.f)
+            maxAir = 12.f;
+        if (curtime >= 0.f && finished > 0.f)
+        {
+            float pct = (finished - curtime) / maxAir * 100.f;
+            if (pct < 0.f)
+                pct = 0.f;
+            if (pct > 100.f)
+                pct = 100.f;
+            air = static_cast<int>(pct + 0.5f);
+        }
+        else
+            air = 0;
+    }
+
     static int s_hudLog;
     if (s_hudLog < 4)
     {
-        Game::logMsg("WristHUD values health=%d armor=%d clip=%d reserve=%d sec=%d (off h=%d a=%d clip2=%d secType=%d)",
-            health, armor, clip, reserve, secondary, g_nvHealth, g_nvArmor, g_nvClip2, g_nvSecondaryAmmoType);
+        Game::logMsg("WristHUD values health=%d armor=%d clip=%d reserve=%d sec=%d air=%d water=%d (off h=%d a=%d clip2=%d secType=%d water=%d airF=%d)",
+            health, armor, clip, reserve, secondary, air, water, g_nvHealth, g_nvArmor, g_nvClip2, g_nvSecondaryAmmoType,
+            g_nvWaterLevel, g_nvAirFinished);
         ++s_hudLog;
     }
     return true;
@@ -1638,6 +1711,26 @@ bool Game::GetConVarInt(const char* name, int& value) const
     }
     value = static_cast<int>(stored ^ reinterpret_cast<uint32_t>(cvar));
     return true;
+}
+
+bool Game::GetConVarFloat(const char* name, float& value) const
+{
+    value = 0.f;
+    void* cvar = FindConVarProbe(m_Cvar, name);
+    if (!cvar)
+        return false;
+    uint32_t stored = 0;
+    __try
+    {
+        stored = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(cvar) + 0x2C);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+    const uint32_t bits = stored ^ reinterpret_cast<uint32_t>(cvar);
+    std::memcpy(&value, &bits, sizeof(value));
+    return std::isfinite(value);
 }
 
 void Game::logMsg(const char* fmt, ...)

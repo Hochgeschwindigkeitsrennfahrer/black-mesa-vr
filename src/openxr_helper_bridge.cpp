@@ -545,10 +545,13 @@ bool L4D2VR_ReadOpenXrHelperConsumedFrame(uint32_t& consuming, uint32_t& consume
     if (!state)
         return false;
 
+    // count is published after the frame id. An acquire after these loads
+    // does not pair with the helper's release, so a new count could be
+    // sampled with the previous frame id and a slot reused too early.
+    consumedCount = state->helperConsumedCount;
+    L4D2VR_SeqlockAcquire();
     consuming = state->helperConsumingFrameId;
     consumed = state->helperConsumedFrameId;
-    consumedCount = state->helperConsumedCount;
-    std::atomic_thread_fence(std::memory_order_acquire);
     return true;
 }
 
@@ -565,7 +568,9 @@ bool L4D2VR_ReadOpenXrHmdPose(L4D2VROpenXrPoseDesc& pose, uint32_t* generation)
         if (gen0 == 0 || (gen0 & 1u))
             continue;
 
+        L4D2VR_SeqlockAcquire();
         L4D2VROpenXrPoseDesc snapshot = state->hmdPose;
+        L4D2VR_SeqlockAcquire();
         const uint32_t gen1 = state->trackingPoseGeneration;
         if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
         {
@@ -592,7 +597,9 @@ bool L4D2VR_ReadOpenXrRuntimeViewConfig(L4D2VROpenXrRuntimeViewConfigDesc& confi
         if (gen0 == 0 || (gen0 & 1u))
             continue;
 
+        L4D2VR_SeqlockAcquire();
         L4D2VROpenXrRuntimeViewConfigDesc snapshot = state->runtimeViewConfig;
+        L4D2VR_SeqlockAcquire();
         const uint32_t gen1 = state->runtimeViewConfigGeneration;
         if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
         {
@@ -634,7 +641,9 @@ bool L4D2VR_ReadOpenXrVisibilityMask(L4D2VROpenXrVisibilityMaskDesc& mask, uint3
         if (gen0 == 0 || (gen0 & 1u))
             continue;
 
+        L4D2VR_SeqlockAcquire();
         L4D2VROpenXrVisibilityMaskDesc snapshot = state->visibilityMask;
+        L4D2VR_SeqlockAcquire();
         const uint32_t gen1 = state->visibilityMaskGeneration;
         if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
         {
@@ -661,7 +670,9 @@ bool L4D2VR_ReadOpenXrInputState(L4D2VROpenXrInputStateDesc& inputState, uint32_
         if (gen0 == 0 || (gen0 & 1u))
             continue;
 
+        L4D2VR_SeqlockAcquire();
         L4D2VROpenXrInputStateDesc snapshot = state->inputState;
+        L4D2VR_SeqlockAcquire();
         const uint32_t gen1 = state->inputStateGeneration;
         if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
         {
@@ -685,9 +696,9 @@ void L4D2VR_PublishOpenXrGameRenderPose(const L4D2VROpenXrPoseDesc& pose)
     if (!state)
         return;
 
-    ++state->gameRenderPoseGeneration;
+    L4D2VR_SeqlockBegin(state->gameRenderPoseGeneration);
     state->gameRenderPose = pose;
-    ++state->gameRenderPoseGeneration;
+    L4D2VR_SeqlockEnd(state->gameRenderPoseGeneration);
     state->heartbeatTickMs = GetTickCount64();
 }
 
@@ -738,14 +749,12 @@ void L4D2VR_PublishOpenXrSharedTexturePair(
     if (!state)
         return;
 
-    ++state->sharedTextureGeneration;
-    std::atomic_thread_fence(std::memory_order_release);
+    L4D2VR_SeqlockBegin(state->sharedTextureGeneration);
     state->eyeTextures[L4D2VR_OPENXR_EYE_LEFT] = left;
     state->eyeTextures[L4D2VR_OPENXR_EYE_RIGHT] = right;
     state->sharedTexturesReadyMask |=
         (1u << L4D2VR_OPENXR_EYE_LEFT) | (1u << L4D2VR_OPENXR_EYE_RIGHT);
-    std::atomic_thread_fence(std::memory_order_release);
-    ++state->sharedTextureGeneration;
+    L4D2VR_SeqlockEnd(state->sharedTextureGeneration);
     state->heartbeatTickMs = GetTickCount64();
 }
 
@@ -767,9 +776,10 @@ void L4D2VR_PublishOpenXrSharedTexture(uint32_t eyeIndex, const L4D2VROpenXrShar
         return;
     }
 
+    L4D2VR_SeqlockBegin(state->sharedTextureGeneration);
     state->eyeTextures[eyeIndex] = texture;
     state->sharedTexturesReadyMask |= readyBit;
-    ++state->sharedTextureGeneration;
+    L4D2VR_SeqlockEnd(state->sharedTextureGeneration);
     state->heartbeatTickMs = GetTickCount64();
 
     Game::logMsg(
@@ -830,9 +840,9 @@ void L4D2VR_PublishOpenXrSharedTextureFrame(uint32_t frameId)
     if ((state->sharedTexturesReadyMask & L4D2VR_OPENXR_EYES_READY_MASK) != L4D2VR_OPENXR_EYES_READY_MASK)
         return;
 
-    ++state->sharedTextureFrameGeneration;
+    L4D2VR_SeqlockBegin(state->sharedTextureFrameGeneration);
     state->sharedTextureFrameId = frameId;
-    ++state->sharedTextureFrameGeneration;
+    L4D2VR_SeqlockEnd(state->sharedTextureFrameGeneration);
     state->heartbeatTickMs = GetTickCount64();
 
     {
@@ -877,13 +887,13 @@ void L4D2VR_PublishOpenXrOverlay(uint32_t overlayIndex, const L4D2VROpenXrOverla
         return;
     }
 
+    L4D2VR_SeqlockBegin(state->overlayGeneration);
     state->overlays[overlayIndex] = overlay;
     if (overlay.valid && overlay.visible && overlay.texture.valid)
         state->overlayReadyMask |= readyBit;
     else
         state->overlayReadyMask &= ~readyBit;
-
-    ++state->overlayGeneration;
+    L4D2VR_SeqlockEnd(state->overlayGeneration);
     state->heartbeatTickMs = GetTickCount64();
 }
 
@@ -897,8 +907,8 @@ void L4D2VR_PublishOpenXrOverlayFrame(uint32_t frameId)
     if (!state)
         return;
 
-    ++state->overlayFrameGeneration;
+    L4D2VR_SeqlockBegin(state->overlayFrameGeneration);
     state->overlayFrameId = frameId;
-    ++state->overlayFrameGeneration;
+    L4D2VR_SeqlockEnd(state->overlayFrameGeneration);
     state->heartbeatTickMs = GetTickCount64();
 }

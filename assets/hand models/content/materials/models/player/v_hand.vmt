@@ -1,0 +1,21 @@
+"VertexLitGeneric"
+{
+	"$baseTexture" "models/player/v_hand"
+	"$bumpmap" "models/player/v_hand_normal"
+
+	"$envmap" "env_cubemap"
+	"$normalmapalphaenvmapmask" "1"
+	"$envmaptint" "[.001 .001 .001]"
+//	"$envmapcontrast" "1.0"
+
+	"$detail" "detail\detail_fabric001"
+	"$detailscale" "1.358"
+	"$detailblendfactor" .20
+	"$detailblendmode" "0"
+
+	"$phong" "1"
+	"$phongboost" "0.7"
+	"$phongexponent" "15"
+	"$phongalbedotint" "1"
+	"$phongfresnelranges"	"[0.04 0.4 1.5]"
+}

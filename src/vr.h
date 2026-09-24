@@ -69,6 +69,8 @@ public:
     bool m_RuntimeBackendFallbackToOpenVR = true;
     bool m_OpenXrLoaderAvailable = false;
     bool m_OpenXrHelperBridgeActive = false;
+    DWORD m_OpenXrHelperRestartMs = 0;
+    int m_OpenXrHelperRestartCount = 0;
     bool m_OpenXrSwapGameEyeOrigins = false;
     L4D2VROpenXrPoseDesc m_OpenXrLastHmdPose{};
     uint32_t m_OpenXrLastHmdPoseGeneration = 0;
@@ -150,9 +152,25 @@ public:
     uint32_t m_OpenXrPaceWaits = 0;
     double m_OpenXrPaceWaitMs = 0.0;
     double m_OpenXrPaceWaitMaxMs = 0.0;
+    // Latest helper pose latched at stereo start. Do not block the game
+    // thread on helper consume / a new displayTime (HMD 2026-09-20).
+    int64_t m_OpenXrLatchedDisplayTime = 0;
+    uint32_t m_OpenXrLatchedPoseGeneration = 0;
+    int64_t m_OpenXrPublishedDisplayTime = 0;
+    uint32_t m_OpenXrPublishedPoseGeneration = 0;
+    uint32_t m_OpenXrAwaitFrames = 0;
+    uint32_t m_OpenXrAwaitHandoffs = 0;
+    double m_OpenXrAwaitPoseMs = 0.0;
+    double m_OpenXrAwaitPoseMaxMs = 0.0;
+    uint32_t m_OpenXrHelperSubmittedLast = 0;
+    uint32_t m_OpenXrSkipSameVsync = 0;
+    uint32_t m_OpenXrSkipStereoNoPose = 0;
     // Publish every pending slot whose copy the GPU has completed (newest
     // wins; older completed ones are dropped as stale).
     void PollOpenXrDeferredPublish();
+    // Wait for the helper's next xrWaitFrame pose (HL2VR WaitGetPoses).
+    // Does not wait for slot consume. Returns true if displayTime/gen changed.
+    bool AwaitOpenXrCompositorFrame();
     // Block until the oldest pending copy's event signals (bounded GPU
     // run-ahead, OpenXrMaxPending). Never WaitDeviceIdle: that is
     // vkDeviceWaitIdle with no timeout and hangs the process.
@@ -175,6 +193,8 @@ public:
     // (hmd_native) or fits HMD aspect in the window if that crash-stickies.
     uint32_t m_RenderWidth = 0;
     uint32_t m_RenderHeight = 0;
+    // Retired L4D2VR eye-copy MSAA. Left at 0 so private eyes stay single-sample
+    // submit targets. Scene AA is bmvr::g_Msaa (HL2VR), not this field.
     uint32_t m_AntiAliasing = 0;
     bool UseVrMsaa() const
     {
@@ -246,6 +266,18 @@ public:
         bool rpg = false;
         bool gluon = false;
         bool mp5 = false;
+        // Long guns / pistols: off-hand can wrap the model. Table is meters
+        // from the rear grip along F/R/U. L_Wrist is used only when
+        // offhandUseBone is set (MP5 magwell / pistol monitor pose are wrong).
+        bool twoHand = false;
+        bool offhandUseBone = false;
+        bool offhandPistol = false;
+        float offhandMetersX = 0.f;
+        float offhandMetersY = 0.f;
+        float offhandMetersZ = 0.f;
+        // Extra grab length along +F from the point, so a pump/handguard is a
+        // rail instead of a single rear bone.
+        float offhandRailMeters = 0.f;
     };
     ViewmodelClass m_VmClass;
     static void ClassifyViewmodel(const char* modelName, ViewmodelClass& out);
@@ -288,6 +320,11 @@ public:
     std::atomic<uint64_t> m_Hl2vrHandoffId{ 0 };
     int m_Hl2vrCallQueueSlot = -1;
     bool m_Hl2vrCallQueueProbed = false;
+    // Source slot 146 can return a non-null non-queue on BM. Remember it so
+    // ProbeCallQueue does not latch 146 after QueueFunctorInternal SEH-fails.
+    int m_McCallQueueFailedSlot = -1;
+    bool m_McEyeCopyQueued = false;
+    bool m_McEyeCopyDone = false;
     uint32_t m_Hl2vrQueuedWgpFrames = 0;
     Vector m_SetupOrigin{};
     Vector m_SetupOriginToHMD{};
@@ -517,6 +554,7 @@ public:
     vr::VRActionHandle_t m_ActionCrouch = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionCrouchToggle = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionFlashlight = vr::k_ulInvalidActionHandle;
+    vr::VRActionHandle_t m_ActionInventoryGripLeft = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionScoreboard = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionPause = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionSprint = vr::k_ulInvalidActionHandle;
@@ -546,6 +584,7 @@ public:
     std::atomic<int> m_PendingGameUi{ 0 };
     std::atomic<int> m_PendingQuit{ 0 };
     bool m_GameUiVisible = false;
+    std::atomic<bool> m_AppActivated{ true };
     DWORD m_GameUiActivateMs = 0;
     DWORD m_MenuLastVisibleMs = 0;
     int m_MenuPointerHand = 1;
@@ -609,6 +648,7 @@ public:
     void BeginStereoFramePose();
     void EndStereoFramePose();
     void LogOpenXrPublishRate();
+    void TickOpenXrHelperWatchdog();
     void LogOpenXrPublishSetupFailure(const char* stage, uint32_t eye, uint32_t slot, unsigned hr);
     bool EnsureOpenXrPublishTextures(IDirect3DDevice9* device, UINT w, UINT h);
     void ReleaseOpenXrPublishTextures();
@@ -697,6 +737,12 @@ public:
     // GMod: queued material system writes band M of a 2W x 3H ring; helper
     // copies band (M-2). False keeps the verified single-core 1x-eye path.
     bool McPipelineEnabled() const;
+    bool McEyesSmallerThanWindow() const;
+    // One HWND-sized RenderView + squash-blit both eyes. Not fused.
+    // True when FullFrame/G-buffer stayed window-sized and either gbmatch
+    // lock is on or the recommended eyes fit inside the HWND. WMR grows
+    // world RTs (worldMatch=1) so this stays false and double RV still runs.
+    bool ShouldHwndBlitStereo() const;
     // True only while *this thread* is in a stereo world pass. Shared
     // StereoEyeBlitActive / McPipelineEnabled stay on during pause VGUI and
     // must not steal GameUI onto the 1x eyes or lie GetScreenSize to HMD.
@@ -781,6 +827,11 @@ public:
     void ClearUnusedDesktopBackbuffer();
     void ProcessInput();
     void ApplyMenuCursor();
+    // Game thread only. World vgui_screen (bm_c2a5i mortar, etc.): hover is
+    // C_VGuiScreen::ClientThink from EyeAngles, but clicks need VGUI
+    // InternalMousePressed(MOUSE_LEFT=0). Trigger is otherwise only IN_ATTACK.
+    void ApplyWorldVguiTriggerClick(CUserCmd* cmd);
+    bool WorldVguiSuppressAttack() const { return m_WorldVguiSuppressAttack; }
     void DrawMenuCursorOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf);
     void ApplyMenuNavigation();
     void QueueEscapeKey();
@@ -791,6 +842,14 @@ public:
     void PollVrMenuEvents();
     void NoteEngineVGui(void* engineVgui);
     bool GameUiVisible() const { return m_GameUiVisible; }
+    // WM_ACTIVATEAPP. Default true so the first frames publish before any
+    // activate message. Alt-tab sets false.
+    void NoteAppActivated(bool activated);
+    bool AppActivated() const { return m_AppActivated.load(std::memory_order_relaxed); }
+    // Called from the window proc before the engine's own handler, and once
+    // per RenderView. No-op unless a focus transition left sound stuck.
+    void NoteAudioFocusTransition(bool activated);
+    void TickAudioFocusRecover();
     // HL2VR IsMenuUp: GameUI is actually up (engine IsGameUIVisible).
     bool IsMenuUp() const;
     // HL2VR ProcessInput: gameplay booleans stay off while GameUI is up and
@@ -899,6 +958,11 @@ public:
     void GetRightGlovePalmOffsetMeters(Vector& meters) const;
     bool WantsRightGloveVisible() const;
     bool WantsRightGloveWeaponGripCurl() const;
+    bool WantsOffhandGloveWeaponGripCurl() const;
+    bool TwoHandGripActive() const { return m_TwoHandActive; }
+    // Live L_Wrist (or L_Hand) world origin from DrawModelExecute bone matrices.
+    void NoteViewmodelOffhandWorld(const Vector& worldOrigin);
+    bool TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QAngle& trackingAng) const;
     bool HudOverlayReady() const { return m_HudOverlayReady; }
     void EnsureHudOverlay();
     void SubmitHudOverlay();
@@ -906,6 +970,9 @@ public:
     void BindHudOverlayWhileQueueLocked();
     void ClearHudSurface(bool opaque);
     void TickMatQueueFromRenderView();
+    // HL2VR hlvr_msaa from VR/config.txt. Scene targets pick it up on the
+    // next map load. Advanced Video is not hooked.
+    void UpdateHl2vrMsaa();
     uint32_t HeldButtons() const { return m_HeldButtons.load(std::memory_order_acquire); }
     static constexpr uint32_t kWeaponSoundHover = 1u;
     static constexpr uint32_t kWeaponSoundSelect = 2u;
@@ -982,13 +1049,28 @@ private:
     void RefreshActiveWeaponModel();
     void RefreshHeldWeaponState();
     void ApplyViewmodelBasisOffsets();
-    void ApplyTwoHandShotgunAim();
-    bool m_TwoHandShotgunActive = false;
+    void ApplyTwoHandWeaponAim();
+    float LeftSupportGripValue() const;
+    bool ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const;
+    bool m_TwoHandActive = false;
+    bool m_OffhandGripBoneValid = false;
+    float m_OffhandGripGx = 0.f;
+    float m_OffhandGripGy = 0.f;
+    float m_OffhandGripGz = 0.f;
+    float m_TwoHandGrabGx = 0.f;
+    float m_TwoHandGrabGy = 0.f;
+    float m_TwoHandGrabGz = 0.f;
+    Vector m_TwoHandDrawPos{};
+    QAngle m_TwoHandDrawAng{};
+    bool m_TwoHandDrawValid = false;
+    bool m_TwoHandDrawPhysicalLeft = true;
+    Vector m_TwoHandSmoothF{};
+    Vector m_TwoHandSmoothU{};
+    bool m_TwoHandSmoothValid = false;
     int m_AutoMatQueueModeLastRequested = -999;
     std::chrono::steady_clock::time_point m_AutoMatQueueModeLastCmdTime{};
     bool m_VrCvarsApplied = false;
-    bool m_MenuFpsMaxSent = false;
-    int m_MenuFpsMaxLastHz = -1;
+    bool m_Hl2vrMsaaCvarReady = false;
     bool m_LastCanRenderScene = true;
     DWORD m_EyeResizeSettleMs = 0;
     DWORD m_LastCompositorReclaimMs = 0;
@@ -1009,9 +1091,6 @@ private:
     uint32_t m_McFrame = 0;
     std::atomic<DWORD> m_McRecordThreadId{ 0 };
     bool m_McRingReady = false;
-    // GetCallQueue / QueueFunctorInternal failed (Quest Link log 2026-09-08).
-    // Stay on the single-thread 1x-eye blit + Present publish path.
-    bool m_McCallQueueDead = false;
     std::mutex m_OpenXrPublishMutex;
     IDirect3DSurface9* m_StereoEyeBlitDest = nullptr;
     bool m_StereoEyeBlitActive = false;
@@ -1086,6 +1165,9 @@ private:
     int m_MenuCursorX = 0;
     int m_MenuCursorY = 0;
     double m_MenuCursorSmoothMs = 0.0;
+    bool m_MenuPointerLastValid = false;
+    float m_MenuPointerLastPos[3]{};
+    float m_MenuPointerLastDir[3]{};
     bool m_MenuPanelPoseValid = false;
     uint32_t m_MenuOverlayEpoch = 0;
     L4D2VROpenXrPoseDesc m_MenuPanelPose{};
@@ -1095,6 +1177,8 @@ private:
     DWORD m_MenuClickMs = 0;
     int m_MenuClickX = 0;
     int m_MenuClickY = 0;
+    bool m_WorldVguiTriggerWasDown = false;
+    bool m_WorldVguiSuppressAttack = false;
     bool m_WeaponMenuOpen = false;
     bool m_WeaponMenuClickHeld = false;
     bool m_WeaponMenuOpenedThisHold = false;

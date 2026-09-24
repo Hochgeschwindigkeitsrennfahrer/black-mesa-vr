@@ -401,6 +401,10 @@ namespace
     bool IsOffscreenWorldRtName(const char* name);
     thread_local RtStackEntry g_RtStack[kRtStackMax]{};
     thread_local int g_RtStackDepth = 0;
+    // Pushes past kRtStackMax used to return without a slot, then NotePopRt
+    // still popped a real entry. Aux/world class then tracked the wrong RT
+    // for the rest of the frame.
+    thread_local int g_RtStackOverflow = 0;
     thread_local int g_AuxRtDepth = 0;
     bool g_CostActive = false;
     int g_ShadowPush = 0;
@@ -487,7 +491,16 @@ namespace
     void NotePushRt(const char* name, int w, int h, const RtNameClass* cls = nullptr)
     {
         if (g_RtStackDepth >= kRtStackMax)
+        {
+            ++g_RtStackOverflow;
+            static int s_overflowLog;
+            if (s_overflowLog < 3)
+            {
+                Game::logMsg("RT stack overflow at %d (nested push not tracked)", kRtStackMax);
+                ++s_overflowLog;
+            }
             return;
+        }
         RtStackEntry& e = g_RtStack[g_RtStackDepth++];
         e.w = w;
         e.h = h;
@@ -525,6 +538,11 @@ namespace
 
     void NotePopRt()
     {
+        if (g_RtStackOverflow > 0)
+        {
+            --g_RtStackOverflow;
+            return;
+        }
         if (g_RtStackDepth <= 0)
             return;
         const RtStackEntry e = g_RtStack[--g_RtStackDepth];
@@ -1266,12 +1284,78 @@ namespace
         return n;
     }
 
+    const char* StudioRelString(const unsigned char* base, int rel);
+
+    int FindStudioBoneIndex(unsigned char* hdr, const char* name)
+    {
+        if (!hdr || !name || !name[0])
+            return -1;
+        int length = 0;
+        int numbones = 0;
+        int boneindex = 0;
+        __try
+        {
+            length = *reinterpret_cast<int*>(hdr + kStudioHdrLength);
+            numbones = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
+            boneindex = *reinterpret_cast<int*>(hdr + kStudioHdrBoneIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+        if (length < 256 || length > 4 * 1024 * 1024)
+            return -1;
+        if (numbones <= 0 || numbones > kMaxStudioBones)
+            return -1;
+        if (boneindex < 0 || boneindex + numbones * kStudioBoneSize > length)
+            return -1;
+        for (int i = 0; i < numbones; ++i)
+        {
+            unsigned char* bone = hdr + boneindex + i * kStudioBoneSize;
+            int szname = 0;
+            __try { szname = *reinterpret_cast<int*>(bone); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+            const char* n = StudioRelString(bone, szname);
+            if (n[0] && _stricmp(n, name) == 0)
+                return i;
+        }
+        return -1;
+    }
+
+    void SampleViewmodelOffhandGrip(unsigned char* hdr, const float* bones12, int nBones)
+    {
+        if (!hdr || !bones12 || nBones <= 0 || !Hooks::m_VR)
+            return;
+        int idx = FindStudioBoneIndex(hdr, "L_Wrist");
+        if (idx < 0)
+            idx = FindStudioBoneIndex(hdr, "L_Hand");
+        if (idx < 0 || idx >= nBones)
+            return;
+        const float* m = bones12 + idx * 12;
+        Vector world{};
+        __try
+        {
+            world.x = m[3];
+            world.y = m[7];
+            world.z = m[11];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        if (!std::isfinite(world.x) || !std::isfinite(world.y) || !std::isfinite(world.z))
+            return;
+        if (world.LengthSqr() <= 1.f)
+            return;
+        Hooks::m_VR->NoteViewmodelOffhandWorld(world);
+    }
+
     bool SehCopyAndFixViewmodelMatrices(float* dst, const void* src, int count,
         const float pivot[3], float scale,
         const float yFixOrigin[3], const float right[3], const float up[3], const float fwd[3],
         float yFix, const float* rigidDelta)
     {
-        if (!dst || !src || count < 1)
+        if (!dst || !src || count < 1 || count > kMaxStudioBones)
             return false;
         __try
         {
@@ -1282,9 +1366,10 @@ namespace
                 auto matrix = reinterpret_cast<float(*)[4]>(m);
                 if (rigidDelta)
                     ApplyMatrix3x4Delta(matrix, reinterpret_cast<const float(*)[4]>(rigidDelta));
-                if (yFix > 0.2f && yFix < 2.f && fabsf(yFix - 1.f) > 0.03f)
+                if (yFixOrigin && right && up && fwd
+                    && yFix > 0.2f && yFix < 2.f && fabsf(yFix - 1.f) > 0.03f)
                     UnstretchMatrix3x4ViewY(matrix, yFixOrigin, right, up, fwd, yFix);
-                if (scale > 0.2f && scale < 1.5f && fabsf(scale - 1.f) > 0.001f)
+                if (pivot && scale > 0.2f && scale < 1.5f && fabsf(scale - 1.f) > 0.001f)
                     ScaleMatrix3x4AroundPivot(matrix, pivot, scale);
             }
             return true;
@@ -2623,9 +2708,9 @@ namespace
         view.y = 0;
         view.m_nUnscaledX = 0;
         view.m_nUnscaledY = 0;
-        // fl_gbmatch: keep engine 2560 width/height so deferred flashlight
-        // apply matches the G-buffer. Still write HMD fov/aspect (below).
-        if (!bmvr::UseGbMatchViewLock())
+        // HWND blit / gbmatch: keep engine 2560 width/height so deferred
+        // flashlight apply matches the G-buffer. Still write HMD fov/aspect.
+        if (!vr->ShouldHwndBlitStereo())
         {
             view.width = eyeWidth;
             view.height = eyeHeight;
@@ -2693,11 +2778,13 @@ namespace
             && Hooks::m_VR->m_SourceRenderQueueBuildCount.load(std::memory_order_acquire) != 0;
     }
 
-    bool OffscreenStereoSizeLie(int& width, int& height)
+    bool WorldMatchEyeSizeLieAllowed()
     {
         if (!bmvr::OffscreenWorldMatchesEyes() || !Hooks::m_VR)
             return false;
-        if (Hooks::m_VR->HudPaintActive())
+        if (Hooks::m_VR->HudPaintActive() || Hooks::m_VR->Want2dMenuPanel())
+            return false;
+        if (Hooks::m_VR->m_CaptureReentry)
             return false;
         // Flashlight/CSM stay aux so their 8192 views keep atlas size. The
         // deferred apply Viewport/GetScreenSize(2560) while that shadow is
@@ -2707,9 +2794,31 @@ namespace
             return false;
         if (McLeftoverRecording())
             return false;
-        const bool stereo = Hooks::m_VR->StereoWorldPassActive();
-        if (!stereo && !Hooks::m_VR->CachedRt0MatchesEyes()
+        // FullFrame is already eye-sized during HWND pass-through. Using RT0
+        // size alone to lie GetScreenSize made water/refract CopyRT use a
+        // 1280x1408 srcRect into _rt_poweroftwofb 1024 (2026-09-09 bm_c4a2a).
+        if (!Hooks::m_VR->PassThroughWarmupDone())
+            return false;
+        if (!Hooks::m_VR->IsGameplayEligible() || !EngineInGame())
+            return false;
+        return Hooks::m_VR->m_RenderWidth >= 640 && Hooks::m_VR->m_RenderHeight >= 360;
+    }
+
+    bool OffscreenStereoSizeLie(int& width, int& height)
+    {
+        // GetBackBufferDimensions only: the swapchain is still the HWND.
+        // Lying BB size for the whole frame made Present StretchRect 2560²
+        // onto a 2560x1440 backbuffer.
+        if (!bmvr::OffscreenWorldMatchesEyes() || !Hooks::m_VR)
+            return false;
+        if (Hooks::m_VR->HudPaintActive())
+            return false;
+        if (AuxSceneRtBound() && !RtStackTopIsWorldScene()
             && !Hooks::m_VR->D3dRt0IsEyeSized())
+            return false;
+        if (McLeftoverRecording())
+            return false;
+        if (!Hooks::m_VR->StereoWorldPassActive())
             return false;
         const int eyeW = static_cast<int>(Hooks::m_VR->m_RenderWidth);
         const int eyeH = static_cast<int>(Hooks::m_VR->m_RenderHeight);
@@ -2717,6 +2826,19 @@ namespace
             return false;
         width = eyeW;
         height = eyeH;
+        return true;
+    }
+
+    bool OffscreenWorldViewSizeLie(int& width, int& height)
+    {
+        // GetScreenSize builds CViewSetup *before* m_StereoEye is set.
+        // Lying only during StereoWorldPassActive left setup=2560x1440 on a
+        // 2560x2560 eye; D3D then stretched that 16:9 viewport into the
+        // square RT (soft / letterboxed HMD, 2026-09-13 simulator).
+        if (!WorldMatchEyeSizeLieAllowed())
+            return false;
+        width = static_cast<int>(Hooks::m_VR->m_RenderWidth);
+        height = static_cast<int>(Hooks::m_VR->m_RenderHeight);
         return true;
     }
 
@@ -2788,8 +2910,9 @@ namespace
             return;
         // Flashlight apply PushRT/Viewport is 2560 (G-buffer actual). Forcing
         // 1584 here is why the beam never landed in fused eyes. Keep engine
-        // size; squash-blit after RenderView.
-        if (bmvr::UseGbMatchViewLock())
+        // size; squash-blit after RenderView. Same lock when gbmatch was
+        // crash-stickied but eyes still fit in the HWND (simulator).
+        if (Hooks::m_VR->ShouldHwndBlitStereo())
             return;
         const int inX = x;
         const int inY = y;
@@ -2891,7 +3014,9 @@ namespace
             return false;
         if (Hooks::m_VR->HudPaintActive() || Hooks::m_VR->m_CaptureReentry)
             return false;
-        return StereoEyeWorldActive() || Hooks::m_VR->IsGameplayEligible();
+        // Same as PushRT: unpaused pass-through is still a 16:9 HWND view.
+        // Treating it as an eye pass rewrote DSSR/CopyRT into 1280 RTs.
+        return Hooks::m_VR->StereoWorldPassActive();
     }
 
     bool LooksLikeWindowExtent(int w, int h)
@@ -2910,6 +3035,14 @@ namespace
     bool ApplyHwndStereoRtDimLie(int& width, int& height, bool originalWroteNothing)
     {
         if (!Hooks::m_VR || Hooks::m_VR->HudPaintActive())
+            return false;
+        // HWND blit / gbmatch keeps CViewSetup / G-buffer at HWND size and
+        // squash-blits after RenderView. Lying 2560x1440 -> 1280x1408 here
+        // made PushRT and shaders allocate/draw as if RT0 were the eye
+        // (2026-09-09 simulator: first pair done worldMatch=0 mc=0, then
+        // exitCode=1). Gate on eyes-vs-window, not only gbmatch — skip-file
+        // leftover disabled UseGbMatchViewLock and this lie still fired.
+        if (Hooks::m_VR->ShouldHwndBlitStereo())
             return false;
         if (McLeftoverRecording())
             return false;
@@ -3238,6 +3371,21 @@ namespace
         redirected = true;
     }
 
+    bool SehVguiPaintOriginal(void* vgui, int paintMode)
+    {
+        if (!Hooks::hkVgui_Paint.fOriginal)
+            return false;
+        __try
+        {
+            Hooks::hkVgui_Paint.fOriginal(vgui, paintMode);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     // L4D2VR PaintToHudOnce: extra VGui_Paint into vrHUD. Engine dest stays
     // untouched so desktop VGUI survives. BM never PushRT `_rt_gui` during
     // stereo gameplay (log: only gbuffer/null), so the PopRT blit never ran
@@ -3253,6 +3401,8 @@ namespace
         // in-game GameUI copies menu chrome onto a cleared-transparent overlay.
         // HEV HUD is client DRAWHUD, not this path.
         if (!vr->WantPauseWorldOverlay())
+            return;
+        if (!vr->AppActivated())
             return;
         if (vr->HudPaintedThisFrame())
             return;
@@ -3288,8 +3438,21 @@ namespace
             vr->PreparePauseHudForVgui(scope.ctx);
         const int paintMode = PAINT_UIPANELS;
         ++g_VguiOverlayReentry;
-        Hooks::hkVgui_Paint.fOriginal(vgui, paintMode);
+        const bool painted = SehVguiPaintOriginal(vgui, paintMode);
         --g_VguiOverlayReentry;
+        if (!painted)
+        {
+            if (!queued)
+                vr->UnbindPauseHudAfterExtraPaint();
+            vr->SetHudPaintActive(false);
+            static int s_paintSeh;
+            if (s_paintSeh < 4)
+            {
+                Game::logMsg("VGui extra-paint overlay SEH");
+                ++s_paintSeh;
+            }
+            return;
+        }
         if (queued)
         {
             if (!vr->QueueMcPauseHudEnd())
@@ -3345,7 +3508,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     };
 
     if (m_VR)
+    {
         m_VR->FlushPendingGameUi();
+        m_VR->TickAudioFocusRecover();
+    }
 
     EnsureServerFlashlightHook();
     if (m_VR)
@@ -3364,6 +3530,21 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         && std::isfinite(setup.origin.z)
         && fabsf(setup.origin.x) < 100000.f && fabsf(setup.origin.y) < 100000.f;
     const bool fovOk = std::isfinite(setup.fov) && setup.fov > 10.f && setup.fov < 170.f;
+    // Crossbow zoom lerps CViewSetup.fov through ~43 then down toward the
+    // 2D scope value. fov>10 skipped stereo after the first live frame and
+    // left the last eye texture frozen in the HMD until unscope.
+    const bool scopeFov = m_VR && std::isfinite(setup.fov) && setup.fov > 1.f && setup.fov < 50.f
+        && (m_VR->ScopeZoomActive() || m_VR->ViewmodelIsScoped());
+    const bool fovForStereo = fovOk || scopeFov;
+    if (scopeFov && !fovOk)
+    {
+        static int s_zoomFovGate;
+        if (s_zoomFovGate < 8)
+        {
+            Game::logMsg("Stereo zoom FOV gate engine=%.1f (would have skipped at fov<=10)", setup.fov);
+            ++s_zoomFovGate;
+        }
+    }
 
     if (m_VR && mainView)
         m_VR->m_SetupOrigin = setup.origin;
@@ -3402,8 +3583,41 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         if (m_VR && m_VR->IsGameplayEligible() && inGame
             && mainView && m_VR->m_HmdPoseValid)
         {
+            // HWND blit (eyes smaller than the window, or gbmatch lock): do
+            // not rewrite look or shrink the view. Look copy + gluon CopyRT
+            // died in pass-through on OpenXR Simulator (heartbeat in_rel_look).
+            if (m_VR->ShouldHwndBlitStereo())
+            {
+                static int s_ptHwnd;
+                if (s_ptHwnd < 4)
+                {
+                    Game::logMsg("HMD-fb pass-through HWND %dx%d (no look copy; eyes %ux%u)",
+                        setup.width, setup.height, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
+                    ++s_ptHwnd;
+                }
+                callOriginal(setup, nClearFlags, whatToDraw);
+                return;
+            }
             CViewSetup vrView = setup;
             applyL4d2VrHead(vrView, false, true);
+            // WorldRenderAtEyeSize is grow-only. When FullFrame already matches
+            // eyes that are at least as large as this HWND view, keep the
+            // pass-through on the RT size (CopyRT 2560 into 1280 FullFrame
+            // 2026-09-09). Do not shrink a 2560 view down to a leftover 1280
+            // eye — that is the simulator gluon crash path.
+            if (bmvr::OffscreenWorldMatchesEyes()
+                && m_VR->m_RenderWidth + 32 >= static_cast<UINT>(setup.width)
+                && m_VR->m_RenderHeight + 32 >= static_cast<UINT>(setup.height))
+            {
+                NormalizeViewSetupForVREye(vrView, m_VR);
+                static int s_ptEye;
+                if (s_ptEye < 4)
+                {
+                    Game::logMsg("HMD-fb pass-through view %dx%d -> eye %dx%d (world RTs match)",
+                        setup.width, setup.height, vrView.width, vrView.height);
+                    ++s_ptEye;
+                }
+            }
 
             static int s_relLog;
             if (s_relLog < 4)
@@ -3465,7 +3679,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         && inGame
         && mainView
         && originOk
-        && fovOk
+        && fovForStereo
         && m_VR->StereoEyesReady()
         && m_VR->m_PassThroughMainViews < kStereoAfterPassThrough)
     {
@@ -3495,7 +3709,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         && inGame
         && mainView
         && originOk
-        && fovOk
+        && fovForStereo
         && m_VR->StereoEyesReady())
     {
         if (m_VR->m_StereoEyesDrawnThisFrame)
@@ -3532,6 +3746,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             // No-gbmatch uses DesktopLeftoverRender (default off).
             const bool gbSkipLeftover = bmvr::TryFlashlightGbMatch() && bmvr::TryGbLeftSkip();
             const bool skipLeftover = bmvr::OffscreenWorldMatchesEyes()
+                || m_VR->ShouldHwndBlitStereo()
                 || (bmvr::TryFlashlightGbMatch()
                     ? gbSkipLeftover
                     : !bmvr::g_DesktopLeftoverRender);
@@ -3567,6 +3782,60 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         }
         m_VR->m_StereoEyesDrawnThisFrame = true;
         m_VR->BeginStereoFramePose();
+        if (m_VR->ShouldHwndBlitStereo())
+        {
+            // Simulator 1280 eyes / 2560 G-buffer: do not shrink CViewSetup to
+            // 1280 (that plus DRAWHUD exited 1). One HWND view blit to both
+            // eyes was mono and ALTERNATING_VISIBLE_FRAMES — 16:9 fov 106
+            // squashed into a ~square eye the compositor treated as 90°.
+            // Two HWND-sized RVs with IPD + HMD fov/aspect, squash-blit each
+            // after a GPU flush. Do not bind the 1280 eye RTs, gloves overlay,
+            // ColorFill, or a third DRAWHUD pass (those killed gbmatch).
+            static int s_hwndBlit;
+            if (s_hwndBlit == 0)
+                bmvr::BeginRisky(L"hmd_fb");
+            m_VR->NoteEngineScopeFov(setup.fov);
+            CViewSetup leftEyeView = setup;
+            CViewSetup rightEyeView = setup;
+            NormalizeViewSetupForVREye(leftEyeView, m_VR);
+            NormalizeViewSetupForVREye(rightEyeView, m_VR);
+            m_VR->NoteStereoClipPlanes(leftEyeView.zNear, leftEyeView.zFar);
+            applyL4d2VrHead(leftEyeView, true, true);
+            applyL4d2VrHead(rightEyeView, true, false);
+            if (s_hwndBlit < 8)
+            {
+                const float ipd = m_VR->m_Ipd * m_VR->m_IpdScale * m_VR->m_VRScale;
+                Game::logMsg("HWND gbmatch stereo pair setup=%dx%d -> %dx%d fov=%.1f->%.1f aspect=%.3f->%.3f eyes=%ux%u ipd=%.3f",
+                    setup.width, setup.height, leftEyeView.width, leftEyeView.height,
+                    setup.fov, leftEyeView.fov, setup.m_flAspectRatio, leftEyeView.m_flAspectRatio,
+                    m_VR->m_RenderWidth, m_VR->m_RenderHeight, ipd);
+            }
+            m_VR->m_StereoRenderViewActive = false;
+            m_VR->m_StereoBodyOrigin = setup.origin;
+            m_VR->m_HasStereoBodyOrigin = true;
+            m_VR->m_StereoEye = 1;
+            callOriginal(leftEyeView, nClearFlags, whatToDraw);
+            const bool leftOk = m_VR->BlitHmdViewFromBackbuffer(m_VR->m_D9LeftEyeSurface, true);
+            m_VR->m_StereoEye = 2;
+            callOriginal(rightEyeView, nClearFlags, whatToDraw);
+            const bool rightOk = m_VR->BlitHmdViewFromBackbuffer(m_VR->m_D9RightEyeSurface, true);
+            m_VR->m_StereoEye = 0;
+            m_VR->m_DirectEyeSubmit = true;
+            m_VR->FlushStereoBlitGpu();
+            m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
+            m_VR->m_HasStereoBodyOrigin = false;
+            m_VR->EndStereoFramePose();
+            if (s_hwndBlit < 8)
+            {
+                Game::logMsg("HWND gbmatch stereo done left=%d right=%d", leftOk ? 1 : 0, rightOk ? 1 : 0);
+                ++s_hwndBlit;
+            }
+            else
+                ++s_hwndBlit;
+            if (s_hwndBlit == 120)
+                bmvr::EndRisky(L"hmd_fb");
+            return;
+        }
         static int s_enterLog;
         if (s_enterLog < 4)
         {
@@ -3651,11 +3920,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         StereoCostBegin();
         g_Cost.eye = 1;
         m_VR->m_StereoEye = 1;
-        const bool mcLeft = mc && m_VR->QueueMcEyeBind(1, false);
-        if (!mcLeft)
+        if (!mc)
         {
             m_VR->BeginStereoEyeBlit(m_VR->m_D9LeftEyeSurface);
             m_VR->ClearStereoEyeSurfaces();
+        }
+        else
+        {
+            m_VR->QueueMcEyeBind(1, false);
         }
         {
             const int eyeDraw = whatToDraw & ~kRenderViewDrawHud;
@@ -3663,7 +3935,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             callOriginal(leftEyeView, nClearFlags, eyeDraw);
             g_Cost.leftTicks += QpcNow() - t0;
         }
-        if (!mcLeft)
+        if (!mc)
         {
         const bool leftUnbind = m_VR->EndStereoEyeBlit();
         {
@@ -3724,11 +3996,17 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         g_Cost.eye = 2;
         g_Cost.eye = 2;
         m_VR->m_StereoEye = 2;
-        const bool mcRight = mc && m_VR->QueueMcEyeBind(2, true);
-        if (!mcRight)
+        if (!mc)
         {
             m_VR->BeginStereoEyeBlit(m_VR->m_D9RightEyeSurface);
             m_VR->ClearStereoEyeSurfaces();
+        }
+        else
+        {
+            // Flush so left's shared FullFrame copy can land on the 1x eye
+            // before the right RenderView reuses it. Do not IMat Viewport
+            // the HWND at eye size (nvogl crash).
+            m_VR->QueueMcEyeBind(2, true);
         }
         {
             const int eyeDraw = whatToDraw & ~kRenderViewDrawHud;
@@ -3736,7 +4014,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             callOriginal(rightEyeView, nClearFlags, eyeDraw);
             g_Cost.rightTicks += QpcNow() - t0;
         }
-        if (!mcRight)
+        if (!mc)
         {
         const bool rightUnbind = m_VR->EndStereoEyeBlit();
         {
@@ -3772,7 +4050,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         }
         } // !mc right post-RV
         m_VR->m_StereoEye = 0;
-        if (mcLeft && mcRight)
+        if (mc)
         {
             m_VR->QueueMcCompositeToRing(mcBand);
             m_VR->FinishMcStereoPair();
@@ -3784,17 +4062,22 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         // thread; Present copies it onto the HWND. StretchRect of 1x eyes
         // from this thread races playback. Do not blit onto the swapchain
         // from the mat thread (viewport clobber / Present stall).
-        if (!(mcLeft && mcRight))
+        if (!mc)
         {
+        if (m_VR->ShouldHwndBlitStereo())
+            m_VR->FlushStereoBlitGpu();
         if (bmvr::OffscreenWorldMatchesEyes())
             m_VR->MirrorStereoToDesktopWindow();
-        else if (m_VR->m_IsVREnabled && !m_VR->WantPauseWorldOverlay())
+        else if (m_VR->m_IsVREnabled && !m_VR->WantPauseWorldOverlay()
+            && !m_VR->ShouldHwndBlitStereo())
             m_VR->ClearUnusedDesktopBackbuffer();
         }
         // gbmatch already draws flashlight in the eye passes. A third window
-        // DRAWHUD pass was a 15fps regression. Keep it only for the fused
-        // fallback (eyes stripped HUD).
-        const bool runDrawHudPass = !(mcLeft && mcRight) && !bmvr::TryFlashlightGbMatch() && bmvr::TryDrawHud();
+        // DRAWHUD pass was a 15fps regression and, on OpenXR Simulator with
+        // gbmatch skip-filed, the process exit (heartbeat in_drawhud).
+        // Keep it only for fused fallback (eyes stripped HUD).
+        const bool runDrawHudPass = !mc && !bmvr::TryFlashlightGbMatch()
+            && !m_VR->ShouldHwndBlitStereo() && bmvr::TryDrawHud();
         if (runDrawHudPass)
         {
             static int s_drawHudFrames;
@@ -3814,7 +4097,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         // rendered into it with depth. Adding the no-depth desktop overlay on
         // top of that put a second, slightly offset copy of each hand on the
         // window, which is what read as the hands being see-through there.
-        if (!(mcLeft && mcRight)
+        if (!mc
             && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes)
             && !m_VR->IsMenuUp()
             && !bmvr::OffscreenWorldMatchesEyes()
@@ -3837,6 +4120,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 bmvr::OffscreenWorldMatchesEyes() ? 1 : 0, mc ? 1 : 0);
             if (bmvr::OffscreenWorldMatchesEyes())
                 Game::logMsg("offscreen native: FullFrame/G-buffer match eyes %dx%d", eyeW, eyeH);
+            if (bmvr::UseGbMatchViewLock())
+                Game::logMsg("HWND stereo post-pair: no RT dim lie, no BB ColorFill (gbmatch squash blit)");
             ++s_hmdFbDone;
         }
 
@@ -4026,6 +4311,21 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     if (m_VR && m_VR->m_IsVREnabled && cmd->command_number)
         applyVrUserCmd();
 
+    // World vgui_screen (C_VGuiScreen / CMortarControlScreen): hover uses
+    // EyeAngles (HMD). DetermineVguiInputMode uses cmd viewangles, which we
+    // set to controller aim, so IN_ATTACK never becomes a VGUI click.
+    const int buttonsBeforeOriginal = cmd->buttons;
+    if (m_VR && m_VR->m_IsVREnabled && cmd->command_number)
+    {
+        if (m_VR->IsGameplayEligible() && EngineInGame()
+            && m_VR->m_HmdPoseValid && !m_VR->IsMenuUp()
+            && !m_VR->MenuGameplayBlocked())
+        {
+            const Vector hmdVa = m_VR->GetViewAngle();
+            cmd->viewangles.Init(hmdVa.x, hmdVa.y, 0.f);
+        }
+    }
+
     bool result = hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
     if (m_VR && cmd->command_number && m_VR->IsGameplayEligible())
@@ -4039,7 +4339,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     applyControllerAim();
     if (m_VR)
         ZeroPlayerViewRecoil(localPlayer);
+    if (m_VR)
+        m_VR->ApplyWorldVguiTriggerClick(cmd);
+    const bool vguiAteAttack = (buttonsBeforeOriginal & (IN_ATTACK | IN_ATTACK2)) != 0
+        && (cmd->buttons & (IN_ATTACK | IN_ATTACK2)) == 0;
     if (m_VR && m_VR->EmptyHands())
+        cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+    else if (vguiAteAttack || (m_VR && m_VR->WorldVguiSuppressAttack()))
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
@@ -4301,12 +4607,14 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     if (isViewmodel && m_VR && m_VR->IsMenuUp() && m_VR->IsGameplayEligible() && EngineInGame())
         return;
 
-    if (isViewmodel && m_VR && m_VR->IsGameplayEligible() && EngineInGame())
+    const bool vrViewmodelPass = m_VR && m_VR->PassThroughWarmupDone()
+        && m_VR->StereoWorldPassActive();
+    if (isViewmodel && vrViewmodelPass && m_VR->IsGameplayEligible() && EngineInGame())
         ApplyViewmodelStudioWork(state, modelName, body, skin, hideArms, pCustomBoneToWorld);
 
     void* bonesToDraw = pCustomBoneToWorld;
     const ModelRenderInfo_t* infoToDraw = &info;
-    if (isViewmodel && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
+    if (isViewmodel && vrViewmodelPass && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
         && EngineInGame() && m_VR->m_ControllerPoseValid)
     {
         const float scale = [&]() -> float {
@@ -4409,6 +4717,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             {
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
+                SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);
@@ -4506,10 +4815,14 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
     // Grow world G-buffer viewports before NotePushRt so the stack records
     // 3168, and so a `_rt_gb*` push while flashlight is still parent is not
     // skipped by AuxSceneRtBound().
+    // Only during an actual eye pass. GameUI-dismiss used to arm this during
+    // the 2560 pass-through warmup (2026-09-09: world flashed, then
+    // exitCode=1, heartbeat in_rel_look, no stereo enter). FullFrame/GB are
+    // already 1280x1408; rewriting PushRT onto them while CViewSetup is still
+    // HWND 16:9 kills the next RenderView.
     if (m_VR && bmvr::OffscreenWorldMatchesEyes()
         && !m_VR->HudPaintActive()
-        && (m_VR->StereoWorldPassActive()
-            || (m_VR->IsGameplayEligible() && !m_VR->WantPauseWorldOverlay())))
+        && m_VR->StereoWorldPassActive())
     {
         const int eyeW = static_cast<int>(m_VR->m_RenderWidth);
         const int eyeH = static_cast<int>(m_VR->m_RenderHeight);
@@ -4604,7 +4917,8 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
     }
     if (hkPushRenderTargetAndViewport.fOriginal)
         hkPushRenderTargetAndViewport.fOriginal(ecx, pTexture, pDepthTexture, nViewX, nViewY, nViewW, nViewH);
-    if (m_VR && !m_VR->HudPaintActive() && nViewW > 0 && nViewH > 0
+    if (m_VR && !m_VR->HudPaintActive() && !m_VR->ShouldHwndBlitStereo()
+        && nViewW > 0 && nViewH > 0
         && static_cast<UINT>(nViewW) == m_VR->m_RenderWidth
         && static_cast<UINT>(nViewH) == m_VR->m_RenderHeight)
         m_VR->NoteCachedRt0Size(static_cast<UINT>(nViewW), static_cast<UINT>(nViewH));
@@ -4654,7 +4968,10 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             || (m_VR && m_VR->McOriginIsRingBand(destX, destY)));
     const bool windowUv = LooksLikeWindowUv(srcX0, srcY0, srcX1, srcY1);
     const bool potSrc = SrcLooksLikePowerOfTwoFb(srcWidth, srcHeight, eyeW, eyeH);
-    if (StereoEyeWorldActive() && StereoBloomMaterial(matName))
+    const bool waterWarp = matName && std::strstr(matName, "water_warp") != nullptr;
+    if (StereoBloomMaterial(matName) && Hooks::m_VR
+        && Hooks::m_VR->StereoWorldPassActive()
+        && (bmvr::OffscreenWorldMatchesEyes() || Hooks::m_VR->ShouldHwndBlitStereo()))
     {
         static int s_skipBloom;
         if (s_skipBloom < 12)
@@ -4666,7 +4983,53 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
         return;
     }
     int expanded = 0;
-    if (OffscreenEyePassActive() && (windowDest || windowUv)
+    // Underwater overlay is screenspace water_warp from _rt_poweroftwofb.
+    // GetScreenSize eye-lie can leave dest at 1024 (or HWND 16:9) on the
+    // square eye — a magnified inset in one corner that pops fullscreen
+    // when dest happens to match. Planar water uses the Water shader, not
+    // this DSSR path.
+    if (waterWarp && OffscreenEyePassActive() && eyeW >= 640 && eyeH >= 360
+        && width >= 256 && height >= 256
+        && (width + 64 < eyeW || height + 64 < eyeH || windowDest))
+    {
+        int ox = 0;
+        int oy = 0;
+        bool rewrite = true;
+        if (m_VR->D3dRt0IsMcRing())
+        {
+            if (!m_VR->McResolveRingEyeOrigin(origX, origY, origW, origH, ox, oy))
+            {
+                int cx = 0, cy = 0, cw = 0, ch = 0;
+                if (m_VR->McClipAmbiguousWindowVp(origX, origY, origW, origH, cx, cy, cw, ch))
+                {
+                    destX = cx;
+                    destY = cy;
+                    width = cw;
+                    height = ch;
+                    rewrite = false;
+                    expanded = 1;
+                }
+                else
+                    rewrite = false;
+            }
+        }
+        if (rewrite)
+        {
+            destX = ox;
+            destY = oy;
+            width = eyeW;
+            height = eyeH;
+            expanded = 1;
+        }
+        static int s_warp;
+        if (s_warp < 8)
+        {
+            Game::logMsg("DSSR water_warp dest %d,%d %dx%d -> %d,%d %dx%d",
+                origX, origY, origW, origH, destX, destY, width, height);
+            ++s_warp;
+        }
+    }
+    if (expanded == 0 && OffscreenEyePassActive() && (windowDest || windowUv)
         && !HudScreenspaceMaterial(matName) && !potSrc && eyeW >= 640)
     {
         const bool ringDest = m_VR->D3dRt0IsMcRing() && McViewportDestIsRing();
@@ -4792,7 +5155,13 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     if (!srcEye && destEye && OffscreenEyePassActive())
         srcEye = true;
     int grew = 0;
-    if (srcRect && windowSrc && !destWindow && srcEye && OffscreenEyePassActive())
+    const bool refractDest = DestLooksLikeRefractCopy(SafeTextureName(texture))
+        || (destW >= 256 && destH >= 256 && destW == destH && destW <= 2048
+            && eyeW >= 640 && destW + 32 < eyeW);
+    // Do not grow a HWND srcRect to eye size when the dest is the 1024
+    // underwater / refract RT. That copy must downsample the whole view.
+    if (srcRect && windowSrc && !destWindow && srcEye && OffscreenEyePassActive()
+        && !refractDest)
     {
         int ox = 0;
         int oy = 0;
@@ -4885,6 +5254,65 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
         if (StereoEyeWorldActive())
             ++s_stereoCopyLog;
     }
+    // Clip src to the source RT and dst to the dest texture. Clipping src to
+    // dest turned a legal 1280→1024 stretch (_rt_poweroftwofb refract) into a
+    // crop, and a 2560 srcRect into a 1280 FullFrame is illegal only when the
+    // *source* is smaller than srcRect (2026-09-09).
+    auto clipToBounds = [&](SourceRect_t*& rect, SourceRect_t& storage, int maxW, int maxH, const char* tag) {
+        if (!rect || maxW < 1 || maxH < 1)
+            return;
+        if (rect->x >= 0 && rect->y >= 0 && rect->width > 0 && rect->height > 0
+            && rect->x + rect->width <= maxW && rect->y + rect->height <= maxH)
+            return;
+        storage = *rect;
+        if (storage.x < 0)
+            storage.x = 0;
+        if (storage.y < 0)
+            storage.y = 0;
+        if (storage.x >= maxW || storage.y >= maxH)
+        {
+            storage.x = 0;
+            storage.y = 0;
+            storage.width = maxW;
+            storage.height = maxH;
+        }
+        else
+        {
+            if (storage.width > maxW - storage.x)
+                storage.width = maxW - storage.x;
+            if (storage.height > maxH - storage.y)
+                storage.height = maxH - storage.y;
+        }
+        static int s_clip;
+        if (s_clip < 8)
+        {
+            Game::logMsg("CopyRTEx clip %s %d,%d %dx%d -> %dx%d",
+                tag, rect->x, rect->y, rect->width, rect->height, maxW, maxH);
+            ++s_clip;
+        }
+        rect = &storage;
+    };
+    if (srcW >= 1 && srcH >= 1)
+        clipToBounds(srcRect, expanded, srcW, srcH, "src");
+    else if (refractDest && srcRect
+        && (srcRect->width > destW || srcRect->height > destH))
+    {
+        // Source RT size unknown. Clipping srcRect to dest cropped the
+        // underwater copy to the top-left 1024 of a 2544 eye after
+        // GetScreenSize returned eye size (magnified corner overlay that
+        // then water_warp stretched fullscreen — same look as scope zoom).
+        static int s_refractStretch;
+        if (s_refractStretch < 8)
+        {
+            Game::logMsg("CopyRTEx refract stretch drop srcRect %d,%d %dx%d into dest %dx%d",
+                srcRect->x, srcRect->y, srcRect->width, srcRect->height, destW, destH);
+            ++s_refractStretch;
+        }
+        srcRect = nullptr;
+    }
+    else
+        clipToBounds(srcRect, expanded, destW, destH, "src-unk");
+    clipToBounds(dstRect, expandedDst, destW, destH, "dst");
     if (hkCopyRenderTargetToTextureEx.fOriginal)
         hkCopyRenderTargetToTextureEx.fOriginal(ecx, texture, renderTargetId, srcRect, dstRect);
 }
@@ -6489,7 +6917,7 @@ void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& hei
     }
     const int origW = width;
     const int origH = height;
-    if (OffscreenStereoSizeLie(width, height))
+    if (OffscreenWorldViewSizeLie(width, height))
     {
         static int s_ssLie;
         if (s_ssLie < 8 && (origW != width || origH != height))
@@ -6556,10 +6984,12 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
     // the gun used 16:9 in a ~square eye RT (stretch along view-up, and the
     // grip rides the look plane when you nod).
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame()
-        && m_VR->StereoWorldPassActive()
         && m_VR->m_RenderWidth >= 640 && m_VR->m_RenderHeight >= 360
-        && (bmvr::OffscreenWorldMatchesEyes() || m_VR->CachedRt0MatchesEyes()
-            || m_VR->D3dRt0IsEyeSized()))
+        && (WorldMatchEyeSizeLieAllowed()
+            || (m_VR->StereoWorldPassActive()
+                && (bmvr::OffscreenWorldMatchesEyes() || bmvr::UseGbMatchViewLock()
+                    || m_VR->CachedRt0MatchesEyes()
+                    || m_VR->D3dRt0IsEyeSized()))))
     {
         const float eyeAspect = static_cast<float>(m_VR->m_RenderWidth)
             / static_cast<float>(m_VR->m_RenderHeight);
@@ -6626,11 +7056,24 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
         growW = gbW;
         growH = gbH;
     }
-    const bool wantGrow = wantGrowFb || wantGrowGb;
+    bool wantGrow = wantGrowFb || wantGrowGb;
+    const int oldW = w;
+    const int oldH = h;
+    if (wantGrow && oldW >= 640 && oldH >= 360
+        && growW <= static_cast<uint32_t>(oldW)
+        && growH <= static_cast<uint32_t>(oldH))
+    {
+        static int s_shrinkLog;
+        if (s_shrinkLog < 8)
+        {
+            Game::logMsg("CreateNamedRT %s skip shrink %dx%d -> %ux%u (keep engine size)",
+                name ? name : "?", oldW, oldH, growW, growH);
+            ++s_shrinkLog;
+        }
+        wantGrow = false;
+    }
     if (wantGrow)
     {
-        const int oldW = w;
-        const int oldH = h;
         const int oldMode = sizeMode;
         w = static_cast<int>(growW);
         h = static_cast<int>(growH);
@@ -6701,7 +7144,59 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     }
     if (!hkCreateNamedRTEx.fOriginal)
         return nullptr;
+    const bool sceneName = name && (std::strstr(name, "_rt_FullFrame")
+        || std::strstr(name, "_rt_Resolved")
+        || (std::strstr(name, "_rt_gb")
+            && !std::strstr(name, "shadow") && !std::strstr(name, "Shadow")
+            && !std::strstr(name, "flashlight") && !std::strstr(name, "Flashlight")
+            && !std::strstr(name, "csm") && !std::strstr(name, "CSM")));
+    const bool separateDepth = depth == MATERIAL_RT_DEPTH_SEPARATE || depth == MATERIAL_RT_DEPTH_ONLY;
+    if (sceneName && !separateDepth)
+    {
+        static int s_sharedDepth;
+        if (s_sharedDepth < 8)
+        {
+            Game::logMsg("HL2VR MSAA skip %s depth=%d (needs a separate depth buffer)", name, depth);
+            ++s_sharedDepth;
+        }
+    }
+    const bool msaaScope = sceneName && separateDepth && bmvr::g_MsaaAllowed
+        && bmvr::NormalizeMsaa(static_cast<int>(bmvr::g_Msaa)) >= 2
+        && !skipGrow;
+    if (msaaScope)
+    {
+        static int s_scopeLog;
+        if (s_scopeLog < 12)
+        {
+            Game::logMsg("HL2VR MSAA %s %dx%d depth=%d samples=%u",
+                name, w, h, depth, bmvr::g_Msaa);
+            ++s_scopeLog;
+        }
+    }
+    const uint32_t scopeW = w > 0 ? static_cast<uint32_t>(w) : 0;
+    const uint32_t scopeH = h > 0 ? static_cast<uint32_t>(h) : 0;
+    // No C++ guard here: this function uses __try, and MSVC rejects
+    // unwinding objects in the same function.
+    if (msaaScope)
+    {
+        if (bmvr::Hl2vrMsaaScope::Depth() == 0)
+        {
+            bmvr::Hl2vrMsaaScope::Width() = scopeW;
+            bmvr::Hl2vrMsaaScope::Height() = scopeH;
+        }
+        ++bmvr::Hl2vrMsaaScope::Depth();
+    }
+    static bool s_msaaArmed;
+    if (msaaScope && !s_msaaArmed)
+    {
+        s_msaaArmed = true;
+        bmvr::BeginRisky(L"msaa");
+    }
     ITexture* tex = hkCreateNamedRTEx.fOriginal(ecx, name, w, h, sizeMode, format, depth, textureFlags, renderTargetFlags);
+    if (msaaScope && bmvr::Hl2vrMsaaScope::Depth() > 0)
+        --bmvr::Hl2vrMsaaScope::Depth();
+    if (msaaScope && s_msaaArmed)
+        bmvr::EndRisky(L"msaa");
     if (tex && name && (fullMode || namedFb || namedGb || wantGrow))
     {
         int aw = 0, ah = 0;

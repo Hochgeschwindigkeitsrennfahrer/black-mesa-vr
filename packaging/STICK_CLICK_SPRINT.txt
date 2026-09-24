@@ -1,0 +1,13 @@
+Black Mesa VR — sprint drop-in
+==============================
+
+Sprint with left joystick click (L3). Hold to keep sprinting.
+
+Same install as the usual drop-in: close the game, copy this folder into
+Steam\steamapps\common\Black Mesa so d3d9.dll lands in all three:
+
+  Black Mesa\d3d9.dll
+  Black Mesa\bin\d3d9.dll
+  Black Mesa\bin\thirdparty\dxvk-windows-x86\d3d9.dll
+
+Launch with -oldgameui (and -enabledxvk if the video menu is native D3D9).

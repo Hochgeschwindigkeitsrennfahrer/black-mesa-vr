@@ -191,7 +191,7 @@
    },
    "category": "steamvr_input",
    "controller_type": "vive_controller",
-   "description": "Vive wand trackpads mapped like L4D2VR/Portal2 sticks (left walk, right turn).",
+   "description": "Vive wand trackpads: left walk, right turn.",
    "name": "Black Mesa VR Vive v3 use/sprint/reload",
    "options": {},
    "simulated_actions": []

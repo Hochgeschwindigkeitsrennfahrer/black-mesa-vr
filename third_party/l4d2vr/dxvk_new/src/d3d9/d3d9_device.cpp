@@ -160,6 +160,26 @@ namespace dxvk {
             params->Windowed = TRUE;
         }
 
+        static void BmvrStripSwapchainMsaa(D3DPRESENT_PARAMETERS* params)
+        {
+            if (!params)
+                return;
+            if (params->MultiSampleType == D3DMULTISAMPLE_NONE && params->MultiSampleQuality == 0)
+                return;
+            static int s_log;
+            if (s_log < 4)
+            {
+                Logger::info(str::format(
+                    "BMVR stripping swapchain MSAA ",
+                    static_cast<int>(params->MultiSampleType),
+                    " q=", params->MultiSampleQuality,
+                    " (scene MSAA is HL2VR-scoped, not the backbuffer)"));
+                ++s_log;
+            }
+            params->MultiSampleType = D3DMULTISAMPLE_NONE;
+            params->MultiSampleQuality = 0;
+        }
+
         static void BmvrForceHmdAspectWindowedBackbuffer(D3DPRESENT_PARAMETERS* params)
         {
             if (!params)
@@ -1660,6 +1680,7 @@ namespace dxvk {
 
     D3DPRESENT_PARAMETERS* caller = pPresentationParameters;
     D3DPRESENT_PARAMETERS local = *pPresentationParameters;
+    BmvrStripSwapchainMsaa(&local);
     BmvrKeepDesktopWindowed(&local);
     BmvrForceHmdAspectWindowedBackbuffer(&local);
     BmvrSyncCallerBackbufferSize(caller, &local);
@@ -1880,12 +1901,7 @@ namespace dxvk {
                             || (Usage & D3DUSAGE_DYNAMIC)
                             || IsVendorFormat(EnumerateFormat(Format));
 
-    if (g_Game && g_Game->m_VR
-     && (g_Game->m_VR->m_CreatingTextureID == VR::Texture_LeftEye
-      || g_Game->m_VR->m_CreatingTextureID == VR::Texture_RightEye)) {
-      dxvk::Logger::info(str::format("Creating texture with MSAA ", g_Game->m_VR->m_AntiAliasing));
-      desc.MultiSample = MapToMultisampleType(g_Game->m_VR->m_AntiAliasing);
-    }
+    BmvrApplyHl2vrMsaa(desc);
 
     if (FAILED(D3D9CommonTexture::NormalizeTextureProperties(this, D3DRTYPE_TEXTURE, &desc)))
       return D3DERR_INVALIDCALL;
@@ -2914,6 +2930,9 @@ namespace dxvk {
     if (dstTextureInfo->IsAutomaticMip())
       MarkTextureMipsDirty(dstTextureInfo);
 
+    if (dstTextureInfo->Desc()->MultiSample != D3DMULTISAMPLE_NONE)
+      dstTextureInfo->MarkMsaaDirty();
+
     return D3D_OK;
   }
 
@@ -3359,6 +3378,7 @@ namespace dxvk {
       }
     }
 
+    BmvrNoteMsaaAttachmentsWritten();
     return D3D_OK;
   }
 
@@ -4406,6 +4426,7 @@ namespace dxvk {
       ctx->draw(1u, &draw);
     });
 
+    BmvrNoteMsaaAttachmentsWritten();
     return D3D_OK;
   }
 
@@ -4459,6 +4480,7 @@ namespace dxvk {
       ctx->drawIndexed(1u, &draw);
     });
 
+    BmvrNoteMsaaAttachmentsWritten();
     return D3D_OK;
   }
 
@@ -4511,6 +4533,7 @@ namespace dxvk {
     m_state.vertexBuffers[0].offset       = 0;
     m_state.vertexBuffers[0].length       = 0;
     m_state.vertexBuffers[0].stride       = 0;
+    BmvrNoteMsaaAttachmentsWritten();
     return D3D_OK;
   }
 
@@ -4583,6 +4606,7 @@ namespace dxvk {
     m_state.vertexBuffers[0].stride       = 0;
 
     m_state.indices = nullptr;
+    BmvrNoteMsaaAttachmentsWritten();
     return D3D_OK;
   }
 
@@ -6405,6 +6429,7 @@ namespace dxvk {
     desc.IsBackBuffer       = FALSE;
     desc.IsAttachmentOnly   = TRUE;
     desc.IsLockable         = Lockable;
+    BmvrApplyHl2vrMsaa(desc);
 
     // Because they are always lockable, image surfaces / offscreen plain surfaces
     // are restricted to using lockable depth stencil formats.
@@ -6546,12 +6571,9 @@ namespace dxvk {
         creatingTextureId == VR::Texture_LeftEye ||
         creatingTextureId == VR::Texture_RightEye;
 
-    if (creatingVrEyeDepth) {
-      dxvk::Logger::info(str::format("Creating depth/stencil surface with MSAA ", vr->m_AntiAliasing));
-      desc.MultiSample = MapToMultisampleType(vr->m_AntiAliasing);
-      if (vr->m_ReShadeVRCompat)
-        desc.IsAttachmentOnly = FALSE;
-    }
+    BmvrApplyHl2vrMsaa(desc);
+    if (creatingVrEyeDepth && vr->m_ReShadeVRCompat)
+      desc.IsAttachmentOnly = FALSE;
 
     if (FAILED(D3D9CommonTexture::NormalizeTextureProperties(this, D3DRTYPE_SURFACE, &desc)))
       return D3DERR_INVALIDCALL;
@@ -6594,6 +6616,7 @@ namespace dxvk {
 
     D3DPRESENT_PARAMETERS* caller = pPresentationParameters;
     D3DPRESENT_PARAMETERS local = *pPresentationParameters;
+    BmvrStripSwapchainMsaa(&local);
     BmvrKeepDesktopWindowed(&local);
     BmvrForceHmdAspectWindowedBackbuffer(&local);
     BmvrSyncCallerBackbufferSize(caller, &local);
@@ -9679,6 +9702,94 @@ namespace dxvk {
   }
 
 
+  void D3D9DeviceEx::BmvrApplyHl2vrMsaa(D3D9_COMMON_TEXTURE_DESC& desc) {
+    if (!bmvr::g_MsaaAllowed || !bmvr::Hl2vrMsaaScope::Active())
+      return;
+    const uint32_t samples = bmvr::NormalizeMsaa(static_cast<int>(bmvr::g_Msaa));
+    if (samples < 2)
+      return;
+    const uint32_t wantW = bmvr::Hl2vrMsaaScope::Width();
+    const uint32_t wantH = bmvr::Hl2vrMsaaScope::Height();
+    if (wantW != 0 && (desc.Width != wantW || desc.Height != wantH))
+      return;
+    const bool renderable = (desc.Usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL)) != 0
+      || desc.IsAttachmentOnly;
+    if (!renderable)
+      return;
+    if (desc.IsLockable || desc.Pool == D3DPOOL_SYSTEMMEM || desc.Pool == D3DPOOL_SCRATCH)
+      return;
+    if (desc.MipLevels != 1)
+      return;
+    const D3DMULTISAMPLE_TYPE ms = MapToMultisampleType(static_cast<int>(samples));
+    if (ms == D3DMULTISAMPLE_NONE)
+      return;
+    VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT;
+    if (FAILED(DecodeMultiSampleType(m_dxvkDevice, ms, 0, &sampleCount))
+        || sampleCount == VK_SAMPLE_COUNT_1_BIT)
+      return;
+    desc.MultiSample = ms;
+    desc.MultisampleQuality = 0;
+  }
+
+
+  void D3D9DeviceEx::BmvrNoteMsaaAttachmentsWritten() {
+    auto note = [](D3D9Surface* surf) {
+      if (!surf)
+        return;
+      D3D9CommonTexture* tex = surf->GetCommonTexture();
+      if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE)
+        return;
+      tex->MarkMsaaDirty();
+    };
+    for (uint32_t i = 0; i < m_state.renderTargets.size(); i++)
+      note(m_state.renderTargets[i].ptr());
+    note(m_state.depthStencil.ptr());
+  }
+
+
+  void D3D9DeviceEx::BmvrResolveMsaaForSample(D3D9CommonTexture* tex) {
+    if (!tex || !tex->MsaaNeedsResolve())
+      return;
+    const Rc<DxvkImage>& srcRef = tex->GetImage();
+    if (srcRef == nullptr || srcRef->info().sampleCount == VK_SAMPLE_COUNT_1_BIT) {
+      tex->MarkMsaaResolved();
+      return;
+    }
+    const Rc<DxvkImage> src = srcRef;
+    const Rc<DxvkImage> dst = tex->GetResolveImage();
+    const DxvkFormatInfo* fmt = lookupFormatInfo(src->info().format);
+    const bool depth = tex->IsDepthStencil();
+    VkImageAspectFlags aspects = fmt ? fmt->aspectMask : VK_IMAGE_ASPECT_COLOR_BIT;
+    if (!depth)
+      aspects &= VK_IMAGE_ASPECT_COLOR_BIT;
+
+    VkImageResolve region = { };
+    region.srcSubresource.aspectMask = aspects;
+    region.srcSubresource.mipLevel = 0;
+    region.srcSubresource.baseArrayLayer = 0;
+    region.srcSubresource.layerCount = std::max(src->info().numLayers, 1u);
+    region.dstSubresource = region.srcSubresource;
+    region.srcOffset = VkOffset3D { 0, 0, 0 };
+    region.dstOffset = VkOffset3D { 0, 0, 0 };
+    region.extent = src->mipLevelExtent(0);
+
+    const VkFormat format = src->info().format;
+    const VkResolveModeFlagBits mode = depth
+      ? VK_RESOLVE_MODE_SAMPLE_ZERO_BIT
+      : VK_RESOLVE_MODE_AVERAGE_BIT;
+    EmitCs([
+      cDst = dst,
+      cSrc = src,
+      cRegion = region,
+      cFormat = format,
+      cMode = mode
+    ] (DxvkContext* ctx) {
+      ctx->resolveImage(cDst, cSrc, cRegion, cFormat, cMode, VK_RESOLVE_MODE_SAMPLE_ZERO_BIT);
+    });
+    tex->MarkMsaaResolved();
+  }
+
+
   void D3D9DeviceEx::BindTexture(DWORD StateSampler) {
     auto shaderSampler = RemapStateSamplerShader(StateSampler);
 
@@ -9691,7 +9802,14 @@ namespace dxvk {
     D3D9CommonTexture* commonTex =
       GetCommonTexture(m_state.textures[StateSampler]);
 
-    Rc<DxvkImageView> imageView = commonTex->GetSampleView(srgb);
+    const bool msaa = commonTex != nullptr
+      && commonTex->Desc()->MultiSample != D3DMULTISAMPLE_NONE;
+    if (msaa)
+      BmvrResolveMsaaForSample(commonTex);
+
+    Rc<DxvkImageView> imageView = msaa
+      ? commonTex->GetResolveSampleView(srgb)
+      : commonTex->GetSampleView(srgb);
 
     EmitCs([
       cSlot = slot,

@@ -357,6 +357,12 @@ namespace dxvk {
       return m_sampleView.Pick(srgb && IsSrgbCompatible());
     }
 
+    const Rc<DxvkImageView>& GetResolveSampleView(bool srgb);
+
+    void MarkMsaaDirty() { m_msaaDirty = true; }
+    void MarkMsaaResolved() { m_msaaDirty = false; }
+    bool MsaaNeedsResolve() const { return m_msaaDirty; }
+
     Rc<DxvkImageView> CreateView(
             UINT                   Layer,
             UINT                   Lod,
@@ -514,6 +520,8 @@ namespace dxvk {
     bool                          m_transitionedToHazardLayout = false;
 
     D3D9ColorView                 m_sampleView;
+    D3D9ColorView                 m_resolveSampleView;
+    bool                          m_msaaDirty = true;
 
     D3D9SubresourceBitset         m_locked = { };
 

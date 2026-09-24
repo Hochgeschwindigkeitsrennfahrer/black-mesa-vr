@@ -37,7 +37,9 @@ $staleFlags = @(
   'bmvr_in_hl2vr_cproj.flag',
   'bmvr_in_hl2vr_neye.flag',
   'bmvr_in_stereo_vis.flag',
-  'bmvr_in_ctrl_vm.flag'
+  'bmvr_in_ctrl_vm.flag',
+  'bmvr_in_fl_gbmatch.flag',
+  'bmvr_in_drawhud.flag'
 )
 foreach ($dir in $flagDirs) {
   if (-not (Test-Path $dir)) { continue }
@@ -123,6 +125,22 @@ Install-One $BinDir
 # 3) Next to bms.exe — L4D2VR-style, and AddDllDirectory(game root)
 Install-One $GameRoot
 
+# Stock sourcevr.dll imports VR_Init/VR_Shutdown from openvr_api.dll (old ABI).
+# We install SteamVR/modern openvr_api (VR_InitInternal2 / VR_ShutdownInternal).
+# Engine LoadLibrary("sourcevr.dll") then pops "entry point VR_Shutdown could
+# not be located" twice at startup. We do not use ISourceVirtualReality.
+$sourceVr = Join-Path $BinDir "sourcevr.dll"
+$sourceVrDisabled = Join-Path $BinDir "sourcevr.dll.disabled"
+if (Test-Path -LiteralPath $sourceVr) {
+  if (Test-Path -LiteralPath $sourceVrDisabled) {
+    Remove-Item -LiteralPath $sourceVr -Force
+    Write-Host "Removed bin\sourcevr.dll (backup already at sourcevr.dll.disabled)"
+  } else {
+    Move-Item -LiteralPath $sourceVr -Destination $sourceVrDisabled
+    Write-Host "Disabled bin\sourcevr.dll -> sourcevr.dll.disabled (old OpenVR ABI vs our openvr_api.dll)"
+  }
+}
+
 # Quitting GameUI used to leave this armed; the next launch then disabled
 # compositor Submit and the HMD stayed black with a working desktop cursor.
 foreach ($dir in @($GameRoot, $BinDir, $DxvkDir)) {
@@ -148,9 +166,11 @@ foreach ($skip in @((Join-Path $GameRoot "bmvr_skip.txt"), (Join-Path $BinDir "b
   $new = [regex]::Replace($new, '(?m)^hl2vr_cproj\r?\n', '')
   $new = [regex]::Replace($new, '(?m)^hl2vr_neye\r?\n', '')
   $new = [regex]::Replace($new, '(?m)^hmd_world\r?\n', '')
+  $new = [regex]::Replace($new, '(?m)^fl_gbmatch\r?\n', '')
+  $new = [regex]::Replace($new, '(?m)^drawhud\r?\n', '')
   if ($new -ne $text) {
     Set-Content -LiteralPath $skip -Value $new -Encoding ASCII -NoNewline
-    Write-Host "Removed false-ban ctrl_pose/ctrl_vm/vr_gloves/hand_overlay/hl2vr_playercull/hl2vr_pixelvis/hl2vr_ham/hmd_world from $skip"
+    Write-Host "Removed false-ban ctrl_pose/ctrl_vm/vr_gloves/hand_overlay/hl2vr_playercull/hl2vr_pixelvis/hl2vr_ham/hmd_world/fl_gbmatch/drawhud from $skip"
   }
 }
 
@@ -200,72 +220,14 @@ if (Test-Path $OffSrc) {
 }
 $CfgSrc = Join-Path $VrSrc "config.txt"
 $CfgDst = Join-Path $VrDst "config.txt"
+# Do not append or overwrite keys in an existing VR\config.txt. That pass
+# is how player files filled up with one-off experiments. Shipped defaults
+# live in the DLL; a missing file gets the template once.
 if (-not (Test-Path $CfgDst)) {
   Copy-Item -Force $CfgSrc $CfgDst
   Write-Host "Installed $CfgDst (edit RenderScale here; restart to apply)"
 } else {
-  Write-Host "Kept existing $CfgDst"
-  $cfgText = Get-Content -LiteralPath $CfgDst -Raw
-  $cfgText = [regex]::Replace($cfgText, '(?m)^HudDistance=.*$', 'HudDistance=1.05')
-  $cfgText = [regex]::Replace($cfgText, '(?m)^HudSize=.*$', 'HudSize=0.70')
-  $cfgText = [regex]::Replace($cfgText, '(?m)^ViewmodelScale=.*$', 'ViewmodelScale=0.68')
-  $cfgText = [regex]::Replace($cfgText, '(?m)^CompositorPostPresentHandoff=.*$', 'CompositorPostPresentHandoff=true')
-  $cfgText = [regex]::Replace($cfgText, '(?m)^VrHandsDebugBoxes=.*$', 'VrHandsDebugBoxes=false')
-  if ($cfgText -notmatch '(?m)^HudDistance=') { $cfgText += "`r`nHudDistance=1.05`r`n" }
-  if ($cfgText -notmatch '(?m)^HudSize=') { $cfgText += "`r`nHudSize=0.70`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^MenuPanelScale=.*$', 'MenuPanelScale=0.70')
-  if ($cfgText -notmatch '(?m)^MenuPanelScale=') { $cfgText += "`r`nMenuPanelScale=0.70`r`n" }
-  if ($cfgText -notmatch '(?m)^MenuCursorSmoothSec=') { $cfgText += "`r`nMenuCursorSmoothSec=0.18`r`n" }
-  if ($cfgText -notmatch '(?m)^ViewmodelScale=') { $cfgText += "`r`nViewmodelScale=0.68`r`n" }
-  if ($cfgText -notmatch '(?m)^CompositorPostPresentHandoff=') { $cfgText += "`r`nCompositorPostPresentHandoff=true`r`n" }
-  if ($cfgText -notmatch '(?m)^VrHandsGlovesEnabled=') { $cfgText += "`r`nVrHandsGlovesEnabled=true`r`n" }
-  if ($cfgText -notmatch '(?m)^VrHandsModelScale=') { $cfgText += "`r`nVrHandsModelScale=0.85`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^VrHandsModelScale=.*$', 'VrHandsModelScale=0.85')
-  if ($cfgText -notmatch '(?m)^VrHandsPoseRotationOffset=') { $cfgText += "`r`nVrHandsPoseRotationOffset=0,180,0`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^VrHandsPoseRotationOffset=.*$', 'VrHandsPoseRotationOffset=0,180,0')
-  if ($cfgText -notmatch '(?m)^VrHandsPoseOffsetMeters=') { $cfgText += "`r`nVrHandsPoseOffsetMeters=0,-0.008,-0.10`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^VrHandsPoseOffsetMeters=.*$', 'VrHandsPoseOffsetMeters=0,-0.008,-0.10')
-  if ($cfgText -notmatch '(?m)^AutoMatQueueMode=') { $cfgText += "`r`nAutoMatQueueMode=false`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^AutoMatQueueMode=.*$', 'AutoMatQueueMode=false')
-  if ($cfgText -notmatch '(?m)^MulticoreMode=') { $cfgText += "`r`nMulticoreMode=true`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^MulticoreMode=.*$', 'MulticoreMode=true')
-  Write-Host "MulticoreMode=true (mat_queue_mode 2 after stereo warmup; menu stays 0)."
-  if ($cfgText -notmatch '(?m)^AntiAliasing=') { $cfgText += "`r`nAntiAliasing=0`r`n" }
-  if ($cfgText -notmatch '(?m)^VrHandsUseHevGloves=') { $cfgText += "`r`nVrHandsUseHevGloves=true`r`n" }
-  if ($cfgText -notmatch '(?m)^VrHandsDebugBoxes=') { $cfgText += "`r`nVrHandsDebugBoxes=false`r`n" }
-  if ($cfgText -notmatch '(?m)^VrHandHud=') { $cfgText += "`r`nVrHandHud=true`r`n" }
-  if ($cfgText -notmatch '(?m)^VrCrosshair=') { $cfgText += "`r`nVrCrosshair=false`r`n" }
-  if ($cfgText -notmatch '(?m)^ScopeZoomFovScale=') { $cfgText += "`r`nScopeZoomFovScale=0.28`r`n" }
-  if ($cfgText -notmatch '(?m)^ScopeZoomSmoothSec=') { $cfgText += "`r`nScopeZoomSmoothSec=0.16`r`n" }
-  if ($cfgText -notmatch '(?m)^DesktopLeftoverRender=') { $cfgText += "`r`nDesktopLeftoverRender=false`r`n" }
-  if ($cfgText -notmatch '(?m)^ForceOpenVis=') { $cfgText += "`r`nForceOpenVis=false`r`n" }
-  if ($cfgText -notmatch '(?m)^HiddenAreaMesh=') { $cfgText += "`r`nHiddenAreaMesh=false`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^HiddenAreaMesh=.*$', 'HiddenAreaMesh=false')
-  if ($cfgText -notmatch '(?m)^MaterialPredraw=') { $cfgText += "`r`nMaterialPredraw=false`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^MaterialPredraw=.*$', 'MaterialPredraw=false')
-  if ($cfgText -notmatch '(?m)^StereoBlitGpuFlush=') { $cfgText += "`r`nStereoBlitGpuFlush=false`r`n" }
-  # 2026-09-06: deferred publish raised fps but broke WMR smoothing. Force false.
-  if ($cfgText -notmatch '(?m)^OpenXrDeferredPublish=') { $cfgText += "`r`nOpenXrDeferredPublish=false`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^OpenXrDeferredPublish=.*$', 'OpenXrDeferredPublish=false')
-  if ($cfgText -notmatch '(?m)^OpenXrSlotCoolingMs=') { $cfgText += "`r`nOpenXrSlotCoolingMs=4`r`n" }
-  if ($cfgText -notmatch '(?m)^OpenXrMaxPending=') { $cfgText += "`r`nOpenXrMaxPending=1`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^VRRuntimeBackend=(hl2vr|openvrhl2vr|hl2vropenvr|steamvrhl2vr)\s*$', 'VRRuntimeBackend=openxr')
-  if ($cfgText -notmatch '(?m)^VRRuntimeBackend=') { $cfgText += "`r`nVRRuntimeBackend=openxr`r`n" }
-  if ($cfgText -notmatch '(?m)^OpenXRHelper=') { $cfgText += "`r`nOpenXRHelper=true`r`n" }
-  if ($cfgText -notmatch '(?m)^OpenXRHelperSubmitTestFrames=') { $cfgText += "`r`nOpenXRHelperSubmitTestFrames=0`r`n" }
-  if ($cfgText -notmatch '(?m)^OpenXRHelperWaitReadySeconds=') { $cfgText += "`r`nOpenXRHelperWaitReadySeconds=45`r`n" }
-  if ($cfgText -notmatch '(?m)^OpenXRHelperUseGameRenderPoseForProjection=') { $cfgText += "`r`nOpenXRHelperUseGameRenderPoseForProjection=true`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^OpenXRHelperUseGameRenderPoseForProjection=.*$', 'OpenXRHelperUseGameRenderPoseForProjection=true')
-  if ($cfgText -notmatch '(?m)^OpenXRHelperHandTracking=') { $cfgText += "`r`nOpenXRHelperHandTracking=false`r`n" }
-  # GitHub default: world RTs at one eye. Do not overwrite a user false.
-  if ($cfgText -notmatch '(?m)^WorldRenderAtEyeSize=') { $cfgText += "`r`nWorldRenderAtEyeSize=true`r`n" }
-  $cfgText = [regex]::Replace($cfgText, '(?m)^WorldRenderAtEyeSize=.*$', 'WorldRenderAtEyeSize=true')
-  $cfgText = [regex]::Replace($cfgText, '(?m)^Roomscale1To1.*\r?\n', '')
-  $cfgText = [regex]::Replace($cfgText, '(?m)^PhysicalCrouch=.*\r?\n', '')
-  $cfgText = [regex]::Replace($cfgText, '(?m)^RoomscaleMovement=.*\r?\n', '')
-  Set-Content -LiteralPath $CfgDst -Value $cfgText -Encoding ASCII -NoNewline
-  Write-Host "Updated HudDistance/HudSize/ViewmodelScale/CompositorPostPresentHandoff/gloves/wrist HUD/OpenXR in $CfgDst"
-  Write-Host "WorldRenderAtEyeSize=true (world at eye size, same as github.com/.../black-mesa-vr)."
+  Write-Host "Kept existing $CfgDst (not rewritten)"
 }
 Write-Host "Installed SteamVR bindings to $ManifestDst"
 Write-Host "If SteamVR still has old face-button bindings, restore BMVR defaults (v4: left trigger=use, B=alt-fire, A=reload, Y=menu)."
@@ -275,7 +237,7 @@ if (-not (Test-Path $CfgGame)) { throw "Missing $CfgGame" }
 $BmvrCfgSrc = Join-Path $VrSrc "bmvr.cfg"
 $BmvrCfgDst = Join-Path $CfgGame "bmvr.cfg"
 Copy-Item -Force $BmvrCfgSrc $BmvrCfgDst
-Write-Host "Installed $BmvrCfgDst (PVS on; mat_queue_mode 2 is set by the DLL after warmup)"
+Write-Host "Installed $BmvrCfgDst (crosshair off, engine_no_focus_sleep 0)"
 $Autoexec = Join-Path $CfgGame "autoexec.cfg"
 if (Test-Path $Autoexec) {
   $autoText = Get-Content -LiteralPath $Autoexec -Raw

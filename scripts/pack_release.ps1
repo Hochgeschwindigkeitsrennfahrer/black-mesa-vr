@@ -29,6 +29,15 @@ Copy-Item -Force $ReadmeSrc (Join-Path $Stage "BMVR_README.txt")
 if (Test-Path $TestNotes) {
   Copy-Item -Force $TestNotes (Join-Path $Stage "TEST_RELEASE.txt")
 }
+$DisableSrc = Join-Path $Root "packaging\DISABLE-SOURCEVR.bat"
+if (Test-Path $DisableSrc) {
+  Copy-Item -Force $DisableSrc (Join-Path $Stage "DISABLE-SOURCEVR.bat")
+}
+foreach ($unName in @("UNINSTALL-BMVR.bat", "UNINSTALL-BMVR.ps1")) {
+  $unSrc = Join-Path $Root "scripts\$unName"
+  if (-not (Test-Path $unSrc)) { throw "Missing $unSrc" }
+  Copy-Item -Force $unSrc (Join-Path $Stage $unName)
+}
 Copy-Item -Force $Dll (Join-Path $Stage "d3d9.dll")
 Copy-Item -Force $OpenVrSrc (Join-Path $Stage "openvr_api.dll")
 

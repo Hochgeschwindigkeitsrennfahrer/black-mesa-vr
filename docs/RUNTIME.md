@@ -17,6 +17,22 @@ Install to:
 
 Optional Steam extra: `-enabledxvk` if the launcher video menu is Direct3D 9.
 
+## Verified: SteamVR Home after ~minutes, game still running (2026-09-13)
+
+Live: `bms.exe` PID 27364, helper PID 30304, SteamVR/OpenXR 2.17.9. Helper submitted ~16500 Vulkan frames then:
+
+`[VR][OpenXRHelper] exited wait=0x00000000 code=28 status=Failed … detail=OpenXR Vulkan frame loop failed`
+
+`OpenXRHelper64.exe` exit 28 is `ImportSharedGameTexturesIfNeeded` after a seqlock miss or a failed re-import. The helper treated that as fatal, destroyed the OpenXR session, and SteamVR fell back to Home. `bms.exe` kept Presenting (`helperFeedback=0`, growing `poseAge`).
+
+Cause: `ReadSharedTexturePair` retried 8 times with no yield. The game’s seqlock is odd while writing; if the 32-bit thread is preempted mid-write, all 8 attempts fail and the helper exits. A failed `vkAllocateMemory` after `ParkCurrentGameEye` also dropped the last working eyes.
+
+Fix: keep last imported eyes on seqlock/import miss; do not `return 28` after a live session; do not time out `XR_SESSION_STATE_READY` after frames have been submitted; restart the helper from Present if it exits while the game is still up.
+
+## Verified: `sourcevr.dll` VR_Shutdown dialog (2026-09-13)
+
+Stock `bin\sourcevr.dll` (157696 bytes) imports `VR_Init` and `VR_Shutdown` from `openvr_api.dll`. Install copies SteamVR/modern `openvr_api.dll`, which exports `VR_InitInternal` / `VR_InitInternal2` / `VR_ShutdownInternal` only (`openvr_api.def`). Engine `LoadLibrary("sourcevr.dll")` then fails; Windows shows “entry point VR_Shutdown could not be located in …\bin\sourcevr.dll” **twice** at startup. Clicking OK continues: `ISourceVirtualReality` stays null (BM already no-ops that). Fix: rename `sourcevr.dll` → `sourcevr.dll.disabled` in `scripts/install.ps1`. Do not restore stock `openvr_api.dll` in `bin\` while our `d3d9.dll` is linked against the modern ABI.
+
 ## Verified fail: OpenVR Submit DoNotHaveFocus (101)
 
 2026-08-16 after Reset skip: `OpenVR Submit ... eL=101 eR=101` then unbind capture then crash. 101 is `VRCompositorError_DoNotHaveFocus`. OpenVR throttles WaitGetPoses to 10 Hz in that state. Cause: `GetLastPoses` does not take scene focus. Fix: always `WaitGetPoses`, `CompositorBringToFront`, do not Submit until focus, skip unbind StretchRect, skip `wait_idle`.
@@ -210,11 +226,13 @@ Restart after edits. `hmd_native` / `hmd_swap` remain skip-file disabled.
 
 Open/complex maps were drawing the whole vis set: QoL forced `r_occlusion 0` + `r_portalsopenall 1` after a stereo areaportal latch. Default is PVS + occlusion again (`ForceOpenVis=true` restores the old pair). `r_visocclusion` is a cheat/debug overlay, not HW occlusion — keep it `0` (`1` was a mistaken default and is a Xen crash suspect). Each stereo eye also ran BM new-renderer CSM (`cl_csm_qualitymode` / `nr_shadow_*`; logs showed `_rt_gbshadowmaprt` 8192²). Lowest quality + `nr_shadow_res` 2048 + one shadow pass. **Surface Tension (`bm_c2a5a`):** the stereo-cost / CSM-quality-0 build was the last one the user called a bit better (~38–46 fps combat, pair ~26 ms, ~110 NPCs). Later cuts (`cl_csm_enabled 0`, `nr_shadow_active 0`, shoot/dlights off, then `nr_dev_gb_debug_type 1` + `r_lod 2`) were **unplayable**: `gbDepth` stayed 4 (Fast2 never switched), combat ~27–32 fps, uniq ~150, one pair 62.7 ms with DME orig 51.7 ms. Those cvars are reverted; do not retry. Do **not** set `nr_lights_active 0` (flashlight is `__GBLightSpot_FlashLight`). L4D2VR `r_flashlightdepthtexture` is **not** copied. Multicore still off.
 
-## AntiAliasing (`VR\config.txt`)
+## Msaa (`VR\config.txt`)
 
-L4D2VR overlay key, not `mat_antialias`. `0` / `2` / `4` / `8` / `16`. Restart after edits. DXVK stamps D3D9 MSAA on `CreateTexture` for `Texture_LeftEye` / `Texture_RightEye`, then `StretchRect` resolves into non-MSAA submit textures that OpenVR can consume. Engine video AA stays off.
+HL2VR `hlvr_msaa`. `Msaa` is `0` / `2` / `4` / `8` / `16` (default 4). Edit the key and restart. Advanced Video stays None / FXAA; hooking that dropdown crashes the page. When `Msaa` is 2 or higher, engine FXAA is turned off once at startup so it does not stack.
 
-On the current HMD-fb **blit** path the world is rasterized into the window backbuffer first, so MSAA on the eye copy does not anti-alias geometry. Gloves drawn into the eye RTs still get MSAA. Named per-eye RTs (verified fail here) are what made L4D2VR's world MSAA real.
+DXVK stamps the sample count only while `CreateNamedRenderTarget` is creating a separate-depth scene target (`_rt_FullFrame*`, `_rt_gb*` except shadow/CSM/flashlight, `_rt_Resolved*`). Shared-depth targets are logged and left single-sample. The next time a shader samples one of those targets, DXVK resolves it (average color, sample-zero depth) into a 1x image and binds that. Private eye textures, the HUD, and the swapchain stay single-sample. `mat_antialias` on the backbuffer is stripped on `Reset`.
+
+A crash during the first scoped create writes `bmvr_in_msaa.flag`; the next launch persist-skips `msaa`. Not headset-verified yet. Deferred G-buffer average-resolve can fringe normals and albedo. Do not retry named per-eye RTs for this.
 
 ## SteamVR controllers (L4D2VR/Portal2 actions)
 
@@ -381,3 +399,30 @@ Refraction-only (user): surface better. Full water retry: `r_WaterDrawReflection
 **Verified 2026-09-04 (user):** that full-water set was the GitHub 47 FPS vs local 32 FPS regression in the same spot. Hands and menu were not the cause. Do not retry stereo **full** water (reflection + expensive + gbuffer reflection).
 
 **Verified 2026-09-06 (user):** `r_WaterDrawRefraction 1` alone costs no noticeable performance and looks better than the fog fill. Default is refraction-only again (`waterrefract1`). `nr_gbuffer_for_refraction_enabled` stays 0. Do not grow Water/Refract RTs to the eye.
+
+## OpenXR Simulator HWND blit (2026-09-09 / 2026-09-13)
+
+WMR OpenXR grows `_rt_FullFrameFB` / G-buffer to the recommended eye (3168×3100 > HWND) so `worldMatch=1` and fused double `RenderView` is safe.
+
+OpenXR Simulator Quest 3 Performance is **1280×1408** inside HWND **2560×1440**. Grow-only does **not** shrink FullFrame to 1280 (cover-scaling to 2560×2816 created a 5136×8448 MC ring and stopped the simulator session on the menu). `worldMatch` stays 0.
+
+Do **not** shrink `CViewSetup` to 1280 into that 2560 G-buffer, and do **not** run a third `RENDERVIEW_DRAWHUD` pass (`heartbeat in_drawhud`, `exitCode=1`).
+
+One HWND view squash-blitted to both eyes stayed up but was **mono** and the simulator logged `ALTERNATING_VISIBLE_FRAMES` (16:9 fov 106 squashed into a ~square eye submitted as 90°). Current path: two **HWND-sized** `RenderView`s with IPD + HMD fov/aspect, squash-blit each after a GPU flush (`HWND gbmatch stereo pair`). Bloom is skipped while that pass is active. WMR is unchanged (`worldMatch=1` keeps fused double RV). Do not cover-scale simulator eyes. Do not force `mat_queue_mode` 0 after warmup.
+
+## Audio stays dead after alt-tab (one report, SteamVR)
+
+Black Mesa's `snd_mute_losefocus` (default 1) builds DirectSound buffers without `DSBCAPS_GLOBALFOCUS` (`engine.dll` `0x1005FC5A`). Tabbing out is supposed to silence the mix; tabbing back resumes it. One SteamVR user loses audio on tab-out and never gets it back. Hundreds of other users do not, so this is not a global `snd_mute_losefocus 0`.
+
+`TickAudioFocusRecover` runs on the RenderView path. It only writes when a focus return still looks stuck: Windows session mute or volume collapsed versus the pre-loss snapshot, the default render endpoint changed and the meter is still silent, or the mix buffer at the `Play(0,0,DSBPLAY_LOOPING)` site (`engine.dll` RVA `0x5FA43`) is `BUFFERLOST` or no longer `PLAYING`. A session that already resumed is not touched. In-game pause and map load postpone the DirectSound / `snd_restart` kick. Not HMD-verified.
+
+## Pause then alt-tab closes the process (2026-09-13, again 2026-09-20)
+
+User paused in `bm_c1a4b`, tabbed to the desktop, game vanished. No `bmvr_crash.txt`. Helper: `Parent process exited wait=0x00000000 exitCode=1`. Log: `GameUI visible`, pause overlay extra-paint, then `MC Present fallback: ICallQueue did not copy 1x eyes`. Earlier the same day WER recorded `nvoglv32.dll` `c0000005` in `bms.exe` (Steam/NVIDIA overlay GL). Recurred 2026-09-20 after native 90 Hz: same helper `exitCode=1`, same `GameUI visible` → extra-paint → `MC Present fallback`, still **no** `App deactivated (WM_ACTIVATEAPP)` line.
+
+`gameui_activate` does not set `IVEngineClient::IsPaused`. Present then StretchRect'd 1x eyes and TransferSurface'd the pause HUD while the overlay GL context tore down. `WM_ACTIVATEAPP` arrives too late (or never).
+
+Do **not** drop `mat_queue_mode` to 0 for GameUI. Do not use `GetForegroundWindow` — SteamVR is often foreground during normal play. Do **not** skip copies on focus-loss without GameUI.
+
+Fix (compiled; pause+tab not HMD-verified): skip Present **eye** StretchRect whenever in-game pause overlay is up (`WantPauseWorldOverlay`; not the 2D main-menu panel). HUD overlay TransferSurface only while the HWND is still activated. `WM_ACTIVATE` `WA_INACTIVE` sets `NoteAppActivated(false)` earlier than `ACTIVATEAPP`. Extra-paint already returns if `!AppActivated()`. Do not 22 ms pose-wait during pause overlay. Leftover HWND under GameUI still draws (do not set `m_StereoEyesDrawnThisFrame` for pause). Do not skip copies on focus-loss without GameUI.
+

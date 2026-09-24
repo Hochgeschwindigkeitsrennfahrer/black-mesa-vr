@@ -747,6 +747,43 @@ namespace dxvk {
   }
 
 
+  const Rc<DxvkImageView>& D3D9CommonTexture::GetResolveSampleView(bool srgb) {
+    const bool wantSrgb = srgb && IsSrgbCompatible();
+    if (m_resolveSampleView.Pick(wantSrgb) != nullptr)
+      return m_resolveSampleView.Pick(wantSrgb);
+
+    VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (IsDepthStencil())
+      layout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL;
+
+    auto makeView = [&](bool viewSrgb) -> Rc<DxvkImageView> {
+      DxvkImageViewKey viewInfo;
+      viewInfo.format    = m_mapping.ConversionFormatInfo.FormatColor != VK_FORMAT_UNDEFINED
+                         ? PickSRGB(m_mapping.ConversionFormatInfo.FormatColor, m_mapping.ConversionFormatInfo.FormatSrgb, viewSrgb)
+                         : PickSRGB(m_mapping.FormatColor, m_mapping.FormatSrgb, viewSrgb);
+      viewInfo.layout    = layout;
+      viewInfo.aspects   = lookupFormatInfo(viewInfo.format)->aspectMask;
+      viewInfo.usage     = VK_IMAGE_USAGE_SAMPLED_BIT;
+      viewInfo.viewType  = GetImageViewTypeFromResourceType(m_type, AllLayers);
+      viewInfo.mipIndex  = 0;
+      viewInfo.mipCount  = 1;
+      viewInfo.layerIndex = 0;
+      viewInfo.layerCount = m_desc.ArraySize;
+      viewInfo.packedSwizzle = DxvkImageViewKey::packSwizzle(m_mapping.Swizzle);
+      if (IsDepthStencil()) {
+        viewInfo.aspects &= ~VK_IMAGE_ASPECT_STENCIL_BIT;
+        viewInfo.packedSwizzle = 0u;
+      }
+      return GetResolveImage()->createView(viewInfo);
+    };
+
+    m_resolveSampleView.Color = makeView(false);
+    if (IsSrgbCompatible())
+      m_resolveSampleView.Srgb = makeView(true);
+    return m_resolveSampleView.Pick(wantSrgb);
+  }
+
+
   const Rc<DxvkBuffer>& D3D9CommonTexture::GetBuffer() {
     return m_buffer;
   }

@@ -1,0 +1,211 @@
+#include "dxvk_hud_item.h"
+#include "../framepacer/dxvk_framepacer.h"
+
+namespace dxvk::hud {
+
+
+  HudRenderLatencyItem::HudRenderLatencyItem() { }
+  HudRenderLatencyItem::~HudRenderLatencyItem() { }
+
+
+  void HudRenderLatencyItem::update(dxvk::high_resolution_clock::time_point time) {
+
+    const Rc<DxvkLatencyTracker> tracker = m_tracker;
+    const FramePacer* framePacer = dynamic_cast<FramePacer*>( tracker.ptr() );
+    if (!framePacer)
+      return;
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time - m_lastUpdate);
+
+    if (elapsed.count() >= UpdateInterval) {
+      m_lastUpdate = time;
+
+      int32_t latency = framePacer->getLatencyAverage();
+      m_latency = str::format(latency / 1000, ".", (latency/100) % 10, " ms");
+    }
+
+  }
+
+
+  HudPos HudRenderLatencyItem::render(
+    const DxvkContextObjects& ctx,
+    const HudPipelineKey&     key,
+    const HudOptions&         options,
+          HudRenderer&        renderer,
+          HudPos              position) {
+
+    position.y += 12;
+    renderer.drawText(16, position, 0xff4040ffu, "Render latency:");
+    renderer.drawText(16, { position.x + 195, position.y },
+      0xffffffffu, m_latency);
+
+    position.y += 8;
+    return position;
+  }
+
+
+  HudJitterItem::HudJitterItem() { }
+  HudJitterItem::~HudJitterItem() { }
+
+
+  void HudJitterItem::update(dxvk::high_resolution_clock::time_point time) {
+
+    const Rc<DxvkLatencyTracker> tracker = m_tracker;
+    FramePacer* framePacer = dynamic_cast<FramePacer*>( tracker.ptr() );
+    if (!framePacer)
+      return;
+
+    if (!framePacer->m_enabledJitterTracking)
+      framePacer->m_enabledJitterTracking.store(true);
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time - m_lastUpdate);
+
+    if (elapsed.count() >= UpdateInterval) {
+      m_lastUpdate = time;
+
+      JitterTotal jitter = framePacer->getJitterStats();
+
+      if (jitter.count) {
+        float count_inv = 1.0/jitter.count;
+        jitter.frametime *= count_inv;
+        jitter.latency   *= count_inv;
+        jitter.appThreadLatency *= count_inv;
+
+        jitter.frametime = std::min( (int64_t) 9999, jitter.frametime );
+        jitter.latency   = std::min( (int64_t) 9999, jitter.latency );
+        jitter.appThreadLatency = std::min( (int64_t) 9999, jitter.appThreadLatency );
+      }
+
+      m_frametime = str::format( jitter.frametime );
+      m_latency   = str::format( jitter.latency );
+      m_appThread = str::format( jitter.appThreadLatency );
+    }
+  }
+
+
+  HudPos HudJitterItem::render(
+    const DxvkContextObjects& ctx,
+    const HudPipelineKey&     key,
+    const HudOptions&         options,
+          HudRenderer&        renderer,
+          HudPos              position) {
+
+    constexpr int w = 12;
+    position.y += 12;
+
+    renderer.drawText(16, position, 0xff40ffffu, "Jitter (us):");
+    position.y += 16;
+    int x = 2 * w;
+
+    renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "ft"); x += 3*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_frametime); x += (m_frametime.size()+1)*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "lat"); x += 4*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_latency); x += (m_latency.size()+1)*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "atl"); x += 4*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_appThread);
+
+    position.y += 8;
+    return position;
+  }
+
+
+  HudLatencyDetailsItem::HudLatencyDetailsItem() { }
+  HudLatencyDetailsItem::~HudLatencyDetailsItem() { }
+
+
+  void HudLatencyDetailsItem::update(dxvk::high_resolution_clock::time_point time) {
+
+    const Rc<DxvkLatencyTracker> tracker = m_tracker;
+    FramePacer* framePacer = dynamic_cast<FramePacer*>( tracker.ptr() );
+    if (!framePacer)
+      return;
+
+    if (!framePacer->m_enabledGpuBufferTracking)
+      framePacer->m_enabledGpuBufferTracking.store(true);
+    if (!framePacer->m_enabledVSyncBufferTracking && framePacer->getFramePacerMode()->getPresentMode() == VK_PRESENT_MODE_FIFO_KHR)
+      framePacer->m_enabledVSyncBufferTracking.store(true);
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time - m_lastUpdate);
+
+    if (elapsed.count() >= UpdateInterval) {
+      m_lastUpdate = time;
+
+      const LatencyStats* gpuBufferStats = framePacer->getGpuBufferStats();
+      if (gpuBufferStats) {
+        int32_t p50 = gpuBufferStats->getPercentile(0.5);
+        int32_t p75 = gpuBufferStats->getPercentile(0.75);
+        int32_t p95 = gpuBufferStats->getPercentile(0.95);
+        int32_t p99 = gpuBufferStats->getPercentile(0.99);
+        m_gpuP50 = str::format(p50);
+        m_gpuP75 = str::format(p75);
+        m_gpuP95 = str::format(p95);
+        m_gpuP99 = str::format(p99);
+      }
+
+      if (framePacer->getFramePacerMode()->getPresentMode() == VK_PRESENT_MODE_FIFO_KHR
+        && (framePacer->getMode() || std::chrono::duration_cast<std::chrono::milliseconds>(
+          high_resolution_clock::now() - FpsLimiter::m_lastActive.load()).count() > 3000) ) {
+        const LatencyStats* presentStats = framePacer->getPresentStats();
+        if (presentStats) {
+          int32_t p50 = presentStats->getPercentile(0.5);
+          int32_t p75 = presentStats->getPercentile(0.75);
+          int32_t p95 = presentStats->getPercentile(0.95);
+          int32_t p99 = presentStats->getPercentile(0.99);
+          m_presentP50 = str::format(p50);
+          m_presentP75 = str::format(p75);
+          m_presentP95 = str::format(p95);
+          m_presentP99 = str::format(p99);
+        }
+      } else {
+        m_presentP50 = "";
+      }
+
+    }
+  }
+
+
+  HudPos HudLatencyDetailsItem::render(
+    const DxvkContextObjects& ctx,
+    const HudPipelineKey&     key,
+    const HudOptions&         options,
+          HudRenderer&        renderer,
+          HudPos              position) {
+
+    constexpr int w = 12;
+    position.y += 12;
+
+    renderer.drawText(16, position, 0xff40ffffu, "GPU Buffer (us):");
+    position.y += 16;
+    int x = 2 * w;
+
+    renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p50"); x += 4*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_gpuP50); x += (m_gpuP50.size()+1)*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p75"); x += 4*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_gpuP75); x += (m_gpuP75.size()+1)*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p95"); x += 4*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_gpuP95); x += (m_gpuP95.size()+1)*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p99"); x += 4*w;
+    renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_gpuP99);
+
+    if (!m_presentP50.empty()) {
+      position.y += 18;
+      renderer.drawText(16, position, 0xff40ffffu, "V-Sync Buffer (us):");
+      position.y += 16;
+      x = 2 * w;
+
+      renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p50"); x += 4*w;
+      renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_presentP50); x += (m_presentP50.size()+1)*w;
+      renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p75"); x += 4*w;
+      renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_presentP75); x += (m_presentP75.size()+1)*w;
+      renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p95"); x += 4*w;
+      renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_presentP95); x += (m_presentP95.size()+1)*w;
+      renderer.drawText(16, { position.x + x, position.y }, 0xff40ffffu, "p99"); x += 4*w;
+      renderer.drawText(16, { position.x + x, position.y }, 0xffffffffu, m_presentP99);
+    }
+
+    position.y += 8;
+    return position;
+  }
+
+
+}

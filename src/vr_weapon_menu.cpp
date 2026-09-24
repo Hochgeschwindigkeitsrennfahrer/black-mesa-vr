@@ -6,9 +6,11 @@
 #include "openxr_helper_bridge.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <d3d9.h>
@@ -707,6 +709,95 @@ namespace
         h = nh;
     }
 
+    // HUD VTFs are authored for a 1080p 2D overlay. The wheel bilinear-upscales
+    // until the long edge is at least 512 (cap 1024). Wrist icons sit on the
+    // hand, so they need the short edge at 768 (cap 2048) and a sharper kernel.
+    void UpscaleBgraForVr(int& w, int& h, std::vector<unsigned char>& bgra, bool wrist = false)
+    {
+        if (w <= 0 || h <= 0 || bgra.size() < static_cast<size_t>(w) * h * 4u)
+            return;
+        int scale = 1;
+        if (wrist)
+        {
+            constexpr int kMinShort = 768;
+            constexpr int kMaxLong = 2048;
+            while ((std::min)(w, h) * scale < kMinShort
+                && (std::max)(w, h) * scale * 2 <= kMaxLong)
+                scale *= 2;
+        }
+        else
+        {
+            constexpr int kMinLong = 512;
+            constexpr int kMaxLong = 1024;
+            while ((std::max)(w, h) * scale < kMinLong
+                && (std::max)(w, h) * scale * 2 <= kMaxLong)
+                scale *= 2;
+        }
+        if (scale <= 1)
+            return;
+        const int nw = w * scale;
+        const int nh = h * scale;
+        std::vector<unsigned char> dst(static_cast<size_t>(nw) * nh * 4u);
+        const float sx = static_cast<float>(w) / static_cast<float>(nw);
+        const float sy = static_cast<float>(h) / static_cast<float>(nh);
+        auto at = [&](int x, int y, int c) -> float {
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x >= w) x = w - 1;
+            if (y >= h) y = h - 1;
+            return static_cast<float>(bgra[(static_cast<size_t>(y) * w + x) * 4 + c]);
+        };
+        auto catmull = [](float t, float p0, float p1, float p2, float p3) {
+            const float t2 = t * t;
+            const float t3 = t2 * t;
+            return 0.5f * ((2.f * p1) + (-p0 + p2) * t
+                + (2.f * p0 - 5.f * p1 + 4.f * p2 - p3) * t2
+                + (-p0 + 3.f * p1 - 3.f * p2 + p3) * t3);
+        };
+        for (int y = 0; y < nh; ++y)
+        {
+            const float fy = (static_cast<float>(y) + 0.5f) * sy - 0.5f;
+            const int y1 = static_cast<int>(floorf(fy));
+            const float ty = fy - static_cast<float>(y1);
+            for (int x = 0; x < nw; ++x)
+            {
+                const float fx = (static_cast<float>(x) + 0.5f) * sx - 0.5f;
+                const int x1 = static_cast<int>(floorf(fx));
+                const float tx = fx - static_cast<float>(x1);
+                unsigned char* out = dst.data() + (static_cast<size_t>(y) * nw + x) * 4;
+                for (int c = 0; c < 4; ++c)
+                {
+                    float v;
+                    if (wrist)
+                    {
+                        float col[4];
+                        for (int ky = 0; ky < 4; ++ky)
+                        {
+                            col[ky] = catmull(tx,
+                                at(x1 - 1, y1 - 1 + ky, c),
+                                at(x1,     y1 - 1 + ky, c),
+                                at(x1 + 1, y1 - 1 + ky, c),
+                                at(x1 + 2, y1 - 1 + ky, c));
+                        }
+                        v = catmull(ty, col[0], col[1], col[2], col[3]);
+                    }
+                    else
+                    {
+                        const float v0 = at(x1, y1, c) + (at(x1 + 1, y1, c) - at(x1, y1, c)) * tx;
+                        const float v1 = at(x1, y1 + 1, c) + (at(x1 + 1, y1 + 1, c) - at(x1, y1 + 1, c)) * tx;
+                        v = v0 + (v1 - v0) * ty;
+                    }
+                    const int iv = static_cast<int>(v + 0.5f);
+                    out[c] = static_cast<unsigned char>(iv < 0 ? 0 : (iv > 255 ? 255 : iv));
+                }
+            }
+        }
+        Game::logMsg("HUD icon upscale %dx%d -> %dx%d wrist=%d", w, h, nw, nh, wrist ? 1 : 0);
+        bgra.swap(dst);
+        w = nw;
+        h = nh;
+    }
+
     // Blue Shift's hud_hev_overlay is a wrapping wipe atlas: the heater
     // shield straddles the right edge, and its missing right side is the
     // fragment on the left. Stitch those two column-runs into one glyph.
@@ -890,16 +981,13 @@ namespace
 
     void RemapHevAmberToCalhoun(std::vector<unsigned char>& bgra);
 
-    bool LoadVtfTexture(IDirect3DDevice9* device, const wchar_t* path, IDirect3DTexture9** out,
-        bool remapAmber, bool stretchAlpha)
+    bool DecodeVtfFileBgra(const wchar_t* path, bool remapAmber, bool stretchAlpha,
+        int& w, int& h, std::vector<unsigned char>& bgra)
     {
-        *out = nullptr;
         std::vector<unsigned char> vtf;
         if (!ReadFileBytes(path, vtf))
             return false;
-        int w = 0, h = 0;
         unsigned format = 0;
-        std::vector<unsigned char> bgra;
         if (!DecodeVtfToBgra(vtf, w, h, bgra, &format))
         {
             Game::logMsg("Weapon menu radial vtf decode fail %ls fmt=%u size=%u",
@@ -916,13 +1004,24 @@ namespace
                 bgra[i] = static_cast<unsigned char>((std::min)(255u, a * 2u));
             }
         }
+        return true;
+    }
+
+    bool LoadVtfTexture(IDirect3DDevice9* device, const wchar_t* path, IDirect3DTexture9** out,
+        bool remapAmber, bool stretchAlpha)
+    {
+        *out = nullptr;
+        int w = 0, h = 0;
+        std::vector<unsigned char> bgra;
+        if (!DecodeVtfFileBgra(path, remapAmber, stretchAlpha, w, h, bgra))
+            return false;
         if (!UploadBgraTexture(device, w, h, bgra, out) || !*out)
         {
             Game::logMsg("Weapon menu radial upload fail %ls %dx%d", path, w, h);
             return false;
         }
-        Game::logMsg("Weapon menu radial loaded %ls %dx%d fmt=%u remap=%d stretchA=%d",
-            path, w, h, format, remapAmber ? 1 : 0, stretchAlpha ? 1 : 0);
+        Game::logMsg("Weapon menu radial loaded %ls %dx%d remap=%d stretchA=%d",
+            path, w, h, remapAmber ? 1 : 0, stretchAlpha ? 1 : 0);
         return true;
     }
 
@@ -965,6 +1064,8 @@ namespace
         add(L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Black Mesa\\VR\\weapon_wheel");
     }
 
+    void KickIconPreload();
+
     void EnsureRadialTextures(IDirect3DDevice9* device)
     {
         if (!device)
@@ -986,33 +1087,11 @@ namespace
         if (g_RadialTried)
             return;
         g_RadialTried = true;
-        std::vector<std::wstring> dirs;
-        CollectRadialSearchDirs(dirs);
-        const wchar_t* names[2] = {
-            L"RadialMenu_Background_Default.vtf",
-            L"RadialMenu_Background_Selected.vtf"
-        };
-        IDirect3DTexture9** slots[2] = { &g_RadialDefaultTex, &g_RadialHighlightTex };
-        for (int i = 0; i < 2; ++i)
-        {
-            bool ok = false;
-            for (const auto& dir : dirs)
-            {
-                const std::wstring path = dir + L"\\" + names[i];
-                if (LoadVtfTexture(device, path.c_str(), slots[i],
-                    bmvr::IsBlueShift(), i == 0))
-                {
-                    ok = true;
-                    break;
-                }
-            }
-            if (!ok)
-                Game::logMsg("Weapon menu radial missing %ls (%d dirs)", names[i], static_cast<int>(dirs.size()));
-        }
+        KickIconPreload();
     }
 
-    // HEV HUD silhouettes are orange. Blue Shift's Calhoun HUD is blue
-    // (same RGB as the pause-menu cursor). R↔B swap maps (255,176,0) to
+    // HEV HUD silhouettes are orange. Blue Shift / Azure Sheep use Calhoun
+    // blue (same RGB as the pause-menu cursor). R↔B swap maps (255,176,0) to
     // (0,176,255), next to Calhoun (64,168,255). Skip if the atlas is
     // already blue-dominant so a native bshift VTF is left alone.
     void RemapHevAmberToCalhoun(std::vector<unsigned char>& bgra)
@@ -1068,7 +1147,7 @@ namespace
         p.tintDryIdle = D3DCOLOR_XRGB(255, 72, 56);
         p.glyphDryHover = D3DCOLOR_XRGB(255, 160, 140);
         p.glyphDryIdle = D3DCOLOR_XRGB(255, 72, 56);
-        if (bmvr::IsBlueShift())
+        if (bmvr::UseBlueHud())
         {
             p.fillHover = D3DCOLOR_ARGB(210, 10, 28, 52);
             p.fillIdle = D3DCOLOR_ARGB(170, 6, 14, 28);
@@ -1102,9 +1181,12 @@ namespace
     }
 
     void ReleaseHudIconCache();
+    void InvalidateIconPreload();
+    void KickIconPreload();
 
     void ReleaseWeaponIcons()
     {
+        InvalidateIconPreload();
         for (int i = 0; i < KindCount; ++i)
         {
             if (g_WeaponIconTex[i])
@@ -1219,58 +1301,200 @@ namespace
         return ExtractHudVtfByName(vpks, HudVtfNameForKind(kind), vtf);
     }
 
-    void EnsureWeaponIcons(IDirect3DDevice9* device)
+    enum class PrepKind { Weapon, Hud, RadialDefault, RadialSelected };
+
+    struct PrepBlob
     {
-        if (!device)
+        PrepKind kind = PrepKind::Hud;
+        int weaponKind = 0;
+        char name[64]{};
+        int w = 0;
+        int h = 0;
+        int generation = 0;
+        std::vector<unsigned char> bgra;
+    };
+
+    std::mutex g_prepMu;
+    std::vector<PrepBlob> g_prepQueue;
+    std::atomic<int> g_prepGen{ 0 };
+    int g_prepSignaledGen = -1;
+    bool g_prepBlue = false;
+    HANDLE g_prepEvent = nullptr;
+    std::atomic<bool> g_prepThreadUp{ false };
+
+    void InvalidateIconPreload()
+    {
+        g_prepGen.fetch_add(1, std::memory_order_acq_rel);
+        std::lock_guard<std::mutex> lock(g_prepMu);
+        g_prepQueue.clear();
+        g_prepSignaledGen = -1;
+    }
+
+    bool PrepareHudBgra(const std::vector<std::wstring>& vpks, const char* name, bool wantBlue,
+        bool wrist, int& w, int& h, std::vector<unsigned char>& bgra)
+    {
+        std::vector<unsigned char> vtf;
+        if (!ExtractHudVtfByName(vpks, name, vtf))
+        {
+            if (bmvr::IsBlueShift() && name && _stricmp(name, "hud_hev_overlay.vtf") == 0)
+            {
+                w = 128;
+                h = 128;
+                RasterizeHeaterShield(w, h, bgra);
+                CropBgraToAlpha(w, h, bgra);
+                UpscaleBgraForVr(w, h, bgra, true);
+                return true;
+            }
+            Game::logMsg("HUD icon preload missing %s", name ? name : "");
+            return false;
+        }
+        unsigned format = 0;
+        if (!DecodeVtfToBgra(vtf, w, h, bgra, &format))
+        {
+            Game::logMsg("HUD icon preload decode fail %s fmt=%u", name, format);
+            return false;
+        }
+        CropBgraToAlpha(w, h, bgra);
+        if (name && _stricmp(name, "hud_hev_overlay.vtf") == 0)
+            UnwrapOrCropHudOverlay(w, h, bgra);
+        if (wantBlue)
+            RemapHevAmberToCalhoun(bgra);
+        UpscaleBgraForVr(w, h, bgra, wrist);
+        return w > 0 && h > 0 && !bgra.empty();
+    }
+
+    bool PrepStillCurrent(int gen)
+    {
+        return gen == g_prepGen.load(std::memory_order_acquire);
+    }
+
+    void EnqueuePrep(PrepBlob&& blob)
+    {
+        std::lock_guard<std::mutex> lock(g_prepMu);
+        if (blob.generation != g_prepGen.load(std::memory_order_acquire))
             return;
-        const bool wantBlue = bmvr::IsBlueShift();
-        if (g_WeaponIconDevice && g_WeaponIconDevice != device)
-            ReleaseWeaponIcons();
-        if (g_WeaponIconTried && g_WeaponIconBlueShift != wantBlue)
-            ReleaseWeaponIcons();
-        if (g_WeaponIconTried)
-            return;
-        g_WeaponIconTried = true;
-        g_WeaponIconDevice = device;
-        g_WeaponIconBlueShift = wantBlue;
+        g_prepQueue.push_back(std::move(blob));
+    }
+
+    void PreloadIconsJob(int gen, bool wantBlue)
+    {
         const auto vpks = HudVpkPaths();
         if (vpks.empty())
+            Game::logMsg("HUD icon preload: no bms_*_dir.vpk next to bms.exe");
+        int weapons = 0;
+        for (int k = 1; k < KindCount && PrepStillCurrent(gen); ++k)
         {
-            Game::logMsg("Weapon menu: no bms_*_dir.vpk next to bms.exe");
+            const char* name = HudVtfNameForKind(static_cast<WeaponKind>(k));
+            if (!name)
+                continue;
+            PrepBlob blob;
+            blob.kind = PrepKind::Weapon;
+            blob.weaponKind = k;
+            blob.generation = gen;
+            if (!PrepareHudBgra(vpks, name, wantBlue, false, blob.w, blob.h, blob.bgra))
+                continue;
+            EnqueuePrep(std::move(blob));
+            ++weapons;
+        }
+        const char* hudNames[] = {
+            "hud_health_overlay.vtf",
+            "hud_hev_overlay.vtf",
+            "damage_drown.vtf",
+            "ammo_357.vtf",
+            "ammo_buckshot.vtf",
+            "ammo_bolt.vtf",
+            "ammo_energy.vtf",
+            "ammo_grenade_rpg.vtf",
+            "ammo_grenade_hornet.vtf",
+            "ammo_grenade_frag.vtf",
+            "ammo_grenade_satchel.vtf",
+            "ammo_grenade_tripmine.vtf",
+            "ammo_snark.vtf",
+            "ammo_9mm.vtf",
+            "ammo_grenade_mp5.vtf"
+        };
+        int hud = 0;
+        for (const char* name : hudNames)
+        {
+            if (!PrepStillCurrent(gen))
+                break;
+            PrepBlob blob;
+            blob.kind = PrepKind::Hud;
+            blob.generation = gen;
+            strncpy_s(blob.name, name, _TRUNCATE);
+            if (!PrepareHudBgra(vpks, name, wantBlue, true, blob.w, blob.h, blob.bgra))
+                continue;
+            EnqueuePrep(std::move(blob));
+            ++hud;
+        }
+        if (PrepStillCurrent(gen))
+        {
+            std::vector<std::wstring> dirs;
+            CollectRadialSearchDirs(dirs);
+            const wchar_t* names[2] = {
+                L"RadialMenu_Background_Default.vtf",
+                L"RadialMenu_Background_Selected.vtf"
+            };
+            for (int i = 0; i < 2 && PrepStillCurrent(gen); ++i)
+            {
+                bool got = false;
+                for (const auto& dir : dirs)
+                {
+                    PrepBlob blob;
+                    blob.kind = (i == 0) ? PrepKind::RadialDefault : PrepKind::RadialSelected;
+                    blob.generation = gen;
+                    const std::wstring path = dir + L"\\" + names[i];
+                    if (!DecodeVtfFileBgra(path.c_str(), wantBlue, i == 0, blob.w, blob.h, blob.bgra))
+                        continue;
+                    EnqueuePrep(std::move(blob));
+                    got = true;
+                    break;
+                }
+                if (!got)
+                    Game::logMsg("Weapon menu radial missing %ls", names[i]);
+            }
+        }
+        if (PrepStillCurrent(gen))
+            Game::logMsg("HUD icon preload ready weapons=%d hud=%d", weapons, hud);
+    }
+
+    DWORD WINAPI IconPreloadThread(void*)
+    {
+        for (;;)
+        {
+            WaitForSingleObject(g_prepEvent, INFINITE);
+            int gen = 0;
+            bool blue = false;
+            {
+                std::lock_guard<std::mutex> lock(g_prepMu);
+                gen = g_prepGen.load(std::memory_order_acquire);
+                blue = g_prepBlue;
+            }
+            PreloadIconsJob(gen, blue);
+        }
+    }
+
+    void KickIconPreload()
+    {
+        std::lock_guard<std::mutex> lock(g_prepMu);
+        if (!g_prepEvent)
+            g_prepEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!g_prepEvent)
             return;
-        }
-        int loaded = 0;
-        for (int k = 1; k < KindCount; ++k)
+        if (!g_prepThreadUp.load(std::memory_order_relaxed))
         {
-            std::vector<unsigned char> vtf;
-            if (!ExtractHudVtf(vpks, static_cast<WeaponKind>(k), vtf))
-            {
-                Game::logMsg("Weapon menu HUD vtf missing kind=%d %s",
-                    k, HudVtfNameForKind(static_cast<WeaponKind>(k)));
-                continue;
-            }
-            int w = 0, h = 0;
-            unsigned format = 0;
-            std::vector<unsigned char> bgra;
-            if (!DecodeVtfToBgra(vtf, w, h, bgra, &format))
-            {
-                Game::logMsg("Weapon menu HUD vtf decode fail kind=%d fmt=%u size=%u",
-                    k, format, static_cast<unsigned>(vtf.size()));
-                continue;
-            }
-            CropBgraToAlpha(w, h, bgra);
-            if (wantBlue)
-                RemapHevAmberToCalhoun(bgra);
-            IDirect3DTexture9* tex = nullptr;
-            if (!UploadBgraTexture(device, w, h, bgra, &tex) || !tex)
-            {
-                Game::logMsg("Weapon menu HUD upload fail kind=%d %dx%d", k, w, h);
-                continue;
-            }
-            g_WeaponIconTex[k] = tex;
-            ++loaded;
+            HANDLE thread = CreateThread(nullptr, 0, IconPreloadThread, nullptr, 0, nullptr);
+            if (!thread)
+                return;
+            CloseHandle(thread);
+            g_prepThreadUp.store(true, std::memory_order_relaxed);
         }
-        Game::logMsg("Weapon menu HUD icons loaded=%d vpks=%d", loaded, static_cast<int>(vpks.size()));
+        g_prepBlue = bmvr::UseBlueHud();
+        const int gen = g_prepGen.load(std::memory_order_acquire);
+        if (g_prepSignaledGen == gen)
+            return;
+        g_prepSignaledGen = gen;
+        SetEvent(g_prepEvent);
     }
 
     // Name-keyed cache for HUD icons the wrist HUD asks for by filename
@@ -1281,11 +1505,114 @@ namespace
         char name[64]{};
         IDirect3DTexture9* tex = nullptr;
     };
-    constexpr int kHudIconCacheMax = 24;
+    constexpr int kHudIconCacheMax = 32;
     HudIconEntry g_HudIconCache[kHudIconCacheMax]{};
     int g_HudIconCount = 0;
     IDirect3DDevice9* g_HudIconDevice = nullptr;
     bool g_HudIconBlueShift = false;
+
+    void StoreHudTexture(const char* name, IDirect3DTexture9* tex, bool wantBlue)
+    {
+        if (!name || !tex)
+            return;
+        for (int i = 0; i < g_HudIconCount; ++i)
+        {
+            if (_stricmp(g_HudIconCache[i].name, name) == 0)
+            {
+                if (g_HudIconCache[i].tex)
+                    g_HudIconCache[i].tex->Release();
+                g_HudIconCache[i].tex = tex;
+                return;
+            }
+        }
+        if (g_HudIconCount >= kHudIconCacheMax)
+        {
+            tex->Release();
+            return;
+        }
+        HudIconEntry& entry = g_HudIconCache[g_HudIconCount++];
+        strncpy_s(entry.name, name, _TRUNCATE);
+        entry.tex = tex;
+        g_HudIconBlueShift = wantBlue;
+    }
+
+    void DrainOneHudIconUpload(IDirect3DDevice9* device)
+    {
+        if (!device)
+            return;
+        const bool wantBlue = bmvr::UseBlueHud();
+        if ((g_WeaponIconDevice && g_WeaponIconDevice != device)
+            || ((g_WeaponIconDevice || g_HudIconCount > 0) && g_WeaponIconBlueShift != wantBlue))
+            ReleaseWeaponIcons();
+        g_WeaponIconDevice = device;
+        g_HudIconDevice = device;
+        g_WeaponIconBlueShift = wantBlue;
+        g_HudIconBlueShift = wantBlue;
+        KickIconPreload();
+
+        PrepBlob blob;
+        {
+            std::lock_guard<std::mutex> lock(g_prepMu);
+            const int gen = g_prepGen.load(std::memory_order_acquire);
+            while (!g_prepQueue.empty() && g_prepQueue.front().generation != gen)
+                g_prepQueue.erase(g_prepQueue.begin());
+            if (g_prepQueue.empty())
+                return;
+            blob = std::move(g_prepQueue.front());
+            g_prepQueue.erase(g_prepQueue.begin());
+        }
+        IDirect3DTexture9* tex = nullptr;
+        if (!UploadBgraTexture(device, blob.w, blob.h, blob.bgra, &tex) || !tex)
+        {
+            Game::logMsg("HUD icon upload fail kind=%d %s %dx%d",
+                static_cast<int>(blob.kind), blob.name, blob.w, blob.h);
+            return;
+        }
+        switch (blob.kind)
+        {
+        case PrepKind::Weapon:
+            if (blob.weaponKind > 0 && blob.weaponKind < KindCount)
+            {
+                if (g_WeaponIconTex[blob.weaponKind])
+                    g_WeaponIconTex[blob.weaponKind]->Release();
+                g_WeaponIconTex[blob.weaponKind] = tex;
+                Game::logMsg("Weapon icon uploaded kind=%d %dx%d", blob.weaponKind, blob.w, blob.h);
+            }
+            else
+                tex->Release();
+            break;
+        case PrepKind::Hud:
+            StoreHudTexture(blob.name, tex, wantBlue);
+            Game::logMsg("Wrist HUD icon uploaded %s %dx%d", blob.name, blob.w, blob.h);
+            break;
+        case PrepKind::RadialDefault:
+            if (g_RadialDefaultTex)
+                g_RadialDefaultTex->Release();
+            g_RadialDefaultTex = tex;
+            Game::logMsg("Weapon menu radial uploaded default %dx%d", blob.w, blob.h);
+            break;
+        case PrepKind::RadialSelected:
+            if (g_RadialHighlightTex)
+                g_RadialHighlightTex->Release();
+            g_RadialHighlightTex = tex;
+            Game::logMsg("Weapon menu radial uploaded selected %dx%d", blob.w, blob.h);
+            break;
+        }
+    }
+
+    void EnsureWeaponIcons(IDirect3DDevice9* device)
+    {
+        if (!device)
+            return;
+        const bool wantBlue = bmvr::UseBlueHud();
+        if (g_WeaponIconDevice && g_WeaponIconDevice != device)
+            ReleaseWeaponIcons();
+        if (g_WeaponIconDevice && g_WeaponIconBlueShift != wantBlue)
+            ReleaseWeaponIcons();
+        g_WeaponIconDevice = device;
+        g_WeaponIconBlueShift = wantBlue;
+        KickIconPreload();
+    }
 
     void ReleaseHudIconCache()
     {
@@ -1368,68 +1695,23 @@ IDirect3DTexture9* bmvr::AcquireHudIcon(IDirect3DDevice9* device, const char* vt
 {
     if (!device || !vtfName || !*vtfName)
         return nullptr;
-    const bool wantBlue = IsBlueShift();
-    if (g_HudIconDevice && g_HudIconDevice != device)
-        ReleaseHudIconCache();
-    if (g_HudIconCount > 0 && g_HudIconBlueShift != wantBlue)
-        ReleaseHudIconCache();
     g_HudIconDevice = device;
-    g_HudIconBlueShift = wantBlue;
     for (int i = 0; i < g_HudIconCount; ++i)
     {
         if (_stricmp(g_HudIconCache[i].name, vtfName) == 0)
             return g_HudIconCache[i].tex;
     }
-    if (g_HudIconCount >= kHudIconCacheMax)
-        return nullptr;
+    return nullptr;
+}
 
-    // Claim the slot before loading so a missing asset is only attempted once.
-    HudIconEntry& entry = g_HudIconCache[g_HudIconCount++];
-    strncpy_s(entry.name, vtfName, _TRUNCATE);
+void bmvr::KickHudIconPreload()
+{
+    KickIconPreload();
+}
 
-    const auto vpks = HudVpkPaths();
-    std::vector<unsigned char> vtf;
-    if (!ExtractHudVtfByName(vpks, vtfName, vtf))
-    {
-        if (IsBlueShift() && _stricmp(vtfName, "hud_hev_overlay.vtf") == 0)
-        {
-            std::vector<unsigned char> bgra;
-            int iw = 128, ih = 128;
-            RasterizeHeaterShield(iw, ih, bgra);
-            CropBgraToAlpha(iw, ih, bgra);
-            IDirect3DTexture9* tex = nullptr;
-            if (UploadBgraTexture(device, iw, ih, bgra, &tex) && tex)
-            {
-                entry.tex = tex;
-                Game::logMsg("Wrist HUD Blue Shift shield procedural %dx%d", iw, ih);
-                return tex;
-            }
-        }
-        Game::logMsg("Wrist HUD icon missing %s", vtfName);
-        return nullptr;
-    }
-    int iw = 0, ih = 0;
-    unsigned format = 0;
-    std::vector<unsigned char> bgra;
-    if (!DecodeVtfToBgra(vtf, iw, ih, bgra, &format))
-    {
-        Game::logMsg("Wrist HUD icon decode fail %s fmt=%u", vtfName, format);
-        return nullptr;
-    }
-    CropBgraToAlpha(iw, ih, bgra);
-    if (_stricmp(vtfName, "hud_hev_overlay.vtf") == 0)
-        UnwrapOrCropHudOverlay(iw, ih, bgra);
-    if (wantBlue)
-        RemapHevAmberToCalhoun(bgra);
-    IDirect3DTexture9* tex = nullptr;
-    if (!UploadBgraTexture(device, iw, ih, bgra, &tex) || !tex)
-    {
-        Game::logMsg("Wrist HUD icon upload fail %s %dx%d", vtfName, iw, ih);
-        return nullptr;
-    }
-    entry.tex = tex;
-    Game::logMsg("Wrist HUD icon loaded %s %dx%d", vtfName, iw, ih);
-    return tex;
+void bmvr::PumpHudIconUploads(IDirect3DDevice9* device)
+{
+    DrainOneHudIconUpload(device);
 }
 
 const char* bmvr::PrimaryAmmoIconVtf(const char* model, const char* net)

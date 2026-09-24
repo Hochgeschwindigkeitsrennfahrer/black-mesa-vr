@@ -64,17 +64,21 @@ matches "shoots way above where you're aiming until you recenter". It now holds
 the last good controller aim across dropouts, and only uses the headset before
 any controller aim has been seen.
 
-## 4. Two-hand shotgun blend dragged the barrel down
+## 4. Two-hand weapons
 
-`ApplyTwoHandShotgunAim` engaged on **distance alone** between the off-hand and
-the forend (enter 0.18 m, stay 0.32 m) and then blended the weapon forward 85 %
-toward the off-hand. Dropping the off-hand to your side kept it inside the
-generous 0.32 m stay radius, so the barrel tracked the lowered hand — the
-shotgun appeared to lower itself.
+The old shotgun-only path used a fake 0.28 m forend, a 55 % blend, and a 50°
+clamp. The barrel lagged the off-hand, then followed it to the hip.
 
-It now also requires the off-hand to stay *ahead of the gun hand along the
-barrel*, and rejects a blend that would swing the barrel more than ~50° from
-where the gun hand points.
+`ApplyTwoHandWeaponAim` runs on long guns, the MP5, the 357, and the glock.
+Grab is **left grip only** while the support hand is on the model — no
+proximity auto-latch. Shotgun / crossbow / RPG / tau / gluon / hivehand use
+the viewmodel `L_Wrist` / `L_Hand` bone when it is a real forend. The shotgun
+pump is a rail from that bone toward the barrel, not a single rear point. MP5
+ignores L_Wrist (magazine) and uses a left-side handguard table. Pistols snap
+the glove immediately left of the gun-hand controller onto the grip without
+rotating aim. Release when the squeeze lets go or the support hand leaves the
+rail. Long-gun shots follow the two-hand barrel (`GetAimAngles`). **Not
+HMD-verified.**
 
 ## 5. Wrist HUD icons
 

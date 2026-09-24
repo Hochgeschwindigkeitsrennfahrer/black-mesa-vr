@@ -22,12 +22,19 @@ Do not copy d3d9.dll into only one of those. Native Direct3D 9 never loads this 
 
 If you already tuned VR\config.txt, keep your copy (do not overwrite it).
 
+After the copy, run DISABLE-SOURCEVR.bat once (it sits next to bms.exe).
+That renames bin\sourcevr.dll so Windows does not pop "VR_Shutdown could
+not be located" at startup. This mod does not use Valve's sourcevr plugin.
+
+To remove the mod later, run UNINSTALL-BMVR.bat next to bms.exe (needs
+UNINSTALL-BMVR.ps1 beside it). Type YES when asked.
+
 This zip also includes:
 
   Black Mesa\VR\hands\            HEV glove meshes
   Black Mesa\VR\weapon_wheel\     HL2VR radial-menu textures
   Black Mesa\VR\openxr_helper64\  L4D2VR x64 OpenXR helper (if built)
-  Black Mesa\bms\cfg\bmvr.cfg     crosshair off / VR QoL cvars
+  Black Mesa\bms\cfg\bmvr.cfg     crosshair off; do not sleep when the window loses focus
 
 If bms\cfg\autoexec.cfg exists, add this line (once):
 
@@ -50,6 +57,13 @@ If the in-game video / renderer menu is "Direct3D 9", also add:
   -enabledxvk
 
 This DLL is DXVK. Native D3D9 will not show VR.
+
+Blue Shift and Azure Sheep use the same launch options plus:
+
+  -game bshift
+  -game asheep
+
+Those campaigns get the Calhoun-blue wrist HUD and bare (security-guard) hands.
 
 
 3) OpenXR runtime (Quest / Virtual Desktop / SteamVR)
@@ -106,11 +120,15 @@ After launch, bmvr_log.txt reports the size actually used, for example:
 -------------------------------------------
 Left stick walk, right stick turn, right trigger attack (use when hands are empty),
 left trigger use, right B alt-fire, right A reload, left Y / left menu pause.
-Left-stick click sprint; double-tap the stick forward also sprints while you
-keep holding forward. Right-stick click weapon wheel (tap to recenter).
+Left-stick click sprint. Right-stick click weapon wheel (tap to recenter).
 Right grip flashlight. Left X previous weapon. Reload is A only.
+Put the off-hand on a rifle/shotgun/MP5/RPG/tau/gluon/crossbow forend and
+hold left grip to two-hand; the glove sits on the gun. Glock / 357: left
+grip next to the gun-hand controller, on the pistol grip. Let go of grip to
+release (resting the hand on the model without grip does not attach).
 While the menu is up, point the right controller at it and pull the trigger
-to click. A confirms, B goes back.
+to click. A confirms, B goes back. In-world screens (air support on bm_c2a5i)
+use look for hover and the right trigger as left click.
 
 If sticks or the new pause/sprint bindings do nothing, open SteamVR Bindings for
 this app and reset the layout to the default in VR\SteamVRActionManifest.
@@ -127,8 +145,6 @@ If the gun sits too far forward/back, edit VR\config.txt:
   ControllerPitchTilt=-35.0
   ControllerPitchTiltTouch=0
   ViewmodelPosOffsetXTouch=5.5
-  OpenXRHelperFlipSubmitY=false
-  OpenXRHelperSwapProjectionEyes=auto
 
 Quest / Touch: the G2 -35° grip tilt is not applied. Weapons use the OpenXR
 aim pose plus a 5.5 unit pull-back (aim origin is ahead of grip). Hands sit
@@ -137,34 +153,18 @@ VR/viewmodel_offsets.txt, reset those weapons (numpad 0) so they do not
 double. Virtual Desktop users should set Streamer Options → OpenXR Runtime
 to VDXR. Meta Link / Quest 3 uses the Link OpenXR runtime. Steam Link uses
 SteamVR OpenXR in Meta compatibility mode and does not Y-flip.
-OpenXRHelperFlipSubmitY=false is the default (auto inverted SteamVR).
-Set true only if a runtime is still upside-down. Oculus/Link does not
-Y-flip; it crops the 108° eye image to the runtime frustum and submits
-runtime FOV.
+Add OpenXRHelperFlipSubmitY=true only if a runtime is still upside-down.
 
 Those take effect on the next launch (config is read at DLL load).
 
-Also in VR\config.txt (defaults):
+The same file also has Haptics, HideCrosshair, VrCrosshair, DisableViewBob,
+LeftHanded, IPDScale, HeightOffset, and Msaa (0 / 2 / 4 / 8 / 16; the video
+menu writes Msaa too). VRRuntimeBackend=openxr uses the 64-bit helper;
+openvr is the SteamVR compositor.
 
-  AutoMatQueueMode=false  do not toggle the cvar except via MulticoreMode
-  MulticoreMode=true      default: mat_queue_mode 2 after stereo warmup (menu stays 0)
-  VRRuntimeBackend=openxr  L4D2VR x64 OpenXR helper (openvr = SteamVR compositor)
-  OpenXRHelper=true
-  OpenXRHelperSubmitTestFrames=0
-  ForceOpenVis=false      keep PVS/occlusion (true = old whole-map vis)
-  StereoBlitGpuFlush=true   CPU-wait GPU after the left-eye backbuffer copy
-  IPDScale=1.0            HeightOffset=0.0
-  Haptics=true            HideCrosshair=true
-  VrCrosshair=false       world-space aim reticle (set true to show it)
-  MatchHmdHz=false        (unused for fps; fps_max is 0 / uncapped)
-  DisableViewBob=true
-  LeftHanded=false        RecenterResetsYaw=true
-  HideLocalPlayerModel=true
-
-Menu and load stay queue 0. Gameplay uses MulticoreMode: the DLL
-SetThreadMode(2) after stereo warmup. AutoMatQueueMode=false — do not
-ClientCmd mat_queue_mode. If that path crashes, bmvr_skip.txt next to
-bms.exe skips it on the next launch.
+Menu and load stay single-threaded. Gameplay switches to mat_queue_mode 2
+after stereo warmup. If that path crashes, bmvr_skip.txt next to bms.exe
+skips it on the next launch.
 
 
 6) If it does not load
