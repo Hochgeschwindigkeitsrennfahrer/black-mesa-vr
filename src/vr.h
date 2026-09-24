@@ -856,6 +856,19 @@ public:
     // visibleBone0 is the viewmodel root after the controller delta. Aim angles
     // point the pistol muzzle (model -Y) along the controller, pivoted on the grip.
     void AnchorHlvrPistolGun(const float visibleBone0[3][4], const QAngle& aim, float outGun[3][4]) const;
+    // Crowbar, shotgun, and MP5. Same draw path as the pistol: swap the stock
+    // viewmodel, skin the HL2VR idle pose, bone-merge the right hand.
+    void* HlvrWeaponDrawModel(const char* stockModelName);
+    bool IsHlvrWeaponModel(void* model) const;
+    bool IsHlvrWeaponRigged(void* model) const;
+    bool HlvrHandsReplaceGloves() const;
+    int WriteHlvrWeaponSkin(const float modelToWorld[3][4], void* model, float* boneRows, int maxBones);
+    void AnchorHlvrWeapon(void* model, const float visibleBone0[3][4], const QAngle& aim, float outGun[3][4]);
+    void DrawHlvrWeaponAttachments(void* modelRender, const ModelRenderInfo_t& gunInfo);
+    void DrawHlvrFreeHands(void* modelRender, bool left, bool right);
+    void ClearHlvrWeaponPending();
+    void NoteHlvrWeaponPending(void* modelRender, const ModelRenderInfo_t& info);
+    void FlushHlvrWeaponPending();
     void GetRightHandAttach(Vector& posMeters, Vector& rotDeg) const;
     bool GetRightHandAttachCurls(float curls[5]) const;
     bool RightHandAttachActive() const;

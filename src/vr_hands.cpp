@@ -649,6 +649,8 @@ bool BmVrGloves::DrawForEye(
     float zFar,
     bool overlayNoDepth)
 {
+    if (g_Game && g_Game->m_VR && g_Game->m_VR->HlvrHandsReplaceGloves())
+        return false;
     if (!device || !m_Impl || !m_Impl->EnsureAssets())
         return false;
 

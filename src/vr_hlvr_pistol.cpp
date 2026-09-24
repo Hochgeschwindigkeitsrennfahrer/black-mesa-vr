@@ -206,7 +206,7 @@ namespace
         if (g_pistol.gun && g_pistol.slideModel && g_pistol.clipModel)
         {
             if (!g_pistol.handModel && vr->m_Game)
-                g_pistol.handModel = vr->m_Game->FindOrLoadModel("models/weapons/vr_glock_hands.mdl");
+                g_pistol.handModel = vr->m_Game->FindOrLoadModel("models/weapons/vr_hlvr_hands.mdl");
             return true;
         }
         if (g_pistol.loadTries >= 180)
@@ -220,7 +220,7 @@ namespace
         if (!g_pistol.clipModel)
             g_pistol.clipModel = game->FindOrLoadModel("models/weapons/vr_pistol_clip.mdl");
         if (!g_pistol.handModel)
-            g_pistol.handModel = game->FindOrLoadModel("models/weapons/vr_glock_hands.mdl");
+            g_pistol.handModel = game->FindOrLoadModel("models/weapons/vr_hlvr_hands.mdl");
         if (g_pistol.gun && g_pistol.slideModel && g_pistol.clipModel)
         {
             Game::logMsg("HL2VR pistol loaded vr_pistol / slide / clip hand=%d tries=%d",
@@ -816,7 +816,8 @@ void VR::DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& g
     std::memcpy(gunWorld, gunInfo.pModelToWorld, sizeof(gunWorld));
     drawPart(g_pistol.slideModel, "models/weapons/vr_pistol_slide.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
     if (g_pistol.handModel)
-        drawPart(g_pistol.handModel, "models/weapons/vr_glock_hands.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
+        drawPart(g_pistol.handModel, "models/weapons/vr_hlvr_hands.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
+    DrawHlvrFreeHands(modelRender, true, false);
 
     if (g_pistol.mag == MagLoaded)
     {

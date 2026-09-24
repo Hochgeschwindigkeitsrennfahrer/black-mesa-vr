@@ -34,6 +34,7 @@ set(BMVR_SOURCES
   src/vr.cpp
   src/vr_crowbar.cpp
   src/vr_hlvr_pistol.cpp
+  src/vr_hlvr_weapons.cpp
   src/vr_weapon_menu.cpp
   src/vr_hands.cpp
   src/vr_hand_renderer_d3d9.cpp

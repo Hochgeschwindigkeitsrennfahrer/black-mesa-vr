@@ -4277,9 +4277,13 @@ namespace
     {
         (void)edx;
         g_hlvrGun.valid = false;
+        if (Hooks::m_VR)
+            Hooks::m_VR->ClearHlvrWeaponPending();
         int drawn = 0;
         if (g_hkAnimatingDraw.fOriginal)
             drawn = g_hkAnimatingDraw.fOriginal(ecx, flags);
+        if (Hooks::m_VR)
+            Hooks::m_VR->FlushHlvrWeaponPending();
         if (g_hlvrGun.valid && Hooks::m_VR && g_hlvrGun.modelRender)
         {
             HlvrGunDraw saved = g_hlvrGun;
@@ -4358,7 +4362,19 @@ bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* 
                 swapped = true;
             }
         }
-        if (m_VR->IsHlvrPistolRigged(info->pModel) && info->pModelToWorld && info->pRenderable
+        if (!swapped)
+        {
+            const char* stock = SafeModelName(m_Game->m_ModelInfo, info->pModel);
+            void* replacement = m_VR->HlvrWeaponDrawModel(stock);
+            if (replacement)
+            {
+                saved = info->pModel;
+                info->pModel = static_cast<model_t*>(replacement);
+                swapped = true;
+            }
+        }
+        if ((m_VR->IsHlvrPistolRigged(info->pModel) || m_VR->IsHlvrWeaponRigged(info->pModel))
+            && info->pModelToWorld && info->pRenderable
             && !hkViewmodelSetupBones.pTarget)
         {
             void** vt = nullptr;
@@ -4378,7 +4394,7 @@ bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* 
         }
         if (swapped)
             g_HlvrPoseGun = true;
-        else if (m_VR->IsHlvrPistolRigged(info->pModel))
+        else if (m_VR->IsHlvrPistolRigged(info->pModel) || m_VR->IsHlvrWeaponRigged(info->pModel))
             g_HlvrRigid = true;
     }
     bool ok = false;
@@ -4502,7 +4518,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         // World props: skip GetModelName. Open maps call DME thousands of times
         // per eye; the name string was the hot cost next to the draw itself.
         isViewmodel = CachedModelIsViewmodel(pModel);
-        if (!isViewmodel && m_VR && m_VR->IsHlvrPistolRigged(pModel))
+        if (!isViewmodel && m_VR && (m_VR->IsHlvrPistolRigged(pModel) || m_VR->IsHlvrWeaponRigged(pModel)))
             isViewmodel = true;
         if (isViewmodel && m_Game && m_Game->m_ModelInfo)
         {
@@ -4592,7 +4608,11 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     }
 
     if (isViewmodel && m_VR && m_VR->EmptyHands() && m_VR->IsGameplayEligible() && EngineInGame())
+    {
+        if (!m_VR->IsHlvrPistolRigged(pModel) && !m_VR->IsHlvrWeaponRigged(pModel))
+            m_VR->DrawHlvrFreeHands(ecx, true, true);
         return;
+    }
 
     // Pause / GameUI: keep controller poses updating, skip the gun mesh so it
     // does not track in front of the overlay. Next unpaused DME draws it again.
@@ -4612,14 +4632,16 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     const ModelRenderInfo_t* infoToDraw = &info;
     // Slide and magazine already carry the gun's placed matrix. Skin them
     // here and do not run the viewmodel rigid delta a second time.
-    if (isViewmodel && m_VR && m_VR->IsHlvrPistolRigged(pModel) && !m_VR->IsHlvrPistolModel(pModel)
-        && info.pModelToWorld && m_VR->IsGameplayEligible() && EngineInGame())
+    if (isViewmodel && m_VR && info.pModelToWorld && m_VR->IsGameplayEligible() && EngineInGame()
+        && ((m_VR->IsHlvrPistolRigged(pModel) && !m_VR->IsHlvrPistolModel(pModel))
+            || (m_VR->IsHlvrWeaponRigged(pModel) && !m_VR->IsHlvrWeaponModel(pModel))))
     {
         const int slot = g_VmDrawSlot++ & (kVmDrawSlots - 1);
         float placed[3][4];
         std::memcpy(placed, info.pModelToWorld, sizeof(placed));
-        const int n = m_VR->WriteHlvrPistolSkin(placed, pModel,
-            &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
+        const int n = m_VR->IsHlvrWeaponRigged(pModel)
+            ? m_VR->WriteHlvrWeaponSkin(placed, pModel, &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones)
+            : m_VR->WriteHlvrPistolSkin(placed, pModel, &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
         if (n > 0)
             bonesToDraw = g_ScaledViewmodelBones[slot];
     }
@@ -4724,7 +4746,27 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             const int nBones = StudioHdrNumBones(hdr);
             bool usedBones = false;
             bool pistolSkin = false;
-            if (m_VR->IsHlvrPistolModel(pModel) && (g_HlvrPosedBone0Valid || info.pModelToWorld))
+            if (m_VR->IsHlvrWeaponModel(pModel) && (g_HlvrPosedBone0Valid || info.pModelToWorld))
+            {
+                float placed[3][4];
+                const void* src = g_HlvrPosedBone0Valid ? static_cast<const void*>(g_HlvrPosedBone0) : info.pModelToWorld;
+                if (src && SehCopyAndFixViewmodelMatrices(&placed[0][0], src,
+                        1, pivot3, 1.f, pivot3, right3, up3, fwd3,
+                        needYFix ? yFix : 1.f, rigidPtr))
+                {
+                    float gunWorld[3][4];
+                    m_VR->AnchorHlvrWeapon(pModel, placed, targetAng, gunWorld);
+                    const int n = m_VR->WriteHlvrWeaponSkin(gunWorld, pModel,
+                        &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
+                    if (n > 0)
+                    {
+                        bonesToDraw = g_ScaledViewmodelBones[slot];
+                        usedBones = true;
+                        pistolSkin = true;
+                    }
+                }
+            }
+            if (!pistolSkin && m_VR->IsHlvrPistolModel(pModel) && (g_HlvrPosedBone0Valid || info.pModelToWorld))
             {
                 float placed[3][4];
                 const void* src = g_HlvrPosedBone0Valid ? static_cast<const void*>(g_HlvrPosedBone0) : info.pModelToWorld;
@@ -4797,6 +4839,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 ForceStereoViewmodelWorldDepth(g_MatCtx);
             if (isViewmodel && m_VR && m_VR->IsHlvrPistolModel(pModel) && infoToDraw)
                 NoteHlvrGunDraw(ecx, *infoToDraw);
+            if (isViewmodel && m_VR && m_VR->IsHlvrWeaponModel(pModel) && infoToDraw)
+                m_VR->NoteHlvrWeaponPending(ecx, *infoToDraw);
             const long long t0 = g_Cost.active ? QpcNow() : 0;
             hkDrawModelExecute.fOriginal(ecx, state, *infoToDraw, bonesToDraw);
             if (g_Cost.active)
