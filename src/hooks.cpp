@@ -4198,9 +4198,63 @@ void __fastcall Hooks::dDepthRange(void* ecx, void* edx, float zNear, float zFar
     CallOriginalDepthRange(ecx, zNear, zFar);
 }
 
+int __fastcall Hooks::dDrawModelEx(void* ecx, void* edx, ModelRenderInfo_t* info)
+{
+    (void)edx;
+    if (info && info->pModel && m_VR && m_VR->IsGameplayEligible() && m_Game && m_Game->m_ModelInfo)
+    {
+        static void* s_glock = nullptr;
+        if (info->pModel != s_glock)
+        {
+            const char* name = nullptr;
+            __try
+            {
+                name = m_Game->m_ModelInfo->GetModelName(info->pModel);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                name = nullptr;
+            }
+            if (name && std::strstr(name, "v_glock"))
+                s_glock = info->pModel;
+        }
+        if (s_glock && info->pModel == s_glock)
+        {
+            const int idx = m_VR->HlvrPistolModelIndex();
+            void* pistol = (idx > 0) ? m_Game->m_ModelInfo->GetModel(idx) : nullptr;
+            if (pistol)
+                info->pModel = static_cast<model_t*>(pistol);
+        }
+    }
+    if (hkDrawModelEx.fOriginal)
+        return hkDrawModelEx.fOriginal(ecx, info);
+    return 0;
+}
+
 void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld)
 {
     (void)edx;
+    if (!hkDrawModelEx.pTarget && ecx)
+    {
+        void** vt = nullptr;
+        __try
+        {
+            vt = *reinterpret_cast<void***>(ecx);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            vt = nullptr;
+        }
+        // IModelRender slot 16 (+0x40) is DrawModelEx: Setup then Execute.
+        // Swap v_glock here, before setup. Doing it inside Execute is too late
+        // and the extra draw returns 0.
+        if (vt && vt[16]
+            && hkDrawModelEx.createHook(vt[16], &dDrawModelEx) == 0
+            && hkDrawModelEx.enableHook() == 0)
+            Game::logMsg("DrawModelEx hook slot16=%p", vt[16]);
+        else if (!hkDrawModelEx.pTarget)
+            hkDrawModelEx.pTarget = vt ? vt[16] : nullptr;
+    }
     if (HlvrPistolDrawDepth() > 0)
     {
         if (hkDrawModelExecute.fOriginal)

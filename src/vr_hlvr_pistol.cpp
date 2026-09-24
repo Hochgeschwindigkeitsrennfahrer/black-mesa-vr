@@ -379,14 +379,70 @@ int VR::HlvrPistolModelIndex()
     if (!m_Game || !m_Game->m_ModelInfo)
         return 0;
     EnsureModels(this);
-    const int idx = m_Game->m_ModelInfo->GetModelIndex("models/weapons/vr_pistol.mdl");
+    int idx = 0;
+    __try
+    {
+        idx = m_Game->m_ModelInfo->GetModelIndex("models/weapons/vr_pistol.mdl");
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        idx = 0;
+    }
     if (idx <= 0)
+    {
+        void** vt = nullptr;
+        __try
+        {
+            vt = *reinterpret_cast<void***>(m_Game->m_ModelInfo);
+            using RegFn = int(__thiscall*)(void*, const char*, bool);
+            if (vt && vt[52])
+                idx = reinterpret_cast<RegFn>(vt[52])(m_Game->m_ModelInfo, "models/weapons/vr_pistol.mdl", true);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            idx = 0;
+        }
+    }
+    if (idx <= 0)
+    {
+        static int s_fail;
+        if (s_fail < 3)
+        {
+            Game::logMsg("HL2VR pistol model index missing");
+            ++s_fail;
+        }
         return 0;
+    }
     g_pistol.modelIndex = idx;
-    void* model = m_Game->m_ModelInfo->GetModel(idx);
+    void* model = nullptr;
+    __try
+    {
+        model = m_Game->m_ModelInfo->GetModel(idx);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        model = nullptr;
+    }
+    unsigned studio = 0;
     if (model)
+    {
         g_pistol.gun = model;
-    Game::logMsg("HL2VR pistol viewmodel index=%d model=%p", idx, model);
+        __try
+        {
+            studio = *reinterpret_cast<unsigned short*>(static_cast<char*>(model) + 0x38);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            studio = 0;
+        }
+    }
+    Game::logMsg("HL2VR pistol viewmodel index=%d model=%p studio=%u", idx, model, studio);
+    if (studio == 0)
+    {
+        g_pistol.modelIndex = 0;
+        g_pistol.gun = nullptr;
+        return 0;
+    }
     return idx;
 }
 
