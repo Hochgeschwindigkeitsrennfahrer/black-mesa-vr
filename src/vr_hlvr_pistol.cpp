@@ -451,6 +451,136 @@ bool VR::IsHlvrPistolModel(void* model) const
     return model && g_pistol.gun && model == g_pistol.gun;
 }
 
+namespace
+{
+    struct MdlCache
+    {
+        void* obj = nullptr;
+        void** vt = nullptr;
+    };
+
+    MdlCache FindMdlCache()
+    {
+        MdlCache out{};
+        HMODULE eng = GetModuleHandleA("engine.dll");
+        if (!eng)
+            return out;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(eng);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+            return out;
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+            reinterpret_cast<const unsigned char*>(eng) + dos->e_lfanew);
+        const auto* base = reinterpret_cast<const unsigned char*>(eng);
+        const size_t size = nt->OptionalHeader.SizeOfImage;
+        for (size_t i = 24; i + 8 < size; ++i)
+        {
+            if (base[i] != 0x0F || base[i + 1] != 0xB7 || base[i + 2] != 0x40 || base[i + 3] != 0x38
+                || base[i + 4] != 0x50 || base[i + 5] != 0xFF || base[i + 6] != 0x52 || base[i + 7] != 0x38)
+                continue;
+            for (size_t b = 2; b < 20; ++b)
+            {
+                if (base[i - b] == 0x8B && base[i - b + 1] == 0x0D)
+                {
+                    void** global = nullptr;
+                    std::memcpy(&global, base + i - b + 2, sizeof(global));
+                    if (!global)
+                        return out;
+                    __try
+                    {
+                        out.obj = *global;
+                        if (out.obj)
+                            out.vt = *reinterpret_cast<void***>(out.obj);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        out = {};
+                    }
+                    return out;
+                }
+            }
+        }
+        return out;
+    }
+
+    unsigned short StudioHandle(void* model)
+    {
+        if (!model)
+            return 0;
+        unsigned short h = 0;
+        __try
+        {
+            h = *reinterpret_cast<unsigned short*>(static_cast<char*>(model) + 0x38);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            h = 0;
+        }
+        return h;
+    }
+}
+
+void* VR::HlvrPistolDrawModel()
+{
+    if (!EnsureModels(this) || !g_pistol.gun)
+        return nullptr;
+    unsigned short handle = StudioHandle(g_pistol.gun);
+    static MdlCache s_cache{};
+    static bool s_cacheTried = false;
+    if (!s_cacheTried)
+    {
+        s_cache = FindMdlCache();
+        s_cacheTried = true;
+        Game::logMsg("HL2VR pistol mdlcache=%p", s_cache.obj);
+    }
+    MdlCache cache = s_cache;
+    if ((handle == 0 || handle == 0xFFFF) && cache.obj && cache.vt && cache.vt[9])
+    {
+        using FindFn = unsigned short(__thiscall*)(void*, const char*);
+        __try
+        {
+            handle = reinterpret_cast<FindFn>(cache.vt[9])(cache.obj, "models/weapons/vr_pistol.mdl");
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            handle = 0;
+        }
+        if (handle != 0 && handle != 0xFFFF)
+        {
+            __try
+            {
+                *reinterpret_cast<unsigned short*>(static_cast<char*>(g_pistol.gun) + 0x38) = handle;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                handle = 0;
+            }
+        }
+    }
+    void* hw = nullptr;
+    if (handle != 0 && handle != 0xFFFF && cache.obj && cache.vt && cache.vt[14])
+    {
+        using HwFn = void*(__thiscall*)(void*, unsigned short);
+        __try
+        {
+            hw = reinterpret_cast<HwFn>(cache.vt[14])(cache.obj, handle);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            hw = nullptr;
+        }
+    }
+    static int s_log;
+    if (s_log < 4)
+    {
+        Game::logMsg("HL2VR pistol draw model=%p studio=%u hw=%p cache=%p",
+            g_pistol.gun, handle, hw, cache.obj);
+        ++s_log;
+    }
+    if (!hw)
+        return nullptr;
+    return g_pistol.gun;
+}
+
 #if 0
 bool VR::DrawHlvrPistol_Unused(void* modelRender, const ModelRenderInfo_t& vmInfo)
 {

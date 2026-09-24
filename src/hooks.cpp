@@ -4220,8 +4220,7 @@ int __fastcall Hooks::dDrawModelEx(void* ecx, void* edx, ModelRenderInfo_t* info
         }
         if (s_glock && info->pModel == s_glock)
         {
-            const int idx = m_VR->HlvrPistolModelIndex();
-            void* pistol = (idx > 0) ? m_Game->m_ModelInfo->GetModel(idx) : nullptr;
+            void* pistol = m_VR->HlvrPistolDrawModel();
             if (pistol)
                 info->pModel = static_cast<model_t*>(pistol);
         }
@@ -4319,6 +4318,35 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         isViewmodel = CachedModelIsViewmodel(pModel);
         if (!isViewmodel && m_VR && m_VR->IsHlvrPistolModel(pModel))
             isViewmodel = true;
+        if (isViewmodel && m_VR && m_VR->IsHlvrPistolModel(pModel) && hkDrawModelExecute.fOriginal)
+        {
+            // Engine setup skinned this mesh with the glock bone cache, and the
+            // 0.64 viewmodel shrink is for that oversized mesh. Draw the pistol
+            // on its own model matrix at full size.
+            if (m_VR->StereoWorldPassActive())
+                ForceStereoViewmodelWorldDepth(g_MatCtx);
+            void* bonesOut = pCustomBoneToWorld;
+            const float* src = info.pModelToWorld
+                ? reinterpret_cast<const float*>(info.pModelToWorld) : nullptr;
+            int nBones = 0;
+            if (state)
+            {
+                const auto* lite = reinterpret_cast<const DrawModelStateLite*>(state);
+                if (!src && lite->modelToWorld)
+                    src = reinterpret_cast<const float*>(lite->modelToWorld);
+                if (lite->studioHdr)
+                    nBones = *reinterpret_cast<const int*>(lite->studioHdr + kStudioHdrNumBones);
+            }
+            thread_local float pistolBones[kMaxStudioBones][3][4];
+            if (src && nBones > 0 && nBones <= kMaxStudioBones)
+            {
+                for (int i = 0; i < nBones; ++i)
+                    std::memcpy(pistolBones[i], src, sizeof(float) * 12);
+                bonesOut = pistolBones;
+            }
+            hkDrawModelExecute.fOriginal(ecx, state, info, bonesOut);
+            return;
+        }
         if (isViewmodel && m_Game && m_Game->m_ModelInfo)
         {
             modelName = SafeModelName(m_Game->m_ModelInfo, pModel);

@@ -843,6 +843,7 @@ public:
     void UpdateHlvrPistol(uint32_t& buttons);
     // Engine model index for models/weapons/vr_pistol.mdl. 0 until it loads.
     int HlvrPistolModelIndex();
+    void* HlvrPistolDrawModel();
     bool IsHlvrPistolModel(void* model) const;
     void GetRightHandAttach(Vector& posMeters, Vector& rotDeg) const;
     bool GetRightHandAttachCurls(float curls[5]) const;
