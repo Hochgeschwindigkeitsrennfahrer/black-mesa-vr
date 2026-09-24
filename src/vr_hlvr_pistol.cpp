@@ -640,13 +640,35 @@ namespace
     }
 }
 
-void VR::AnchorHlvrPistolGun(const float visibleBone0[3][4], float outGun[3][4]) const
+void VR::AnchorHlvrPistolGun(const float visibleBone0[3][4], const QAngle& aim, float outGun[3][4]) const
 {
-    std::memcpy(outGun, visibleBone0, sizeof(float) * 12);
+    float placed[3][4];
+    std::memcpy(placed, visibleBone0, sizeof(placed));
     const float* t = kGunRootT;
-    outGun[0][3] -= visibleBone0[0][0] * t[0] + visibleBone0[0][1] * t[1] + visibleBone0[0][2] * t[2];
-    outGun[1][3] -= visibleBone0[1][0] * t[0] + visibleBone0[1][1] * t[1] + visibleBone0[1][2] * t[2];
-    outGun[2][3] -= visibleBone0[2][0] * t[0] + visibleBone0[2][1] * t[1] + visibleBone0[2][2] * t[2];
+    placed[0][3] -= visibleBone0[0][0] * t[0] + visibleBone0[0][1] * t[1] + visibleBone0[0][2] * t[2];
+    placed[1][3] -= visibleBone0[1][0] * t[0] + visibleBone0[1][1] * t[1] + visibleBone0[1][2] * t[2];
+    placed[2][3] -= visibleBone0[2][0] * t[0] + visibleBone0[2][1] * t[1] + visibleBone0[2][2] * t[2];
+
+    // Keep the grip where the viewmodel bone put it. The glock bone rotation
+    // points this mesh sideways; the muzzle is model -Y.
+    const Vector& grip = kGripOrigin;
+    const Vector gripWorld(
+        placed[0][0] * grip.x + placed[0][1] * grip.y + placed[0][2] * grip.z + placed[0][3],
+        placed[1][0] * grip.x + placed[1][1] * grip.y + placed[1][2] * grip.z + placed[1][3],
+        placed[2][0] * grip.x + placed[2][1] * grip.y + placed[2][2] * grip.z + placed[2][3]);
+
+    Vector fwd, right, up;
+    QAngle::AngleVectors(aim, &fwd, &right, &up);
+    (void)right;
+    const Vector axisY(-fwd.x, -fwd.y, -fwd.z);
+    const Vector axisZ = up;
+    const Vector axisX = CrossProduct(axisY, axisZ);
+    outGun[0][0] = axisX.x; outGun[0][1] = axisY.x; outGun[0][2] = axisZ.x;
+    outGun[1][0] = axisX.y; outGun[1][1] = axisY.y; outGun[1][2] = axisZ.y;
+    outGun[2][0] = axisX.z; outGun[2][1] = axisY.z; outGun[2][2] = axisZ.z;
+    outGun[0][3] = gripWorld.x - (outGun[0][0] * grip.x + outGun[0][1] * grip.y + outGun[0][2] * grip.z);
+    outGun[1][3] = gripWorld.y - (outGun[1][0] * grip.x + outGun[1][1] * grip.y + outGun[1][2] * grip.z);
+    outGun[2][3] = gripWorld.z - (outGun[2][0] * grip.x + outGun[2][1] * grip.y + outGun[2][2] * grip.z);
 }
 
 int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* boneRows, int maxBones)

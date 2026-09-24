@@ -4733,7 +4733,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                         needYFix ? yFix : 1.f, rigidPtr))
                 {
                     float gunWorld[3][4];
-                    m_VR->AnchorHlvrPistolGun(placed, gunWorld);
+                    m_VR->AnchorHlvrPistolGun(placed, targetAng, gunWorld);
                     const int n = m_VR->WriteHlvrPistolSkin(gunWorld, pModel,
                         &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
                     if (n > 0)
