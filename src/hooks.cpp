@@ -5678,7 +5678,23 @@ namespace
         }
     }
 
-    Vector* RewriteShootOrigin(void* player, Vector* out, tWeaponShootPosition original, bool grabHold)
+    Vector* RewriteShootOriginImpl(void* player, Vector* out, tWeaponShootPosition original, bool grabHold);
+
+    Vector* RewriteShootOrigin(void* player, Vector* out, tWeaponShootPosition original, bool grabHold, bool server)
+    {
+        Vector* r = RewriteShootOriginImpl(player, out, original, grabHold);
+        if (bmvr::g_AimDebug && Hooks::m_VR && out && !grabHold)
+        {
+            Vector before{};
+            if (original)
+                original(player, &before);
+            const bool rewrote = (before - *out).LengthSqr() > 0.01f;
+            Hooks::m_VR->AimDebugShootOrigin(server, player, rewrote, before, *out);
+        }
+        return r;
+    }
+
+    Vector* RewriteShootOriginImpl(void* player, Vector* out, tWeaponShootPosition original, bool grabHold)
     {
         if (original && out)
             original(player, out);
@@ -5919,7 +5935,10 @@ void __fastcall Hooks::dGetShootAngles(void* ecx, void* edx, QAngle* out)
     if (!hkGetShootAngles.fOriginal)
         return;
     hkGetShootAngles.fOriginal(ecx, out);
+    const QAngle before = out ? *out : QAngle{};
     ApplyVrShootAngles(ecx, out);
+    if (bmvr::g_AimDebug && m_VR && out)
+        m_VR->AimDebugShootAngles(true, ecx, (before.x != out->x || before.y != out->y), before, *out);
 }
 
 void __fastcall Hooks::dClientGetShootAngles(void* ecx, void* edx, QAngle* out)
@@ -5927,25 +5946,28 @@ void __fastcall Hooks::dClientGetShootAngles(void* ecx, void* edx, QAngle* out)
     (void)edx;
     if (hkClientGetShootAngles.fOriginal)
         hkClientGetShootAngles.fOriginal(ecx, out);
+    const QAngle before = out ? *out : QAngle{};
     ApplyVrShootAngles(ecx, out);
+    if (bmvr::g_AimDebug && m_VR && out)
+        m_VR->AimDebugShootAngles(false, ecx, (before.x != out->x || before.y != out->y), before, *out);
 }
 
 Vector* __fastcall Hooks::dClientWeaponShootPosition(void* ecx, void* edx, Vector* out)
 {
     (void)edx;
-    return RewriteShootOrigin(ecx, out, hkClientWeaponShootPosition.fOriginal, false);
+    return RewriteShootOrigin(ecx, out, hkClientWeaponShootPosition.fOriginal, false, false);
 }
 
 Vector* __fastcall Hooks::dServerWeaponShootPosition(void* ecx, void* edx, Vector* out)
 {
     (void)edx;
-    return RewriteShootOrigin(ecx, out, hkServerWeaponShootPosition.fOriginal, false);
+    return RewriteShootOrigin(ecx, out, hkServerWeaponShootPosition.fOriginal, false, true);
 }
 
 Vector* __fastcall Hooks::dServerGrabHoldOrigin(void* ecx, void* edx, Vector* out)
 {
     (void)edx;
-    return RewriteShootOrigin(ecx, out, hkServerGrabHoldOrigin.fOriginal, true);
+    return RewriteShootOrigin(ecx, out, hkServerGrabHoldOrigin.fOriginal, true, true);
 }
 
 void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang)

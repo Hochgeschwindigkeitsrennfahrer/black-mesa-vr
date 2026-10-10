@@ -902,6 +902,10 @@ public:
     // Cleared by UpdateAimCrosshair when the reticle is off or the ray missed.
     bool AimCrosshairVisible() const { return m_AimCrosshairValid; }
     bool TryGetAimCrosshairWorld(Vector& out) const;
+    // AimDebug=true (config.txt): compare what the server fires with the
+    // reticle ray. Called from the shoot-origin/-angle hooks on the game thread.
+    void AimDebugShootOrigin(bool server, void* player, bool rewrote, const Vector& before, const Vector& after);
+    void AimDebugShootAngles(bool server, void* player, bool rewrote, const QAngle& before, const QAngle& after);
     // Gordon has no gloves before the HEV suit (intro tram). Sampled on the
     // game thread; defaults true so a failed netvar scan cannot hide the hands.
     // Combined with VrHideHandsWithoutSuit — false hides HEV gloves and the

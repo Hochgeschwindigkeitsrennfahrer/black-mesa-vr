@@ -2408,7 +2408,13 @@ bool VR::InitOpenVR()
     m_System->GetProjectionRaw(vr::Eye_Right, &r_left, &r_right, &r_top, &r_bottom);
 
     const float tanHalfFovX = (std::max)({ -l_left, l_right, -r_left, r_right });
-    const float tanHalfFovY = (std::max)({ -l_top, l_bottom, -r_top, r_bottom });
+    // PSVR2 (asymmetric per-eye FOV): NormalizeViewSetupForVREye renders this
+    // frustum at the eye RT's own aspect (~1:1), so the engine's vertical
+    // half-FOV is tanX/rtAspect, not max(|top|,|bottom|). Using the HMD's tanY
+    // here cropped the full rendered height into the HMD's vertical FOV
+    // (~29 % vertical squash on PSVR2: tanX/tanY 1.386 vs RT 0.984). Treat the
+    // rendered frustum as square; exact for a 1:1 RT, ~1.6 % off at 0.984.
+    const float tanHalfFovY = tanHalfFovX;
 
     // Same projection crop as L4D2VR vr_lifecycle_init.inl. Keep OpenVR v
     // unflipped on this DXVK path (Vulkan v-swap inverted the fused image).
@@ -2595,7 +2601,10 @@ bool VR::InitOpenXR()
     sanitizeTextureBounds(m_TextureBounds[0]);
     sanitizeTextureBounds(m_TextureBounds[1]);
 
-    m_Aspect = tanHalfFovX / tanHalfFovY;
+    // PSVR2: the engine renders at the eye RT's aspect (~1:1), so overlays
+    // (VrCrosshair, hand boxes) projected with tanX/tanY (1.386) landed 1.41x
+    // too far off-centre. See the OpenVR init above.
+    m_Aspect = 1.0f;
     m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
     m_FovRight = m_Fov;
@@ -3012,7 +3021,10 @@ void VR::PublishOpenXrEyeTexture(TextureID texID, const D3D9_TEXTURE_VR_DESC& de
         shared.vMax = 1.0f;
         if (submitTexture)
         {
-            shared.renderFovXDeg = 0.0f;
+            // The eye was rendered at m_Fov (NormalizeViewSetupForVREye). With 0
+            // the helper fell back to 90 deg and showed a 123 deg PSVR2 render
+            // as 90 deg (world ~0.54x). Aspect 0 = helper uses the RT's w/h.
+            shared.renderFovXDeg = (std::isfinite(m_Fov) && m_Fov > 1.0f && m_Fov < 179.0f) ? m_Fov : 0.0f;
             shared.renderAspect = 0.0f;
         }
         else
@@ -6226,6 +6238,103 @@ bool VR::TryGetAimCrosshairWorld(Vector& out) const
         return false;
     out = m_AimCrosshairWorld;
     return true;
+}
+
+namespace
+{
+    // AimDebug: last shoot origin per side, so the angle hook (called right
+    // after Weapon_ShootPosition by FireBullets) can trace the actual shot.
+    struct AimDebugOrigin
+    {
+        Vector origin{};
+        Vector before{};
+        void* player = nullptr;
+        bool rewrote = false;
+        DWORD ms = 0;
+        bool valid = false;
+    };
+    AimDebugOrigin g_AimDebugOrigin[2];
+    int g_AimDebugLines = 0;
+    DWORD g_AimDebugLastMs = 0;
+    constexpr int kAimDebugMaxLines = 400;
+}
+
+void VR::AimDebugShootOrigin(bool server, void* player, bool rewrote, const Vector& before, const Vector& after)
+{
+    if (!bmvr::g_AimDebug)
+        return;
+    AimDebugOrigin& o = g_AimDebugOrigin[server ? 1 : 0];
+    o.origin = after;
+    o.before = before;
+    o.player = player;
+    o.rewrote = rewrote;
+    o.ms = GetTickCount();
+    o.valid = true;
+}
+
+void VR::AimDebugShootAngles(bool server, void* player, bool rewrote, const QAngle& before, const QAngle& after)
+{
+    if (!bmvr::g_AimDebug || g_AimDebugLines >= kAimDebugMaxLines)
+        return;
+    // Only while the trigger is held: these hooks also run for NPCs and
+    // non-firing queries.
+    if ((m_HeldButtons.load(std::memory_order_acquire) & IN_ATTACK) == 0)
+        return;
+    const DWORD now = GetTickCount();
+    if (now - g_AimDebugLastMs < 40)
+        return;
+    if (!m_Game || !m_Game->m_EngineTrace || !m_Game->m_EngineClient)
+        return;
+    g_AimDebugLastMs = now;
+    ++g_AimDebugLines;
+
+    C_BaseEntity* local = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+    auto trace = [&](const Vector& from, const QAngle& ang, Vector& hit) -> bool {
+        Vector dir{};
+        QAngle::AngleVectors(ang, &dir, nullptr, nullptr);
+        if (VectorNormalize(dir) <= 0.01f)
+            return false;
+        CTraceFilterSkipSelf filter(local, 0);
+        Ray_t ray;
+        ray.Init(from, from + dir * 8192.f);
+        CGameTrace tr{};
+        m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
+        hit = tr.endpos;
+        return tr.fraction < 1.f;
+    };
+
+    const AimDebugOrigin& o = g_AimDebugOrigin[server ? 1 : 0];
+    const bool haveOrigin = o.valid && o.player == player && now - o.ms < 250;
+    Vector shotHit{};
+    const bool shotHitOk = haveOrigin && trace(o.origin, after, shotHit);
+
+    Vector retOrigin{};
+    const bool haveRet = TryGetVrShootOrigin(retOrigin);
+    const QAngle retAng = GetAimAngles();
+    Vector retHit{};
+    const bool retHitOk = haveRet && trace(retOrigin, retAng, retHit);
+
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    const Vector eye = GetViewOrigin(body);
+    const Vector hand = GetRightControllerAbsPos(body);
+    Vector fwd, right, up;
+    QAngle::AngleVectors(retAng, &fwd, &right, &up);
+    const Vector dHit = shotHit - retHit;
+    const Vector dOrig = o.origin - retOrigin;
+
+    Game::logMsg("AimDebug %s player=%p origin rewrote=%d (%.1f,%.1f,%.1f) was (%.1f,%.1f,%.1f) age=%lums | "
+        "angles rewrote=%d (%.2f,%.2f) was (%.2f,%.2f) | reticle o=(%.1f,%.1f,%.1f) a=(%.2f,%.2f) crosshair=%d | "
+        "shotHit=%d (%.1f,%.1f,%.1f) retHit=%d (%.1f,%.1f,%.1f) dHit right=%.1f up=%.1f fwd=%.1f | "
+        "dOrigin right=%.1f up=%.1f fwd=%.1f | eye=(%.1f,%.1f,%.1f) hand=(%.1f,%.1f,%.1f) body=(%.1f,%.1f,%.1f)",
+        server ? "server" : "client", player,
+        o.rewrote ? 1 : 0, o.origin.x, o.origin.y, o.origin.z, o.before.x, o.before.y, o.before.z,
+        haveOrigin ? static_cast<unsigned long>(now - o.ms) : 9999ul,
+        rewrote ? 1 : 0, after.x, after.y, before.x, before.y,
+        retOrigin.x, retOrigin.y, retOrigin.z, retAng.x, retAng.y, m_AimCrosshairValid ? 1 : 0,
+        shotHitOk ? 1 : 0, shotHit.x, shotHit.y, shotHit.z, retHitOk ? 1 : 0, retHit.x, retHit.y, retHit.z,
+        dHit.Dot(right), dHit.Dot(up), dHit.Dot(fwd),
+        dOrig.Dot(right), dOrig.Dot(up), dOrig.Dot(fwd),
+        eye.x, eye.y, eye.z, hand.x, hand.y, hand.z, body.x, body.y, body.z);
 }
 
 void VR::UpdateRpgLaserPoint()

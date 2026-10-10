@@ -64,6 +64,7 @@ namespace bmvr
     bool g_HandHud = true;
     bool g_VrCrosshair = false;
     float g_VrCrosshairScale = 1.f;
+    bool g_AimDebug = false;
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
@@ -505,6 +506,8 @@ namespace bmvr
                 g_VrCrosshair = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrCrosshairScale") == 0)
                 g_VrCrosshairScale = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "AimDebug") == 0)
+                g_AimDebug = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHideHandsWithoutSuit") == 0)
                 g_HideHandsWithoutSuit = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrScopeUsesHmdAim") == 0)

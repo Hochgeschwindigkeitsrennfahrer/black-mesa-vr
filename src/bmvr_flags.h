@@ -218,6 +218,9 @@ namespace bmvr
     extern bool g_VrCrosshair;
     // Reticle size multiplier, for players who want it smaller or bolder.
     extern float g_VrCrosshairScale;
+    // AimDebug=true: per shot, log the server bullet origin/direction and its
+    // traced hit next to the reticle ray and hit (bmvr_log "AimDebug").
+    extern bool g_AimDebug;
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand
     // GLBs still draw on the intro tram. Depends on a scanned m_bWearingSuit
     // offset; set false if the scan ever misfires.
