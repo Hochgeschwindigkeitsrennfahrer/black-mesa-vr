@@ -5612,17 +5612,44 @@ namespace
         return FindPatternInModule(mod, hex);
     }
 
+    bool InServerDll(const void* p)
+    {
+        static uintptr_t s_base = 0, s_end = 0;
+        if (!s_base)
+        {
+            HMODULE mod = GetModuleHandleA("server.dll");
+            if (!mod)
+                return false;
+            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mod);
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+                reinterpret_cast<const unsigned char*>(mod) + dos->e_lfanew);
+            s_base = reinterpret_cast<uintptr_t>(mod);
+            s_end = s_base + nt->OptionalHeader.SizeOfImage;
+        }
+        const uintptr_t a = reinterpret_cast<uintptr_t>(p);
+        return a >= s_base && a < s_end;
+    }
+
     int ServerEntityIndex(void* ent)
     {
         if (!ent)
             return 0;
         int idx = 0;
+        // BM's server player has no IServerNetworkable vtable at +8 (null or a
+        // non-code pointer). Relying on __except cost ~1000 faults/s under
+        // Wine (8 fps, 2026-10-11) and called a garbage address half the time.
+        // Only call through a vtable and function that live in server.dll.
+        unsigned char* net = reinterpret_cast<unsigned char*>(ent) + 8;
+        void** vt = nullptr;
+        void* fn = nullptr;
+        using Fn = int(__thiscall*)(void*);
         __try
         {
-            unsigned char* net = reinterpret_cast<unsigned char*>(ent) + 8;
-            void** vt = *reinterpret_cast<void***>(net);
-            using Fn = int(__thiscall*)(void*);
-            idx = reinterpret_cast<Fn>(vt[0x24 / 4])(net);
+            vt = *reinterpret_cast<void***>(net);
+            if (InServerDll(vt))
+                fn = vt[0x24 / 4];
+            if (InServerDll(fn))
+                idx = reinterpret_cast<Fn>(fn)(net);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
