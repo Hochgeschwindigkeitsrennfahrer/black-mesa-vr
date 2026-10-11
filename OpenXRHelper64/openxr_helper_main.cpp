@@ -4027,7 +4027,6 @@ namespace
 
         int FrameLoop(const Options& options)
         {
-            m_GameRendersRuntimeFov = options.gameRendersRuntimeFov;
             const ULONGLONG startTicks = GetTickCount64();
             uint32_t submittedFrames = 0;
             bool shouldExit = false;
@@ -9156,6 +9155,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
         int FrameLoop(const Options& options)
         {
+            m_GameRendersRuntimeFov = options.gameRendersRuntimeFov;
             const ULONGLONG startTicks = GetTickCount64();
             uint32_t submittedFrames = 0;
             bool shouldExit = false;

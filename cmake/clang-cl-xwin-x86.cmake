@@ -28,7 +28,7 @@ set(_xwin_inc
   "/imsvc${XWIN}/sdk/include/winrt")
 string(JOIN " " _xwin_inc_str ${_xwin_inc})
 set(CMAKE_C_FLAGS_INIT "--target=i686-pc-windows-msvc -fms-compatibility -fms-extensions ${_xwin_inc_str}")
-set(CMAKE_CXX_FLAGS_INIT "--target=i686-pc-windows-msvc -fms-compatibility -fms-extensions /EHsc ${_xwin_inc_str}")
+set(CMAKE_CXX_FLAGS_INIT "--target=i686-pc-windows-msvc -fms-compatibility -fms-extensions /EHa ${_xwin_inc_str}")
 
 set(_xwin_lib "/libpath:${XWIN}/crt/lib/x86 /libpath:${XWIN}/sdk/lib/um/x86 /libpath:${XWIN}/sdk/lib/ucrt/x86")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_xwin_lib}")
@@ -36,3 +36,14 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_xwin_lib}")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "${_xwin_lib}")
 
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+# The mod guards raw game-memory reads with __try/__except. clang only catches
+# a fault inside the __try body itself with /EHa (async SEH); CMake's MSVC
+# defaults append /EHsc to CMAKE_CXX_FLAGS, so put /EHa in the per-config
+# flags, which come later on the command line. Even with /EHa, clang (23, x86)
+# resets the try-state to -1 at the lifetime start of any local declared inside
+# the __try body, so the guarded loads ran unprotected (ServerEntityIndex
+# crash on map load, 2026-10-11); -disable-lifetime-markers keeps them inside.
+set(_bmvr_seh "/EHa -Xclang -disable-lifetime-markers")
+set(CMAKE_CXX_FLAGS_RELEASE_INIT "${_bmvr_seh}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT "${_bmvr_seh}")
+set(CMAKE_CXX_FLAGS_DEBUG_INIT "${_bmvr_seh}")
