@@ -65,6 +65,8 @@ namespace bmvr
     bool g_VrCrosshair = false;
     float g_VrCrosshairScale = 1.f;
     bool g_AimDebug = false;
+    bool g_OffCenterTest = false;
+    bool g_OffCenterEyes = false;
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
@@ -508,6 +510,10 @@ namespace bmvr
                 g_VrCrosshairScale = static_cast<float>(atof(val));
             else if (std::strcmp(n, "AimDebug") == 0)
                 g_AimDebug = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "OffCenterEyes") == 0)
+                g_OffCenterEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "OffCenterTest") == 0)
+                g_OffCenterTest = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHideHandsWithoutSuit") == 0)
                 g_HideHandsWithoutSuit = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrScopeUsesHmdAim") == 0)
@@ -1528,6 +1534,24 @@ namespace bmvr
 
     bool TryHmdSwapchain() { return g_TryHmdSwapchain; }
     bool TryHmdFramebuffer() { return g_TryHmdFramebuffer; }
+    bool OffCenterTestActive()
+    {
+        if (!g_OffCenterTest)
+            return false;
+        static ULONGLONG s_lastCheck = 0;
+        static bool s_on = false;
+        const ULONGLONG now = GetTickCount64();
+        if (now - s_lastCheck >= 500)
+        {
+            s_lastCheck = now;
+            const std::wstring marker = ExeDir() + L"\\VR\\offcenter_test_on";
+            const bool on = GetFileAttributesW(marker.c_str()) != INVALID_FILE_ATTRIBUTES;
+            if (on != s_on)
+                Log(on ? "OffCenterTest on" : "OffCenterTest off");
+            s_on = on;
+        }
+        return s_on;
+    }
     bool TryHmdNative() { return g_TryHmdNative; }
     bool TryNamedRenderTargets() { return g_TryNamedRT; }
     bool TryNamedStereoWrap() { return g_TryNamedStereoWrap; }

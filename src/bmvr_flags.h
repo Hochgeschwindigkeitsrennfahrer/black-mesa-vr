@@ -221,6 +221,17 @@ namespace bmvr
     // AimDebug=true: per shot, log the server bullet origin/direction and its
     // traced hit next to the reticle ray and hit (bmvr_log "AimDebug").
     extern bool g_AimDebug;
+    // OffCenterTest=true (flat only, diagnostic): while VR/offcenter_test_on
+    // exists, the main view renders the PSVR2 left-eye off-centre subrect
+    // (left 0, right 0.758 of the frustum) to check the engine's off-centre
+    // projection path (deferred lights, sky, water, viewmodel) on the desktop.
+    extern bool g_OffCenterTest;
+    // OffCenterEyes=true: each eye renders only its own asymmetric HMD
+    // frustum (CViewSetup m_bOffCenter) instead of the symmetric union, and
+    // is submitted at the runtime's per-eye FOV. PSVR2: ~54 % -> 100 % of
+    // the rendered pixels reach the eye.
+    extern bool g_OffCenterEyes;
+    bool OffCenterTestActive();
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand
     // GLBs still draw on the intro tram. Depends on a scanned m_bWearingSuit
     // offset; set false if the scan ever misfires.

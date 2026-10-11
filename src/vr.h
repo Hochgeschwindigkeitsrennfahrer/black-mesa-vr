@@ -202,6 +202,18 @@ public:
             || m_AntiAliasing == 8 || m_AntiAliasing == 16;
     }
     float m_Aspect = 1.f;
+    // OffCenterEyes: the union frustum is fov=m_Fov, aspect=m_OffCenterAspect
+    // (tanX/tanY over both eyes); each eye renders the sub-rectangle
+    // m_OffCenterFrac[eye] = {left, right, bottom, top} (0..1 of the union).
+    bool m_OffCenterActive = false;
+    float m_OffCenterAspect = 1.f;
+    float m_OffCenterFrac[2][4]{};
+    // stereoEye 1 = left, 2 = right (0 / mono: false).
+    bool OffCenterForEye(int stereoEye, const float*& frac) const;
+    // Union-frustum NDC -> this eye's NDC: ndc' = ndc * s + o.
+    bool OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const;
+    // l/r/d/u = tangents of each eye's left/right/down/up half-angles.
+    void SetupOffCenter(const float leftEye[4], const float rightEye[4]);
     float m_Fov = 90.f;
     // Per-eye CalcFovFromProjection (widest of the four raw half-angles).
     float m_FovLeft = 90.f;
@@ -932,7 +944,7 @@ public:
     bool EmptyHands() const { return m_EmptyHands; }
     void UpdateWeaponMenu(bool stickClickHeld, float deltaMs);
     void ApplyWeaponMenuWorldPose();
-    void DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
+    void DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
     bool UpdateWeaponFireHaptics();
     void AfterCreateMoveFireHaptics();

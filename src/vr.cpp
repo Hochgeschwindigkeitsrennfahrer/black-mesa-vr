@@ -2430,6 +2430,18 @@ bool VR::InitOpenVR()
         m_TextureBounds[0].uMin, m_TextureBounds[0].vMin, m_TextureBounds[0].uMax, m_TextureBounds[0].vMax,
         m_TextureBounds[1].uMin, m_TextureBounds[1].vMin, m_TextureBounds[1].uMax, m_TextureBounds[1].vMax);
 
+    {
+        // GetProjectionRaw: bottom (> 0) is the visual up edge, top (< 0)
+        // the down edge (same mapping as the OpenXR init below).
+        const float le[4] = { l_left, l_right, l_top, l_bottom };
+        const float re[4] = { r_left, r_right, r_top, r_bottom };
+        SetupOffCenter(le, re);
+        if (m_OffCenterActive)
+        {
+            m_TextureBounds[0] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
+            m_TextureBounds[1] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
+        }
+    }
     m_Aspect = tanHalfFovX / tanHalfFovY;
     m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
@@ -2600,6 +2612,12 @@ bool VR::InitOpenXR()
     };
     sanitizeTextureBounds(m_TextureBounds[0]);
     sanitizeTextureBounds(m_TextureBounds[1]);
+    {
+        // top = tan(angleDown) < 0, bottom = tan(angleUp) > 0 (see above).
+        const float le[4] = { l_left, l_right, l_top, l_bottom };
+        const float re[4] = { r_left, r_right, r_top, r_bottom };
+        SetupOffCenter(le, re);
+    }
 
     // PSVR2: the engine renders at the eye RT's aspect (~1:1), so overlays
     // (VrCrosshair, hand boxes) projected with tanX/tanY (1.386) landed 1.41x
@@ -6967,14 +6985,19 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     // gbmatch paints an HMD frustum into 16:9 pixels. Use the HMD aspect so
     // glove projection matches the anamorphic scene that squash-blits to the eye.
     const float pixelAspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
-    const float aspect = (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
-    const float projFov = HorizontalFovForAspect(aspect);
+    // OffCenterEyes: project into the union frustum (WorldRenderFov,
+    // m_OffCenterAspect), then remap to this eye's sub-rectangle.
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
     const float tanHalf = tanf(projFov * 0.5f * 3.14159265f / 180.f);
     if (!(tanHalf > 0.01f))
     {
         device->Release();
         return false;
     }
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
 
     auto project = [&](const Vector& world, float& sx, float& sy) -> bool {
         const Vector delta = world - eyeOrig;
@@ -6983,8 +7006,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             return false;
         const float x = delta.Dot(right);
         const float y = delta.Dot(up);
-        const float ndcX = (x / z) / tanHalf;
-        const float ndcY = ((y / z) * aspect) / tanHalf;
+        const float ndcX = (x / z) / tanHalf * ocSx + ocOx;
+        const float ndcY = ((y / z) * aspect) / tanHalf * ocSy + ocOy;
         sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
         sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
         return sx > -40.f && sy > -40.f
@@ -7274,7 +7297,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         }
 
         if (WeaponMenuOpen())
-            DrawWeaponMenu(device, w, h, eyeOrig, fwd, right, up);
+            DrawWeaponMenu(device, stereoEye, w, h, eyeOrig, fwd, right, up);
         else if (AimCrosshairVisible())
         {
             float cx = 0.f, cy = 0.f;
@@ -7608,17 +7631,19 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     bool rightOk, const Vector& rightOrigin, const QAngle& rightAng,
     const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up)
 {
-    (void)stereoEye;
     if (!m_Game || !device)
         return;
     int health = -1, armor = -1, clip = -1, reserve = -1, secondary = -1, air = -1;
     if (!m_Game->ReadWristHudValues(health, armor, clip, reserve, secondary, air))
         return;
-    const float aspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
-    const float projFov = HorizontalFovForAspect(aspect);
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
     const float tanHalf = tanf(projFov * 0.5f * 3.14159265f / 180.f);
     if (!(tanHalf > 0.01f))
         return;
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
     auto project = [&](const Vector& world, float& sx, float& sy) -> bool {
         const Vector delta = world - eyeOrig;
         const float z = delta.Dot(fwd);
@@ -7626,8 +7651,8 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             return false;
         const float x = delta.Dot(right);
         const float y = delta.Dot(up);
-        const float ndcX = (x / z) / tanHalf;
-        const float ndcY = ((y / z) * aspect) / tanHalf;
+        const float ndcX = (x / z) / tanHalf * ocSx + ocOx;
+        const float ndcY = ((y / z) * aspect) / tanHalf * ocSy + ocOy;
         sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
         sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
         return sx > -80.f && sy > -80.f && sx < static_cast<float>(w) + 80.f && sy < static_cast<float>(h) + 80.f;
@@ -9115,6 +9140,62 @@ bool VR::CopyFlashlightState(Vector& origin, Vector& forward) const
     origin = m_FlashlightOrigin;
     forward = m_FlashlightForward;
     return true;
+}
+
+bool VR::OffCenterForEye(int stereoEye, const float*& frac) const
+{
+    if (!m_OffCenterActive || (stereoEye != 1 && stereoEye != 2))
+        return false;
+    frac = m_OffCenterFrac[stereoEye - 1];
+    return true;
+}
+
+bool VR::OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const
+{
+    const float* f = nullptr;
+    if (!OffCenterForEye(stereoEye, f))
+        return false;
+    // Union NDC of the eye's edges: 2*frac-1. Map [2l-1, 2r-1] -> [-1, 1].
+    sx = 1.f / (f[1] - f[0]);
+    ox = -(f[0] + f[1] - 1.f) * sx;
+    sy = 1.f / (f[3] - f[2]);
+    oy = -(f[2] + f[3] - 1.f) * sy;
+    return true;
+}
+
+void VR::SetupOffCenter(const float leftEye[4], const float rightEye[4])
+{
+    m_OffCenterActive = false;
+    if (!bmvr::g_OffCenterEyes)
+        return;
+    const float* eyes[2] = { leftEye, rightEye };
+    float tanX = 0.f, tanY = 0.f;
+    for (const float* e : eyes)
+    {
+        if (!(e[0] < -0.001f && e[1] > 0.001f && e[2] < -0.001f && e[3] > 0.001f))
+        {
+            Game::logMsg("OffCenterEyes: invalid eye tangents l=%.4f r=%.4f d=%.4f u=%.4f, staying symmetric",
+                e[0], e[1], e[2], e[3]);
+            return;
+        }
+        tanX = (std::max)({ tanX, -e[0], e[1] });
+        tanY = (std::max)({ tanY, -e[2], e[3] });
+    }
+    for (int i = 0; i < 2; ++i)
+    {
+        m_OffCenterFrac[i][0] = 0.5f + 0.5f * eyes[i][0] / tanX;
+        m_OffCenterFrac[i][1] = 0.5f + 0.5f * eyes[i][1] / tanX;
+        m_OffCenterFrac[i][2] = 0.5f + 0.5f * eyes[i][2] / tanY;
+        m_OffCenterFrac[i][3] = 0.5f + 0.5f * eyes[i][3] / tanY;
+    }
+    m_OffCenterAspect = tanX / tanY;
+    m_OffCenterActive = true;
+    const float used = ((eyes[0][1] - eyes[0][0]) * (eyes[0][3] - eyes[0][2])) / (4.f * tanX * tanY);
+    Game::logMsg("OffCenterEyes on: union fov=%.2f aspect=%.4f L=(l %.4f r %.4f b %.4f t %.4f) R=(l %.4f r %.4f b %.4f t %.4f) left eye uses %.0f%% of the union",
+        2.f * atanf(tanX) * 180.f / 3.14159265f, m_OffCenterAspect,
+        m_OffCenterFrac[0][0], m_OffCenterFrac[0][1], m_OffCenterFrac[0][2], m_OffCenterFrac[0][3],
+        m_OffCenterFrac[1][0], m_OffCenterFrac[1][1], m_OffCenterFrac[1][2], m_OffCenterFrac[1][3],
+        used * 100.f);
 }
 
 float VR::WorldRenderFov() const

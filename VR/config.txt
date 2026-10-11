@@ -45,6 +45,13 @@ HeightOffset=0.0
 # Scene MSAA. 0 / 2 / 4 / 8 / 16. Restart after editing. Not the video menu.
 Msaa=4
 
+# Render each eye's own (asymmetric) HMD frustum instead of one symmetric
+# frustum that covers both eyes. On asymmetric HMDs (PSVR2: 61.5 deg out,
+# 43.5 deg in) the symmetric frustum wastes ~46 % of the eye pixels, so the
+# same RenderScale gets much sharper. OpenXR helper submits the runtime's
+# per-eye FOV. Restart required.
+OffCenterEyes=false
+
 Haptics=true
 HideCrosshair=true
 VrCrosshair=false

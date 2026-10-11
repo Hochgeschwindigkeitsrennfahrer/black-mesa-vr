@@ -655,8 +655,19 @@ bool BmVrGloves::DrawForEye(
     const float scale = std::clamp(modelScale, 0.2f, 2.0f);
     const float nearPlane = (zNear > 0.01f) ? zNear : kEyeZNear;
     const float farPlane = (zFar > nearPlane + 1.f) ? zFar : kEyeZFar;
-    const VrHandMatrix4 projection = VrHandMath::BuildPerspective(
+    VrHandMatrix4 projection = VrHandMath::BuildPerspective(
         horizontalFovDegrees, aspectRatio, nearPlane, farPlane);
+    // OffCenterEyes: clip' = clip * s + w * o on x/y (union NDC -> eye NDC).
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    if (g_Game && g_Game->m_VR && g_Game->m_VR->OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy))
+    {
+        for (int c = 0; c < 4; ++c)
+        {
+            const float w = VrHandMath::Get(projection, 3, c);
+            VrHandMath::Set(projection, 0, c, VrHandMath::Get(projection, 0, c) * ocSx + w * ocOx);
+            VrHandMath::Set(projection, 1, c, VrHandMath::Get(projection, 1, c) * ocSy + w * ocOy);
+        }
+    }
     const VrHandMatrix4 camera = VrHandMath::BuildSourceView(eyeOrigin, viewAngles);
 
     bool drew = false;

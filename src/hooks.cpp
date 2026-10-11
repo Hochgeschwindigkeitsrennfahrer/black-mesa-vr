@@ -2693,7 +2693,7 @@ namespace
         EyeRtPush& operator=(const EyeRtPush&) = delete;
     };
 
-    void NormalizeViewSetupForVREye(CViewSetup& view, const VR* vr)
+    void NormalizeViewSetupForVREye(CViewSetup& view, const VR* vr, int stereoEye)
     {
         // L4D2VR hooks_render.inl: eye copies are HMD size + HMD FOV + HMD
         // aspect. 16:9 engine FOV + center-crop (2026-08-18) zoomed the world
@@ -2726,6 +2726,21 @@ namespace
         const float eyeFov = vr->WorldRenderFov();
         view.fov = eyeFov;
         view.fovViewmodel = eyeFov;
+        // OffCenterEyes: render only this eye's part of the union frustum.
+        // The engine builds it (ComputeViewMatrices, MatrixBuildPerspective-
+        // OffCenterX) from fov + aspect + the 0..1 sub-rectangle; culling and
+        // deferred lights follow the matrices (flat test 2026-10-11). The
+        // copy in DrawViewModels keeps the sub-rectangle.
+        const float* frac = nullptr;
+        if (vr->OffCenterForEye(stereoEye, frac))
+        {
+            view.m_flAspectRatio = vr->m_OffCenterAspect;
+            view.m_bOffCenter = true;
+            view.m_flOffCenterLeft = frac[0];
+            view.m_flOffCenterRight = frac[1];
+            view.m_flOffCenterBottom = frac[2];
+            view.m_flOffCenterTop = frac[3];
+        }
         // L4D2VR: native Source viewmodels use a separate projection and a
         // compressed 0..0.1 depth range so they draw over the world. In VR the
         // gun is a world-space mesh; keep Z (and therefore size vs world
@@ -3507,6 +3522,19 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         hkRenderView.fOriginal(ecx, view, clearFlags, drawFlags);
     };
 
+    if (setup.width >= 640 && setup.height >= 360 && !(m_VR && m_VR->m_IsVREnabled)
+        && bmvr::OffCenterTestActive())
+    {
+        CViewSetup view = setup;
+        view.m_bOffCenter = true;
+        view.m_flOffCenterLeft = 0.0f;
+        view.m_flOffCenterRight = 0.758f;
+        view.m_flOffCenterBottom = 0.0f;
+        view.m_flOffCenterTop = 1.0f;
+        callOriginal(view, nClearFlags, whatToDraw);
+        return;
+    }
+
     if (m_VR)
     {
         m_VR->FlushPendingGameUi();
@@ -3846,8 +3874,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         m_VR->NoteEngineScopeFov(setup.fov);
         CViewSetup leftEyeView = setup;
         CViewSetup rightEyeView = setup;
-        NormalizeViewSetupForVREye(leftEyeView, m_VR);
-        NormalizeViewSetupForVREye(rightEyeView, m_VR);
+        NormalizeViewSetupForVREye(leftEyeView, m_VR, 1);
+        NormalizeViewSetupForVREye(rightEyeView, m_VR, 2);
         m_VR->NoteStereoClipPlanes(leftEyeView.zNear, leftEyeView.zFar);
         applyL4d2VrHead(leftEyeView, true, true);
         applyL4d2VrHead(rightEyeView, true, false);
@@ -7013,8 +7041,9 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
                     || m_VR->CachedRt0MatchesEyes()
                     || m_VR->D3dRt0IsEyeSized()))))
     {
-        const float eyeAspect = static_cast<float>(m_VR->m_RenderWidth)
-            / static_cast<float>(m_VR->m_RenderHeight);
+        const float eyeAspect = m_VR->m_OffCenterActive
+            ? m_VR->m_OffCenterAspect
+            : static_cast<float>(m_VR->m_RenderWidth) / static_cast<float>(m_VR->m_RenderHeight);
         static int s_arLog;
         if (s_arLog < 8)
         {

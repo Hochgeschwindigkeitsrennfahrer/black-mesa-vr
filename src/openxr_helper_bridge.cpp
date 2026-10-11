@@ -6,6 +6,7 @@
 #include <Windows.h>
 
 #include "game.h"
+#include "bmvr_flags.h"
 #include "openxr_bridge_protocol.h"
 
 #include <algorithm>
@@ -277,6 +278,9 @@ OpenXrHelperLaunchConfig L4D2VR_ReadOpenXrHelperLaunchConfig()
         config.disableProjectionLayer = ParseBool(value, config.disableProjectionLayer);
     if (const std::string value = get("OpenXRHelperUseSymmetricProjectionFov"); !value.empty())
         config.useSymmetricProjectionFov = ParseBool(value, config.useSymmetricProjectionFov);
+    // OffCenterEyes: the game renders each eye at the runtime's own FOV, so the
+    // helper submits that FOV and never crops.
+    config.gameRendersRuntimeFov = bmvr::g_OffCenterEyes;
     if (const std::string value = get("OpenXRHelperUseGameRenderPoseForProjection"); !value.empty())
         config.useGameRenderPoseForProjection = ParseBool(value, config.useGameRenderPoseForProjection);
     if (const std::string value = get("OpenXRHelperForceMonoProjectionEye"); !value.empty())
@@ -409,6 +413,7 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
         << L" --mirror-projection-horizontal " << (config.mirrorProjectionHorizontal ? 1 : 0)
         << L" --disable-projection-layer " << (config.disableProjectionLayer ? 1 : 0)
         << L" --use-symmetric-projection-fov " << (config.useSymmetricProjectionFov ? 1 : 0)
+        << L" --game-renders-runtime-fov " << (config.gameRendersRuntimeFov ? 1 : 0)
         << L" --use-game-render-pose-for-projection " << (config.useGameRenderPoseForProjection ? 1 : 0)
         << L" --force-mono-projection-eye " << config.forceMonoProjectionEye
         << L" --force-mono-projection-view " << config.forceMonoProjectionView

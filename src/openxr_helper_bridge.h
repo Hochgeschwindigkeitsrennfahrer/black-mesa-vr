@@ -16,6 +16,7 @@ struct OpenXrHelperLaunchConfig
     bool enableHandTracking = false;
     bool disableProjectionLayer = false;
     bool useSymmetricProjectionFov = false;
+    bool gameRendersRuntimeFov = false;
     bool useGameRenderPoseForProjection = true;
     int forceMonoProjectionEye = -1;
     int forceMonoProjectionView = -1;
