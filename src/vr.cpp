@@ -12730,6 +12730,7 @@ void VR::Update()
     s_lastPresentMs = nowMs;
     if (m_PresentTick == 1 || nowMs - s_fpsLogMs >= 1000)
     {
+        bmvr::LogFaultStats();
         const uint32_t dt = s_fpsLogMs ? (nowMs - s_fpsLogMs) : 0;
         const uint32_t dn = m_PresentTick - s_fpsLogTick;
         const unsigned fps = (dt > 0) ? (dn * 1000u / dt) : 0;

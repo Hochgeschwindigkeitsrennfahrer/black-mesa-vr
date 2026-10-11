@@ -232,6 +232,8 @@ namespace bmvr
     // the rendered pixels reach the eye.
     extern bool g_OffCenterEyes;
     bool OffCenterTestActive();
+    // Logs (and resets) the access-violation count since the last call.
+    void LogFaultStats();
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand
     // GLBs still draw on the intro tram. Depends on a scanned m_bWearingSuit
     // offset; set false if the scan ever misfires.
