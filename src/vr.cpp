@@ -5394,6 +5394,15 @@ void VR::FlushPendingQuit()
 void VR::FlushPendingGameUi()
 {
     FlushPendingQuit();
+    if (bmvr::g_FakeRuntime && m_Game)
+    {
+        char cmd[512];
+        while (L4D2VR_FakeHelperPopCommand(cmd, sizeof(cmd)))
+        {
+            const bool ok = m_Game->ClientCmd_Unrestricted(cmd);
+            Game::logMsg("fakehelper cmd '%s' ok=%d", cmd, ok ? 1 : 0);
+        }
+    }
     const int op = m_PendingGameUi.exchange(0, std::memory_order_acq_rel);
     if (op == 0 || !m_Game)
         return;
@@ -10973,6 +10982,33 @@ void VR::MirrorStereoToDesktopWindow()
             return;
         }
         dest = m_D9DesktopMirrorSurface;
+    }
+
+    if (bmvr::g_MirrorBothEyes && m_D9RightEyeSurface)
+    {
+        // Tests: both whole eye textures side by side (left half / right half),
+        // the images the helper is handed, unscaled in content.
+        const RECT halves[2] = {
+            { 0, 0, static_cast<LONG>(bbDesc.Width / 2), static_cast<LONG>(bbDesc.Height) },
+            { static_cast<LONG>(bbDesc.Width / 2), 0, static_cast<LONG>(bbDesc.Width), static_cast<LONG>(bbDesc.Height) } };
+        IDirect3DSurface9* eyes[2] = { m_D9LeftEyeSurface, m_D9RightEyeSurface };
+        HRESULT hrs[2] = { E_FAIL, E_FAIL };
+        m_CaptureReentry = true;
+        for (int e = 0; e < 2; ++e)
+            hrs[e] = StretchRectKeepDeviceState(device, eyes[e], nullptr, dest, &halves[e], D3DTEXF_LINEAR);
+        m_CaptureReentry = false;
+        if (dest == m_D9DesktopMirrorSurface && SUCCEEDED(hrs[0]))
+            m_DesktopMirrorHasImage.store(true, std::memory_order_release);
+        static int s_bothLog;
+        if (s_bothLog < 4 || FAILED(hrs[0]) || FAILED(hrs[1]))
+        {
+            Game::logMsg("Desktop mirror both eyes %ux%u -> %ux%u hr=0x%08X/0x%08X",
+                eyeW, eyeH, bbDesc.Width, bbDesc.Height, (unsigned)hrs[0], (unsigned)hrs[1]);
+            ++s_bothLog;
+        }
+        bb->Release();
+        device->Release();
+        return;
     }
 
     m_CaptureReentry = true;

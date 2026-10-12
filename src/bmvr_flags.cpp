@@ -21,6 +21,36 @@
 
 namespace bmvr
 {
+    const std::wstring& TestDir()
+    {
+        static const std::wstring dir = [] {
+            wchar_t buf[MAX_PATH]{};
+            const DWORD n = GetEnvironmentVariableW(L"BMVR_TESTDIR", buf, MAX_PATH);
+            std::wstring d = (n > 0 && n < MAX_PATH) ? std::wstring(buf, n) : std::wstring();
+            while (!d.empty() && (d.back() == L'\\' || d.back() == L'/'))
+                d.pop_back();
+            return d;
+        }();
+        return dir;
+    }
+
+    std::string VrFilePath(const char* leaf)
+    {
+        std::string base;
+        const std::wstring& d = TestDir();
+        if (!d.empty())
+        {
+            const int n = WideCharToMultiByte(CP_ACP, 0, d.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (n > 1)
+            {
+                base.resize(static_cast<size_t>(n - 1));
+                WideCharToMultiByte(CP_ACP, 0, d.c_str(), -1, &base[0], n - 1, nullptr, nullptr);
+                base += "\\";
+            }
+        }
+        return base + "VR\\" + leaf;
+    }
+
     uint32_t g_RecommendedEyeWidth = 0;
     uint32_t g_RecommendedEyeHeight = 0;
     uint32_t g_FramebufferWidth = 0;
@@ -67,6 +97,9 @@ namespace bmvr
     bool g_AimDebug = false;
     bool g_OffCenterTest = false;
     bool g_OffCenterEyes = false;
+    bool g_FakeRuntime = false;
+    bool g_MirrorBothEyes = false;
+    bool g_VrShotOriginFix = true;
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
@@ -218,6 +251,8 @@ namespace bmvr
 
     static std::wstring ModuleDir()
     {
+        if (!TestDir().empty())
+            return TestDir();
         wchar_t path[MAX_PATH]{};
         HMODULE mod = g_Module;
         if (!mod)
@@ -235,6 +270,8 @@ namespace bmvr
 
     static std::wstring ExeDir()
     {
+        if (!TestDir().empty())
+            return TestDir();
         wchar_t path[MAX_PATH]{};
         GetModuleFileNameW(nullptr, path, MAX_PATH);
         std::wstring full(path);
@@ -510,6 +547,13 @@ namespace bmvr
                 g_VrCrosshairScale = static_cast<float>(atof(val));
             else if (std::strcmp(n, "AimDebug") == 0)
                 g_AimDebug = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrShotOriginFix") == 0)
+                g_VrShotOriginFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MirrorBothEyes") == 0)
+                g_MirrorBothEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VRRuntimeBackend") == 0)
+                g_FakeRuntime = (_strnicmp(val, "fake", 4) == 0
+                    && (val[4] == 0 || val[4] == ' ' || val[4] == '\t'));
             else if (std::strcmp(n, "OffCenterEyes") == 0)
                 g_OffCenterEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "OffCenterTest") == 0)

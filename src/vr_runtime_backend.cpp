@@ -1,5 +1,6 @@
 #include "vr_runtime_backend.h"
 #include "openxr_loader_util.h"
+#include "bmvr_flags.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -131,7 +132,8 @@ namespace
 VrRuntimeBackend L4D2VR_ParseRuntimeBackend(const std::string& value, VrRuntimeBackend fallback)
 {
     const std::string normalized = NormalizeBackendName(value);
-    if (normalized == "openxr" || normalized == "xr")
+    // fake = the OpenXR helper path with the in-process fake helper (tests).
+    if (normalized == "openxr" || normalized == "xr" || normalized == "fake")
         return VrRuntimeBackend::OpenXR;
     if (normalized == "openvr" || normalized == "steamvr" || normalized == "vr")
         return VrRuntimeBackend::OpenVR;
@@ -372,8 +374,8 @@ VrRuntimeBackendConfig L4D2VR_ReadRuntimeBackendConfig()
             }
         };
 
-    parsePath("VR\\config.txt");
-    parsePath("VR\\config2.txt");
+    parsePath(bmvr::VrFilePath("config.txt").c_str());
+    parsePath(bmvr::VrFilePath("config2.txt").c_str());
 
     auto backendIt = values.find("VRRuntimeBackend");
     if (backendIt != values.end() && !backendIt->second.empty())
@@ -398,6 +400,14 @@ VrRuntimeBackendSelection L4D2VR_SelectRuntimeBackend(
         result.active = VrRuntimeBackend::OpenVR;
         result.canStart = true;
         result.message = "OpenVR runtime selected";
+        return result;
+    }
+
+    if (bmvr::g_FakeRuntime)
+    {
+        result.active = VrRuntimeBackend::OpenXR;
+        result.canStart = true;
+        result.message = "fake OpenXR helper (headless test runtime, no SteamVR)";
         return result;
     }
 

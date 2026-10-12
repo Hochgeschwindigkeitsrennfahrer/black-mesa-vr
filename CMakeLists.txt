@@ -39,6 +39,7 @@ set(BMVR_SOURCES
   src/vr_hand_renderer_d3d9.cpp
   src/vr_runtime_backend.cpp
   src/openxr_helper_bridge.cpp
+  src/vr_fake_helper.cpp
   src/openxr_loader_util.cpp
   src/bmvr_flags.cpp
   src/sdk/checksum_crc.cpp

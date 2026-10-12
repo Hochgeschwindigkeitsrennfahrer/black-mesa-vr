@@ -120,6 +120,13 @@ public:
     // FF 90 4C 02 00 00. Hold distance is 2*radius + 24 (DAT_105db264).
     static constexpr int kCBasePlayer_GrabHoldOrigin_Server = 0x77240;
 
+    // server.dll CBlackMesaPlayer vtable +0x474 (vtables at 0x1067C340 and
+    // 0x10726358 both hold 0x1047C810, not 0x10077240): `push [ebp+8];
+    // call FUN_1012F2C0; ret 4`, the eye position. Bullet weapons read their
+    // shot origin from this slot. Bytes: 55 8B EC FF 75 08 E8 A5 2A CB FF
+    // 8B 45 08 5D C2 04 00.
+    static constexpr int kBlackMesaPlayer_ShootSource_Server = 0x47C810;
+
     // server.dll CGrabController::SetTargetPosition FUN_10470990.
     // UpdateObject writes the hold point here after 2*radius+24. Bytes:
     // 55 8B EC 8B 45 08 8B D1 D9 00 D9 5A 04. ret 8.

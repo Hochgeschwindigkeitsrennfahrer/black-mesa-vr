@@ -1,6 +1,7 @@
 #pragma once
 #include <Windows.h>
 #include <cstdint>
+#include <string>
 
 // Crash-sticky retries of L4D2VR mechanisms the old OpenXR prototype banned.
 // If Black Mesa dies mid-attempt, the in-progress flag remains on disk and
@@ -232,6 +233,25 @@ namespace bmvr
     // the rendered pixels reach the eye.
     extern bool g_OffCenterEyes;
     bool OffCenterTestActive();
+    // Headless tests. BMVR_TESTDIR (a Windows path) stands in for the game
+    // folder for VR\config.txt, the logs, heartbeat, skip and crash-sticky
+    // flag files, so a test never reads or writes the player's files.
+    const std::wstring& TestDir();
+    // "<TestDir>\VR\<leaf>" when BMVR_TESTDIR is set, else "VR\<leaf>"
+    // (relative to the game folder, as before).
+    std::string VrFilePath(const char* leaf);
+    // VRRuntimeBackend=fake: the OpenXR helper path with an in-process fake
+    // helper (scripted poses/buttons from VR\fake.txt, PSVR2 projection, no
+    // SteamVR). See vr_fake_helper.cpp.
+    extern bool g_FakeRuntime;
+    // MirrorBothEyes=true: the desktop window shows both eye images side by
+    // side, each whole eye texture stretched into one half (tests take
+    // screenshots of it).
+    extern bool g_MirrorBothEyes;
+    // VrShotOriginFix=true (default): bullets fired through server player
+    // vtable +0x474 leave from the controller ray (TryGetVrShootOrigin), not
+    // the head. false = old behaviour (tests compare both).
+    extern bool g_VrShotOriginFix;
     // Logs (and resets) the access-violation count since the last call.
     void LogFaultStats();
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand

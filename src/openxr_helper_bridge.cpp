@@ -160,8 +160,8 @@ namespace
                 }
             };
 
-        parsePath("VR\\config.txt");
-        parsePath("VR\\config2.txt");
+        parsePath(bmvr::VrFilePath("config.txt").c_str());
+        parsePath(bmvr::VrFilePath("config2.txt").c_str());
         return values;
     }
 
@@ -268,6 +268,8 @@ OpenXrHelperLaunchConfig L4D2VR_ReadOpenXrHelperLaunchConfig()
 
     if (const std::string value = get("OpenXRHelper"); !value.empty())
         config.enabled = ParseBool(value, config.enabled);
+    if (bmvr::g_FakeRuntime)
+        config.enabled = true;
     if (const std::string value = get("OpenXRHelperSwapProjectionEyes"); !value.empty())
         config.swapProjectionEyes = ParseFlipSubmitY(value, config.swapProjectionEyes);
     if (const std::string value = get("OpenXRHelperSwapProjectionViewOrder"); !value.empty())
@@ -334,6 +336,24 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
                 return {};
             return s.substr(0, slash);
         };
+
+    if (bmvr::g_FakeRuntime)
+    {
+        // Headless tests: no helper process, no SteamVR. The fake helper thread
+        // plays the helper's side of the bridge (vr_fake_helper.cpp).
+        auto* fakeState = new L4D2VROpenXrBridgeState{};
+        fakeState->gamePid = GetCurrentProcessId();
+        fakeState->status = static_cast<uint32_t>(L4D2VROpenXrBridgeStatus::Starting);
+        fakeState->heartbeatTickMs = GetTickCount64();
+        {
+            std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+            g_OpenXrBridgeState = fakeState;
+        }
+        L4D2VR_StartFakeOpenXrHelper(fakeState, config.gameRendersRuntimeFov);
+        Game::logMsg("[VR][OpenXRHelper] fake helper started (VRRuntimeBackend=fake, gameRendersRuntimeFov=%d)",
+            config.gameRendersRuntimeFov ? 1 : 0);
+        return true;
+    }
 
     const std::wstring gameRoot = CurrentDirectoryPath();
     const std::wstring moduleDir = moduleDirectory();

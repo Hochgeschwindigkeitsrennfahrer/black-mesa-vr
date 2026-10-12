@@ -4,6 +4,15 @@
 #include "vr.h"
 #include "offsets.h"
 #include "bmvr_flags.h"
+#include <intrin.h>
+
+// Offset of addr inside server.dll (0 if outside/unknown). AimDebug and the
+// shot-origin caller whitelist identify call sites by return address.
+static uint32_t ServerRva(uintptr_t addr)
+{
+    const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll"));
+    return base && addr > base ? static_cast<uint32_t>(addr - base) : 0;
+}
 #include "sigscanner.h"
 #include "in_buttons.h"
 #include "trace.h"
@@ -3906,6 +3915,23 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             }
         }
 
+        if (bmvr::g_FakeRuntime)
+        {
+            // Headless tests: eye origins/angles in world units, ~1/s (world scale check).
+            static DWORD s_fakeEyeLogMs;
+            const DWORD nowMs = GetTickCount();
+            if (nowMs - s_fakeEyeLogMs >= 1000)
+            {
+                s_fakeEyeLogMs = nowMs;
+                Game::logMsg("fake eyes setup=(%.2f,%.2f,%.2f) L=(%.2f,%.2f,%.2f) R=(%.2f,%.2f,%.2f) ang=(%.2f,%.2f,%.2f) fov=%.3f aspect=%.4f ipdUnits=%.3f",
+                    setup.origin.x, setup.origin.y, setup.origin.z,
+                    leftEyeView.origin.x, leftEyeView.origin.y, leftEyeView.origin.z,
+                    rightEyeView.origin.x, rightEyeView.origin.y, rightEyeView.origin.z,
+                    leftEyeView.angles.x, leftEyeView.angles.y, leftEyeView.angles.z,
+                    leftEyeView.fov, leftEyeView.m_flAspectRatio, ipd);
+            }
+        }
+
         static int s_hmdFbOnce;
         if (s_hmdFbOnce == 0)
         {
@@ -4094,7 +4120,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         {
         if (m_VR->ShouldHwndBlitStereo())
             m_VR->FlushStereoBlitGpu();
-        if (bmvr::OffscreenWorldMatchesEyes())
+        if (bmvr::OffscreenWorldMatchesEyes() || bmvr::g_MirrorBothEyes)
             m_VR->MirrorStereoToDesktopWindow();
         else if (m_VR->m_IsVREnabled && !m_VR->WantPauseWorldOverlay()
             && !m_VR->ShouldHwndBlitStereo())
@@ -5916,6 +5942,25 @@ void Hooks::EnsureWeaponShootOriginHooks()
             hkServerGrabHoldOrigin.pTarget = p;
         }
     }
+    if (server && !hkServerBmShootSource.pTarget)
+    {
+        auto* p = reinterpret_cast<unsigned char*>(server) + Offsets::kBlackMesaPlayer_ShootSource_Server;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            && CodeBytesMatch(p, "558BECFF7508E8A52ACBFF8B45085DC20400"))
+        {
+            if (hkServerBmShootSource.createHook(p, &dServerBmShootSource) == 0
+                && hkServerBmShootSource.enableHook() == 0)
+                Game::logMsg("Hook enabled: server BM player +0x474 shot origin rva=0x%X", Offsets::kBlackMesaPlayer_ShootSource_Server);
+            else
+                Game::logMsg("server BM player +0x474 shot origin hook failed");
+        }
+        else
+        {
+            Game::logMsg("server BM player +0x474 shot origin skipped (bytes/rva 0x%X)", Offsets::kBlackMesaPlayer_ShootSource_Server);
+            hkServerBmShootSource.pTarget = p;
+        }
+    }
     if (server && !hkGrabSetTarget.pTarget)
     {
         auto* p = reinterpret_cast<unsigned char*>(server) + Offsets::kCGrabController_SetTargetPosition;
@@ -5993,7 +6038,19 @@ void __fastcall Hooks::dGetShootAngles(void* ecx, void* edx, QAngle* out)
     const QAngle before = out ? *out : QAngle{};
     ApplyVrShootAngles(ecx, out);
     if (bmvr::g_AimDebug && m_VR && out)
+    {
+        if ((m_VR->m_HeldButtons.load(std::memory_order_acquire) & (IN_ATTACK | IN_ATTACK2)) != 0)
+        {
+            static int s_callerLog;
+            if (s_callerLog < 60)
+            {
+                ++s_callerLog;
+                Game::logMsg("AimDebug GetShootAngles caller rva=0x%X",
+                    ServerRva(reinterpret_cast<uintptr_t>(_ReturnAddress())));
+            }
+        }
         m_VR->AimDebugShootAngles(true, ecx, (before.x != out->x || before.y != out->y), before, *out);
+    }
 }
 
 void __fastcall Hooks::dClientGetShootAngles(void* ecx, void* edx, QAngle* out)
@@ -6023,6 +6080,54 @@ Vector* __fastcall Hooks::dServerGrabHoldOrigin(void* ecx, void* edx, Vector* ou
 {
     (void)edx;
     return RewriteShootOrigin(ecx, out, hkServerGrabHoldOrigin.fOriginal, true, true);
+}
+
+namespace
+{
+    // Bullet origin. CBlackMesaPlayer overrides player vtable +0x474 with a
+    // thunk (server RVA 0x47C810 -> FUN_1012F2C0, the eye position); 0x77240
+    // above is only CBasePlayer's version, so the BM player's +0x474 calls never
+    // reached a hook, and neither does any weapon go through Weapon_ShootPosition
+    // (+0x23C). Bullets therefore left the head along the controller direction
+    // while the reticle sits on the controller ray: a constant world offset of
+    // (hand - head), "up-left" for a right hand held low. Measured headless with
+    // the fake runtime 2026-10-12 (decals on the eye-origin ray to ~1 px; 357,
+    // Glock, MP5). Only the weapon fire call sites below get the VR origin; every
+    // other caller (grab controller, AI, ...) keeps the original eye position.
+    // Return-address RVAs in the shipped server.dll. 0x34DEF9: the shared
+    // bullet routine (FUN_1034DCE0 area) reads the shooter's +0x474 as vecSrc
+    // (seen with AimDebug for the 357, Glock and MP5). The others are the
+    // +0x474 calls directly followed by GetShootAngles (+0x240) in weapon
+    // code (0x48EDA4 seen firing; 0x484C85/0x484F0B/0x48B435 by disassembly).
+    constexpr uint32_t kServerWeaponFireOriginReturnRvas[] = {
+        0x34DEF9, 0x48EDA4, 0x484C85, 0x484F0B, 0x48B435 };
+}
+
+Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out)
+{
+    (void)edx;
+    const uint32_t callerRva = ServerRva(reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    bool weaponFire = false;
+    if (bmvr::g_VrShotOriginFix)
+    {
+        for (uint32_t rva : kServerWeaponFireOriginReturnRvas)
+            weaponFire = weaponFire || (rva != 0 && callerRva == rva);
+    }
+    if (bmvr::g_AimDebug && m_VR
+        && (m_VR->m_HeldButtons.load(std::memory_order_acquire) & (IN_ATTACK | IN_ATTACK2)) != 0)
+    {
+        static int s_callerLog;
+        if (s_callerLog < 80)
+        {
+            ++s_callerLog;
+            Game::logMsg("AimDebug +0x474 origin caller rva=0x%X weaponFire=%d", callerRva, weaponFire ? 1 : 0);
+        }
+    }
+    if (weaponFire)
+        return RewriteShootOrigin(ecx, out, hkServerBmShootSource.fOriginal, false, true);
+    if (hkServerBmShootSource.fOriginal)
+        return hkServerBmShootSource.fOriginal(ecx, out);
+    return out;
 }
 
 void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang)

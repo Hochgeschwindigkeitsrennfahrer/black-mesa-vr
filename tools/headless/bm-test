@@ -1,0 +1,31 @@
+#!/bin/bash
+# bm-test <outdir> [game args...] — headless VR test run: creates <outdir>/VR/config.txt from the player's
+# config (read only; $BMVR_BASE_CONFIG overrides) with VRRuntimeBackend=fake, MirrorBothEyes=true,
+# MulticoreMode=false (+ any KEY=VALUE in $BMVR_CONFIG_SET, space separated), and a default fake.txt, then bm-run.
+# Drive it with <outdir>/VR/fake.txt and <outdir>/VR/cmd.txt; logs: <outdir>/bmvr_log.txt.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+out=$(realpath -m "$1"); shift
+GAME=~/.local/share/Steam/steamapps/common/"Black Mesa"
+mkdir -p "$out/VR"
+if [[ ! -f $out/VR/config.txt ]]; then
+	base=${BMVR_BASE_CONFIG:-$GAME/VR/config.txt}
+	set_kv() { # key value: replace or append
+		if grep -q "^$1=" "$out/VR/config.txt"; then sed -i "s|^$1=.*|$1=$2|" "$out/VR/config.txt"
+		else echo "$1=$2" >> "$out/VR/config.txt"; fi
+	}
+	tr -d '\r' < "$base" > "$out/VR/config.txt"
+	set_kv VRRuntimeBackend fake
+	set_kv OpenXRHelper true
+	set_kv MirrorBothEyes true
+	set_kv MulticoreMode false
+	for kv in ${BMVR_CONFIG_SET:-}; do set_kv "${kv%%=*}" "${kv#*=}"; done
+fi
+[[ -f $out/VR/fake.txt ]] || cat > "$out/VR/fake.txt" <<EOT
+size ${BMVR_EYE_SIZE:-960 980}
+hmd 0 0 1.70 0 0 0
+left 0.30 0.20 1.25 20 0 0
+right 0.35 -0.18 1.30 10 0 0
+EOT
+touch "$out/VR/cmd.txt"
+exec "$here/bm-run" "$out" "$@"
