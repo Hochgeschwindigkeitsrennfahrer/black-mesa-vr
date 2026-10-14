@@ -6289,6 +6289,20 @@ void VR::UpdateAimCrosshair()
     m_AimBeamValid = false;
     if (!(bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen)
         return;
+    // Guns only: no laser on the crowbar, thrown weapons, snarks or bare hands.
+    // The RPG keeps its own guidance dot and gets no beam.
+    std::string weaponKey;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        weaponKey = m_VmClass.numpadKey;
+    }
+    static const char* kAimAidWeapons[] = { "glock", "357", "mp5", "shotgun", "crossbow", "rpg", "gauss", "gluon", "hgun" };
+    bool gun = false;
+    for (const char* k : kAimAidWeapons)
+        gun = gun || weaponKey == k;
+    if (!gun)
+        return;
+    const bool wantBeam = bmvr::g_VrLaserBeam && weaponKey != "rpg";
     // The scope draws its own centred crosshair, and while zoomed the shot no
     // longer follows the controller ray this would trace.
     if (m_ScopeZoomActive)
@@ -6317,12 +6331,16 @@ void VR::UpdateAimCrosshair()
     m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
     const bool hit = tr.fraction < 1.f;
 
-    if (bmvr::g_VrLaserBeam)
+    if (wantBeam)
     {
-        // Nothing lies between the origin and the hit (that is what the trace
-        // says), so drawing it without depth testing only covers the gun. A
-        // miss fades out at a fixed length instead of reaching for 8192 units.
-        m_AimBeamStart = origin + dir * 2.f;
+        // Start at the barrel's own muzzle attachment: the shot origin above
+        // sits on the controller axis, a few cm under the barrel. The far end
+        // stays on the shot ray, so the beam converges on where bullets land.
+        // Nothing lies between the shot ray and the hit (the trace says so),
+        // so drawing without depth testing only covers the gun. A miss fades
+        // out at a fixed length instead of reaching for 8192 units.
+        Vector muzzle{};
+        m_AimBeamStart = TryGetVrMuzzleWorld(muzzle) ? muzzle : origin + dir * 2.f;
         m_AimBeamEnd = hit ? tr.endpos : origin + dir * 1024.f;
         m_AimBeamHit = hit;
         m_AimBeamValid = true;
@@ -7456,10 +7474,12 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                     {
                         nx /= len;
                         ny /= len;
-                        constexpr float kBeamWidthHu = 0.2f; // ~5 mm
+                        float beamWidthHu = bmvr::g_VrLaserWidth; // half width; 0.06 = 3 mm beam
+                        if (!(beamWidthHu > 0.005f) || beamWidthHu > 1.f)
+                            beamWidthHu = 0.06f;
                         const float pxPerHu = static_cast<float>(w) * 0.5f * ocSx / tanHalf;
-                        const float wa = (std::max)(0.6f, kBeamWidthHu * pxPerHu / az);
-                        const float wb = (std::max)(0.6f, kBeamWidthHu * pxPerHu / bz);
+                        const float wa = (std::max)(0.5f, beamWidthHu * pxPerHu / az);
+                        const float wb = (std::max)(0.5f, beamWidthHu * pxPerHu / bz);
                         const D3DCOLOR ca = D3DCOLOR_ARGB(170, 255, 40, 25);
                         const D3DCOLOR cb = m_AimBeamHit
                             ? D3DCOLOR_ARGB(110, 255, 40, 25) : D3DCOLOR_ARGB(0, 255, 40, 25);

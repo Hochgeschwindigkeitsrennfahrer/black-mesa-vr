@@ -226,6 +226,8 @@ namespace bmvr
     extern bool g_VrCrosshairDot;
     // Thin red beam from the gun along the firing ray to where it lands.
     extern bool g_VrLaserBeam;
+    // Beam half width in game units (1 unit ~ 2.5 cm).
+    extern float g_VrLaserWidth;
     // AimDebug=true: per shot, log the server bullet origin/direction and its
     // traced hit next to the reticle ray and hit (bmvr_log "AimDebug").
     extern bool g_AimDebug;
