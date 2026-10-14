@@ -4024,16 +4024,15 @@ void VR::ProcessInput()
             ++s_zoomLog;
         }
     }
+    // UpdateAimCrosshair / UpdateRpgLaserPoint run on the game thread
+    // (TickMatQueueFromRenderView): this is the render thread, and the muzzle
+    // lookup sets up viewmodel bones under the model-cache lock, which
+    // deadlocked against the main thread's bone setup (2026-10-15).
     if (paused)
     {
         m_AimCrosshairValid = false;
         m_AimBeamValid = false;
         m_RpgLaserPointValid = false;
-    }
-    else
-    {
-        UpdateAimCrosshair();
-        UpdateRpgLaserPoint();
     }
     if (!paused)
     {
@@ -9150,6 +9149,12 @@ void VR::TickMatQueueFromRenderView()
 {
     UpdateHl2vrMsaa();
     bmvr::TickVrCvars(m_Game);
+    // Entity attachments (muzzle) and traces belong on this thread.
+    if (!PauseUiActive())
+    {
+        UpdateAimCrosshair();
+        UpdateRpgLaserPoint();
+    }
     if (m_Game)
         m_Game->ProbeMatQueueModeFromRenderView();
     ApplyVrQualityOfLifeCvars();
