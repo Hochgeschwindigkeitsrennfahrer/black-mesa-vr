@@ -915,6 +915,10 @@ public:
     // Also true while only the laser beam is to be drawn.
     bool AimCrosshairVisible() const { return m_AimCrosshairValid || m_AimBeamValid; }
     bool TryGetAimCrosshairWorld(Vector& out) const;
+    // Controller position + aim basis right now (render thread safe).
+    bool AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const;
+    // Beam ends and marker from the current pose and the last trace.
+    bool AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) const;
     // AimDebug=true (config.txt): compare what the server fires with the
     // reticle ray. Called from the shoot-origin/-angle hooks on the game thread.
     void AimDebugShootOrigin(bool server, void* player, bool rewrote, const Vector& before, const Vector& after);
@@ -1141,10 +1145,14 @@ private:
     int m_PhysicalCrowbarLoadTries = 0;
     Vector m_AimCrosshairWorld{};
     bool m_AimCrosshairValid = false;
-    Vector m_AimBeamStart{};
-    Vector m_AimBeamEnd{};
     bool m_AimBeamValid = false;
     bool m_AimBeamHit = false;
+    Vector m_AimBeamLocal{};          // muzzle in the aim frame (fwd, right, up)
+    bool m_AimBeamLocalValid = false;
+    std::string m_AimBeamLocalKey;
+    float m_AimBeamDist = 0.f;        // beam length from the muzzle
+    float m_AimShootAlong = 0.f;      // shot origin along the aim from the controller
+    float m_AimHitDist = 0.f;         // shot origin -> marker
     bool m_HasHevSuit = true;
     bool m_WearingHevSuit = true;
     bool m_ScopeZoomActive = false;

@@ -6331,19 +6331,47 @@ void VR::UpdateAimCrosshair()
     m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
     const bool hit = tr.fraction < 1.f;
 
+    // Everything is kept relative to the aim frame (controller position +
+    // aim angles) and rebuilt from the current pose when drawn, so beam and
+    // dot stay locked to the gun instead of trailing it by a tick.
+    Vector pivot{}, f{}, r{}, u{};
+    if (!AimFrameNow(pivot, f, r, u))
+        return;
+    m_AimShootAlong = (origin - pivot).Dot(f);
+    m_AimHitDist = hit ? (tr.endpos - origin).Length() - 1.5f : 0.f;
+
     if (wantBeam)
     {
-        // Start at the barrel's own muzzle attachment: the shot origin above
-        // sits on the controller axis, a few cm under the barrel. The far end
-        // stays on the shot ray, so the beam converges on where bullets land.
-        // Nothing lies between the shot ray and the hit (the trace says so),
-        // so drawing without depth testing only covers the gun. A miss fades
-        // out at a fixed length instead of reaching for 8192 units.
+        // Straight out of the barrel along the aim, from the muzzle
+        // attachment (the shot origin sits on the controller axis, a few cm
+        // under the barrel). Aiming it at the bullet hit instead bent the beam
+        // whenever the hit was close (an NPC right in front of the gun). Its
+        // own trace, so it stops at what it touches. The barrel offset is
+        // smoothed: the attachment comes from last frame's bones.
         Vector muzzle{};
-        m_AimBeamStart = TryGetVrMuzzleWorld(muzzle) ? muzzle : origin + dir * 2.f;
-        m_AimBeamEnd = hit ? tr.endpos : origin + dir * 1024.f;
-        m_AimBeamHit = hit;
-        m_AimBeamValid = true;
+        if (TryGetVrMuzzleWorld(muzzle))
+        {
+            const Vector d = muzzle - pivot;
+            const Vector local(d.Dot(f), d.Dot(r), d.Dot(u));
+            if (!m_AimBeamLocalValid || m_AimBeamLocalKey != weaponKey || (local - m_AimBeamLocal).Length() > 12.f)
+                m_AimBeamLocal = local;
+            else
+                m_AimBeamLocal = m_AimBeamLocal + (local - m_AimBeamLocal) * 0.08f;
+            m_AimBeamLocalKey = weaponKey;
+            m_AimBeamLocalValid = true;
+        }
+        if (m_AimBeamLocalValid)
+        {
+            const Vector start = pivot + f * m_AimBeamLocal.x + r * m_AimBeamLocal.y + u * m_AimBeamLocal.z;
+            CTraceFilterSkipTwoEntities beamFilter(player, m_Game->GetViewModelEntity(), 0);
+            Ray_t beamRay;
+            beamRay.Init(start, start + f * 1024.f);
+            CGameTrace btr{};
+            m_Game->m_EngineTrace->TraceRay(beamRay, MASK_SHOT, &beamFilter, &btr);
+            m_AimBeamHit = btr.fraction < 1.f && !btr.startsolid;
+            m_AimBeamDist = btr.startsolid ? 0.f : 1024.f * btr.fraction;
+            m_AimBeamValid = true;
+        }
     }
     if (!bmvr::g_VrCrosshair || !hit)
         return;
@@ -6353,6 +6381,31 @@ void VR::UpdateAimCrosshair()
     // geometry the glove pass does depth-test against.
     m_AimCrosshairWorld = tr.endpos - dir * 1.5f;
     m_AimCrosshairValid = true;
+}
+
+bool VR::AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const
+{
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    if (body.LengthSqr() <= 1.f)
+        body = m_SetupOrigin;
+    pivot = GetRightControllerAbsPos(body);
+    if (pivot.LengthSqr() <= 1.f)
+        return false;
+    QAngle::AngleVectors(GetAimAngles(), &f, &r, &u);
+    return VectorNormalize(f) > 0.01f;
+}
+
+bool VR::AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) const
+{
+    Vector pivot{}, f{}, r{}, u{};
+    if (!AimFrameNow(pivot, f, r, u))
+        return false;
+    beamStart = pivot + f * (m_AimBeamLocal.x + bmvr::g_VrLaserStartForward)
+        + r * m_AimBeamLocal.y + u * m_AimBeamLocal.z;
+    const float len = (std::max)(0.f, m_AimBeamDist - bmvr::g_VrLaserStartForward);
+    beamEnd = beamStart + f * len;
+    dot = pivot + f * (m_AimShootAlong + m_AimHitDist);
+    return true;
 }
 
 bool VR::TryGetAimCrosshairWorld(Vector& out) const
@@ -7440,13 +7493,15 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
             device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
             device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-            if (m_AimBeamValid)
+            Vector beamA{}, beamB{}, dotNow{};
+            const bool havePoints = AimOverlayPointsNow(beamA, beamB, dotNow);
+            if (m_AimBeamValid && havePoints && (beamB - beamA).LengthSqr() > 1.f)
             {
                 // Clip to just in front of the eye, then a quad whose width is
                 // a fixed world size at each end (perspective taper), never
                 // thinner than a pixel so it does not shimmer far away.
-                Vector a = m_AimBeamStart;
-                Vector b = m_AimBeamEnd;
+                Vector a = beamA;
+                Vector b = beamB;
                 constexpr float kNear = 4.f;
                 const float za = (a - eyeOrig).Dot(fwd);
                 const float zb = (b - eyeOrig).Dot(fwd);
@@ -7494,7 +7549,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 }
             }
             float cx = 0.f, cy = 0.f;
-            if (m_AimCrosshairValid && project(m_AimCrosshairWorld, cx, cy))
+            if (m_AimCrosshairValid && project(havePoints ? dotNow : m_AimCrosshairWorld, cx, cy))
             {
                 if (bmvr::g_VrCrosshairDot)
                     DrawAimDot(device, cx, cy, h);

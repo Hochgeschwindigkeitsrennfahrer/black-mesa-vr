@@ -6232,12 +6232,23 @@ void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle*
         hkGrabSetTarget.fOriginal(ecx, pos ? &p : pos, ang ? &a : ang);
 }
 
+namespace
+{
+    // C_BaseAnimating::GetAttachment(int, Vector&, QAngle&) is built on the
+    // matrix overload, which is hooked too. Scale in the outer call only, or
+    // the point is pulled toward the controller twice (scale^2: ~6 cm short
+    // of the muzzle at ViewmodelScale 0.68).
+    thread_local int t_InAttachmentVec = 0;
+}
+
 int __fastcall Hooks::dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles)
 {
     (void)edx;
     int result = 0;
+    ++t_InAttachmentVec;
     if (hkGetAttachmentVec.fOriginal)
         result = hkGetAttachmentVec.fOriginal(ecx, number, origin, angles);
+    --t_InAttachmentVec;
     if (result && origin && m_VR)
         m_VR->ScaleViewmodelRenderableAttachment(ecx, *origin);
     return result;
@@ -6249,7 +6260,7 @@ int __fastcall Hooks::dGetAttachmentMatrix(void* ecx, void* edx, int number, flo
     int result = 0;
     if (hkGetAttachmentMatrix.fOriginal)
         result = hkGetAttachmentMatrix.fOriginal(ecx, number, matrix);
-    if (result && matrix && m_VR)
+    if (result && matrix && m_VR && t_InAttachmentVec == 0)
     {
         Vector origin(matrix[3], matrix[7], matrix[11]);
         if (m_VR->ScaleViewmodelRenderableAttachment(ecx, origin))

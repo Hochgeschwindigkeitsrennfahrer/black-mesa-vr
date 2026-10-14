@@ -228,6 +228,8 @@ namespace bmvr
     extern bool g_VrLaserBeam;
     // Beam half width in game units (1 unit ~ 2.5 cm).
     extern float g_VrLaserWidth;
+    // Moves the beam start along the barrel (game units, + = forward).
+    extern float g_VrLaserStartForward;
     // AimDebug=true: per shot, log the server bullet origin/direction and its
     // traced hit next to the reticle ray and hit (bmvr_log "AimDebug").
     extern bool g_AimDebug;

@@ -65,6 +65,8 @@ VrCrosshairDot=false
 VrLaserBeam=false
 # Beam half width in game units (1 unit ~ 2.5 cm); 0.06 = ~3 mm beam.
 VrLaserWidth=0.06
+# Beam start along the barrel in game units (+ = further out, 1 unit ~ 2.5 cm).
+VrLaserStartForward=0
 DisableViewBob=true
 LeftHanded=false
 
