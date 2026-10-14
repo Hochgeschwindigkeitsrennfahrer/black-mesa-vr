@@ -10,7 +10,7 @@
 #
 # env: BMVR_DLL (test d3d9.dll, required)  BMVR_ORIG_SHA (sha256 of the installed d3d9.dll, required)
 #      BMVR_PREFIX (prefix copy, default <scratch>/compatdata)  BMVR_DISPLAY (:78)  BMVR_W/BMVR_H (1280x640)
-#      BMVR_LAVAPIPE (~/Downloads/PSVR2/tools/lavapipe)
+#      BMVR_LAVAPIPE (~/Downloads/PSVR2/tools/lavapipe)  BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0; no Xvfb)
 set -euo pipefail
 out=$(realpath -m "$1"); shift
 STEAM=~/.local/share/Steam
@@ -51,14 +51,21 @@ for f in "${DLLS[@]}"; do
 done
 echo "test DLL $(sha256sum < "$BMVR_DLL" | cut -c1-12) installed $(date +%T)" > "$out/run.log"
 
-display=:${BMVR_DISPLAY:-78}
-Xvfb "$display" -screen 0 ${BMVR_SCREEN:-1600x900x24} -nolisten tcp >"$out/xvfb.log" 2>&1 &
-xvfb_pid=$!
-sleep 1
-export DISPLAY=$display
-echo "$display" > "$out/display"
-LVP=${BMVR_LAVAPIPE:-$HOME/Downloads/PSVR2/tools/lavapipe}
-export VK_DRIVER_FILES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json VK_ICD_FILENAMES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json
+if [[ -n ${BMVR_GPU:-} ]]; then
+	# real GPU on an existing X display (window appears there); 32-bit lavapipe crashes on map load since 2026-10-12
+	display=${BMVR_DISPLAY:-:0}
+	export DISPLAY=$display
+	echo "$display" > "$out/display"
+else
+	display=:${BMVR_DISPLAY:-78}
+	Xvfb "$display" -screen 0 ${BMVR_SCREEN:-1600x900x24} -nolisten tcp >"$out/xvfb.log" 2>&1 &
+	xvfb_pid=$!
+	sleep 1
+	export DISPLAY=$display
+	echo "$display" > "$out/display"
+	LVP=${BMVR_LAVAPIPE:-$HOME/Downloads/PSVR2/tools/lavapipe}
+	export VK_DRIVER_FILES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json VK_ICD_FILENAMES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json
+fi
 export VR_PATHREG_OVERRIDE=/nonexistent/openvrpaths.vrpath XR_RUNTIME_JSON=/nonexistent/openxr.json
 export SDL_AUDIODRIVER=dummy PULSE_SERVER=/nonexistent ALSA_CONFIG_PATH=/nonexistent
 export DXVK_LOG_PATH="Z:${out//\//\\}" DXVK_STATE_CACHE=0 DXVK_LOG_LEVEL=${DXVK_LOG_LEVEL:-warn}
