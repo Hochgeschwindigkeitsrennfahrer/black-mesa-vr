@@ -6130,9 +6130,41 @@ void VR::ApplyMenuCursor()
         }
     }
 
+    // Where the pointer was ~100 ms ago. Pulling the trigger tips the
+    // controller; since the menu pointer follows the hand closely (smoothing
+    // 0.05 s, 2026-10-14) the click landed on the neighbouring entry. Click
+    // where the user aimed before the pull.
+    struct CursorSample { DWORD ms; int x; int y; };
+    static CursorSample s_hist[128];
+    static int s_histN;
+    const DWORD histNow = GetTickCount();
+    if (haveHit)
+    {
+        s_hist[s_histN % 128] = { histNow, wx, wy };
+        ++s_histN;
+    }
     const bool click = PressedDigitalAction(m_ActionPrimaryAttack);
     if (click && !m_MenuTriggerWasDown)
     {
+        for (int i = 1; i <= 128 && i <= s_histN; ++i)
+        {
+            const CursorSample& smp = s_hist[(s_histN - i) % 128];
+            if (histNow - smp.ms > 250)
+                break;
+            if (histNow - smp.ms >= 100)
+            {
+                wx = smp.x;
+                wy = smp.y;
+                break;
+            }
+        }
+        if (hwnd)
+        {
+            POINT pt{ wx, wy };
+            ClientToScreen(hwnd, &pt);
+            SetCursorPos(pt.x, pt.y);
+            PostMessageA(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(wx, wy));
+        }
         if (hwnd)
         {
             const DWORD nowClick = GetTickCount();

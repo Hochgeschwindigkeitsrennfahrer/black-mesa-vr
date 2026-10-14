@@ -28,12 +28,15 @@ for f in "${DLLS[@]}"; do
 	[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || { echo "$f is not the expected installed DLL; refusing" >&2; exit 1; }
 done
 cp "$GAME/d3d9.dll" "$out/orig-d3d9.dll"
+# -w/-h are saved by the game into bms/videoconfig.cfg (the player's resolution); put it back afterwards
+cp -a "$GAME/bms/videoconfig.cfg" "$out/orig-videoconfig.cfg" 2>/dev/null || true
 restore() {
 	local f ok=1
 	for f in "${DLLS[@]}"; do
 		cp "$out/orig-d3d9.dll" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
 		[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || ok=0
 	done
+	[[ -f $out/orig-videoconfig.cfg ]] && cp -a "$out/orig-videoconfig.cfg" "$GAME/bms/videoconfig.cfg"
 	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified)" >> "$out/run.log" \
 		|| echo "RESTORE FAILED" | tee -a "$out/run.log" >&2
 }
