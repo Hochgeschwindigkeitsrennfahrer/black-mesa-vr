@@ -2408,13 +2408,14 @@ bool VR::InitOpenVR()
     m_System->GetProjectionRaw(vr::Eye_Right, &r_left, &r_right, &r_top, &r_bottom);
 
     const float tanHalfFovX = (std::max)({ -l_left, l_right, -r_left, r_right });
-    // PSVR2 (asymmetric per-eye FOV): NormalizeViewSetupForVREye renders this
-    // frustum at the eye RT's own aspect (~1:1), so the engine's vertical
-    // half-FOV is tanX/rtAspect, not max(|top|,|bottom|). Using the HMD's tanY
-    // here cropped the full rendered height into the HMD's vertical FOV
-    // (~29 % vertical squash on PSVR2: tanX/tanY 1.386 vs RT 0.984). Treat the
-    // rendered frustum as square; exact for a 1:1 RT, ~1.6 % off at 0.984.
-    const float tanHalfFovY = tanHalfFovX;
+    // NormalizeViewSetupForVREye renders this frustum at the eye RT's own
+    // aspect, so the engine's vertical half-FOV is tanX / rtAspect, not the
+    // HMD's max(|top|,|bottom|). The two only agree when tanX/tanY happens to
+    // equal the RT aspect (near-symmetric HMDs); PSVR2 (tanX/tanY 1.386 vs RT
+    // 0.984) got a ~29 % vertical squash. Derive it from the RT for every HMD.
+    const float rtAspect = (recW >= 640 && recH >= 360)
+        ? static_cast<float>(recW) / static_cast<float>(recH) : 1.0f;
+    const float tanHalfFovY = tanHalfFovX / rtAspect;
 
     // Same projection crop as L4D2VR vr_lifecycle_init.inl. Keep OpenVR v
     // unflipped on this DXVK path (Vulkan v-swap inverted the fused image).
@@ -2619,10 +2620,11 @@ bool VR::InitOpenXR()
         SetupOffCenter(le, re);
     }
 
-    // PSVR2: the engine renders at the eye RT's aspect (~1:1), so overlays
-    // (VrCrosshair, hand boxes) projected with tanX/tanY (1.386) landed 1.41x
-    // too far off-centre. See the OpenVR init above.
-    m_Aspect = 1.0f;
+    // The engine renders at the eye RT's aspect, so overlays (VrCrosshair,
+    // hand boxes) must use it too; tanX/tanY (PSVR2 1.386) put them 1.41x too
+    // far off-centre. See the OpenVR init above.
+    m_Aspect = (m_RenderWidth >= 640 && m_RenderHeight >= 360)
+        ? static_cast<float>(m_RenderWidth) / static_cast<float>(m_RenderHeight) : 1.0f;
     m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
     m_FovRight = m_Fov;
