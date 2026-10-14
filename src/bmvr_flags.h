@@ -222,6 +222,10 @@ namespace bmvr
     extern bool g_VrCrosshair;
     // Reticle size multiplier, for players who want it smaller or bolder.
     extern float g_VrCrosshairScale;
+    // Reticle drawn as a red laser dot instead of the amber ticks.
+    extern bool g_VrCrosshairDot;
+    // Thin red beam from the gun along the firing ray to where it lands.
+    extern bool g_VrLaserBeam;
     // AimDebug=true: per shot, log the server bullet origin/direction and its
     // traced hit next to the reticle ray and hit (bmvr_log "AimDebug").
     extern bool g_AimDebug;

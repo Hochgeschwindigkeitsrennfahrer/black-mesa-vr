@@ -912,7 +912,8 @@ public:
     // safe from the render thread.
     void UpdateAimCrosshair();
     // Cleared by UpdateAimCrosshair when the reticle is off or the ray missed.
-    bool AimCrosshairVisible() const { return m_AimCrosshairValid; }
+    // Also true while only the laser beam is to be drawn.
+    bool AimCrosshairVisible() const { return m_AimCrosshairValid || m_AimBeamValid; }
     bool TryGetAimCrosshairWorld(Vector& out) const;
     // AimDebug=true (config.txt): compare what the server fires with the
     // reticle ray. Called from the shoot-origin/-angle hooks on the game thread.
@@ -1140,6 +1141,10 @@ private:
     int m_PhysicalCrowbarLoadTries = 0;
     Vector m_AimCrosshairWorld{};
     bool m_AimCrosshairValid = false;
+    Vector m_AimBeamStart{};
+    Vector m_AimBeamEnd{};
+    bool m_AimBeamValid = false;
+    bool m_AimBeamHit = false;
     bool m_HasHevSuit = true;
     bool m_WearingHevSuit = true;
     bool m_ScopeZoomActive = false;
@@ -1158,6 +1163,7 @@ private:
     QAngle m_LastFireAim{};
     bool m_HasLastFireAim = false;
     void DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) const;
+    void DrawAimDot(IDirect3DDevice9* device, float sx, float sy, UINT h) const;
     DWORD m_WeaponActionAnimUntilMs = 0;
     int m_LatchedViewmodelIdleSeq = -1;
     bool m_CrouchToggled = false;

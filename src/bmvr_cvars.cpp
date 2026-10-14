@@ -69,6 +69,12 @@ namespace bmvr
               Kind::Float, 0.05f, 1.f, nullptr, &g_TurnSpeed },
             { "bmvr_recenter_yaw", "VR: recenter (R3) also resets the turn direction",
               Kind::Bool, 0.f, 1.f, &g_RecenterResetsYaw, nullptr },
+            { "bmvr_aim_marker", "VR: mark where the gun points",
+              Kind::Bool, 0.f, 1.f, &g_VrCrosshair, nullptr },
+            { "bmvr_aim_dot", "VR: aim marker as a red laser dot (0 = amber crosshair)",
+              Kind::Bool, 0.f, 1.f, &g_VrCrosshairDot, nullptr },
+            { "bmvr_laser_beam", "VR: red laser beam from the gun to where it points",
+              Kind::Bool, 0.f, 1.f, &g_VrLaserBeam, nullptr },
             { "bmvr_menu_smooth", "VR: menu pointer smoothing in seconds (lower = more direct)",
               Kind::Float, 0.02f, 0.6f, nullptr, &g_MenuCursorSmoothSec },
         };

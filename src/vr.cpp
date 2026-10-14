@@ -4027,6 +4027,7 @@ void VR::ProcessInput()
     if (paused)
     {
         m_AimCrosshairValid = false;
+        m_AimBeamValid = false;
         m_RpgLaserPointValid = false;
     }
     else
@@ -6285,7 +6286,8 @@ bool VR::TryGetMeleeAim(Vector& origin, QAngle& angles) const
 void VR::UpdateAimCrosshair()
 {
     m_AimCrosshairValid = false;
-    if (!bmvr::g_VrCrosshair || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen)
+    m_AimBeamValid = false;
+    if (!(bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen)
         return;
     // The scope draws its own centred crosshair, and while zoomed the shot no
     // longer follows the controller ray this would trace.
@@ -6313,7 +6315,19 @@ void VR::UpdateAimCrosshair()
     ray.Init(origin, origin + dir * kMaxRangeHu);
     CGameTrace tr{};
     m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
-    if (tr.fraction >= 1.f)
+    const bool hit = tr.fraction < 1.f;
+
+    if (bmvr::g_VrLaserBeam)
+    {
+        // Nothing lies between the origin and the hit (that is what the trace
+        // says), so drawing it without depth testing only covers the gun. A
+        // miss fades out at a fixed length instead of reaching for 8192 units.
+        m_AimBeamStart = origin + dir * 2.f;
+        m_AimBeamEnd = hit ? tr.endpos : origin + dir * 1024.f;
+        m_AimBeamHit = hit;
+        m_AimBeamValid = true;
+    }
+    if (!bmvr::g_VrCrosshair || !hit)
         return;
 
     // Pull the reticle a hair off the surface it landed on. The overlay pass
@@ -6544,6 +6558,37 @@ void VR::DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) 
         quad(sx - t * 0.5f, sy + gap, t, l, c);              // down
         quad(sx - t * 0.5f, sy - t * 0.5f, t, t, c);         // centre pip
     }
+}
+
+// Laser dot: a red disc with a dark rim, screen-space like the ticks so it
+// stays visible across a hangar.
+void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, UINT h) const
+{
+    if (!device)
+        return;
+    struct Vert
+    {
+        float x, y, z, rhw;
+        D3DCOLOR color;
+    };
+    float scale = bmvr::g_VrCrosshairScale;
+    if (!(scale > 0.05f) || scale > 8.f)
+        scale = 1.f;
+    const float px = ((h > 8) ? static_cast<float>(h) : 1440.f) / 1440.f * scale;
+    const float radius = (std::max)(1.5f, 3.5f * px);
+    constexpr int kSegs = 16;
+    auto disc = [&](float r, D3DCOLOR centre, D3DCOLOR rim) {
+        Vert v[kSegs + 2];
+        v[0] = { sx, sy, 0.f, 1.f, centre };
+        for (int i = 0; i <= kSegs; ++i)
+        {
+            const float a = static_cast<float>(i) * (6.2831853f / kSegs);
+            v[i + 1] = { sx + cosf(a) * r, sy + sinf(a) * r, 0.f, 1.f, rim };
+        }
+        device->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, kSegs, v, sizeof(Vert));
+    };
+    disc(radius + (std::max)(1.f, px), D3DCOLOR_ARGB(140, 0, 0, 0), D3DCOLOR_ARGB(140, 0, 0, 0));
+    disc(radius, D3DCOLOR_ARGB(255, 255, 90, 70), D3DCOLOR_ARGB(235, 230, 20, 10));
 }
 
 bool VR::WantsWeaponActionAnim() const
@@ -7373,16 +7418,70 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             DrawWeaponMenu(device, stereoEye, w, h, eyeOrig, fwd, right, up);
         else if (AimCrosshairVisible())
         {
-            float cx = 0.f, cy = 0.f;
-            if (project(m_AimCrosshairWorld, cx, cy))
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+            device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+            device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+            if (m_AimBeamValid)
             {
-                device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-                device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-                device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-                device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-                DrawAimCrosshair(device, cx, cy, h);
-                device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+                // Clip to just in front of the eye, then a quad whose width is
+                // a fixed world size at each end (perspective taper), never
+                // thinner than a pixel so it does not shimmer far away.
+                Vector a = m_AimBeamStart;
+                Vector b = m_AimBeamEnd;
+                constexpr float kNear = 4.f;
+                const float za = (a - eyeOrig).Dot(fwd);
+                const float zb = (b - eyeOrig).Dot(fwd);
+                if (za >= kNear || zb >= kNear)
+                {
+                    if (za < kNear)
+                        a = a + (b - a) * ((kNear - za) / (zb - za));
+                    else if (zb < kNear)
+                        b = a + (b - a) * ((kNear - za) / (zb - za));
+                    auto toScreen = [&](const Vector& p, float& sx, float& sy, float& z) {
+                        const Vector d = p - eyeOrig;
+                        z = (std::max)(kNear, d.Dot(fwd));
+                        const float ndcX = (d.Dot(right) / z) / tanHalf * ocSx + ocOx;
+                        const float ndcY = ((d.Dot(up) / z) * aspect) / tanHalf * ocSy + ocOy;
+                        sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
+                        sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
+                    };
+                    float ax, ay, az, bx, by, bz;
+                    toScreen(a, ax, ay, az);
+                    toScreen(b, bx, by, bz);
+                    float nx = -(by - ay);
+                    float ny = bx - ax;
+                    const float len = sqrtf(nx * nx + ny * ny);
+                    if (len > 0.5f)
+                    {
+                        nx /= len;
+                        ny /= len;
+                        constexpr float kBeamWidthHu = 0.2f; // ~5 mm
+                        const float pxPerHu = static_cast<float>(w) * 0.5f * ocSx / tanHalf;
+                        const float wa = (std::max)(0.6f, kBeamWidthHu * pxPerHu / az);
+                        const float wb = (std::max)(0.6f, kBeamWidthHu * pxPerHu / bz);
+                        const D3DCOLOR ca = D3DCOLOR_ARGB(170, 255, 40, 25);
+                        const D3DCOLOR cb = m_AimBeamHit
+                            ? D3DCOLOR_ARGB(110, 255, 40, 25) : D3DCOLOR_ARGB(0, 255, 40, 25);
+                        Vert v[4] = {
+                            { ax + nx * wa, ay + ny * wa, 0.f, 1.f, ca },
+                            { ax - nx * wa, ay - ny * wa, 0.f, 1.f, ca },
+                            { bx + nx * wb, by + ny * wb, 0.f, 1.f, cb },
+                            { bx - nx * wb, by - ny * wb, 0.f, 1.f, cb },
+                        };
+                        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vert));
+                    }
+                }
             }
+            float cx = 0.f, cy = 0.f;
+            if (m_AimCrosshairValid && project(m_AimCrosshairWorld, cx, cy))
+            {
+                if (bmvr::g_VrCrosshairDot)
+                    DrawAimDot(device, cx, cy, h);
+                else
+                    DrawAimCrosshair(device, cx, cy, h);
+            }
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         }
 
         static int s_handLog;
