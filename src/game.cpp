@@ -1678,6 +1678,11 @@ namespace
     }
 }
 
+void* Game::FindConVar(const char* name) const
+{
+    return FindConVarProbe(m_Cvar, name);
+}
+
 bool Game::SetConVarInt(const char* name, int value) const
 {
     void* cvar = FindConVarProbe(m_Cvar, name);

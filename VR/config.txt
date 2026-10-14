@@ -28,6 +28,9 @@ ControllerPitchTilt=-35.0
 ControllerPitchTiltTouch=0
 ControllerPitchTiltIndex=0
 ControllerPitchTiltVive=-45.0
+# Player preference on top of the per-controller tilt above, in degrees
+# (negative = gun points lower). Also Options -> Game -> VR (bmvr_gun_pitch).
+GunPitchOffset=0
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
 ViewmodelPosOffsetXTouch=5.5
 
@@ -65,3 +68,5 @@ ScopeZoomFovScale=0.28
 # until the stick is centred again (false = hold the click).
 CrouchStickHold=false
 SprintToggle=false
+# The VR settings above that also appear in Options -> Game (bmvr_* cvars) take
+# the value saved in bms/cfg/config.cfg once changed in the menu or console.

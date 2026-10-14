@@ -5,6 +5,7 @@
 #include "MinHook.h"
 #include "d3d9_vr.h"
 #include "bmvr_flags.h"
+#include "bmvr_cvars.h"
 #include "hooks.h"
 #include "in_buttons.h"
 #include "trace.h"
@@ -8967,6 +8968,7 @@ void VR::UpdateHl2vrMsaa()
 void VR::TickMatQueueFromRenderView()
 {
     UpdateHl2vrMsaa();
+    bmvr::TickVrCvars(m_Game);
     if (m_Game)
         m_Game->ProbeMatQueueModeFromRenderView();
     ApplyVrQualityOfLifeCvars();

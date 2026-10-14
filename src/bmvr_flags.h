@@ -169,6 +169,9 @@ namespace bmvr
     extern float g_ControllerPitchTiltTouch;
     extern float g_ControllerPitchTiltIndex;
     extern float g_ControllerPitchTiltVive;
+    // Player's extra gun pitch in degrees on top of the per-family tilt
+    // (GunPitchOffset in config.txt, bmvr_gun_pitch / Options -> Game).
+    extern float g_GunPitchOffset;
     float EffectiveControllerPitchTilt(uint32_t controllerFamily);
     // Trim applied to the firing pitch only, in degrees, positive = shoot
     // higher. Leaves the viewmodel alone, so it corrects a grip that aims low

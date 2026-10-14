@@ -71,6 +71,7 @@ namespace bmvr
     float g_ControllerPitchTiltTouch = 0.f;
     float g_ControllerPitchTiltIndex = 0.f;
     float g_ControllerPitchTiltVive = -45.f;
+    float g_GunPitchOffset = 0.f;
     float g_AimPitchOffset = 0.f;
     bool g_DisableRecoilAim = true;
     float g_IPDScale = 1.f;
@@ -493,6 +494,12 @@ namespace bmvr
                 g_ControllerPitchTiltTouch = static_cast<float>(atof(val));
             else if (std::strcmp(n, "ControllerPitchTiltIndex") == 0)
                 g_ControllerPitchTiltIndex = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "GunPitchOffset") == 0)
+            {
+                const float s = static_cast<float>(atof(val));
+                if (s >= -60.f && s <= 60.f)
+                    g_GunPitchOffset = s;
+            }
             else if (std::strcmp(n, "ControllerPitchTiltVive") == 0)
                 g_ControllerPitchTiltVive = static_cast<float>(atof(val));
             else if (std::strcmp(n, "AimPitchOffset") == 0)
@@ -1277,7 +1284,7 @@ namespace bmvr
             Log("Disabled %s this launch only (previous launch died; not skip-filed)", label);
     }
 
-    float EffectiveControllerPitchTilt(uint32_t controllerFamily)
+    static float FamilyControllerPitchTilt(uint32_t controllerFamily)
     {
         switch (controllerFamily)
         {
@@ -1291,6 +1298,13 @@ namespace bmvr
         default:
             return g_ControllerPitchTilt;
         }
+    }
+
+    float EffectiveControllerPitchTilt(uint32_t controllerFamily)
+    {
+        // The per-family tilt matches each controller's shape; the player's
+        // own preference (menu / GunPitchOffset) comes on top.
+        return FamilyControllerPitchTilt(controllerFamily) + g_GunPitchOffset;
     }
 
     void EffectiveVrHandsPoseOffset(uint32_t controllerFamily, float& x, float& y, float& z)
