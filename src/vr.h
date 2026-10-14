@@ -1161,6 +1161,7 @@ private:
     DWORD m_WeaponActionAnimUntilMs = 0;
     int m_LatchedViewmodelIdleSeq = -1;
     bool m_CrouchToggled = false;
+    bool m_SprintLatched = false;
     bool m_HudOverlayReady = false;
     bool m_HudOverlayCreateAttempted = false;
     IDirect3DSurface9* m_PauseHudPrevRt = nullptr;

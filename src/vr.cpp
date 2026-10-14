@@ -3903,6 +3903,7 @@ void VR::ProcessInput()
         s_atk = s_atk2 = s_reload = s_use = false;
         ClearUseGrab();
         m_CrouchToggled = false;
+        m_SprintLatched = false;
         m_WeaponMenuOpen = false;
         m_WeaponMenuClickHeld = false;
         m_WeaponMenuOpenedThisHold = false;
@@ -4065,7 +4066,9 @@ void VR::ProcessInput()
         {
             if (turnY < -0.65f)
             {
-                if (!s_crouchAxis)
+                if (bmvr::g_CrouchStickHold)
+                    buttons |= IN_DUCK;
+                else if (!s_crouchAxis)
                     m_CrouchToggled = !m_CrouchToggled;
                 s_crouchAxis = true;
             }
@@ -4074,7 +4077,28 @@ void VR::ProcessInput()
         }
         if (m_CrouchToggled)
             buttons |= IN_DUCK;
-        if (PressedDigitalAction(m_ActionSprint))
+        if (bmvr::g_SprintToggle)
+        {
+            // Click latches; letting the move stick back to centre (or a
+            // second click) ends the sprint. The first 600 ms after the
+            // click ignore the centred stick, so clicking before pushing
+            // works too.
+            static bool s_sprintHeld;
+            static DWORD s_sprintSinceMs;
+            const bool sprintHeld = PressedDigitalAction(m_ActionSprint);
+            if (sprintHeld && !s_sprintHeld)
+            {
+                m_SprintLatched = !m_SprintLatched;
+                s_sprintSinceMs = GetTickCount();
+            }
+            s_sprintHeld = sprintHeld;
+            if (m_SprintLatched && nx * nx + ny * ny < 0.2f * 0.2f
+                && GetTickCount() - s_sprintSinceMs > 600)
+                m_SprintLatched = false;
+            if (m_SprintLatched)
+                buttons |= IN_SPEED;
+        }
+        else if (PressedDigitalAction(m_ActionSprint))
             buttons |= IN_SPEED;
         if (GetTickCount() < m_MeleeAttackUntilMs)
             buttons |= IN_ATTACK;

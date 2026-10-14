@@ -100,6 +100,8 @@ namespace bmvr
     bool g_FakeRuntime = false;
     bool g_MirrorBothEyes = false;
     bool g_VrShotOriginFix = true;
+    bool g_CrouchStickHold = false;
+    bool g_SprintToggle = false;
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
@@ -549,6 +551,10 @@ namespace bmvr
                 g_AimDebug = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrShotOriginFix") == 0)
                 g_VrShotOriginFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "CrouchStickHold") == 0)
+                g_CrouchStickHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "SprintToggle") == 0)
+                g_SprintToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MirrorBothEyes") == 0)
                 g_MirrorBothEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VRRuntimeBackend") == 0)

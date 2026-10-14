@@ -252,6 +252,13 @@ namespace bmvr
     // vtable +0x474 leave from the controller ray (TryGetVrShootOrigin), not
     // the head. false = old behaviour (tests compare both).
     extern bool g_VrShotOriginFix;
+    // CrouchStickHold=true: right stick down crouches only while held
+    // (default false = each push toggles crouch).
+    extern bool g_CrouchStickHold;
+    // SprintToggle=true: one sprint click (left stick click) keeps sprinting
+    // until the left stick returns to centre or sprint is clicked again
+    // (default false = hold the click).
+    extern bool g_SprintToggle;
     // Logs (and resets) the access-violation count since the last call.
     void LogFaultStats();
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand

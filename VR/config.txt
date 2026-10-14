@@ -60,3 +60,8 @@ LeftHanded=false
 
 # Crossbow zoom as a fraction of the headset field of view. 0.28 is about 3.5x.
 ScopeZoomFovScale=0.28
+
+# Right stick down: crouch only while held (false = toggle). Left stick click: sprint latches
+# until the stick is centred again (false = hold the click).
+CrouchStickHold=false
+SprintToggle=false
