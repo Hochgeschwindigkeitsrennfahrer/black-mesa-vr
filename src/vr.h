@@ -165,6 +165,13 @@ public:
     uint32_t m_OpenXrHelperSubmittedLast = 0;
     uint32_t m_OpenXrSkipSameVsync = 0;
     uint32_t m_OpenXrSkipStereoNoPose = 0;
+    // Rate-log counters: synchronous copy wait, stereo pairs begun.
+    uint32_t m_OpenXrCopyWaits = 0;
+    double m_OpenXrCopyWaitMs = 0.0;
+    double m_OpenXrCopyWaitMaxMs = 0.0;
+    uint32_t m_OpenXrCopyThread = 0;
+    uint32_t m_OpenXrPairThread = 0;
+    uint32_t m_OpenXrStereoPairs = 0;
     // Publish every pending slot whose copy the GPU has completed (newest
     // wins; older completed ones are dropped as stale).
     void PollOpenXrDeferredPublish();
@@ -193,10 +200,6 @@ public:
     // (hmd_native) or fits HMD aspect in the window if that crash-stickies.
     uint32_t m_RenderWidth = 0;
     uint32_t m_RenderHeight = 0;
-    // public-beta: HMD-sized eye RTs created inside device Present null the
-    // shaderapi device vtable in SwapBuffers. Keep eyes at the window size.
-    bool m_LockEyeToWindow = false;
-    std::atomic<bool> m_HeadsetSubmitArmed{ false };
     // Retired L4D2VR eye-copy MSAA. Left at 0 so private eyes stay single-sample
     // submit targets. Scene AA is bmvr::g_Msaa (HL2VR), not this field.
     uint32_t m_AntiAliasing = 0;
@@ -648,20 +651,6 @@ public:
     void Update();
     void CreateVRTextures();
     void SubmitVRTextures();
-    // Runs after shaderapidx9 Present returns, past the post-present callback
-    // that faults if D3D resources were created inside device->Present.
-    void AfterShaderApiPresent();
-    // Copy one eye's backbuffer rect into a publish slot Present does not
-    // treat as an eye surface. Call PublishBlittedEyes after both eyes.
-    bool BlitBackbufferEye(int eye, int srcX, int srcY, int srcW, int srcH);
-    void PublishBlittedEyes();
-    // Draw the world into an eye-sized publish target. Not m_D9LeftEyeSurface:
-    // that pointer makes the next shaderapi Present fault.
-    bool BeginBetaEyeRender();
-    void EndBetaEyeRender();
-    void PublishMonoEye();
-    IDirect3DSurface9* m_BetaColorRedirect = nullptr;
-    IDirect3DSurface9* m_BetaDepthRedirect = nullptr;
     void WaitPosesForStereoFrame(bool allowQueued = true);
     void BeginStereoFramePose();
     void EndStereoFramePose();
@@ -1266,5 +1255,3 @@ private:
     uint32_t m_LastStereoBlitHeight = 0;
     bool m_LastEyeBlitWasWindowCrop = false;
 };
-
-void InstallShaderApiPresentHook();

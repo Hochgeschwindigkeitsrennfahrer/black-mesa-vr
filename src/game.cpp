@@ -457,6 +457,10 @@ void Game::EmitEntitySound(C_BaseEntity* entity, const char* soundName)
     HMODULE client = GetModuleHandleA("client.dll");
     if (!client)
         return;
+    // client build 25844216: kCBaseEntity_EmitSound is not re-verified and
+    // the old RVA is mid-function there. Do not call it.
+    if (!Offsets::kCBaseEntity_EmitSoundVerified)
+        return;
     using EmitFn = void(__thiscall*)(void*, const char*, float, float*);
     auto emit = reinterpret_cast<EmitFn>(
         reinterpret_cast<uintptr_t>(client) + Offsets::kCBaseEntity_EmitSound);

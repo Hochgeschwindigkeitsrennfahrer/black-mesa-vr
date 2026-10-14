@@ -113,7 +113,10 @@ namespace bmvr
     bool g_HiddenAreaMesh = false;
     bool g_MaterialPredraw = false;
     bool g_StereoBlitGpuFlush = true;
-    bool g_OpenXrDeferredPublish = false;
+    // Synchronous publish spins ~12 ms per pair on the material thread
+    // waiting for the GPU, so CPU and GPU never overlap (2026-10-14 bm_c1a0a:
+    // pairs=25-42/s). Deferred + wait-for-previous keeps one frame in flight.
+    bool g_OpenXrDeferredPublish = true;
     float g_OpenXrSlotCoolingMs = 4.f;
     uint32_t g_OpenXrMaxPending = 1;
     // Match L4D2VR weapon tables (designed for VRScale 43.2) to BM 39.37:
@@ -1042,9 +1045,6 @@ namespace bmvr
             || strstr(buf, "Hand markers done") != nullptr
             || strstr(buf, "GameUI dismissed") != nullptr
             || strstr(buf, "HMD-fb pass-through") != nullptr
-            || strstr(buf, "look copy") != nullptr
-            || strstr(buf, "cmd hmd aim") != nullptr
-            || strstr(buf, "AfterShaderApiPresent") != nullptr
             || strstr(buf, "Viewmodel DME") != nullptr
             || strstr(buf, "offscreen native") != nullptr
             || strstr(buf, "CopyRTEx clip") != nullptr

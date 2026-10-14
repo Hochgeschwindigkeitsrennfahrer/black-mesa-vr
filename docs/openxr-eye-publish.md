@@ -421,6 +421,90 @@ Expect in-game `await≈90/s`, `helperHz≈90`, helper `waitFrameWin≈11ms`,
 shows that. Desktop FPS will look lower in-map; that is the compositor
 cadence, not a settings cut.
 
+## 10. Deferred publish again, waiting instead of dropping (2026-10-14)
+
+Public beta 25844216, `bm_c1a0a` tram, WMR G2 90 Hz, RTX 4070 Ti, eyes
+3168x3104, multicore. User: "a lot of tearing during movement, like some
+frames can't keep up or aren't synchronized with the head".
+
+Sync publish (`OpenXrDeferredPublish=false`): the material thread spun in
+`pollEvent` for the GPU after every eye copy.
+
+```
+pairs=25-42/s copyWait=25-42/s avg=10.6-14.0ms max=19-212ms (copyTid = presentTid)
+pairs=68-89/s on lighter stretches, GPU 14-71%
+```
+
+CPU and GPU never overlap, so every frame cost CPU + GPU time and the
+compositor repeated frames under a moving world.
+
+Deferred with the §7b throttle rendered at the compositor rate but dropped
+every other pair, because the previous copy was still on the GPU when the next
+pair was ready:
+
+```
+pairs=87-90/s published=41-45/s throttled=44/s pending=1/1
+```
+
+Fix: in `CopyEyesToOpenXrPublishSlot`, when `OpenXrMaxPending` copies are
+pending, `WaitOldestOpenXrPending` (publish it) before this copy instead of
+returning `throttled`. The GPU is already working on the new pair, so the wait
+is only the tail of the previous one. Default `OpenXrDeferredPublish` is now
+`true`.
+
+```
+pairs=82-89/s published=83-89/s throttled=0/s dropped=0/s pending=1/1
+paceWait=70-83/s avg=4-8ms helperHz=89-90 waitFrameWin=11.1ms GPU 83-98%
+```
+
+Invariants still hold: one frame in flight, descriptor goes out only after its
+EVENT signaled, consumed-id slot gate unchanged. Remaining gap to 90 is GPU
+time (~98% busy).
+
+### 10a. User session: mostly 90, dips in crowded rooms (2026-10-14)
+
+User played the §10 build on `bm_c1a0a` then `bm_c1a0b`: "really good now",
+then "the odd stutter and tearing every now and then, especially the last
+2 minutes". Rate lines for those minutes:
+
+```
+published=89-94/s helperHz=90 throttled=0-5/s   (open areas)
+published=64-73/s pairs=64-70/s helperHz=90     (crowded)
+```
+
+`helperHz` never left 90 and `dropped=0` throughout, so the compositor kept
+its cadence and the dips are the game producing fewer pairs, not the helper
+repeating or mixing frames. `blitSkip` rose 0 → 3 over the whole session
+(cumulative), i.e. the blit fence was busy on 3 of ~64,000 frames.
+
+Stereo-cost samples (599 of them; the timer covers only the two RenderViews,
+not the queue wait): 117 ≥ 5 ms, 6 ≥ 10 ms, max 30.1 ms. Every slow sample is
+the same shape: `shadowPush=76` and `dme` in the hundreds
+(`models/humans/scientist.mdl`, `guard.mdl`, `scientist_02.mdl`). `gbDepth`
+stays 4, so the deferred path never switched to the cheap one. Two outliers
+are not GPU frames: a 4406 ms stall is the `bm_c1a0a` → `bm_c1a0b` load, and a
+1016 ms stall has 0.6–5 ms pairs on both sides of it (a scheduling hitch, one
+instance all session).
+
+Not changed. The earlier CSM-quality cuts were measured unplayable on this
+engine (RUNTIME.md, Surface Tension). `RenderScale=0.9` is the available
+headroom knob.
+
+### 10b. Closed session: desktop 150, headset 90 (2026-10-14)
+
+User closed the session and said frames still glitch while the shown FPS is
+150. That counter is `present=` (150–180/s on `bm_c1a0b`). The headset stayed
+at `helperHz=90` and received `published=82–91/s`. `dropped=0`, `blitSkip`
+did not climb, `waitFrameLast` stayed ~11 ms. The 150 is not a headset rate.
+
+The leftover hitch is the submit clock. The eyes are drawn for WaitFrame N's
+predicted time, then the helper's next `xrEndFrame` stamps them with WaitFrame
+N+1. The runtime treats the old pose as already current and does not timewarp
+that ~11 ms (`consumedLag=2`). Fix, not yet headset-checked: when the latched
+render pose time is 0–40 ms behind this WaitFrame, `xrEndFrame.displayTime` is
+that pose time. Helper log field `poseSkewMs` is the correction. The desktop
+counter will still read ~150.
+
 ## Status
 
 Defects 1-5 are implemented and confirmed live in the game/helper logs (publish

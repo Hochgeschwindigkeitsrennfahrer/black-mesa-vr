@@ -126,6 +126,11 @@ public:
 	virtual void* sub_1005D2A0() = 0;
 	virtual void* sub_1005D2C0() = 0;
 	virtual void* sub_1005D2D0() = 0;
+	// public-beta buildid 25844216 (2026-10-10) inserted this slot.
+	// The old IsInGame slot is now a 1-arg ret 4. Calling it with no
+	// argument corrupts the stack on the first Present (exit 0xC0000374).
+	// IsInGame is the next slot: cmp signonState, 6; setz al; ret.
+	virtual void* sub_beta20261010_slot26() = 0;
 	virtual bool IsInGame() = 0;
 	virtual void* sub_1005F150() = 0;
 	virtual void* sub_1005D2F0() = 0;
@@ -151,9 +156,9 @@ public:
 	virtual void* sub_1005D880() = 0;
 	virtual void* sub_1005D890() = 0;
 	virtual void* sub_1005D8A0() = 0;
-	// CEngineClient vtable in engine.dll (image 0x10000000): slot 51 at
-	// 0x100A6860 returns "Dedicated Server" or cl.m_szLevelName; slot 52 at
-	// 0x100A6890 returns "dedicated" or the short map name (background01).
+	// CEngineClient vtable in engine.dll. Build 25607072: GetLevelName slot 51,
+	// GetLevelNameShort slot 52. Build 25844216 (2026-10-10): those are 52 and
+	// 53 because of the slot inserted above IsInGame.
 	virtual const char* GetLevelName() = 0;
 	virtual const char* GetLevelNameShort() = 0;
 	virtual void* sub_1005F190() = 0;
@@ -1080,6 +1085,11 @@ public:
 	virtual void sub_10017780() = 0;
 	virtual void sub_10018180() = 0;
 	virtual void sub_10028B00() = 0;
+	// public-beta materialsystem inserted one virtual below this. Slot 180
+	// (+0x2D0) is now a 0-arg `ret 0`; calling it as (bool, bool) left
+	// ESP 8 bytes off and corrupted EDI in the pause HUD paint.
+	// OverrideAlphaWriteEnable is slot 181 (ret 8) in both contexts.
+	virtual void sub_beta_matsys_inserted() = 0;
 	virtual void OverrideAlphaWriteEnable(bool bEnable, bool bAlphaWriteEnable) = 0;
 };
 

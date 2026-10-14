@@ -430,14 +430,6 @@ namespace
             if (!dest && !vr->McPipelineEnabled() && vr->StereoEyeBlitActive())
                 dest = vr->StereoEyeBlitDest();
         }
-        if (index == 0 && vr && device && vr->m_BetaColorRedirect && !vr->m_CaptureReentry
-            && !vr->HudPaintActive() && rt && rt != vr->m_BetaColorRedirect
-            && SurfaceMatchesWindowOrBackbuffer(device, rt))
-        {
-            rt = vr->m_BetaColorRedirect;
-            redirectedToEye = true;
-            dest = nullptr;
-        }
         if (index == 0 && vr && device && dest)
         {
             if ((bmvr::TrySteamVrEyeRt() || bmvr::OffscreenWorldMatchesEyes()
@@ -557,8 +549,6 @@ namespace
         IDirect3DSurface9* eyeDepth = nullptr;
         if (vr)
             eyeDepth = vr->McPlaybackEyeDepth();
-        if (!eyeDepth && vr && vr->m_BetaDepthRedirect && vr->m_BetaColorRedirect)
-            eyeDepth = vr->m_BetaDepthRedirect;
         if (!eyeDepth && vr && !vr->McPipelineEnabled() && vr->StereoEyeBlitActive()
             && (bmvr::TrySteamVrEyeRt() || bmvr::OffscreenWorldMatchesEyes()))
         {
@@ -894,17 +884,7 @@ namespace
         D3DVIEWPORT9 vp{};
         const D3DVIEWPORT9* use = pViewport;
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
-        if (pViewport && vr && vr->m_BetaColorRedirect
-            && ViewportMatchesWindow(pViewport->Width, pViewport->Height))
-        {
-            vp = *pViewport;
-            vp.X = 0;
-            vp.Y = 0;
-            vp.Width = vr->m_RenderWidth;
-            vp.Height = vr->m_RenderHeight;
-            use = &vp;
-        }
-        if (use == pViewport && pViewport && vr && vr->D3dRt0IsMcRing())
+        if (pViewport && vr && vr->D3dRt0IsMcRing())
         {
             int cx = 0, cy = 0, cw = 0, ch = 0;
             if (vr->McClipAmbiguousWindowVp(
@@ -1008,20 +988,7 @@ namespace
         RECT expanded{};
         const RECT* use = pRect;
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
-        if (pRect && vr && vr->m_BetaColorRedirect)
-        {
-            const UINT w = static_cast<UINT>(pRect->right - pRect->left);
-            const UINT h = static_cast<UINT>(pRect->bottom - pRect->top);
-            if (ViewportMatchesWindow(w, h))
-            {
-                expanded.left = 0;
-                expanded.top = 0;
-                expanded.right = static_cast<LONG>(vr->m_RenderWidth);
-                expanded.bottom = static_cast<LONG>(vr->m_RenderHeight);
-                use = &expanded;
-            }
-        }
-        if (use == pRect && pRect && vr)
+        if (pRect && vr)
         {
             const UINT w = static_cast<UINT>(pRect->right - pRect->left);
             const UINT h = static_cast<UINT>(pRect->bottom - pRect->top);
@@ -2018,170 +1985,6 @@ static bool SehQueueFunctorInternal(ICallQueue* q, CFunctor* functor)
         ok = false;
     }
     return ok;
-}
-
-namespace
-{
-    using tShaderApiPresent = void (__thiscall*)(void* self);
-    tShaderApiPresent g_OrigShaderApiPresent = nullptr;
-
-    void __fastcall HookShaderApiPresent(void* self, void*)
-    {
-        if (g_OrigShaderApiPresent)
-            g_OrigShaderApiPresent(self);
-        // Do not touch D3D here. The shader device is still inside Present;
-        // creating eye RTs on this stack faults the next SwapBuffers.
-        VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
-        if (vr)
-            vr->m_HeadsetSubmitArmed.store(true, std::memory_order_release);
-    }
-}
-
-void InstallShaderApiPresentHook()
-{
-    static bool done = false;
-    if (done)
-        return;
-    done = true;
-    HMODULE sha = GetModuleHandleA("shaderapidx9.dll");
-    if (!sha)
-    {
-        Game::logMsg("shaderapi Present hook skipped (shaderapidx9.dll not loaded)");
-        return;
-    }
-    auto* target = reinterpret_cast<unsigned char*>(sha) + 0x552A0;
-    if (target[0] != 0x55 || target[1] != 0x8B || target[2] != 0xEC || target[3] != 0x83 || target[4] != 0xEC)
-    {
-        Game::logMsg("shaderapi Present hook skipped (prologue %02X %02X %02X %02X %02X)",
-            target[0], target[1], target[2], target[3], target[4]);
-        return;
-    }
-    if (MH_CreateHook(target, reinterpret_cast<void*>(&HookShaderApiPresent), reinterpret_cast<void**>(&g_OrigShaderApiPresent)) != MH_OK
-        || MH_EnableHook(target) != MH_OK)
-    {
-        Game::logMsg("shaderapi Present hook failed");
-        return;
-    }
-    Game::logMsg("shaderapi Present hook enabled rva=0x552A0 (submit after engine post-present)");
-}
-
-void VR::AfterShaderApiPresent()
-{
-    // The 16:9 window copy letterboxed inside the square eye and flickered
-    // because the headset kept reading the texture we were overwriting.
-    // Stereo copies happen from RenderView, after each eye has drawn.
-}
-
-bool VR::BlitBackbufferEye(int eye, int srcX, int srcY, int srcW, int srcH)
-{
-    if (eye < 0 || eye >= static_cast<int>(L4D2VR_OPENXR_EYE_COUNT) || !g_D3DVR9)
-        return false;
-    if (srcW < 64 || srcH < 64)
-        return false;
-    IDirect3DDevice9* device = nullptr;
-    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
-        return false;
-    const UINT dstW = static_cast<UINT>(srcW);
-    const UINT dstH = static_cast<UINT>(srcH);
-    if (!EnsureOpenXrPublishTextures(device, dstW, dstH))
-    {
-        device->Release();
-        return false;
-    }
-    IDirect3DSurface9* bb = nullptr;
-    if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
-    {
-        device->Release();
-        return false;
-    }
-    const uint32_t slot = m_OpenXrPublishSlot % kOpenXrPublishSlots;
-    RECT src{};
-    src.left = srcX;
-    src.top = srcY;
-    src.right = srcX + srcW;
-    src.bottom = srcY + srcH;
-    m_CaptureReentry = true;
-    const HRESULT hr = device->StretchRect(bb, &src,
-        m_D9OpenXrPublishSurface[eye][slot], nullptr, D3DTEXF_NONE);
-    m_CaptureReentry = false;
-    bb->Release();
-    device->Release();
-    return SUCCEEDED(hr);
-}
-
-void VR::PublishBlittedEyes()
-{
-    if (!m_OpenXrPublishReady)
-        return;
-    const uint32_t slot = m_OpenXrPublishSlot % kOpenXrPublishSlots;
-    for (uint32_t eye = 0; eye < L4D2VR_OPENXR_EYE_COUNT; ++eye)
-    {
-        if (!m_OpenXrPublishDesc[eye][slot].valid)
-            return;
-        m_OpenXrSharedEyeTextures[eye] = m_OpenXrPublishDesc[eye][slot];
-    }
-    m_OpenXrSharedEyeTextureReadyMask.store(L4D2VR_OPENXR_EYES_READY_MASK, std::memory_order_release);
-    const bool prevActive = m_OpenXrPublishActive;
-    m_OpenXrPublishActive = false;
-    const uint32_t frameId = m_OpenXrSubmitFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
-    PublishOpenXrResolvedEyeTextures(frameId, false);
-    m_OpenXrPublishActive = prevActive;
-    m_OpenXrPublishSlot = (slot + 1) % kOpenXrPublishSlots;
-}
-
-bool VR::BeginBetaEyeRender()
-{
-    if (!g_D3DVR9 || m_RenderWidth < 640 || m_RenderHeight < 360)
-        return false;
-    IDirect3DDevice9* device = nullptr;
-    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
-        return false;
-    if (!EnsureOpenXrPublishTextures(device, m_RenderWidth, m_RenderHeight))
-    {
-        device->Release();
-        return false;
-    }
-    if (!m_BetaDepthRedirect)
-    {
-        const HRESULT hr = device->CreateDepthStencilSurface(
-            m_RenderWidth, m_RenderHeight, D3DFMT_D24S8,
-            D3DMULTISAMPLE_NONE, 0, TRUE, &m_BetaDepthRedirect, nullptr);
-        if (FAILED(hr) || !m_BetaDepthRedirect)
-        {
-            Game::logMsg("eye depth create failed hr=0x%08X", static_cast<unsigned>(hr));
-            device->Release();
-            return false;
-        }
-        Game::logMsg("eye depth %ux%u", m_RenderWidth, m_RenderHeight);
-    }
-    const uint32_t slot = m_OpenXrPublishSlot % kOpenXrPublishSlots;
-    m_BetaColorRedirect = m_D9OpenXrPublishSurface[L4D2VR_OPENXR_EYE_LEFT][slot];
-    device->Release();
-    return m_BetaColorRedirect != nullptr;
-}
-
-void VR::EndBetaEyeRender()
-{
-    m_BetaColorRedirect = nullptr;
-}
-
-void VR::PublishMonoEye()
-{
-    if (!m_OpenXrPublishReady)
-        return;
-    const uint32_t slot = m_OpenXrPublishSlot % kOpenXrPublishSlots;
-    const L4D2VROpenXrSharedTextureDesc& src = m_OpenXrPublishDesc[L4D2VR_OPENXR_EYE_LEFT][slot];
-    if (!src.valid)
-        return;
-    m_OpenXrSharedEyeTextures[L4D2VR_OPENXR_EYE_LEFT] = src;
-    m_OpenXrSharedEyeTextures[L4D2VR_OPENXR_EYE_RIGHT] = src;
-    m_OpenXrSharedEyeTextureReadyMask.store(L4D2VR_OPENXR_EYES_READY_MASK, std::memory_order_release);
-    const bool prevActive = m_OpenXrPublishActive;
-    m_OpenXrPublishActive = false;
-    const uint32_t frameId = m_OpenXrSubmitFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
-    PublishOpenXrResolvedEyeTextures(frameId, false);
-    m_OpenXrPublishActive = prevActive;
-    m_OpenXrPublishSlot = (slot + 1) % kOpenXrPublishSlots;
 }
 
 VR::VR(Game* game)
@@ -3674,6 +3477,21 @@ bool VR::CopyEyesToOpenXrPublishSlot(IDirect3DSurface9* left, IDirect3DSurface9*
         return false;
     }
 
+    // Deferred: the previous pair's copy is normally still on the GPU when the
+    // next pair is ready (one frame of overlap). Dropping the new pair
+    // (`throttled`) halved the headset to 45/s on bm_c1a0a (2026-10-14:
+    // pairs=88/s published=44/s throttled=44/s). Wait for that copy, publish
+    // it, then copy this pair: the GPU keeps working on this pair meanwhile
+    // and nothing is dropped. Before the lock: Poll takes the same mutex.
+    if (bmvr::g_OpenXrDeferredPublish)
+    {
+        const uint32_t maxPending = std::min<uint32_t>(
+            std::max<uint32_t>(bmvr::g_OpenXrMaxPending, 1u), kOpenXrMaxPending);
+        PollOpenXrDeferredPublish();
+        if (m_OpenXrPendingCount >= maxPending)
+            WaitOldestOpenXrPending();
+    }
+
     std::lock_guard<std::mutex> lock(m_OpenXrPublishMutex);
     // Always use the consumed-id gate. OpenXrDeferredPublish=false used to
     // round-robin 4 slots at the Present rate (~200/s in-game) while the
@@ -3767,7 +3585,14 @@ bool VR::CopyEyesToOpenXrPublishSlot(IDirect3DSurface9* left, IDirect3DSurface9*
         // WaitDeviceIdle used to drain the whole device. Cap this copy's
         // event so a stuck GPU cannot hang the process; 250ms is still
         // several compositor frames in a low-fps Xen scene.
+        const double waitStart = QpcNowMs();
         pollEvent(q, 250.0);
+        const double waited = QpcNowMs() - waitStart;
+        ++m_OpenXrCopyWaits;
+        m_OpenXrCopyWaitMs += waited;
+        if (waited > m_OpenXrCopyWaitMaxMs)
+            m_OpenXrCopyWaitMaxMs = waited;
+        m_OpenXrCopyThread = GetCurrentThreadId();
         PublishOpenXrPair(slot, pend);
         return true;
     }
@@ -4086,12 +3911,6 @@ void VR::ProcessInput()
     }
 
     m_ProcessInputEnabled = true;
-    static int s_ctrlInput;
-    if (m_ControllerPoseValid && s_ctrlInput < 2)
-    {
-        Game::logMsg("Controller tracking input");
-        ++s_ctrlInput;
-    }
 
     vr::InputAnalogActionData_t analog{};
     float walkX = 0.f, walkY = 0.f;
@@ -4452,16 +4271,6 @@ UINT VR::KnownWindowHeight() const
 
 void VR::ChooseEyeRenderSize()
 {
-    if (m_LockEyeToWindow)
-    {
-        uint32_t w = 0, h = 0;
-        if (bmvr::QueryWindowClientSize(w, h) && w >= 640 && h >= 360)
-        {
-            m_RenderWidth = w;
-            m_RenderHeight = h;
-        }
-        return;
-    }
     PollSteamVrRecommendedSize();
 
     if (m_CreatedVRTextures.load(std::memory_order_acquire)
@@ -6395,9 +6204,6 @@ bool VR::TryGetMeleeAim(Vector& origin, QAngle& angles) const
 void VR::UpdateAimCrosshair()
 {
     m_AimCrosshairValid = false;
-    // ProcessInput runs on D3D Present. TraceRay from that thread makes
-    // Source exit as soon as a controller pose exists.
-    return;
     if (!bmvr::g_VrCrosshair || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen)
         return;
     // The scope draws its own centred crosshair, and while zoomed the shot no
@@ -6864,12 +6670,6 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
         ++s_ctrlLog;
     }
     bmvr::EndRisky(L"ctrl_pose");
-    static int s_stored;
-    if (s_stored < 2)
-    {
-        Game::logMsg("Controller tracking stored");
-        ++s_stored;
-    }
 }
 
 vr::ETrackedControllerRole VR::AimControllerRole() const
@@ -9272,6 +9072,8 @@ void VR::BeginStereoFramePose()
             AwaitOpenXrCompositorFrame();
         // Keep the WaitPoses latch. Consuming a newer WaitFrame here would
         // draw a pose the helper may already have EndFrame'd.
+        ++m_OpenXrStereoPairs;
+        m_OpenXrPairThread = GetCurrentThreadId();
     }
     UpdateTracking();
     {
@@ -9366,7 +9168,8 @@ void VR::LogOpenXrPublishRate()
     Game::logMsg("OpenXR publish rate present=%.0f/s published=%.0f/s skipStale=%.0f/s skipVsync=%.0f/s skipNoPose=%.0f/s slots=%u copy=%d "
         "deferred=%.0f/s throttled=%.0f/s helperHold=%.0f/s dropped=%.0f/s pending=%u/%u maxPending=%u "
         "paceWait=%.0f/s avg=%.2fms max=%.2fms await=%.0f/s avg=%.2fms max=%.2fms handoffWait=%.0f/s "
-        "helperHz=%.0f helperFeedback=%d consumedLag=%d",
+        "helperHz=%.0f helperFeedback=%d consumedLag=%d pairs=%.0f/s "
+        "copyWait=%.0f/s avg=%.2fms max=%.2fms pairTid=%u copyTid=%u presentTid=%u",
         m_OpenXrSubmitAttempts * scale, m_OpenXrPublishes * scale,
         m_OpenXrSkippedNoNewFrame * scale, m_OpenXrSkipSameVsync * scale,
         m_OpenXrSkipStereoNoPose * scale,
@@ -9385,7 +9188,16 @@ void VR::LogOpenXrPublishRate()
         helperDelta * scale,
         m_OpenXrHelperFeedbackLive ? 1 : 0,
         m_OpenXrHelperFeedbackLive
-            ? static_cast<int>(latestFrame - m_OpenXrHelperConsumedFrameId) : -1);
+            ? static_cast<int>(latestFrame - m_OpenXrHelperConsumedFrameId) : -1,
+        m_OpenXrStereoPairs * scale,
+        m_OpenXrCopyWaits * scale,
+        m_OpenXrCopyWaits ? m_OpenXrCopyWaitMs / m_OpenXrCopyWaits : 0.0,
+        m_OpenXrCopyWaitMaxMs,
+        m_OpenXrPairThread, m_OpenXrCopyThread, static_cast<unsigned>(GetCurrentThreadId()));
+    m_OpenXrCopyWaits = 0;
+    m_OpenXrCopyWaitMs = 0.0;
+    m_OpenXrCopyWaitMaxMs = 0.0;
+    m_OpenXrStereoPairs = 0;
     m_OpenXrPublishRateTick = now;
     m_OpenXrSubmitAttempts = 0;
     m_OpenXrPublishes = 0;
@@ -9593,8 +9405,8 @@ ICallQueue* VR::ProbeCallQueue()
         if (!m_Hl2vrCallQueueProbed)
         {
             m_Hl2vrCallQueueProbed = true;
-            Game::logMsg("HL2VR GetCallQueue probe slot=%d q=%p (185=BM+39, 146=Source)",
-                m_Hl2vrCallQueueSlot, (void*)q);
+            Game::logMsg("HL2VR GetCallQueue probe slot=%d q=%p (%d=BM, 146=Source)",
+                m_Hl2vrCallQueueSlot, (void*)q, Offsets::kIMatRenderContext_GetCallQueueSlotBmShift);
         }
     }
     SehReleaseMatContext(ctx);
@@ -10722,12 +10534,8 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
 
     bool leftOk = createEye(Texture_LeftEye, &m_D9LeftEyeTexture, &m_D9LeftEyeSurface, m_VKLeftEye);
     bool rightOk = createEye(Texture_RightEye, &m_D9RightEyeTexture, &m_D9RightEyeSurface, m_VKRightEye);
-    // public-beta: a D24S8 eye depth surface created for the headset copy
-    // faults the next shaderapidx9 Present. The copy only blits color.
-    const bool depthOk = m_LockEyeToWindow
-        ? false
-        : (createDepth(Texture_LeftEye, &m_D9LeftEyeDepthSurface)
-            && createDepth(Texture_RightEye, &m_D9RightEyeDepthSurface));
+    const bool depthOk = createDepth(Texture_LeftEye, &m_D9LeftEyeDepthSurface)
+        && createDepth(Texture_RightEye, &m_D9RightEyeDepthSurface);
     // Capture stays at HWND size. Growing this to the eye wiped the 2560x1440
     // GameUI copy and left OpenXR publishing an empty 3168 RT (HMD black).
     UINT copyW = KnownWindowWidth();
@@ -11572,12 +11380,8 @@ void VR::BindHudOverlayWhileQueueLocked()
     }
 }
 
-void __declspec(noinline) VR::CreateVRTextures()
+void VR::CreateVRTextures()
 {
-    // public-beta: entering this body from Present faults SwapBuffers
-    // (shaderapidx9) even after IsInGame. Headset eye RTs stay off until
-    // that path is safe.
-    return;
     Game::logMsg("CreateVRTextures begin presents=%u", m_EligiblePresents);
     if (!g_D3DVR9)
         return;
@@ -11924,10 +11728,8 @@ bool VR::BlitCurrentGameColorTo(IDirect3DSurface9* dst, bool flushGpu)
     return ok;
 }
 
-void __declspec(noinline) VR::CaptureFrameBeforePresent()
+void VR::CaptureFrameBeforePresent()
 {
-    // Same SwapBuffers fault as CreateVRTextures. Do not StretchRect yet.
-    return;
     if (!m_IsVREnabled || !g_D3DVR9)
         return;
     if (McPipelineEnabled())
@@ -12719,14 +12521,7 @@ void VR::Update()
     // pose, or input during that window — Present is about to stop for
     // material precache, and overnight Update work is not what unblocks it.
     if (m_GameplayEligible && !inGame)
-    {
-        // Still sample the headset. Returning before this froze the last
-        // menu pose for the whole map, so the view never followed the head.
-        if (m_OpenXrHelperBridgeActive && !m_PosesWaitedThisFrame)
-            ConsumeOpenXrTracking();
-        UpdateTracking();
         return;
-    }
 
     if (m_OpenXrHelperBridgeActive && !m_PosesWaitedThisFrame)
         ConsumeOpenXrTracking();
@@ -12856,8 +12651,7 @@ void VR::Update()
             bmvr::BeginRisky(L"menu_vr");
             s_menuRisky = 1;
         }
-        if (m_GameplayEligible && m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame())
-            CreateVRTextures();
+        CreateVRTextures();
         if (m_CreatedVRTextures.load(std::memory_order_acquire) && s_menuRisky == 1)
         {
             bmvr::EndRisky(L"menu_vr");

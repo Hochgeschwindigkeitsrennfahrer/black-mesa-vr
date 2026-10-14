@@ -9314,6 +9314,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 bool layerReady = false;
                 bool poseMono2d = false;
                 bool addedMono2dQuad = false;
+                // Default is this WaitFrame. Overwritten with the pose time
+                // the eyes were drawn for once that pose is latched.
+                XrTime submitDisplayTime = frameState.predictedDisplayTime;
                 uint32_t overlayLayerCount = 0;
                 std::array<XrCompositionLayerProjectionView, 2> projectionViews{};
                 std::array<XrCompositionLayerQuad, kMaxOpenXrOverlayLayers> overlayLayers{};
@@ -9445,6 +9448,20 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                 ? "game render"
                                 : "cached game render")
                             : "runtime located";
+                        // The eyes were drawn for the previous WaitFrame's
+                        // predicted time. Stamping xrEndFrame with this
+                        // frame's predicted time tells the runtime that old
+                        // pose is already current, so it does not timewarp
+                        // the ~11ms of head motion and the picture hitches.
+                        // Older than 40ms is a stall; keep the current
+                        // predicted time so xrEndFrame is not rejected.
+                        if (useGameRenderPoseForProjection && projectionRenderPose.displayTime > 0)
+                        {
+                            const XrTime poseTime = static_cast<XrTime>(projectionRenderPose.displayTime);
+                            const int64_t skewNs = static_cast<int64_t>(frameState.predictedDisplayTime) - static_cast<int64_t>(poseTime);
+                            if (skewNs >= 0 && skewNs <= 40000000)
+                                submitDisplayTime = poseTime;
+                        }
 
                         if (sharedTexturesReady && eyeSwapchainsHaveContent)
                         {
@@ -9998,7 +10015,21 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 if (blittedGpuWork)
                     SignalBlitFence(blittedSharedTextureFrameId);
                 XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
-                endInfo.displayTime = frameState.predictedDisplayTime;
+                endInfo.displayTime = submitDisplayTime;
+                if (submitDisplayTime != frameState.predictedDisplayTime)
+                {
+                    static bool s_loggedRenderPoseTime = false;
+                    if (!s_loggedRenderPoseTime)
+                    {
+                        s_loggedRenderPoseTime = true;
+                        const double skewMs = static_cast<double>(
+                            static_cast<int64_t>(frameState.predictedDisplayTime) -
+                            static_cast<int64_t>(submitDisplayTime)) / 1.0e6;
+                        m_Log.Print(
+                            "OpenXR EndFrame displayTime is the render pose time (%.2f ms before this WaitFrame) so the runtime timewarps that motion",
+                            skewMs);
+                    }
+                }
                 endInfo.environmentBlendMode = m_BlendMode;
                 endInfo.layerCount = layerCount;
                 endInfo.layers = layerCount ? layers.data() : nullptr;
@@ -10057,14 +10088,18 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             : "OpenXR Vulkan frame submitted without projection layer"));
                     if (submittedFrames == 1 || (submittedFrames % 60) == 0)
                     {
+                        const double poseSkewMs = static_cast<double>(
+                            static_cast<int64_t>(frameState.predictedDisplayTime) -
+                            static_cast<int64_t>(submitDisplayTime)) / 1.0e6;
                         m_Log.Print("Submitted OpenXR Vulkan frame %u layers=%u projection=%u overlays=%u mono2dQuad=%u blitSkip=%u fenceBusy=%u "
-                            "waitFrameAvg=%.2fms waitFrameWin=%.2fms waitFrameLast=%.2fms fenceBusyFrames=%u",
+                            "waitFrameAvg=%.2fms waitFrameWin=%.2fms waitFrameLast=%.2fms fenceBusyFrames=%u poseSkewMs=%.2f",
                             submittedFrames, layerCount, submitProjectionLayer ? 1u : 0u, overlayLayerCount,
                             addedMono2dQuad ? 1u : 0u, m_BlitSkips, OutstandingBlitFences(),
                             compositorFrames ? waitFrameDtMsSum / compositorFrames : 0.0,
                             waitFrameWindowCount ? waitFrameWindowSum / waitFrameWindowCount : 0.0,
                             waitFrameLastMs,
-                            fenceBusyFrames);
+                            fenceBusyFrames,
+                            poseSkewMs);
                     }
                 }
                 if (options.targetFrames > 0 && submittedFrames >= options.targetFrames)

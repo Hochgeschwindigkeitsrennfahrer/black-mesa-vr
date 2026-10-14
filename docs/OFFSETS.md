@@ -19,9 +19,41 @@ What moved:
 
 `CEnvLaserDot::Draw` no longer matches its old prologue, so that hook skips. `ImpulseCommands` at the old server RVA no longer contains `m_nImpulse`, so that passthrough hook skips too.
 
-Hooking `CEngineVGui::Paint` (`engine.dll+0x239900`) and calling through the trampoline makes this beta exit on the first menu paint, before any headset frame. Leaving that hook off, the backbuffer menu capture submits to OpenXR. The machine skip file `bmvr_skip.txt` records `vgui_paint` from that failure.
+The lightcache walker (stride `0x1E0`) treats a real next index as a cycle, writes the sentinel into the pool, and `engine.dll` then faults; the hook calls the engine function instead.
 
-`C_BlackMesaViewModel` vtable slot `0x398` is `CalcViewModelView` (`client.dll+0x2A1170`). The VR body of that hook access-violates during `bm_c1a0a` load (`C_BasePlayer` slot `0x404` at `client.dll+0x7A210` calls it). The detour catches that and calls the engine with the original eye pose. The lightcache walker (stride `0x1E0`) treats a real next index as a cycle, writes the sentinel into the pool, and `engine.dll` then faults; the hook calls the engine function instead. Material render-target and viewport detours, installed together, fault in `CBlackMesaViewRender` at `client.dll+0x1F303C` (call to a stack address) after LevelInit, so those detours stay off on this build.
+## public-beta buildid 25844216 (2026-10-10)
+
+`client.dll`, `server.dll`, `engine.dll`, `vgui2.dll`, `vguimatsurface.dll`, `studiorender.dll`, and `stdshader_dx9.dll` were rebuilt. `materialsystem.dll` and `shaderapidx9.dll` are the 2026-10-02 files.
+
+### Two interface vtables gained a slot
+
+These broke the stable path on both beta builds. Every crash that the 25607072 notes blamed on VGui_Paint, the material RT/viewport detours (`client.dll+0x1F303C`, "call to a stack address"), CalcViewModelView, CreateMove pre-work, eye-RT creation (`shaderapidx9+0x553FF`, ESI = device `this` garbage), and the first controller pose was a callee popping the wrong number of stack bytes. The caller's saved registers came back wrong or ESP was off on return.
+
+- `VEngineClient015` (`engine.dll`): a 1-arg `ret 4` method sits at slot 26. `IsInGame` is slot 27 (`cmp [signonState], 6; setz al; ret`). `GetLevelName` / `GetLevelNameShort` are 52 / 53 (52 returns `"Dedicated Server"` when dedicated). `IsPaused` is 88, `ClientCmd_Unrestricted` 109. On 25607072 the same shift was already live: `IsInGame` stayed false through gameplay and the "short" map getter returned `maps/bm_c1a0a.bsp`. `src/sdk/sdk.h` has the extra slot.
+- `IMatRenderContext` (`materialsystem.dll`): one slot inserted between 149 and 180. `OverrideAlphaWriteEnable` is slot 181 (`+0x2D4`, both contexts `ret 8`, forwards to shaderapi `+0x46C`). Slot 180 is a 0-arg `ret 0`; calling it with two args corrupted EDI in `PreparePauseHudForVgui` (exit on the first in-game pause HUD). `GetCallQueue` is slot 186: the queued context returns `ecx+0x298`, the immediate context returns 0. Old slot 185 writes `[ecx+0x208] = 0`. Slots 7, 39, 141, 143, 147, 149 held.
+
+`IEngineTrace::TraceRay` (slot 5), `IVModelInfoClient` GetModel/GetModelIndex/GetModelName (1–3), `VClientEntityList003`, `VEngineVGui001`, IClientMode slots 30/32, and IClientRenderable attachment slots 36–38 held.
+
+### client.dll moved about −0xE160 (−0xDBCC to −0xDE80 near 0x16xxxx–0x20xxxx)
+
+Signature-scanned hooks follow automatically. Fixed RVAs updated in `src/offsets.h`:
+
+| Name | 25607072 | 25844216 | Evidence |
+| --- | --- | --- | --- |
+| CalcViewModelView | `0x2A1170` | `0x29BA10` | `C_BlackMesaViewModel` vtable slot 230 (RTTI). Prologue changed. |
+| GetViewModelFOV | `0x217060` | `0x209EF0` | `ClientModeBlackMesaNormal` vtable slot 32. |
+| UpdateFlashlightState | `0x11BD80` | `0x10DC20` | Only xref of `"CClientShadowMgr::UpdateFlashlightState"`. |
+| SetAbsOrigin / SetAbsAngles | `0xAF980` / `0xAF860` | `0xA1820` / `0xA1700` | `ucomiss [esi+0x294]` / `[esi+0x2D0]` prologue (checked at call time). |
+| Weapon_ShootPosition (client) | `0x7C280` | `0x6E120` | Thunk bytes `55 8B EC 8B 11 FF 75 08 FF 92 68 02 00 00`. |
+| GetAttachment vec / matrix | `0x97CE0` / `0x97C10` | `0x89B80` / `0x89AB0` | `C_BaseAnimating` renderable vtable slots 38 / 37. |
+| IClientMode global | `0x6DEA90` | `0x6D5B58` | Operand of the `g_pClientMode` signature. |
+| gpGlobals | `0x553A04` | `0x54FA04` | `mov reg,[imm]; movss xmm,[reg+0xC]` (curtime), 142 sites. |
+
+`CBaseEntity::EmitSound` and the particle-system manager/find are not re-verified; the old RVAs are mid-function. Those calls are off (`kCBaseEntity_EmitSoundVerified`, `kParticleSystemMgrVerified`).
+
+Engine RVAs moved +0x10 (DrawModelExecute `0x114110`, LightcacheFindNearest `0x1D1A70`, GetScreenAspectRatio `0x101490`) and VGui_Paint `+0x1300` (`0x23AC00`); signatures follow.
+
+With those fixed, the stable main render path runs unchanged on this beta: `bm_c1a0a`, `mat_queue_mode 2` multicore, `_rt_FullFrameFB` grown to the 3168x3104 eye, two-eye HMD-fb stereo with IPD origins, ~90 published frames/s, pause GameUI panel, no fault after several minutes.
 
 The table below is the pre-beta scan. Current RVAs live in `src/offsets.h`.
 

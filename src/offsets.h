@@ -75,7 +75,7 @@ public:
     static constexpr int kC_VGuiScreen_PixelHeight = 0x6A4;
     static constexpr int kC_VGuiScreen_PanelPtr = 0x72C;
     // IClientMode* in client.dll .data. C_VGuiScreen::ClientThink 0xFB7F0.
-    static constexpr int kClientModeGlobalRva = 0x6DEA90;
+    static constexpr int kClientModeGlobalRva = 0x6D5B58;
     static constexpr int kIClientMode_ActivateInGameVGuiContext = 30;
     // vgui2 VGUI_InputInternal001 as used by ClientThink (no extra GetMouseFocus).
     static constexpr int kVguiVtInternalCursorMoved = 0x108 / 4;
@@ -87,18 +87,21 @@ public:
     static constexpr int kCBasePlayer_EyePositionVt = 0x268;
     static constexpr int kCBasePlayer_EyeAnglesVt = 0x26C;
 
-    Offset CalcViewModelView{ "client.dll", 0x2A1170,
-        "55 8B EC 83 EC 24 53 56 8B 75 08 57 8B F9 85 F6" };
+    // Build 25844216 (2026-10-10): C_BlackMesaViewModel vtable slot 230 (0x398).
+    // Register allocation changed, so the 25607072 prologue no longer matches.
+    Offset CalcViewModelView{ "client.dll", 0x29BA10,
+        "55 8B EC 83 EC 24 53 56 57 8B 7D 08 8B F1 85 FF" };
 
     // Ghidra client.dll image 0x10000000. FUN_1029d930 (CalcViewModelView)
     // ends in these. FUN_100af720 writes abs origin at this+0x294 and calls
     // FUN_10077220(this,1) to invalidate; FUN_100af600 writes abs angles at
     // this+0x2D0 via FUN_10077220(this,2). Raw field writes skip invalidate,
     // so bones/render origin stay on the camera pivot.
-    // public-beta: both moved +0x260. Each compares this+0x294 / this+0x2D0
-    // (ucomiss) before writing. Field offsets themselves did not move.
-    static constexpr int kCBaseEntity_SetAbsOrigin = 0xAF980;
-    static constexpr int kCBaseEntity_SetAbsAngles = 0xAF860;
+    // Build 25844216 (2026-10-10): both moved -0xE160 from 25607072. Each
+    // compares this+0x294 / this+0x2D0 (ucomiss) before writing; the call
+    // site checks those bytes. Field offsets themselves did not move.
+    static constexpr int kCBaseEntity_SetAbsOrigin = 0xA1820;
+    static constexpr int kCBaseEntity_SetAbsAngles = 0xA1700;
     // C_BaseEntity abs origin written by SetAbsOrigin (Ghidra client FUN_100af720).
     static constexpr int kCBaseEntity_AbsOrigin = 0x294;
 
@@ -108,11 +111,12 @@ public:
     // The weapon wheel plays weapon_*.Draw on the weapon instead, and HUD
     // ticks go through IEngineSound::EmitAmbientSound (2D).
     static constexpr int kCBaseEntity_EmitSound = 0x1D80D0;
+    static constexpr bool kCBaseEntity_EmitSoundVerified = false;
 
     // C_BlackMesaPlayer vtable +0x414. Thunk: call EyePosition (+0x268) and
     // return that vector. Distinct from EyePosition (do not hook +0x268 —
     // that moves the camera). Bytes: 55 8B EC 8B 11 FF 75 08 FF 92 68 02 00 00.
-    static constexpr int kCBasePlayer_Weapon_ShootPosition = 0x7C280;
+    static constexpr int kCBasePlayer_Weapon_ShootPosition = 0x6E120;
 
     // server.dll CBlackMesaPlayer vtable +0x23C. Same thunk onto EyePosition
     // at +0x230. Bytes: 55 8B EC 8B 11 FF 75 08 FF 92 30 02 00 00.
@@ -146,8 +150,8 @@ public:
 
     // C_BaseAnimating IClientRenderable GetAttachment. `this` is entity+4.
     // Vec: FUN_10097a80 (index, Vector*, QAngle*). Matrix: FUN_100979b0.
-    static constexpr int kCBaseAnimating_GetAttachmentVec = 0x97CE0;
-    static constexpr int kCBaseAnimating_GetAttachmentMatrix = 0x97C10;
+    static constexpr int kCBaseAnimating_GetAttachmentVec = 0x89B80;
+    static constexpr int kCBaseAnimating_GetAttachmentMatrix = 0x89AB0;
 
     // IClientRenderable (entity+4) vtable: LookupAttachment +0x90, GetAttachment
     // origin/angles +0x98. Ghidra TAU Fire02 path (FUN_10234330).
@@ -202,6 +206,8 @@ public:
     // client.dll CParticleSystemMgr singleton used as this for FUN_10313390.
     static constexpr int kParticleSystemMgr = 0x5631CC;
     static constexpr int kParticleSystemMgr_Find = 0x313390;
+    // Not re-verified on client build 25844216; the old RVAs are mid-function.
+    static constexpr bool kParticleSystemMgrVerified = false;
     static constexpr int kCParticleDef_ViewModelEffect = 0x200;
     static constexpr int kCParticleDef_Name = 0x228;
     static constexpr int kCNewParticleEffect_Def = 0x58;
@@ -212,7 +218,7 @@ public:
     // client.dll gpGlobals (CGlobalVarsBase*). CHudAir FUN_10271c90 subtracts
     // curtime at +0xC from m_AirFinished. Same .data neighborhood as the leaf
     // system pointer.
-    static constexpr int kClientGpGlobalsPtr = 0x553A04;
+    static constexpr int kClientGpGlobalsPtr = 0x54FA04;
     static constexpr int kCGlobalVars_curtime = 0xC;
     // DT_LocalPlayerExclusive (FUN_100b7240): m_nWaterLevel +0x180 (byte),
     // m_AirFinished +0x16e4 (float). WL_Eyes == 3 is fully underwater.
@@ -263,7 +269,7 @@ public:
 
     // IClientMode slot 32. Reads viewmodel_fov_override then weapon GetViewModelFOV
     // (~54). That is why console fov does not change gun/near scale in VR.
-    Offset GetViewModelFOV{ "client.dll", 0x217060,
+    Offset GetViewModelFOV{ "client.dll", 0x209EF0,
         "55 8B EC 51 8B 0D ? ? ? ? 81 F9 ? ? ? ? 75 16 F3 0F 10 0D" };
 
     Offset AdjustEngineViewport{ "client.dll", 0x110520,
@@ -355,11 +361,15 @@ public:
     static constexpr int kIMatRenderContext_PushRT6 = 0x23C;
     static constexpr int kIMatRenderContext_PopRT = 0x24C;
     // IMatRenderContext::GetCallQueue. HL2VR/Source 2013 absolute slot 146.
-    // BM 6-arg PushRT is slot 143 vs Source 104 (~+39). Probe 185 first, then
-    // 146, under SEH. Do not latch 146 if QueueFunctorInternal SEH-fails — that
-    // object is not ICallQueue (Index SteamVR 2026-09-09: published=0/s).
+    // BM 6-arg PushRT is slot 143 vs Source 104 (~+39). Probe the BM slot
+    // first, then 146, under SEH. Do not latch 146 if QueueFunctorInternal
+    // SEH-fails — that object is not ICallQueue (Index SteamVR 2026-09-09).
+    // public-beta materialsystem inserted one slot between 149 and 180:
+    // CMatQueuedRenderContext slot 186 is `lea eax,[ecx+0x298]; ret` and
+    // CMatRenderContext slot 186 returns 0. Old slot 185 now writes
+    // [ecx+0x208] = 0, so probing it corrupts the context.
     static constexpr int kIMatRenderContext_GetCallQueueSlotSource = 146;
-    static constexpr int kIMatRenderContext_GetCallQueueSlotBmShift = 185;
+    static constexpr int kIMatRenderContext_GetCallQueueSlotBmShift = 186;
 
     // IMaterialSystem vtable is shifted vs L4D2 (GetBackBufferFormat returned a
     // pointer). Call these by RVA. BeginRT no-ops after startup unless
@@ -436,7 +446,9 @@ public:
     // FlashlightState_t: origin float[0..2], forward float[3..5], fov float[9].
     // CClientShadowMgr::UpdateFlashlightState. public-beta +0x260.
     // Pushes the string "CClientShadowMgr::UpdateFlashlightState".
-    static constexpr int kUpdateFlashlightState = 0x11BD80;
+    // client.dll build 25844216 (2026-10-10). 0x11BD80 is mid-function and
+    // the detour AVs at client+0x11B6A4 on startup (exit code 1).
+    static constexpr int kUpdateFlashlightState = 0x10DC20;
 
     // L4D2 leftover referenced by copied sdk.h melee helpers. Unused on Black Mesa.
     struct { int address = 0; } GetMeleeWeaponInfoClient;
