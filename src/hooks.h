@@ -78,6 +78,7 @@ typedef void(__thiscall* tVgui_Paint)(void* thisptr, int mode);
 typedef void(__thiscall* tGetBackBufferDimensions)(void* thisptr, int& width, int& height);
 typedef void(__thiscall* tGetScreenSize)(void* thisptr, int& width, int& height);
 typedef float(__thiscall* tGetScreenAspectRatio)(void* thisptr);
+typedef void(__thiscall* tComputeViewMatrices)(void* thisptr, void* worldToView, void* viewToProjection, void* worldToProjection);
 typedef ITexture*(__thiscall* tCreateNamedRTEx)(void* thisptr, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags);
 typedef void(__thiscall* tEndRTAlloc)(void* thisptr);
 typedef void(__thiscall* tDrawFilledRect)(void* thisptr, int x0, int y0, int x1, int y1);
@@ -145,6 +146,7 @@ public:
     static inline Hook<tGetBackBufferDimensions> hkGetBackBufferDimensions;
     static inline Hook<tGetScreenSize> hkGetScreenSize;
     static inline Hook<tGetScreenAspectRatio> hkGetScreenAspectRatio;
+    static inline Hook<tComputeViewMatrices> hkComputeViewMatrices;
     static inline Hook<tCreateNamedRTEx> hkCreateNamedRTEx;
     static inline Hook<tEndRTAlloc> hkEndRTAlloc;
     static inline Hook<tDrawFilledRect> hkDrawFilledRect;
@@ -211,6 +213,7 @@ public:
     static void __fastcall dGetBackBufferDimensions(void* ecx, void* edx, int& width, int& height);
     static void __fastcall dGetScreenSize(void* ecx, void* edx, int& width, int& height);
     static float __fastcall dGetScreenAspectRatio(void* ecx, void* edx);
+    static void __fastcall dComputeViewMatrices(void* ecx, void* edx, void* worldToView, void* viewToProjection, void* worldToProjection);
     static ITexture* __fastcall dCreateNamedRTEx(void* ecx, void* edx, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags);
     static void __fastcall dEndRTAlloc(void* ecx, void* edx);
     static void __fastcall dDrawFilledRect(void* ecx, void* edx, int x0, int y0, int x1, int y1);

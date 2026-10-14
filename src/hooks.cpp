@@ -6,6 +6,27 @@
 #include "bmvr_flags.h"
 #include <intrin.h>
 
+// The areaportal setup's call into ComputeViewMatrices (E8 rel32 just before
+// kAreaPortalComputeViewReturnRva) must target `fn`; otherwise this is another
+// engine build and the return-address filter would never match.
+static bool AreaPortalComputeViewCallSiteOk(int fn)
+{
+    const uintptr_t engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
+    if (!engine || !fn)
+        return false;
+    const uintptr_t ret = engine + Offsets::kAreaPortalComputeViewReturnRva;
+    const auto* call = reinterpret_cast<const unsigned char*>(ret - 5);
+    bool ok = false;
+    __try
+    {
+        ok = call[0] == 0xE8
+            && ret + *reinterpret_cast<const int32_t*>(call + 1) == static_cast<uintptr_t>(fn);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+    Game::logMsg("Areaportal ComputeViewMatrices call site %s", ok ? "ok" : "MISMATCH (hook skipped)");
+    return ok;
+}
+
 // Offset of addr inside server.dll (0 if outside/unknown). AimDebug and the
 // shot-origin caller whitelist identify call sites by return address.
 static uint32_t ServerRva(uintptr_t addr)
@@ -216,6 +237,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkGetBackBufferDimensions, "GetBackBufferDimensions");
     enableIfReady(hkGetScreenSize, "GetScreenSize");
     enableIfReady(hkGetScreenAspectRatio, "GetScreenAspectRatio");
+    enableIfReady(hkComputeViewMatrices, "ComputeViewMatrices");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -285,6 +307,10 @@ int Hooks::initSourceHooks()
         hkGetScreenSize.createHook((LPVOID)o.GetScreenSize.address, &dGetScreenSize);
     if (o.GetScreenAspectRatio.valid && !hkGetScreenAspectRatio.pTarget)
         hkGetScreenAspectRatio.createHook((LPVOID)o.GetScreenAspectRatio.address, &dGetScreenAspectRatio);
+    // OffCenterEyes only: the areaportal pass must see the centred union view.
+    if (bmvr::g_OffCenterEyes && o.ComputeViewMatrices.valid && !hkComputeViewMatrices.pTarget
+        && AreaPortalComputeViewCallSiteOk(o.ComputeViewMatrices.address))
+        hkComputeViewMatrices.createHook((LPVOID)o.ComputeViewMatrices.address, &dComputeViewMatrices);
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
@@ -7147,6 +7173,39 @@ void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& hei
             width, height, fbW, fbH);
         ++s_ssLog;
     }
+}
+
+// Areaportal culling with OffCenterEyes. The engine's areaportal setup
+// (engine+0x138CF0) copies the current view, sets its screen window to the
+// centred +-tan(fov/2) of that view (fov/aspect = the union frustum), then
+// projects doorways with the copy's ComputeViewMatrices — which honours
+// m_bOffCenter and so maps each eye's own sub-frustum onto -1..1. Doorway
+// rects then land in the wrong part of the window and rooms behind them were
+// culled while in view (2026-10-11 / 10-14). Clearing the flag on that
+// private copy gives the union projection, which matches the window; the
+// union contains both eyes, so culling stays conservative.
+void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToView, void* viewToProjection, void* worldToProjection)
+{
+    (void)edx;
+    static const uintptr_t s_engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
+    const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if (ecx && s_engine && ret == s_engine + Offsets::kAreaPortalComputeViewReturnRva
+        && m_VR && m_VR->m_OffCenterActive)
+    {
+        auto* view = static_cast<CViewSetup*>(ecx);
+        if (view->m_bOffCenter)
+        {
+            view->m_bOffCenter = false;
+            static int s_log;
+            if (s_log < 2)
+            {
+                Game::logMsg("Areaportal view: off-centre cleared on the portal copy (fov=%.1f aspect=%.3f)",
+                    view->fov, view->m_flAspectRatio);
+                ++s_log;
+            }
+        }
+    }
+    hkComputeViewMatrices.fOriginal(ecx, worldToView, viewToProjection, worldToProjection);
 }
 
 float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)

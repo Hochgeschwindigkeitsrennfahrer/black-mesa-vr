@@ -401,6 +401,15 @@ public:
     Offset GetScreenAspectRatio{ "engine.dll", 0x1012D0,
         "55 8B EC 8B 0D ? ? ? ? 83 EC 0C 81 F9 ? ? ? ? 75 16 F3 0F 10 0D" };
 
+    // CViewSetup::ComputeViewMatrices(worldToView, viewToProjection,
+    // worldToProjection), thiscall, ret 0xC. Honours m_bOffCenter (0xEC).
+    // The areaportal view setup (engine+0x138CF0) calls it on its private
+    // view copy (engine+0x3F5820) and returns to engine+0x138DF3; it pairs
+    // the result with a centred +-tan(fov/2) window.
+    Offset ComputeViewMatrices{ "engine.dll", 0x1008B0,
+        "55 8B EC 51 56 8B F1 57 F3 0F 10 86 E8 00 00 00 0F 2E 05", 0, true };
+    static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x138DF3;
+
     Offset ProcessUsercmds{ "server.dll", 0x5320F0,
         "55 8B EC B8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 08", 0, true };
 
