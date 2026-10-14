@@ -5160,6 +5160,34 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             }
         }
     }
+    // Menu background maps / loading (not gameplay): WorldRenderAtEyeSize
+    // grew _rt_FullFrameFB to the eye size, but these views still render at
+    // the window size into its top-left. BM's final copy (dev/motion_blur)
+    // then sampled the whole eye-sized texture, so the window (and the VR
+    // menu panel) showed the background squeezed into the top-left with
+    // stale streaks below and right (2026-10-14). Sample the drawn part (the
+    // window client size) only; downsample passes draw to a smaller dest.
+    uint32_t menuWinW = 0, menuWinH = 0;
+    if (m_VR && eyeW >= 640 && eyeH >= 360
+        && !(m_VR->IsGameplayEligible() && EngineInGame())
+        && !StereoEyeWorldActive() && !OffscreenEyePassActive()
+        && std::abs(origSrcW - eyeW) <= 32 && std::abs(origSrcH - eyeH) <= 32
+        && srcX0 <= 0.5f && srcY0 <= 0.5f
+        && srcX1 >= static_cast<float>(origSrcW) - 2.f && srcY1 >= static_cast<float>(origSrcH) - 2.f
+        && bmvr::QueryWindowClientSize(menuWinW, menuWinH)
+        && menuWinW >= 640 && menuWinH >= 360
+        && origSrcW >= static_cast<int>(menuWinW) + 32 && origSrcH >= static_cast<int>(menuWinH) + 32)
+    {
+        srcX1 = srcX0 + static_cast<float>(menuWinW) - 1.f;
+        srcY1 = srcY0 + static_cast<float>(menuWinH) - 1.f;
+        static int s_menuDssr;
+        if (s_menuDssr < 4)
+        {
+            Game::logMsg("DSSR menu %s: grown src %dx%d, uv limited to the drawn %ux%u (dest %dx%d)",
+                matName, origSrcW, origSrcH, menuWinW, menuWinH, width, height);
+            ++s_menuDssr;
+        }
+    }
     static int s_dssrLog;
     static int s_stereoDssrLog;
     static char s_seen[24][80];
