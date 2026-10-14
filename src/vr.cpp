@@ -4092,8 +4092,12 @@ void VR::ProcessInput()
                 s_sprintSinceMs = GetTickCount();
             }
             s_sprintHeld = sprintHeld;
-            if (m_SprintLatched && nx * nx + ny * ny < 0.2f * 0.2f
+            // Easing off the stick (below half deflection) also ends it, and
+            // the trigger ends it at once: BM blocks firing while sprinting.
+            if (m_SprintLatched && nx * nx + ny * ny < 0.5f * 0.5f
                 && GetTickCount() - s_sprintSinceMs > 600)
+                m_SprintLatched = false;
+            if (primaryHeld)
                 m_SprintLatched = false;
             if (m_SprintLatched)
                 buttons |= IN_SPEED;
