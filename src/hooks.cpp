@@ -1119,6 +1119,9 @@ namespace
             s_lc.action = SequenceLabelLooksLikeWeaponAction(label);
             s_lc.loco = SequenceLabelLooksLikeLocomotionOnly(label);
             s_lc.equip = SequenceLabelLooksLikeEquipOnly(label);
+            if (bmvr::g_AimDebug)
+                Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d tick=%lu",
+                    seq, label ? label : "?", s_lc.action ? 1 : 0, s_lc.loco ? 1 : 0, GetTickCount());
         }
         const bool isAction = s_lc.action;
         const bool isLoco = s_lc.loco;
@@ -1171,6 +1174,22 @@ namespace
                 ForceViewmodelIdlePose(viewmodel, hdr);
             }
             return;
+        }
+
+        // Sprint loop and its in/out transitions: show the aimed idle pose.
+        // Freezing them held the gun on the lowered first frame for as long
+        // as BM's server-side sprint-out lasted (~1 s after stopping, user
+        // 2026-10-14); in VR the gun is in the hand and should stay aimed.
+        if (!isAction && label)
+        {
+            char low[32]{};
+            for (int i = 0; i < 31 && label[i]; ++i)
+                low[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+            if (std::strstr(low, "sprint") != nullptr)
+            {
+                ForceViewmodelIdlePose(viewmodel, hdr);
+                return;
+            }
         }
 
         // Never rewrite m_nSequence. Freeze cycle/rate only for explicit

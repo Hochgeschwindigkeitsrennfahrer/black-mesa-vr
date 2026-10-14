@@ -131,6 +131,7 @@ namespace
         if (b == "next") return (int)A::NextItem;
         if (b == "prev") return (int)A::PrevItem;
         if (b == "weaponmenu") return (int)A::InventoryQuickSwitch;
+        if (b == "sprint") return (int)A::CustomAction1;
         return 0;
     }
 
