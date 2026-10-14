@@ -309,8 +309,10 @@ public:
         0, true };
     // CMatQueuedRenderContext +0x20 is `ret 8` — it never writes the outs.
     // mat_queue_mode 2 records flares against leftover HWND / uninit size.
+    // Stable 19042901 pads the stub with 13 int3s (the old 14-byte pattern
+    // matched nowhere, so the hook was always skipped).
     Offset GetRenderTargetDimensionsQueued{ "materialsystem.dll", 0x5F890,
-        "C2 08 00 CC CC CC CC CC CC CC CC CC CC CC CC CC CC 55 8B EC 8B 45 08 C7 00 00 00 00 00",
+        "C2 08 00 CC CC CC CC CC CC CC CC CC CC CC CC CC 55 8B EC 8B 45 08 C7 00 00 00 00 00",
         0, true };
     Offset GetViewport{ "materialsystem.dll", 0x68A70,
         "55 8B EC 8B 41 4C 56 8D 14 C0 8B 41 40 83 7C 90 F8 00" };
