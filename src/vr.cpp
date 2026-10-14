@@ -6075,10 +6075,11 @@ void VR::ApplyMenuCursor()
             float tau = bmvr::g_MenuCursorSmoothSec;
             if (!(tau >= 0.02f && tau <= 0.6f))
                 tau = 0.18f;
-            // Fast flicks cut lag; small tremor stays filtered.
+            // Fast flicks cut lag; small tremor stays filtered (the idle
+            // dead zone above already holds a resting cursor still).
             tau /= (1.f + speed / 2800.f);
-            if (tau < 0.04f)
-                tau = 0.04f;
+            if (tau < 0.015f)
+                tau = 0.015f;
             const float a = 1.f - expf(-dt / tau);
             m_MenuCursorSmoothX += a * dx;
             m_MenuCursorSmoothY += a * dy;
