@@ -6631,9 +6631,10 @@ void VR::DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) 
     }
 }
 
-// Laser dot: a red disc with a dark rim, screen-space like the ticks so it
-// stays visible across a hangar.
-void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, UINT h) const
+// Laser dot: a red disc with a dark rim. The caller sizes it like a real
+// laser spot (fixed world size, so it shrinks with distance) with a floor
+// that keeps it visible across a hangar.
+void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radius) const
 {
     if (!device)
         return;
@@ -6642,11 +6643,6 @@ void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, UINT h) const
         float x, y, z, rhw;
         D3DCOLOR color;
     };
-    float scale = bmvr::g_VrCrosshairScale;
-    if (!(scale > 0.05f) || scale > 8.f)
-        scale = 1.f;
-    const float px = ((h > 8) ? static_cast<float>(h) : 1440.f) / 1440.f * scale;
-    const float radius = (std::max)(1.5f, 3.5f * px);
     constexpr int kSegs = 16;
     auto disc = [&](float r, D3DCOLOR centre, D3DCOLOR rim) {
         Vert v[kSegs + 2];
@@ -6658,7 +6654,7 @@ void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, UINT h) const
         }
         device->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, kSegs, v, sizeof(Vert));
     };
-    disc(radius + (std::max)(1.f, px), D3DCOLOR_ARGB(140, 0, 0, 0), D3DCOLOR_ARGB(140, 0, 0, 0));
+    disc(radius + (std::max)(0.75f, radius * 0.3f), D3DCOLOR_ARGB(120, 0, 0, 0), D3DCOLOR_ARGB(120, 0, 0, 0));
     disc(radius, D3DCOLOR_ARGB(255, 255, 90, 70), D3DCOLOR_ARGB(235, 230, 20, 10));
 }
 
@@ -7552,7 +7548,18 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             if (m_AimCrosshairValid && project(havePoints ? dotNow : m_AimCrosshairWorld, cx, cy))
             {
                 if (bmvr::g_VrCrosshairDot)
-                    DrawAimDot(device, cx, cy, h);
+                {
+                    float scale = bmvr::g_VrCrosshairScale;
+                    if (!(scale > 0.05f) || scale > 8.f)
+                        scale = 1.f;
+                    // World radius 0.25 u (~6 mm) x scale; floor 1.25 px per
+                    // 1440 px of eye height x scale.
+                    const Vector dotWorld = havePoints ? dotNow : m_AimCrosshairWorld;
+                    const float z = (std::max)(4.f, (dotWorld - eyeOrig).Dot(fwd));
+                    const float pxPerHu = static_cast<float>(w) * 0.5f * ocSx / tanHalf;
+                    const float floorPx = 1.25f * static_cast<float>(h) / 1440.f * scale;
+                    DrawAimDot(device, cx, cy, (std::max)(floorPx, 0.25f * scale * pxPerHu / z));
+                }
                 else
                     DrawAimCrosshair(device, cx, cy, h);
             }
