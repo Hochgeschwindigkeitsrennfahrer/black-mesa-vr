@@ -1042,6 +1042,9 @@ namespace bmvr
             || strstr(buf, "Hand markers done") != nullptr
             || strstr(buf, "GameUI dismissed") != nullptr
             || strstr(buf, "HMD-fb pass-through") != nullptr
+            || strstr(buf, "look copy") != nullptr
+            || strstr(buf, "cmd hmd aim") != nullptr
+            || strstr(buf, "AfterShaderApiPresent") != nullptr
             || strstr(buf, "Viewmodel DME") != nullptr
             || strstr(buf, "offscreen native") != nullptr
             || strstr(buf, "CopyRTEx clip") != nullptr

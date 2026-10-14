@@ -1312,7 +1312,7 @@ void Game::ResolveMaterialThreadSlots() const
         if (!mat)
             mat = GetModuleHandleA("MaterialSystem.dll");
         if (mat)
-            gbdAddr = reinterpret_cast<uintptr_t>(mat) + 0x52d20;
+            gbdAddr = reinterpret_cast<uintptr_t>(mat) + 0x53EF0;
     }
     if (!gbdAddr)
     {

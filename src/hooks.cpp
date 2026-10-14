@@ -56,6 +56,21 @@ namespace
         }
         if (map && map[0])
             return map;
+        // public-beta (build 25607072): GetLevelName before a map is loaded
+        // AVs in server.dll string code. Source's minidump wrapper then
+        // TerminateProcess(1), so the game closes itself at the menu.
+        // GetLevelNameShort is empty there and is safe. IsInGame is false.
+        bool inGame = false;
+        __try
+        {
+            inGame = eng->IsInGame();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return "";
+        }
+        if (!inGame)
+            return "";
         __try
         {
             map = eng->GetLevelName();
@@ -234,7 +249,15 @@ int Hooks::initSourceHooks()
 {
     auto& o = *m_Game->m_Offsets;
 
-    if (o.GetRenderTarget.valid)
+    // public-beta bm_c1a0a: material RT/viewport detours crash in
+    // CBlackMesaViewRender (client.dll+0x1F303C, call to a stack address)
+    // after LevelInit. Weapon, FOV, and frame hooks stay up.
+    const bool kBetaSkipMatHooks = true;
+    const bool kBetaSkipViewmodelHooks = false;
+    const bool kBetaSkipFovViewport = false;
+    const bool kBetaSkipWeaponHooks = false;
+    const bool kBetaSkipFrameHooks = false;
+    if (!kBetaSkipMatHooks && o.GetRenderTarget.valid)
         hkGetRenderTarget.createHook((LPVOID)o.GetRenderTarget.address, &dGetRenderTarget);
     if (o.RenderView.valid)
         hkRenderView.createHook((LPVOID)o.RenderView.address, &dRenderView);
@@ -244,46 +267,46 @@ int Hooks::initSourceHooks()
     // menu Submit.
     if (o.CreateMove.valid)
         hkCreateMove.createHook((LPVOID)o.CreateMove.address, &dCreateMove);
-    if (o.CalcViewModelView.valid)
+    if (!kBetaSkipViewmodelHooks && o.CalcViewModelView.valid)
         hkCalcViewModelView.createHook((LPVOID)o.CalcViewModelView.address, &dCalcViewModelView);
-    if (o.GetViewModelFOV.valid)
+    if (!kBetaSkipFovViewport && o.GetViewModelFOV.valid)
         hkGetViewModelFOV.createHook((LPVOID)o.GetViewModelFOV.address, &dGetViewModelFOV);
-    if (o.AdjustEngineViewport.valid)
+    if (!kBetaSkipFovViewport && o.AdjustEngineViewport.valid)
         hkAdjustEngineViewport.createHook((LPVOID)o.AdjustEngineViewport.address, &dAdjustEngineViewport);
-    if (o.Viewport.valid)
+    if (!kBetaSkipMatHooks && o.Viewport.valid)
         hkViewport.createHook((LPVOID)o.Viewport.address, &dViewport);
-    if (o.GetViewport.valid)
+    if (!kBetaSkipMatHooks && o.GetViewport.valid)
         hkGetViewport.createHook((LPVOID)o.GetViewport.address, &dGetViewport);
-    if (o.GetViewportQueued.valid)
+    if (!kBetaSkipMatHooks && o.GetViewportQueued.valid)
         hkGetViewportQueued.createHook((LPVOID)o.GetViewportQueued.address, &dGetViewport);
-    if (o.GetRenderTargetDimensions.valid)
+    if (!kBetaSkipMatHooks && o.GetRenderTargetDimensions.valid)
         hkGetRenderTargetDimensions.createHook((LPVOID)o.GetRenderTargetDimensions.address, &dGetRenderTargetDimensions);
-    if (o.GetRenderTargetDimensionsBase.valid)
+    if (!kBetaSkipMatHooks && o.GetRenderTargetDimensionsBase.valid)
         hkGetRenderTargetDimensionsBase.createHook((LPVOID)o.GetRenderTargetDimensionsBase.address, &dGetRenderTargetDimensions);
-    if (o.GetRenderTargetDimensionsQueued.valid)
+    if (!kBetaSkipMatHooks && o.GetRenderTargetDimensionsQueued.valid)
         hkGetRenderTargetDimensionsQueued.createHook((LPVOID)o.GetRenderTargetDimensionsQueued.address, &dGetRenderTargetDimensions);
-    if (o.PushRenderTargetAndViewport.valid)
+    if (!kBetaSkipMatHooks && o.PushRenderTargetAndViewport.valid)
         hkPushRenderTargetAndViewport.createHook((LPVOID)o.PushRenderTargetAndViewport.address, &dPushRenderTargetAndViewport);
-    if (o.PopRenderTargetAndViewport.valid)
+    if (!kBetaSkipMatHooks && o.PopRenderTargetAndViewport.valid)
         hkPopRenderTargetAndViewport.createHook((LPVOID)o.PopRenderTargetAndViewport.address, &dPopRenderTargetAndViewport);
-    if (o.DrawScreenSpaceRectangle.valid)
+    if (!kBetaSkipMatHooks && o.DrawScreenSpaceRectangle.valid)
         hkDrawScreenSpaceRectangle.createHook((LPVOID)o.DrawScreenSpaceRectangle.address, &dDrawScreenSpaceRectangle);
-    if (o.CopyRenderTargetToTextureEx.valid)
+    if (!kBetaSkipMatHooks && o.CopyRenderTargetToTextureEx.valid)
         hkCopyRenderTargetToTextureEx.createHook((LPVOID)o.CopyRenderTargetToTextureEx.address, &dCopyRenderTargetToTextureEx);
-    if (o.GetBackBufferDimensions.valid && !hkGetBackBufferDimensions.pTarget)
+    if (!kBetaSkipMatHooks && o.GetBackBufferDimensions.valid && !hkGetBackBufferDimensions.pTarget)
         hkGetBackBufferDimensions.createHook((LPVOID)o.GetBackBufferDimensions.address, &dGetBackBufferDimensions);
-    if (o.GetScreenSize.valid && !hkGetScreenSize.pTarget)
+    if (!kBetaSkipMatHooks && o.GetScreenSize.valid && !hkGetScreenSize.pTarget)
         hkGetScreenSize.createHook((LPVOID)o.GetScreenSize.address, &dGetScreenSize);
-    if (o.GetScreenAspectRatio.valid && !hkGetScreenAspectRatio.pTarget)
+    if (!kBetaSkipMatHooks && o.GetScreenAspectRatio.valid && !hkGetScreenAspectRatio.pTarget)
         hkGetScreenAspectRatio.createHook((LPVOID)o.GetScreenAspectRatio.address, &dGetScreenAspectRatio);
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
-    if (o.EndRTAlloc.valid)
+    if (!kBetaSkipFrameHooks && o.EndRTAlloc.valid)
         hkEndRTAlloc.createHook((LPVOID)o.EndRTAlloc.address, &dEndRTAlloc);
     // vguimatsurface.dll VGUI_Surface030: CMatSystemSurface vtable slot 15
     // DrawFilledRect / 37 DrawTexturedRect (both ret 0x10). File offsets
     // 0x3D880 / 0x40D20 in the Steam BM module.
-    if (m_Game)
+    if (!kBetaSkipFrameHooks && m_Game)
     {
         void* surf = m_Game->GetInterface("vguimatsurface.dll", "VGUI_Surface030");
         if (!surf)
@@ -316,7 +339,7 @@ int Hooks::initSourceHooks()
         Game::logMsg("VGui_Paint createHook skipped (sticky vgui_paint)");
     // Real CModelRender::DrawModelExecute is engine.dll 0x113E80 (vtable +0x4C),
     // thiscall 3-arg, ret 0xC. 0xF6A20 is a displacement loader — do not hook it.
-    if (o.DrawModelExecute.valid && bmvr::TryDrawModelExecute())
+    if (!kBetaSkipWeaponHooks && o.DrawModelExecute.valid && bmvr::TryDrawModelExecute())
     {
         // Hold the sticky only around createHook. The old window lasted until
         // the first gameplay DME, so a later crash (ff_hmdfit) false-banned
@@ -335,7 +358,7 @@ int Hooks::initSourceHooks()
     }
     else if (o.DrawModelExecute.valid)
         Game::logMsg("DrawModelExecute createHook skipped (sticky dme)");
-    if (o.LightcacheFindNearest.valid)
+    if (!kBetaSkipFrameHooks && o.LightcacheFindNearest.valid)
     {
         if (TryParseLightcacheFindNearest(reinterpret_cast<void*>(o.LightcacheFindNearest.address)))
         {
@@ -351,7 +374,7 @@ int Hooks::initSourceHooks()
     }
     // LevelInit stays unhooked: MinHook on it crashed inside the original on
     // background01 (docs/RUNTIME.md). Map names come from GetLevelNameShort.
-    if (m_Game->MaterialVTableMatchesDump() && m_Game->m_MaterialSystem)
+    if (!kBetaSkipFrameHooks && m_Game->MaterialVTableMatchesDump() && m_Game->m_MaterialSystem)
     {
         void** vt = SehMaterialSystemVTable(m_Game->m_MaterialSystem);
         if (vt && vt[37])
@@ -369,8 +392,13 @@ int Hooks::initSourceHooks()
     // m_EngineTrace->TraceRay directly and never needed hkTraceRay.fOriginal.
     (void)&dTraceRay;
 
-    EnsureClientFlashlightHook();
-    EnsureWeaponShootOriginHooks();
+    InstallShaderApiPresentHook();
+
+    if (!kBetaSkipWeaponHooks)
+    {
+        EnsureClientFlashlightHook();
+        EnsureWeaponShootOriginHooks();
+    }
 
     return 1;
 }
@@ -992,6 +1020,10 @@ namespace
 
     void ZeroPlayerViewRecoil(void* player)
     {
+        // public-beta: these punch offsets corrupt the player and the next
+        // CreateMove returns into unmapped client.dll, which exits the process.
+        (void)player;
+        return;
         if (!player)
             return;
         // DT_LocalPlayerExclusive m_Local +0x103C. DT_Local m_vecPunchAngle +0x74,
@@ -2568,7 +2600,10 @@ namespace
         if (!Hooks::hkCalcViewModelView.fOriginal)
             return;
         Vector savedVel{};
-        bool zeroVel = bmvr::g_DisableViewBob && owner;
+        // public-beta: writing player+0xF8 from this hook is on the stack that
+        // exits bm_c1a0a. Leave velocity to the engine until that offset is
+        // rechecked.
+        bool zeroVel = false && bmvr::g_DisableViewBob && owner;
         if (zeroVel)
         {
             __try
@@ -3492,6 +3527,51 @@ ITexture* __fastcall Hooks::dGetRenderTarget(void* ecx, void* edx)
 void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int nClearFlags, int whatToDraw)
 {
     (void)edx;
+    if (!hkRenderView.fOriginal)
+        return;
+    // LevelInit already named the map. Do not also require IsInGame — that
+    // stayed false through gameplay on this beta, so the HMD pose never
+    // reached the camera and the headset copy never started.
+    const bool mainView = setup.width >= 640 && setup.height >= 360;
+    const bool track = m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
+        && mainView && m_VR->m_HmdPoseValid;
+    if (!track)
+    {
+        if (m_VR && m_VR->IsGameplayEligible() && mainView)
+        {
+            static int s_skipLook;
+            if (s_skipLook < 6)
+            {
+                Game::logMsg("look copy skipped vr=%d pose=%d setup=%dx%d",
+                    m_VR->m_IsVREnabled ? 1 : 0, m_VR->m_HmdPoseValid ? 1 : 0,
+                    setup.width, setup.height);
+                ++s_skipLook;
+            }
+        }
+        hkRenderView.fOriginal(ecx, setup, nClearFlags, whatToDraw);
+        return;
+    }
+    m_VR->m_SeenGameplay = true;
+    m_VR->m_HeadsetSubmitArmed.store(false, std::memory_order_release);
+    if (m_VR->m_PassThroughMainViews < VR::kPassThroughViewsBeforeQueued)
+        ++m_VR->m_PassThroughMainViews;
+    // One window-sized view. A second eye in the same window drew the two
+    // halves, and enlarging a 1102-wide crop was the pixelation.
+    CViewSetup vrView = setup;
+    vrView.angles = m_VR->GetViewAngle();
+    vrView.origin = m_VR->GetViewOrigin(setup.origin);
+    static int s_betaLook;
+    if (s_betaLook < 4)
+    {
+        Game::logMsg("single window view %dx%d fov=%.1f",
+            vrView.width, vrView.height, vrView.fov);
+        ++s_betaLook;
+    }
+    hkRenderView.fOriginal(ecx, vrView, nClearFlags, whatToDraw);
+    if (m_VR->BlitBackbufferEye(0, 0, 0, setup.width, setup.height)
+        && m_VR->BlitBackbufferEye(1, 0, 0, setup.width, setup.height))
+        m_VR->PublishBlittedEyes();
+#if 0
     RenderViewNestScope nest;
     CurrentViewScope curView(setup);
     if (!hkRenderView.fOriginal)
@@ -3588,14 +3668,18 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             // died in pass-through on OpenXR Simulator (heartbeat in_rel_look).
             if (m_VR->ShouldHwndBlitStereo())
             {
+                CViewSetup vrView = setup;
+                applyL4d2VrHead(vrView, false, true);
                 static int s_ptHwnd;
                 if (s_ptHwnd < 4)
                 {
-                    Game::logMsg("HMD-fb pass-through HWND %dx%d (no look copy; eyes %ux%u)",
-                        setup.width, setup.height, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
+                    Game::logMsg("HMD-fb pass-through HWND %dx%d look hmd=(%.1f,%.1f) eyes %ux%u",
+                        setup.width, setup.height,
+                        vrView.angles.x, vrView.angles.y,
+                        m_VR->m_RenderWidth, m_VR->m_RenderHeight);
                     ++s_ptHwnd;
                 }
-                callOriginal(setup, nClearFlags, whatToDraw);
+                callOriginal(vrView, nClearFlags, whatToDraw);
                 return;
             }
             CViewSetup vrView = setup;
@@ -3668,6 +3752,13 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             ++s_smallLog;
         }
     }
+
+    // public-beta: one HMD look-copy, then the backbuffer capture. The
+    // two-eye RenderView below faults this build after LevelInit.
+    if (inGame && mainView && m_VR->m_PassThroughMainViews < VR::kPassThroughViewsBeforeQueued)
+        ++m_VR->m_PassThroughMainViews;
+    passThrough();
+    return;
 
     // 2026-08-17: GetScreenSize made the first gameplay view 1584x1440, then
     // this hook immediately ran two RenderViews with HMD FOV/zNear/IPD during
@@ -4153,6 +4244,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     }
 
     passThrough();
+#endif
 }
 
 bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime, CUserCmd* cmd)
@@ -4160,6 +4252,22 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     (void)edx;
     if (!hkCreateMove.fOriginal)
         return false;
+    // public-beta: any work before the original CreateMove makes that call
+    // jump into unmapped client.dll and the engine exits. Write the headset
+    // aim after the original, into the cmd the next view is built from.
+    const bool moved = hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
+    if (cmd && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && m_VR->m_HmdPoseValid)
+    {
+        const Vector aim = m_VR->GetViewAngle();
+        cmd->viewangles.Init(aim.x, aim.y, 0.f);
+        static int s_cmdAim;
+        if (s_cmdAim < 6)
+        {
+            Game::logMsg("cmd hmd aim pitch=%.1f yaw=%.1f", aim.x, aim.y);
+            ++s_cmdAim;
+        }
+    }
+    return moved;
     if (!cmd)
         return hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
@@ -4244,7 +4352,11 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         ZeroPlayerViewRecoil(localPlayer);
     // FireBullets / ItemPostFrame run inside original player CreateMove.
     // Aim, VR buttons, and weaponselect must be applied before that.
-    applyControllerAim();
+    // public-beta: this lambda calls into client.dll at a bad address once
+    // bm_c1a0a is loading and Source exits the process. Aim stays on the
+    // original CreateMove viewangles until that call is safe.
+    if (false)
+        applyControllerAim();
 
     auto applyVrUserCmd = [&]() {
         if (!m_VR || !m_VR->m_IsVREnabled)
@@ -4336,7 +4448,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
     // Camera stays HMD on RenderView copies. Shooting uses controller
     // viewangles. Do not hook EyePosition (that would move the camera).
-    applyControllerAim();
+    if (false)
+        applyControllerAim();
     if (m_VR)
         ZeroPlayerViewRecoil(localPlayer);
     if (m_VR)
@@ -4381,32 +4494,29 @@ void __fastcall Hooks::dLevelShutdown(void* ecx, void* edx)
         hkLevelShutdown.fOriginal(ecx);
 }
 
-void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, const Vector& eyePosition, const QAngle& eyeAngles)
+static void RunCalcViewModelView(void* ecx, void* owner, const Vector& eyePosition, const QAngle& eyeAngles)
 {
-    (void)edx;
-    if (!hkCalcViewModelView.fOriginal)
+    if (!Hooks::hkCalcViewModelView.fOriginal)
         return;
-    if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame() && m_VR->m_HmdPoseValid)
+    // public-beta: once a controller pose is live, moving the viewmodel onto
+    // that pose makes Source exit. Keep the engine viewmodel until that
+    // SetAbs path is verified on this build.
+    if (Hooks::m_VR && Hooks::m_VR->m_ControllerPoseValid)
     {
-        // Uncoupled viewmodel: same world pose both eyes (sd805 / Portal 2).
-        // Do not IPD the gun — that drew two weapons (2026-08-17).
-        if (m_VR->m_ControllerPoseValid)
+        Hooks::hkCalcViewModelView.fOriginal(ecx, owner, eyePosition, eyeAngles);
+        return;
+    }
+    if (Hooks::m_VR && Hooks::m_VR->m_IsVREnabled && Hooks::m_VR->IsGameplayEligible()
+        && EngineInGame() && Hooks::m_VR->m_HmdPoseValid)
+    {
+        if (Hooks::m_VR->m_ControllerPoseValid)
         {
-            // One active-weapon lookup per call (was three). The MP5 test on
-            // the last classified viewmodel is the lock-free class flag rather
-            // than an unlocked read of the std::string.
-            const char* weaponModel = m_Game ? m_Game->GetActiveWeaponModelName() : nullptr;
+            const char* weaponModel = Hooks::m_Game ? Hooks::m_Game->GetActiveWeaponModelName() : nullptr;
             if (weaponModel)
-                m_VR->NoteViewmodelModel(weaponModel);
-            // NoteViewmodelModel just classified weaponModel (mp5/MP5/smg/mp5k
-            // all match on the lowercased path), so the flag is authoritative.
-            const bool mp5 = m_Game && m_VR->ViewmodelIsMp5();
-            // L4D2VR: feed the aim-controller pose as CalcViewModelView eye so
-            // lag/bob and $origin are in the same frame as the hard-lock.
-            const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(eyePosition);
-            const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
-            // Crowbar idle-force runs in SuppressViewmodelMovementAnims.
-            // MP5 fire sequences must keep playing (never idle-force those).
+                Hooks::m_VR->NoteViewmodelModel(weaponModel);
+            const bool mp5 = Hooks::m_Game && Hooks::m_VR->ViewmodelIsMp5();
+            const Vector targetOrigin = Hooks::m_VR->GetRecommendedViewmodelAbsPos(eyePosition);
+            const QAngle targetAng = Hooks::m_VR->GetRecommendedViewmodelAbsAngle();
             if (mp5)
                 ZeroPlayerViewRecoil(owner);
             SuppressViewmodelMovementAnims(ecx);
@@ -4419,17 +4529,39 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
             SuppressViewmodelMovementAnims(ecx);
             return;
         }
-        // Controller pose dropped: keep the gun on the last tracking pose.
-        // Feeding HMD origin/angles here parented the weapon to nod.
-        const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(eyePosition);
-        const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
+        const Vector targetOrigin = Hooks::m_VR->GetRecommendedViewmodelAbsPos(eyePosition);
+        const QAngle targetAng = Hooks::m_VR->GetRecommendedViewmodelAbsAngle();
         CallCalcViewModelViewOriginal(ecx, owner, targetOrigin, targetAng);
         const float origin3[3] = { targetOrigin.x, targetOrigin.y, targetOrigin.z };
         const float angles3[3] = { targetAng.x, targetAng.y, targetAng.z };
         CallSetAbsOriginAngles(ecx, origin3, angles3);
         return;
     }
-    hkCalcViewModelView.fOriginal(ecx, owner, eyePosition, eyeAngles);
+    Hooks::hkCalcViewModelView.fOriginal(ecx, owner, eyePosition, eyeAngles);
+}
+
+void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, const Vector& eyePosition, const QAngle& eyeAngles)
+{
+    (void)edx;
+    if (!hkCalcViewModelView.fOriginal)
+        return;
+    // public-beta: C_BlackMesaViewModel slot 0x398 is this function. The VR
+    // body calls a null pointer during bm_c1a0a load and Source's minidump
+    // wrapper then TerminateProcess(1). Catch it and keep the engine pose.
+    __try
+    {
+        RunCalcViewModelView(ecx, owner, eyePosition, eyeAngles);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        static int s_seh;
+        if (s_seh < 4)
+        {
+            Game::logMsg("CalcViewModelView SEH code=%08X; engine eye pose", GetExceptionCode());
+            ++s_seh;
+        }
+        hkCalcViewModelView.fOriginal(ecx, owner, eyePosition, eyeAngles);
+    }
 }
 
 float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)
@@ -4779,6 +4911,11 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
 void* __cdecl Hooks::dLightcacheFindNearest(int x, int y, int z, int flags)
 {
+    // public-beta lightcache nodes are not stride 0x1E0. The walker treated
+    // a real next index (45106) as a cycle, wrote the sentinel into the pool,
+    // and engine.dll faulted on bm_c1a0a. Call the engine lookup.
+    if (hkLightcacheFindNearest.fOriginal)
+        return hkLightcacheFindNearest.fOriginal(x, y, z, flags);
     if (!g_LcLockReady)
         return LightcacheFindNearestImpl(x, y, z, flags);
     EnterCriticalSection(&g_LcLock);
@@ -7009,6 +7146,11 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
 ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags)
 {
     (void)edx;
+    if (!hkCreateNamedRTEx.fOriginal)
+        return nullptr;
+    // public-beta: resizing named RTs during load leaves a client view object
+    // with a bad vtable and the engine exits. Keep the engine sizes.
+    return hkCreateNamedRTEx.fOriginal(ecx, name, w, h, sizeMode, format, depth, textureFlags, renderTargetFlags);
     {
         const char* map = PeekLevelName();
         if (map && map[0])
@@ -7271,6 +7413,7 @@ void __fastcall Hooks::dDrawTexturedRect(void* ecx, void* edx, int x0, int y0, i
 
 void bmvr::InstallEarlyFramebufferHook()
 {
+    return;
     static bool attempted = false;
     if (attempted)
         return;
@@ -7294,10 +7437,10 @@ void bmvr::InstallEarlyFramebufferHook()
         return;
     }
 
-    int off = SigScanner::VerifyOffset("materialsystem.dll", 0x52d20,
+    int off = SigScanner::VerifyOffset("materialsystem.dll", 0x53EF0,
         "55 8B EC 8B 0D ? ? ? ? 8B 01 8B 80 58 04 00 00 5D FF E0");
     if (off < 0)
-        off = SigScanner::VerifyOffset("MaterialSystem.dll", 0x52d20,
+        off = SigScanner::VerifyOffset("MaterialSystem.dll", 0x53EF0,
             "55 8B EC 8B 0D ? ? ? ? 8B 01 8B 80 58 04 00 00 5D FF E0");
     if (off == -1)
     {
@@ -7305,7 +7448,7 @@ void bmvr::InstallEarlyFramebufferHook()
         return;
     }
     if (off == 0)
-        off = 0x52d20;
+        off = 0x53EF0;
     void* target = reinterpret_cast<uint8_t*>(mat) + off;
     if (Hooks::hkGetBackBufferDimensions.createHook(target, &Hooks::dGetBackBufferDimensions) != 0
         || Hooks::hkGetBackBufferDimensions.enableHook() != 0)
@@ -7322,7 +7465,7 @@ void bmvr::InstallEarlyFramebufferHook()
         Log("GetScreenSize: engine.dll not loaded yet");
         return;
     }
-    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6BD0,
+    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6CF0,
         "55 8B EC 8B 0D ? ? ? ? 56 8B 01 FF 90 9C 01 00 00");
     if (screenOff == -1)
     {
@@ -7330,7 +7473,7 @@ void bmvr::InstallEarlyFramebufferHook()
         return;
     }
     if (screenOff == 0)
-        screenOff = 0xA6BD0;
+        screenOff = 0xA6CF0;
     void* screenTarget = reinterpret_cast<uint8_t*>(eng) + screenOff;
     if (!Hooks::hkGetScreenSize.pTarget)
     {
@@ -7344,14 +7487,14 @@ void bmvr::InstallEarlyFramebufferHook()
     }
     if (!Hooks::hkGetScreenAspectRatio.pTarget)
     {
-        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x1012D0,
+        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x101480,
             "55 8B EC 8B 0D ? ? ? ? 83 EC 0C 81 F9 ? ? ? ? 75 16 F3 0F 10 0D");
         if (aspectOff == -1)
             Log("GetScreenAspectRatio signature not found");
         else
         {
             if (aspectOff == 0)
-                aspectOff = 0x1012D0;
+                aspectOff = 0x101480;
             void* aspectTarget = reinterpret_cast<uint8_t*>(eng) + aspectOff;
             if (Hooks::hkGetScreenAspectRatio.createHook(aspectTarget, &Hooks::dGetScreenAspectRatio) != 0
                 || Hooks::hkGetScreenAspectRatio.enableHook() != 0)

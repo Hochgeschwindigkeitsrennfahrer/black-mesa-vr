@@ -308,11 +308,8 @@ void VR::UpdateCrowbarMelee()
         return;
     }
 
-    EnsurePhysicalCrowbarModel();
-
-    // Same crowbar/wrench test as IsCrowbarWeaponModel, classified once in
-    // NoteViewmodelModel; the old per-frame std::string copy of the model
-    // path under m_ControllerMutex heap-allocated every Present.
+    // This runs from D3D Present. FindOrLoadModel here exits the process on
+    // the first live controller pose. The swing uses the hand pose, not the mdl.
     if (!ViewmodelIsCrowbar())
     {
         m_MeleeNewSwing = true;
