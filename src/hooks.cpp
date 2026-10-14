@@ -3646,7 +3646,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 && m_VR->m_RenderWidth + 32 >= static_cast<UINT>(setup.width)
                 && m_VR->m_RenderHeight + 32 >= static_cast<UINT>(setup.height))
             {
-                NormalizeViewSetupForVREye(vrView, m_VR);
+                NormalizeViewSetupForVREye(vrView, m_VR, 0);
                 static int s_ptEye;
                 if (s_ptEye < 4)
                 {
@@ -3834,8 +3834,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             m_VR->NoteEngineScopeFov(setup.fov);
             CViewSetup leftEyeView = setup;
             CViewSetup rightEyeView = setup;
-            NormalizeViewSetupForVREye(leftEyeView, m_VR);
-            NormalizeViewSetupForVREye(rightEyeView, m_VR);
+            NormalizeViewSetupForVREye(leftEyeView, m_VR, 1);
+            NormalizeViewSetupForVREye(rightEyeView, m_VR, 2);
             m_VR->NoteStereoClipPlanes(leftEyeView.zNear, leftEyeView.zFar);
             applyL4d2VrHead(leftEyeView, true, true);
             applyL4d2VrHead(rightEyeView, true, false);
