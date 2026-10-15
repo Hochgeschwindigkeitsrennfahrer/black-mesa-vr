@@ -4940,7 +4940,21 @@ QAngle VR::GetAimAngles() const
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
         if (m_TwoHandActive && !m_VmClass.offhandPistol)
         {
-            QAngle::VectorAngles(m_ViewmodelForward, m_ViewmodelUp, aim);
+            // m_Viewmodel* is the model's basis, which carries the per-weapon
+            // pose angles (ApplyViewmodelBasisOffsets: yaw ay, pitch ax, roll
+            // az) on top of the aim. Undo them in reverse order so two-handed
+            // aim matches one-handed aim (shotgun ay=-4 put the dot right of
+            // the barrel, 2026-10-15).
+            float ox = 0.f, oy = 0.f, oz = 0.f, ax = 0.f, ay = 0.f, az = 0.f;
+            ResolveWeaponViewmodelPose(ox, oy, oz, ax, ay, az);
+            Vector f = m_ViewmodelForward, r = m_ViewmodelRight, u = m_ViewmodelUp;
+            r = VectorRotate(r, f, -az);
+            u = VectorRotate(u, f, -az);
+            f = VectorRotate(f, r, -ax);
+            u = VectorRotate(u, r, -ax);
+            f = VectorRotate(f, u, -ay);
+            QAngle::VectorAngles(f, u, aim);
+            aim.x -= bmvr::g_AimPitchOffset;
             if (aim.x > 180.f) aim.x -= 360.f;
             if (aim.x < -180.f) aim.x += 360.f;
             if (aim.x > 89.f) aim.x = 89.f;
