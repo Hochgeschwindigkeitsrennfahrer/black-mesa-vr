@@ -4388,7 +4388,10 @@ void VR::ProcessInput()
         ApplyMenuCursor();
     }
     else
-        m_MenuTriggerWasDown = false;
+        // Keep tracking held buttons while no menu panel is up: resetting to
+        // false made a held Cross/trigger click again when the menu reappeared.
+        m_MenuTriggerWasDown = PressedDigitalAction(m_ActionPrimaryAttack)
+            || PressedDigitalAction(m_ActionMenuSelect);
     // Recenter is a short tap of the same right-stick click that opens the
     // weapon menu. Do not recenter on press-edge while that click is held.
     if (resetHeld && !s_reset && !menuStick && !m_WeaponMenuOpenedThisHold)
@@ -6463,7 +6466,8 @@ void VR::ApplyMenuCursor()
     else
         click = PressedDigitalAction(m_ActionPrimaryAttack);
     s_trigLatched = click;
-    click = click || PressedDigitalAction(m_ActionMenuSelect);
+    const bool selectHeld = PressedDigitalAction(m_ActionMenuSelect);
+    click = click || selectHeld;
     if (click && !m_MenuTriggerWasDown)
     {
         for (int i = 1; i <= 128 && i <= s_histN; ++i)
@@ -6496,8 +6500,9 @@ void VR::ApplyMenuCursor()
         static int s_clickLog;
         if (s_clickLog < 40)
         {
-            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d trigger=%.2f t=%lu",
-                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, triggerValue, static_cast<unsigned long>(histNow));
+            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d trigger=%.2f cross=%d t=%lu",
+                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, triggerValue, selectHeld ? 1 : 0,
+                static_cast<unsigned long>(histNow));
             ++s_clickLog;
         }
     }
