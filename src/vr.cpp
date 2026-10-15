@@ -4316,12 +4316,50 @@ void VR::ProcessInput()
         Game::logMsg("PrevItem queued on CreateMove (weaponselect, not invprev)");
     }
     RefreshHeldWeaponState();
+    // Triangle: tap = pause (on release), hold 0.6 s in gameplay = VR
+    // settings panel. While a menu or the panel is up it toggles on press as
+    // before, so leaving them stays immediate.
+    static DWORD s_pauseDownMs;
+    static bool s_pauseDeferred;
+    static bool s_pauseHoldFired;
+    constexpr DWORD kSettingsHoldMs = 600;
+    const bool pauseHoldable = !paused && !IsMenuUp() && !m_SettingsOpen;
     if (m_GameplayEligible && pauseHeld && !s_pause)
     {
-        Game::logMsg("Pause action edge paused=%d gameUi=%d handle=%llu",
-            paused ? 1 : 0, IsMenuUp() ? 1 : 0,
-            static_cast<unsigned long long>(m_ActionPause));
-        QueueGameUiToggle(paused);
+        s_pauseHoldFired = false;
+        s_pauseDeferred = pauseHoldable;
+        s_pauseDownMs = GetTickCount();
+        if (m_SettingsOpen)
+            CloseSettingsPanel("triangle");
+        else if (!s_pauseDeferred)
+        {
+            Game::logMsg("Pause action edge paused=%d gameUi=%d handle=%llu",
+                paused ? 1 : 0, IsMenuUp() ? 1 : 0,
+                static_cast<unsigned long long>(m_ActionPause));
+            QueueGameUiToggle(paused);
+        }
+    }
+    if (s_pauseDeferred && pauseHeld && !s_pauseHoldFired
+        && GetTickCount() - s_pauseDownMs >= kSettingsHoldMs)
+    {
+        s_pauseHoldFired = true;
+        s_pauseDeferred = false;
+        if (m_GameplayEligible && pauseHoldable && !m_WeaponMenuOpen)
+        {
+            Game::logMsg("Triangle hold -> VR settings panel");
+            OpenSettingsPanel();
+        }
+    }
+    if (s_pauseDeferred && !pauseHeld && s_pause)
+    {
+        s_pauseDeferred = false;
+        if (m_GameplayEligible)
+        {
+            Game::logMsg("Pause action tap paused=%d gameUi=%d handle=%llu",
+                paused ? 1 : 0, IsMenuUp() ? 1 : 0,
+                static_cast<unsigned long long>(m_ActionPause));
+            QueueGameUiToggle(paused);
+        }
     }
     if (Want2dMenuPanel() || WantPauseWorldOverlay())
     {
@@ -5530,7 +5568,9 @@ void VR::ApplyMenuNavigation()
     }
 
     const bool select = PressedDigitalAction(m_ActionMenuSelect);
-    if (select && !s_ok)
+    // With a pointer on the menu, Cross clicks there (menu pointer code);
+    // Enter would activate whatever has keyboard focus instead.
+    if (select && !s_ok && !m_MenuCursorValid)
     {
         QueueKeyToHwnd(hwnd, VK_RETURN);
         Game::logMsg("Menu confirm A/MenuSelect");
@@ -6292,7 +6332,25 @@ void VR::ApplyMenuCursor()
         s_hist[s_histN % 128] = { histNow, wx, wy };
         ++s_histN;
     }
-    const bool click = PressedDigitalAction(m_ActionPrimaryAttack);
+    // Trigger with hysteresis: press past 0.6, re-arm only below 0.25. The
+    // digital action flips at 0.45 both ways, so a finger resting on the
+    // trigger near that point fired click after click while just pointing.
+    static bool s_trigLatched;
+    bool click = s_trigLatched;
+    float triggerValue = -1.f;
+    vr::InputAnalogActionData_t trig{};
+    if (GetAnalogActionData(m_ActionPrimaryAttack, trig))
+    {
+        triggerValue = trig.x;
+        if (trig.x >= 0.6f)
+            click = true;
+        else if (trig.x <= 0.25f)
+            click = false;
+    }
+    else
+        click = PressedDigitalAction(m_ActionPrimaryAttack);
+    s_trigLatched = click;
+    click = click || PressedDigitalAction(m_ActionMenuSelect);
     if (click && !m_MenuTriggerWasDown)
     {
         for (int i = 1; i <= 128 && i <= s_histN; ++i)
@@ -6314,36 +6372,19 @@ void VR::ApplyMenuCursor()
             SetCursorPos(pt.x, pt.y);
             PostMessageA(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(wx, wy));
         }
+        // Single clicks only. Two pulls within the double-click time used to
+        // become WM_LBUTTONDBLCLK, which opens/loads the item in BM's lists
+        // and menus when the user merely clicked again.
         if (hwnd)
         {
-            const DWORD nowClick = GetTickCount();
-            const int dx = wx - m_MenuClickX;
-            const int dy = wy - m_MenuClickY;
-            const DWORD dblMs = GetDoubleClickTime();
-            const bool dbl = m_MenuClickMs != 0
-                && (nowClick - m_MenuClickMs) <= (dblMs ? dblMs : 500u)
-                && (dx * dx + dy * dy) <= 36 * 36;
-            if (dbl)
-            {
-                PostMessageA(hwnd, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(wx, wy));
-                PostMessageA(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(wx, wy));
-                m_MenuClickMs = 0;
-                Game::logMsg("VR menu double-click at %d,%d", wx, wy);
-            }
-            else
-            {
-                PostMessageA(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(wx, wy));
-                PostMessageA(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(wx, wy));
-                m_MenuClickMs = nowClick;
-                m_MenuClickX = wx;
-                m_MenuClickY = wy;
-            }
+            PostMessageA(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(wx, wy));
+            PostMessageA(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(wx, wy));
         }
         static int s_clickLog;
-        if (s_clickLog < 8)
+        if (s_clickLog < 40)
         {
-            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d",
-                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0);
+            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d trigger=%.2f t=%lu",
+                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, triggerValue, static_cast<unsigned long>(histNow));
             ++s_clickLog;
         }
     }

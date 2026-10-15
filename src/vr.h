@@ -1240,9 +1240,6 @@ private:
     Vector m_MenuPanelFwd{};
     Vector m_MenuPanelRight{};
     Vector m_MenuPanelUp{};
-    DWORD m_MenuClickMs = 0;
-    int m_MenuClickX = 0;
-    int m_MenuClickY = 0;
     bool m_WorldVguiTriggerWasDown = false;
     bool m_WorldVguiSuppressAttack = false;
     bool m_WeaponMenuOpen = false;
