@@ -263,6 +263,8 @@ namespace bmvr
     // vtable +0x474 leave from the controller ray (TryGetVrShootOrigin), not
     // the head. false = old behaviour (tests compare both).
     extern bool g_VrShotOriginFix;
+    // Shots start at the muzzle attachment (not slid onto the controller axis).
+    extern bool g_VrShootFromMuzzle;
     // CrouchStickHold=true: right stick down crouches only while held
     // (default false = each push toggles crouch).
     extern bool g_CrouchStickHold;

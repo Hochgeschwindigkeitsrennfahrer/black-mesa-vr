@@ -105,6 +105,7 @@ namespace bmvr
     bool g_FakeRuntime = false;
     bool g_MirrorBothEyes = false;
     bool g_VrShotOriginFix = true;
+    bool g_VrShootFromMuzzle = true;
     bool g_CrouchStickHold = false;
     bool g_SprintToggle = false;
     bool g_VrSettingsPause = true;
@@ -580,6 +581,8 @@ namespace bmvr
                 g_SprintToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSettingsPause") == 0)
                 g_VrSettingsPause = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrShootFromMuzzle") == 0)
+                g_VrShootFromMuzzle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MirrorBothEyes") == 0)
                 g_MirrorBothEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VRRuntimeBackend") == 0)

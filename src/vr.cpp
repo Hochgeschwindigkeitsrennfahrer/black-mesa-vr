@@ -5094,6 +5094,16 @@ bool VR::TryGetVrShootOrigin(Vector& origin) const
     Vector muzzle{};
     if (!TryGetVrMuzzleWorld(muzzle))
         return false;
+    // Default since 2026-10-15: shots leave the muzzle along the aim, like a
+    // real gun. Up close they hit where the barrel points (user: 5-10 cm
+    // under it at a wall), and the laser is a straight line out of the
+    // barrel. The constant few-cm offset from the controller axis is
+    // invisible at range. VrShootFromMuzzle=false = the projection below.
+    if (bmvr::g_VrShootFromMuzzle)
+    {
+        origin = muzzle;
+        return true;
+    }
 
     // Bullets fly along cmd->viewangles, which is the controller aim, but they
     // start at the muzzle. The muzzle sits off that axis by the per-weapon
@@ -6560,7 +6570,7 @@ void VR::UpdateAimCrosshair()
     m_AimShootAlong = (origin - pivot).Dot(f);
     m_AimHitDist = hit ? (tr.endpos - origin).Length() - 1.5f : 0.f;
 
-    if (wantBeam)
+    if (wantBeam || bmvr::g_VrShootFromMuzzle)
     {
         // From the muzzle attachment to the shot's hit point (the dot), so
         // beam, dot and gun meet. The muzzle offset is kept in the gun
@@ -6582,7 +6592,7 @@ void VR::UpdateAimCrosshair()
         if (m_AimBeamLocalValid)
         {
             m_AimBeamHit = hit;
-            m_AimBeamValid = true;
+            m_AimBeamValid = wantBeam;
         }
     }
     if (!bmvr::g_VrCrosshair || !hit)
@@ -6626,12 +6636,21 @@ bool VR::AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) co
     Vector pivot{}, f{}, r{}, u{};
     if (!AimFrameNow(pivot, f, r, u))
         return false;
-    dot = pivot + f * (m_AimShootAlong + m_AimHitDist);
-    beamEnd = m_AimBeamHit ? dot : pivot + f * (m_AimShootAlong + 1024.f);
     Vector vo{}, vf{}, vr{}, vu{};
     if (!GunFrameNow(vo, vf, vr, vu))
         return false;
     beamStart = vo + vf * m_AimBeamLocal.x + vr * m_AimBeamLocal.y + vu * m_AimBeamLocal.z;
+    if (bmvr::g_VrShootFromMuzzle && m_AimBeamLocalValid)
+    {
+        // Shot = muzzle along the aim: dot and beam on that one line.
+        dot = beamStart + f * m_AimHitDist;
+        beamEnd = m_AimBeamHit ? dot : beamStart + f * 1024.f;
+    }
+    else
+    {
+        dot = pivot + f * (m_AimShootAlong + m_AimHitDist);
+        beamEnd = m_AimBeamHit ? dot : pivot + f * (m_AimShootAlong + 1024.f);
+    }
     Vector along = beamEnd - beamStart;
     const float len = VectorNormalize(along);
     beamStart = beamStart + along * (std::min)(len, bmvr::g_VrLaserStartForward);
