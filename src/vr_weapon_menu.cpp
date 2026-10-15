@@ -2120,7 +2120,7 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     };
 
     auto drawTexturedQuad = [&](IDirect3DTexture9* tex, const Vector& center,
-        float halfW, float halfH, D3DCOLOR tint) {
+        float halfW, float halfH, D3DCOLOR tint, bool mirrorU = false) {
         if (!tex)
             return;
         const Vector tl = center - m_WeaponMenuRight * halfW + m_WeaponMenuUp * halfH;
@@ -2143,10 +2143,10 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
         MenuVertTex tv[4] = {
-            { x0, y0, 0.f, r0, tint, 0.f, 0.f },
-            { x1, y1, 0.f, r1, tint, 1.f, 0.f },
-            { x2, y2, 0.f, r2, tint, 0.f, 1.f },
-            { x3, y3, 0.f, r3, tint, 1.f, 1.f }
+            { x0, y0, 0.f, r0, tint, mirrorU ? 1.f : 0.f, 0.f },
+            { x1, y1, 0.f, r1, tint, mirrorU ? 0.f : 1.f, 0.f },
+            { x2, y2, 0.f, r2, tint, mirrorU ? 1.f : 0.f, 1.f },
+            { x3, y3, 0.f, r3, tint, mirrorU ? 0.f : 1.f, 1.f }
         };
         device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tv, sizeof(MenuVertTex));
         device->SetTexture(0, nullptr);
@@ -2214,8 +2214,10 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         if (slot.settingsGear)
         {
             if (IDirect3DTexture9* gear = SettingsGearTexture(device))
+                // m_WeaponMenuRight = up x fwd points left in Source;
+                // text must not come out mirrored.
                 drawTexturedQuad(gear, slot.center, radiusHu * 0.62f, radiusHu * 0.31f,
-                    hover ? D3DCOLOR_XRGB(255, 255, 255) : pal.tintIdle);
+                    hover ? D3DCOLOR_XRGB(255, 255, 255) : pal.tintIdle, true);
             continue;
         }
         const bool showIcon = slot.entityIndex > 0 || (!slot.emptyHand && slot.kind > 0);

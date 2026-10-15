@@ -930,6 +930,7 @@ public:
     bool AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const;
     // Beam ends and marker from the current pose and the last trace.
     bool AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) const;
+    bool GunFrameNow(Vector& origin, Vector& f, Vector& r, Vector& u) const;
     // AimDebug=true (config.txt): compare what the server fires with the
     // reticle ray. Called from the shoot-origin/-angle hooks on the game thread.
     void AimDebugShootOrigin(bool server, void* player, bool rewrote, const Vector& before, const Vector& after);
@@ -1182,10 +1183,9 @@ private:
     bool m_AimCrosshairValid = false;
     bool m_AimBeamValid = false;
     bool m_AimBeamHit = false;
-    Vector m_AimBeamLocal{};          // muzzle in the aim frame (fwd, right, up)
+    Vector m_AimBeamLocal{};          // muzzle in the gun model frame (fwd, right, up)
     bool m_AimBeamLocalValid = false;
     std::string m_AimBeamLocalKey;
-    float m_AimBeamDist = 0.f;        // beam length from the muzzle
     float m_AimShootAlong = 0.f;      // shot origin along the aim from the controller
     float m_AimHitDist = 0.f;         // shot origin -> marker
     bool m_HasHevSuit = true;

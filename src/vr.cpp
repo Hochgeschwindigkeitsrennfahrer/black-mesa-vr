@@ -6488,17 +6488,16 @@ void VR::UpdateAimCrosshair()
 
     if (wantBeam)
     {
-        // Straight out of the barrel along the aim, from the muzzle
-        // attachment (the shot origin sits on the controller axis, a few cm
-        // under the barrel). Aiming it at the bullet hit instead bent the beam
-        // whenever the hit was close (an NPC right in front of the gun). Its
-        // own trace, so it stops at what it touches. The barrel offset is
-        // smoothed: the attachment comes from last frame's bones.
-        Vector muzzle{};
-        if (TryGetVrMuzzleWorld(muzzle))
+        // From the muzzle attachment to the shot's hit point (the dot), so
+        // beam, dot and gun meet. The muzzle offset is kept in the gun
+        // model's own frame, which rolls with the wrist; the aim frame has no
+        // roll, so an offset stored there swung around the barrel whenever
+        // the wrist turned. Smoothed: the attachment is last frame's bones.
+        Vector muzzle{}, vo{}, vf{}, vr{}, vu{};
+        if (TryGetVrMuzzleWorld(muzzle) && GunFrameNow(vo, vf, vr, vu))
         {
-            const Vector d = muzzle - pivot;
-            const Vector local(d.Dot(f), d.Dot(r), d.Dot(u));
+            const Vector d = muzzle - vo;
+            const Vector local(d.Dot(vf), d.Dot(vr), d.Dot(vu));
             if (!m_AimBeamLocalValid || m_AimBeamLocalKey != weaponKey || (local - m_AimBeamLocal).Length() > 12.f)
                 m_AimBeamLocal = local;
             else
@@ -6508,14 +6507,7 @@ void VR::UpdateAimCrosshair()
         }
         if (m_AimBeamLocalValid)
         {
-            const Vector start = pivot + f * m_AimBeamLocal.x + r * m_AimBeamLocal.y + u * m_AimBeamLocal.z;
-            CTraceFilterSkipTwoEntities beamFilter(player, m_Game->GetViewModelEntity(), 0);
-            Ray_t beamRay;
-            beamRay.Init(start, start + f * 1024.f);
-            CGameTrace btr{};
-            m_Game->m_EngineTrace->TraceRay(beamRay, MASK_SHOT, &beamFilter, &btr);
-            m_AimBeamHit = btr.fraction < 1.f && !btr.startsolid;
-            m_AimBeamDist = btr.startsolid ? 0.f : 1024.f * btr.fraction;
+            m_AimBeamHit = hit;
             m_AimBeamValid = true;
         }
     }
@@ -6541,16 +6533,34 @@ bool VR::AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const
     return VectorNormalize(f) > 0.01f;
 }
 
+bool VR::GunFrameNow(Vector& origin, Vector& f, Vector& r, Vector& u) const
+{
+    // Where the viewmodel is placed this frame, roll included.
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    if (body.LengthSqr() <= 1.f)
+        body = m_SetupOrigin;
+    if (body.LengthSqr() <= 1.f)
+        return false;
+    origin = GetRecommendedViewmodelAbsPos(body);
+    ApplyViewmodelVisualScale(origin);
+    QAngle::AngleVectors(GetRecommendedViewmodelAbsAngle(), &f, &r, &u);
+    return VectorNormalize(f) > 0.01f;
+}
+
 bool VR::AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) const
 {
     Vector pivot{}, f{}, r{}, u{};
     if (!AimFrameNow(pivot, f, r, u))
         return false;
-    beamStart = pivot + f * (m_AimBeamLocal.x + bmvr::g_VrLaserStartForward)
-        + r * m_AimBeamLocal.y + u * m_AimBeamLocal.z;
-    const float len = (std::max)(0.f, m_AimBeamDist - bmvr::g_VrLaserStartForward);
-    beamEnd = beamStart + f * len;
     dot = pivot + f * (m_AimShootAlong + m_AimHitDist);
+    beamEnd = m_AimBeamHit ? dot : pivot + f * (m_AimShootAlong + 1024.f);
+    Vector vo{}, vf{}, vr{}, vu{};
+    if (!GunFrameNow(vo, vf, vr, vu))
+        return false;
+    beamStart = vo + vf * m_AimBeamLocal.x + vr * m_AimBeamLocal.y + vu * m_AimBeamLocal.z;
+    Vector along = beamEnd - beamStart;
+    const float len = VectorNormalize(along);
+    beamStart = beamStart + along * (std::min)(len, bmvr::g_VrLaserStartForward);
     return true;
 }
 
@@ -8656,7 +8666,11 @@ void VR::ApplyTwoHandWeaponAim()
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
     const bool pistol = m_VmClass.offhandPistol;
     const float enterR = (pistol ? 0.07f : 0.05f) * scale;
-    const float stayR = (pistol ? 0.14f : 0.12f) * scale;
+    // Long guns: lat is measured from the gun hand's own axis, and with two
+    // hands on the gun that wrist turns away from the hand-to-hand line the
+    // gun follows. 0.12 m let go mid-aim (headset 2026-10-15: drops at
+    // 11-15 cm with the grip held). Releasing the grip still lets go.
+    const float stayR = (pistol ? 0.14f : 0.25f) * scale;
     const float slop = 0.04f * scale;
     const float railHu = m_VmClass.offhandRailMeters * scale;
     const float alongMin = gx - slop;
