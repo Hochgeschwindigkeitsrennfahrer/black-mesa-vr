@@ -3465,6 +3465,17 @@ namespace
         redirected = true;
     }
 
+    void SehViewport(IMatRenderContext* ctx, int w, int h)
+    {
+        __try
+        {
+            Hooks::hkViewport.fOriginal(ctx, 0, 0, w, h);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
     bool SehVguiPaintOriginal(void* vgui, int paintMode)
     {
         if (!Hooks::hkVgui_Paint.fOriginal)
@@ -3523,8 +3534,12 @@ namespace
                 return;
             }
         }
-        if (scope.ctx && Hooks::hkViewport.fOriginal)
-            Hooks::hkViewport.fOriginal(scope.ctx, 0, 0, static_cast<int>(tw), static_cast<int>(th));
+        // Queued (multicore): the material thread binds the HUD RT, which
+        // resets the viewport to its size. Setting it here from the main
+        // thread raced the material thread (AV in shaderapidx9 opening the
+        // pause menu / applying video settings, 2026-10-15, twice).
+        if (!queued && scope.ctx && Hooks::hkViewport.fOriginal)
+            SehViewport(scope.ctx, static_cast<int>(tw), static_cast<int>(th));
         // HL2VR RenderHUD: full dest, alpha write, clear 0,0,0,0,
         // then PAINT_UIPANELS. Software CURSOR fights the ColorFill arrow
         // and strobes. D3D bind replaces named PushRT.
