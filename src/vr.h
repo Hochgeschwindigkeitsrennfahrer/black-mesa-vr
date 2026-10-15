@@ -600,6 +600,7 @@ public:
     std::atomic<uint32_t> m_PendingImpulse{ 0 };
     std::atomic<int> m_PendingInvDelta{ 0 };
     std::atomic<int> m_PendingWeaponSelect{ 0 };
+    std::atomic<bool> m_PendingQuickSave{ false };
     std::atomic<uint32_t> m_PendingWeaponSounds{ 0 };
     std::atomic<int> m_PendingWeaponSoundKind{ 0 };
     std::atomic<int> m_PendingWeaponSoundEntity{ 0 };
@@ -1108,6 +1109,7 @@ private:
     void ApplyViewmodelBasisOffsets();
     void ApplyTwoHandWeaponAim();
     float LeftSupportGripValue() const;
+    bool UpdateShoulderGestures(bool paused);
     bool ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const;
     bool m_TwoHandActive = false;
     bool m_OffhandGripBoneValid = false;

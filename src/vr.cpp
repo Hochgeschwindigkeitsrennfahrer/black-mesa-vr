@@ -4281,6 +4281,11 @@ void VR::ProcessInput()
     const bool prevHeld = PressedDigitalAction(m_ActionPrevItem);
     const bool pauseHeld = PressedDigitalAction(m_ActionPause);
     const bool resetHeld = PressedDigitalAction(m_ActionResetPosition);
+    // Shoulder gestures (HL2VR style): left hand behind the left shoulder +
+    // left grip = quick save, right hand behind the right shoulder + right
+    // grip = crowbar. The hand must rest there ~0.25 s first (a buzz says
+    // it is armed), so a fast swing past the shoulder does nothing.
+    const bool rightShoulder = UpdateShoulderGestures(paused);
     vr::InputDigitalActionData_t flash{};
     static bool s_flashLatched = false;
     static DWORD s_flashImpulseMs = 0;
@@ -4291,7 +4296,7 @@ void VR::ProcessInput()
         if (flash.bState)
         {
             s_flashReleasePolls = 0;
-            if (!paused && !m_GameUiVisible && !s_flashLatched && (nowTick - s_flashImpulseMs) > 300)
+            if (!paused && !m_GameUiVisible && !s_flashLatched && !rightShoulder && (nowTick - s_flashImpulseMs) > 300)
             {
                 m_PendingImpulse.store(100, std::memory_order_release);
                 s_flashImpulseMs = nowTick;
@@ -5619,6 +5624,11 @@ void VR::FlushPendingGameUi()
             const bool ok = m_Game->ClientCmd_Unrestricted(cmd);
             Game::logMsg("fakehelper cmd '%s' ok=%d", cmd, ok ? 1 : 0);
         }
+    }
+    if (m_PendingQuickSave.exchange(false, std::memory_order_acq_rel) && m_Game)
+    {
+        const bool ok = m_Game->ClientCmd_Unrestricted("save quick");
+        Game::logMsg("Quick save ClientCmd_Unrestricted ok=%d", ok ? 1 : 0);
     }
     const int op = m_PendingGameUi.exchange(0, std::memory_order_acq_rel);
     if (op == 0 || !m_Game)
@@ -8826,6 +8836,101 @@ void VR::ApplyTwoHandWeaponAim()
     m_ViewmodelUp = U;
 
     finishDraw(F, R, U, gxSlide);
+}
+
+bool VR::UpdateShoulderGestures(bool paused)
+{
+    // Returns true while the right hand is in its shoulder zone, so the right
+    // grip does not also toggle the flashlight there.
+    struct Zone { DWORD enteredMs = 0; bool armed = false; bool gripDown = true; };
+    static Zone s_left, s_right;
+    const bool active = m_GameplayEligible && !paused && !MenuGameplayBlocked()
+        && !m_WeaponMenuOpen && !m_SettingsOpen && m_HmdPoseValid;
+    if (!active)
+    {
+        s_left = Zone{};
+        s_right = Zone{};
+        return false;
+    }
+    const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+    Vector fwd = m_HmdForward;
+    fwd.z = 0.f;
+    if (VectorNormalize(fwd) <= 0.01f)
+        return false;
+    const Vector up(0.f, 0.f, 1.f);
+    const Vector right = CrossProduct(fwd, up);   // Source: x fwd, y left, z up
+    // Behind the head (the HMD sits ~10 cm ahead of the neck), above chest
+    // height, on that hand's side.
+    auto inZone = [&](const Vector& hand, float side) {
+        const Vector d = hand - m_HmdPosAbs;
+        const float along = d.Dot(fwd) / scale;
+        const float lateral = d.Dot(right) / scale * side;
+        const float height = d.z / scale;
+        return along < -0.02f && height > -0.30f && height < 0.25f
+            && lateral > -0.05f && lateral < 0.45f;
+    };
+    auto gripValue = [&](vr::VRActionHandle_t h) {
+        vr::InputAnalogActionData_t a{};
+        if (GetAnalogActionData(h, a))
+            return a.x;
+        return PressedDigitalAction(h) ? 1.f : 0.f;
+    };
+    // Returns true on the grip's press edge while armed.
+    auto step = [&](Zone& z, bool in, float grip, vr::ETrackedControllerRole role) {
+        const DWORD now = GetTickCount();
+        if (!in)
+        {
+            z.enteredMs = 0;
+            z.armed = false;
+            z.gripDown = grip >= 0.3f;
+            return false;
+        }
+        if (z.enteredMs == 0)
+            z.enteredMs = now;
+        if (!z.armed && now - z.enteredMs >= 250 && !z.gripDown)
+        {
+            z.armed = true;
+            PulseHandHaptic(role, 1200, 0.3f);
+        }
+        if (grip >= 0.6f && !z.gripDown)
+        {
+            z.gripDown = true;
+            return z.armed;
+        }
+        if (grip <= 0.3f)
+            z.gripDown = false;
+        return false;
+    };
+
+    const bool leftIn = m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
+    const bool rightIn = m_PhysicalRightTrackingValid && inZone(m_PhysicalRightPosAbs, 1.f);
+    if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand))
+    {
+        m_PendingQuickSave.store(true, std::memory_order_release);
+        PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
+        Game::logMsg("Shoulder gesture: quick save");
+    }
+    if (step(s_right, rightIn, gripValue(m_ActionFlashlight), vr::TrackedControllerRole_RightHand) && m_Game)
+    {
+        Game::InventoryWeapon inv[32]{};
+        const int n = m_Game->CollectInventoryWeapons(inv, 32);
+        for (int i = 0; i < n; ++i)
+        {
+            const char* names[] = { inv[i].networkName, inv[i].modelName };
+            bool crowbar = false;
+            for (const char* nm : names)
+                crowbar = crowbar || (nm && (strstr(nm, "crowbar") || strstr(nm, "wrench")));
+            if (crowbar && inv[i].entityIndex > 0)
+            {
+                m_EmptyHands = false;
+                m_PendingWeaponSelect.store(inv[i].entityIndex, std::memory_order_release);
+                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
+                Game::logMsg("Shoulder gesture: crowbar entity=%d", inv[i].entityIndex);
+                break;
+            }
+        }
+    }
+    return rightIn;
 }
 
 float VR::LeftSupportGripValue() const
