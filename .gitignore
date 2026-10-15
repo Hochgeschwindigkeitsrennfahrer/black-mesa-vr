@@ -20,3 +20,5 @@ third_party/openxr/loader/
 build-linux/
 build-linux-helper/
 build-stable*/
+build-beta/
+build-beta-helper/

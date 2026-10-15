@@ -1758,7 +1758,7 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 {
     (void)deltaMs;
     const DWORD now = GetTickCount();
-    if (!m_GameplayEligible || !m_Game || PauseUiActive())
+    if (!m_GameplayEligible || !m_Game || PauseUiActive() || m_SettingsOpen)
     {
         m_WeaponMenuOpen = false;
         m_WeaponMenuClickHeld = false;
@@ -1943,6 +1943,17 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
             }
         };
         packInto(kWeaponHex, static_cast<int>(sizeof(kWeaponHex) / sizeof(kWeaponHex[0])));
+        // VR settings: one cell below the crowbar, outside the weapon brick.
+        if (placed < kMaxMenuSlots && take(0, -2))
+        {
+            WeaponMenuSlot& gear = m_WeaponMenuSlots[placed];
+            OffsetToPlane(0, -2, gear.planeX, gear.planeY);
+            gear.hudSlot = 0;
+            gear.hudPos = -2;
+            gear.settingsGear = true;
+            strncpy_s(gear.label, "VR", _TRUNCATE);
+            ++placed;
+        }
         m_WeaponMenuCount = placed;
         ApplyWeaponMenuWorldPose();
 
@@ -2019,7 +2030,11 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 
     if (!stickClickHeld && m_WeaponMenuClickHeld)
     {
-        if (m_WeaponMenuOpenedThisHold)
+        const bool openSettings = m_WeaponMenuOpen && m_WeaponMenuHover >= 0
+            && m_WeaponMenuHover < m_WeaponMenuCount && m_WeaponMenuSlots[m_WeaponMenuHover].settingsGear;
+        if (openSettings)
+            OpenSettingsPanel();
+        else if (m_WeaponMenuOpenedThisHold)
             QueueWeaponMenuSound(kWeaponSoundSelect, 0, 0);
         else if ((now - m_WeaponMenuClickStartMs) < kMenuHoldMs)
         {
@@ -2196,6 +2211,13 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const WeaponMenuSlot& slot = m_WeaponMenuSlots[i];
         const bool hover = (i == m_WeaponMenuHover);
         const bool dry = slot.dry && !slot.emptyHand;
+        if (slot.settingsGear)
+        {
+            if (IDirect3DTexture9* gear = SettingsGearTexture(device))
+                drawTexturedQuad(gear, slot.center, radiusHu * 0.62f, radiusHu * 0.31f,
+                    hover ? D3DCOLOR_XRGB(255, 255, 255) : pal.tintIdle);
+            continue;
+        }
         const bool showIcon = slot.entityIndex > 0 || (!slot.emptyHand && slot.kind > 0);
         if (!showIcon)
             continue;

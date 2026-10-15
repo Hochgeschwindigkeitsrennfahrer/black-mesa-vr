@@ -35,6 +35,7 @@ set(BMVR_SOURCES
   src/vr_audio_focus.cpp
   src/vr_crowbar.cpp
   src/vr_weapon_menu.cpp
+  src/vr_settings_panel.cpp
   src/vr_hands.cpp
   src/vr_hand_renderer_d3d9.cpp
   src/vr_runtime_backend.cpp

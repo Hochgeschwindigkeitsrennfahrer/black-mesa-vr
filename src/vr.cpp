@@ -3411,8 +3411,10 @@ void VR::MaybeDebugDumpPublished(uint32_t slot)
     if (!f)
         return;
     char name[64] = "dump";
-    if (std::fscanf(f, "%63s", name) != 1)
+    int step = 4;
+    if (std::fscanf(f, "%63s %d", name, &step) < 1)
         std::strcpy(name, "dump");
+    step = std::clamp(step, 1, 8);
     std::fclose(f);
     std::remove(trigger.c_str());
     IDirect3DDevice9* dev = nullptr;
@@ -3421,8 +3423,8 @@ void VR::MaybeDebugDumpPublished(uint32_t slot)
     const std::string base = bmvr::VrFilePath(name);
     if (slot < kOpenXrPublishSlots)
     {
-        DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[0][slot], base + "-left.bmp", 4);
-        DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[1][slot], base + "-right.bmp", 4);
+        DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[0][slot], base + "-left.bmp", step);
+        DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[1][slot], base + "-right.bmp", step);
     }
     else
         Game::logMsg("debug dump: no publish slot (%u)", slot);
@@ -4092,6 +4094,7 @@ void VR::ProcessInput()
 
     const bool menuStick = WeaponMenuStickHeld();
     UpdateWeaponMenu(menuStick, deltaMs);
+    UpdateSettingsPanel();
 
     bool usedAnalogTurn = false;
     float turnY = 0.f;
@@ -4188,16 +4191,18 @@ void VR::ProcessInput()
         const bool primaryHeld = PressedDigitalAction(m_ActionPrimaryAttack);
         const bool emptyHands = m_EmptyHands;
         const bool leftUse = PressedDigitalAction(m_ActionUse);
-        if (!m_WeaponMenuOpen && primaryHeld && !emptyHands && !IsCrowbarEquipped())
+        // The settings panel takes trigger, Cross and Circle (reload / alt-fire).
+        const bool menuOwnsButtons = m_WeaponMenuOpen || m_SettingsOpen;
+        if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped())
             buttons |= IN_ATTACK;
-        if (!m_WeaponMenuOpen && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
+        if (!menuOwnsButtons && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
             buttons |= IN_ATTACK2;
         if (PressedDigitalAction(m_ActionJump) || (haveTurnY && turnY > 0.65f))
             buttons |= IN_JUMP;
         // Left trigger is Use. Right trigger is Use only while holstered.
         // Hold to hold a pickup; release pulses a second Use to drop.
-        UpdateUseGrab(buttons, leftUse, !m_WeaponMenuOpen && emptyHands && primaryHeld);
-        if (PressedDigitalAction(m_ActionReload))
+        UpdateUseGrab(buttons, leftUse, !menuOwnsButtons && emptyHands && primaryHeld);
+        if (!m_SettingsOpen && PressedDigitalAction(m_ActionReload))
             buttons |= IN_RELOAD;
         if (PressedDigitalAction(m_ActionCrouch))
             buttons |= IN_DUCK;
@@ -6427,7 +6432,8 @@ void VR::UpdateAimCrosshair()
 {
     m_AimCrosshairValid = false;
     m_AimBeamValid = false;
-    if (!(bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen)
+    if (!(bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen
+        || m_SettingsOpen)
         return;
     // Guns only: no laser on the crowbar, thrown weapons, snarks or bare hands.
     // The RPG keeps its own guidance dot and gets no beam.
@@ -7536,6 +7542,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     bool wantHandHud = drawOverlays && bmvr::g_HandHud && m_Game && m_HasHevSuit;
     bool wantOverlay = drawOverlays && (drawBoxes
         || WeaponMenuOpen()
+        || SettingsPanelOpen()
         || AimCrosshairVisible());
     if ((wantOverlay || wantHandHud) && !bmvr::TryHandOverlay())
     {
@@ -7621,7 +7628,9 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 drawHandProxy(toWorld(rightPos), rightAng, D3DCOLOR_XRGB(255, 0, 255), false, m_ActionSkeletonRight);
         }
 
-        if (WeaponMenuOpen())
+        if (SettingsPanelOpen())
+            DrawSettingsPanel(device, stereoEye, w, h, eyeOrig, fwd, right, up);
+        else if (WeaponMenuOpen())
             DrawWeaponMenu(device, stereoEye, w, h, eyeOrig, fwd, right, up);
         else if (AimCrosshairVisible())
         {
@@ -10104,7 +10113,7 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
     IDirect3DSurface9* right = m_D9RightEyeSurface;
     if (!IsMenuUp()
         && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-            || WeaponMenuOpen() || AimCrosshairVisible()))
+            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible()))
     {
         DrawIndependentHandMarkers(left, 1, true, true);
         DrawIndependentHandMarkers(right, 2, true, true);

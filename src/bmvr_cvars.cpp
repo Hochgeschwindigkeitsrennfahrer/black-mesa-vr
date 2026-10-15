@@ -52,6 +52,7 @@ namespace bmvr
             alignas(8) uint8_t obj[kObjBytes];
             char str[kStrCap];
             char def[kStrCap];
+            float lastSeen;
         };
 
         VrCvar g_Cvars[] = {
@@ -313,10 +314,18 @@ namespace bmvr
             }
             g_Registered = true;
             ReplayConfigCfg();
+            // config.cfg values were replayed into the cvars: apply them once.
+            for (VrCvar& c : g_Cvars)
+                c.lastSeen = CurrentDefault(c) - 12345.f;
         }
-        for (const VrCvar& c : g_Cvars)
+        // Only a cvar that changed (console, config.cfg) writes its flag, so
+        // the in-VR settings panel's changes are not overwritten every frame.
+        for (VrCvar& c : g_Cvars)
         {
             float v = ReadValue(c);
+            if (v == c.lastSeen)
+                continue;
+            c.lastSeen = v;
             if (!(v >= c.minVal))
                 v = c.minVal;
             if (!(v <= c.maxVal))

@@ -959,6 +959,30 @@ public:
     bool WeaponMenuStickHeld() const;
     bool EmptyHands() const { return m_EmptyHands; }
     void UpdateWeaponMenu(bool stickClickHeld, float deltaMs);
+    // In-VR settings panel (vr_settings_panel.cpp), opened from the weapon
+    // menu's gear slot. Render thread only.
+    bool SettingsPanelOpen() const { return m_SettingsOpen; }
+    void OpenSettingsPanel();
+    void CloseSettingsPanel(const char* why);
+    void UpdateSettingsPanel();
+    void DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
+        const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
+    void SettingsPanelFrame(Vector& origin, Vector& fwd, Vector& right, Vector& up) const;
+    static IDirect3DTexture9* SettingsGearTexture(IDirect3DDevice9* device);
+    bool m_SettingsOpen = false;
+    bool m_SettingsDirty = false;
+    bool m_SettingsChanged = false;
+    bool m_SettingsClickHeld = false;
+    bool m_SettingsBackHeld = false;
+    bool m_SettingsHitValid = false;
+    int m_SettingsHover = -1;
+    int m_SettingsHoverZone = -1;
+    float m_SettingsHitX = 0.f;
+    float m_SettingsHitY = 0.f;
+    float m_SettingsLatchYaw = 0.f;
+    Vector m_SettingsLatchDelta{};
+    Vector m_SettingsLatchFwd{};
+    Vector m_SettingsLatchRight{};
     void ApplyWeaponMenuWorldPose();
     void DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
@@ -1279,6 +1303,7 @@ private:
         bool emptyHand = false;
         bool dry = false;
         bool throwable = false;
+        bool settingsGear = false;   // opens the VR settings panel on release
     };
     WeaponMenuSlot m_WeaponMenuSlots[20]{};
     int m_LastMuzzleFlashParity = -1;

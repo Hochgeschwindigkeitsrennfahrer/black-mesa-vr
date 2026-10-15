@@ -8,7 +8,8 @@
 #   unfake <key>                      removes that line
 #   shot <name>                       screenshot of the game window -> <outdir>/<name>.png
 #   log                               copy the mod log now
-#   dump <name>                       mod writes VR/<name>-left/right/hud.bmp: the eye pair it publishes + overlay
+#   dump <name> [step]                mod writes VR/<name>-left/right/hud.bmp: the eye pair it publishes + overlay
+#                                     (every <step>th pixel, default 4)
 #   projcheck [left|right|both] [deg] projection check (bm-projcheck.py): window shots before/after turning the fake
 #                                     hmd about that eye (pitch, yaw, roll); fails unless each eye image uses the
 #                                     projection the fake helper says the real helper would submit (1.000 +- 2 %).
