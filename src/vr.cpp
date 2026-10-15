@@ -4296,6 +4296,10 @@ void VR::ProcessInput()
         if (flash.bState)
         {
             s_flashReleasePolls = 0;
+            // A grip squeezed for the shoulder crowbar is still held when
+            // the hand comes forward: that press must not toggle the light.
+            if (rightShoulder)
+                s_flashLatched = true;
             if (!paused && !m_GameUiVisible && !s_flashLatched && !rightShoulder && (nowTick - s_flashImpulseMs) > 300)
             {
                 m_PendingImpulse.store(100, std::memory_order_release);
@@ -5629,6 +5633,7 @@ void VR::FlushPendingGameUi()
     {
         const bool ok = m_Game->ClientCmd_Unrestricted("save quick");
         Game::logMsg("Quick save ClientCmd_Unrestricted ok=%d", ok ? 1 : 0);
+        ShowToast(ok ? "GAME SAVED" : "SAVE FAILED");
     }
     const int op = m_PendingGameUi.exchange(0, std::memory_order_acq_rel);
     if (op == 0 || !m_Game)
@@ -7604,7 +7609,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     bool wantOverlay = drawOverlays && (drawBoxes
         || WeaponMenuOpen()
         || SettingsPanelOpen()
-        || AimCrosshairVisible());
+        || AimCrosshairVisible()
+        || ToastVisible());
     if ((wantOverlay || wantHandHud) && !bmvr::TryHandOverlay())
     {
         static int s_skipOverlayLog;
@@ -7775,6 +7781,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             }
             device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         }
+        if (ToastVisible())
+            DrawToast(device, stereoEye, w, h, eyeOrig, fwd, right, up);
 
         static int s_handLog;
         if (s_handLog < 4)
@@ -8717,11 +8725,7 @@ void VR::ApplyTwoHandWeaponAim()
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
     const bool pistol = m_VmClass.offhandPistol;
     const float enterR = (pistol ? 0.07f : 0.05f) * scale;
-    // Long guns: lat is measured from the gun hand's own axis, and with two
-    // hands on the gun that wrist turns away from the hand-to-hand line the
-    // gun follows. 0.12 m let go mid-aim (headset 2026-10-15: drops at
-    // 11-15 cm with the grip held). Releasing the grip still lets go.
-    const float stayR = (pistol ? 0.14f : 0.25f) * scale;
+    const float stayR = 0.14f * scale;   // pistol support hand
     const float slop = 0.04f * scale;
     const float railHu = m_VmClass.offhandRailMeters * scale;
     const float alongMin = gx - slop;
@@ -8736,8 +8740,10 @@ void VR::ApplyTwoHandWeaponAim()
         if (pistol)
             m_TwoHandActive = holdingSqueeze && distToGrip <= stayR;
         else
-            m_TwoHandActive = holdingSqueeze && lat <= stayR
-                && along >= (alongMin - slop) && along <= (alongMax + slop);
+            // Long guns hold on as long as the grip is held (user, 2026-10-15:
+            // letting go with the grip still pressed made no sense); only a
+            // hand far off the gun (tracking jump, hand dropped) releases.
+            m_TwoHandActive = holdingSqueeze && (d - grip).Length() <= 0.45f * scale;
     }
     else if (squeezing)
     {
@@ -8866,8 +8872,10 @@ bool VR::UpdateShoulderGestures(bool paused)
         const float along = d.Dot(fwd) / scale;
         const float lateral = d.Dot(right) / scale * side;
         const float height = d.z / scale;
-        return along < -0.02f && height > -0.30f && height < 0.25f
-            && lateral > -0.05f && lateral < 0.45f;
+        // Closer than the first try (2026-10-15: crowbar a reach too far):
+        // level with the eyes counts, and lower down.
+        return along < 0.04f && height > -0.38f && height < 0.30f
+            && lateral > 0.05f && lateral < 0.50f;
     };
     auto gripValue = [&](vr::VRActionHandle_t h) {
         vr::InputAnalogActionData_t a{};
@@ -8930,7 +8938,12 @@ bool VR::UpdateShoulderGestures(bool paused)
             }
         }
     }
-    return rightIn;
+    // Also for 1 s after leaving the zone, so the grip squeeze that took the
+    // crowbar cannot toggle the flashlight on the way forward.
+    static DWORD s_rightLeftMs;
+    if (rightIn)
+        s_rightLeftMs = GetTickCount();
+    return rightIn || (s_rightLeftMs && GetTickCount() - s_rightLeftMs < 1000);
 }
 
 float VR::LeftSupportGripValue() const

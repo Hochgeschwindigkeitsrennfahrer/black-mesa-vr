@@ -966,6 +966,13 @@ public:
     bool SettingsPanelOpen() const { return m_SettingsOpen; }
     void OpenSettingsPanel();
     void CloseSettingsPanel(const char* why);
+    void ShowToast(const char* text);
+    bool ToastVisible() const;
+    void DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
+        const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
+    static constexpr DWORD kToastMs = 2500;
+    char m_ToastText[32]{};
+    DWORD m_ToastUntilMs = 0;
     void UpdateSettingsPanel();
     void DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);

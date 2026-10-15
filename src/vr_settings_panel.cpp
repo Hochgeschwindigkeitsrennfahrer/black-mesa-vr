@@ -170,6 +170,8 @@ namespace
         IDirect3DTexture9* sys = nullptr;
         IDirect3DTexture9* gpu = nullptr;
         IDirect3DTexture9* gearGpu = nullptr;
+        IDirect3DTexture9* toastGpu = nullptr;
+        char toastText[32]{};
         int w = 0, h = 0;
     };
     PanelGfx g_Gfx;
@@ -179,6 +181,7 @@ namespace
         if (g_Gfx.sys) g_Gfx.sys->Release();
         if (g_Gfx.gpu) g_Gfx.gpu->Release();
         if (g_Gfx.gearGpu) g_Gfx.gearGpu->Release();
+        if (g_Gfx.toastGpu) g_Gfx.toastGpu->Release();
         g_Gfx = PanelGfx{};
     }
 
@@ -635,4 +638,111 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
         }
     }
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+}
+
+void VR::ShowToast(const char* text)
+{
+    strncpy_s(m_ToastText, text ? text : "", _TRUNCATE);
+    m_ToastUntilMs = GetTickCount() + kToastMs;
+}
+
+bool VR::ToastVisible() const
+{
+    return m_ToastUntilMs != 0 && static_cast<int>(m_ToastUntilMs - GetTickCount()) > 0;
+}
+
+void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
+    const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up)
+{
+    // Short head-locked message (quick save), slightly below the view centre.
+    if (!device || !ToastVisible())
+        return;
+    if (g_Gfx.device && g_Gfx.device != device)
+        ReleaseGfx();
+    g_Gfx.device = device;
+    if (!g_Gfx.toastGpu || std::strcmp(g_Gfx.toastText, m_ToastText) != 0)
+    {
+        if (g_Gfx.toastGpu) { g_Gfx.toastGpu->Release(); g_Gfx.toastGpu = nullptr; }
+        Canvas c(512, 96);
+        if (!c.ok())
+            return;
+        c.fill(0, 0, c.w, c.h, kBg);
+        c.fill(0, 0, c.w, 5, kAmber);
+        c.text(m_ToastText, 0, 5, c.w, c.h, kAmber, 54, true, DT_CENTER);
+        c.setAlpha(225);
+        IDirect3DTexture9* sys = nullptr;
+        if (!Upload(device, c, sys, g_Gfx.toastGpu) && g_Gfx.toastGpu)
+        {
+            g_Gfx.toastGpu->Release();
+            g_Gfx.toastGpu = nullptr;
+        }
+        if (sys)
+            sys->Release();
+        strncpy_s(g_Gfx.toastText, m_ToastText, _TRUNCATE);
+    }
+    if (!g_Gfx.toastGpu)
+        return;
+
+    const float pixelAspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
+    const float tanHalf = tanf(projFov * 0.5f * kPi / 180.f);
+    if (!(tanHalf > 0.01f))
+        return;
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
+    auto project = [&](const Vector& world, float& sx, float& sy, float& rhw) -> bool {
+        const Vector d = world - eyeOrig;
+        const float z = d.Dot(fwd);
+        if (z < 0.5f)
+            return false;
+        rhw = 1.f / z;
+        const float ndcX = (d.Dot(right) * rhw) / tanHalf * ocSx + ocOx;
+        const float ndcY = ((d.Dot(up) * rhw) * aspect) / tanHalf * ocSy + ocOy;
+        sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
+        sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
+        return true;
+    };
+    // Both eyes share the head-centred placement, so it fuses at 30 HU.
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    const Vector head = GetViewOrigin(body);
+    const Vector po = head + fwd * 30.f - up * 5.f;
+    const float hw = 6.f, hh = hw * 96.f / 512.f;
+    const Vector corners[4] = { po - right * hw + up * hh, po + right * hw + up * hh, po - right * hw - up * hh, po + right * hw - up * hh };
+    const int left = static_cast<int>(m_ToastUntilMs - GetTickCount());
+    const int alpha = (std::min)(255, (std::max)(0, left * 255 / 400));
+    MenuVertTex v[4]{};
+    const float uv[4][2] = { { 0, 0 }, { 1, 0 }, { 0, 1 }, { 1, 1 } };
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!project(corners[i], v[i].x, v[i].y, v[i].rhw))
+            return;
+        v[i].color = D3DCOLOR_ARGB(alpha, 255, 255, 255);
+        v[i].u = uv[i][0];
+        v[i].v = uv[i][1];
+    }
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    device->SetTexture(0, g_Gfx.toastGpu);
+    device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+    device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(MenuVertTex));
+    device->SetTexture(0, nullptr);
+    device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+    device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 }
