@@ -13,6 +13,9 @@ The foundation of the VR implementation is based heavily on the approach pioneer
 L4D2VR source:
 https://github.com/keyou91/l4d2vr
 
+MacOS version here:
+https://github.com/armax9/black-mesa-vr-macos
+
 ## Current Status
 
 **The project is working start-to-finish and is playable as a full VR mod.**
