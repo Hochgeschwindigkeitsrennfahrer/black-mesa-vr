@@ -3312,8 +3312,127 @@ void VR::WaitOldestOpenXrPending()
     }
 }
 
+namespace
+{
+    float HalfToFloat(uint16_t h)
+    {
+        const uint32_t s = (h >> 15) & 1, e = (h >> 10) & 0x1F, m = h & 0x3FF;
+        float v = (e == 0) ? std::ldexp(static_cast<float>(m), -24)
+            : (e == 31) ? 65504.f : std::ldexp(static_cast<float>(m | 0x400), static_cast<int>(e) - 25);
+        return s ? -v : v;
+    }
+
+    // Read back a render-target surface and write every `step`th pixel as a
+    // 24-bit BMP. 8888 and 16F formats; others are only logged.
+    bool DumpSurfaceBmp(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path, int step)
+    {
+        if (!dev || !src)
+            return false;
+        D3DSURFACE_DESC d{};
+        if (FAILED(src->GetDesc(&d)))
+            return false;
+        const bool f16 = d.Format == D3DFMT_A16B16G16R16F;
+        const bool bgra = d.Format == D3DFMT_A8R8G8B8 || d.Format == D3DFMT_X8R8G8B8;
+        const bool rgba = d.Format == D3DFMT_A8B8G8R8 || d.Format == D3DFMT_X8B8G8R8;
+        if (!f16 && !bgra && !rgba)
+        {
+            Game::logMsg("debug dump %s: format %u not handled (%ux%u)", path.c_str(), d.Format, d.Width, d.Height);
+            return false;
+        }
+        IDirect3DSurface9* sys = nullptr;
+        if (FAILED(dev->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || !sys)
+            return false;
+        bool ok = false;
+        D3DLOCKED_RECT lr{};
+        if (SUCCEEDED(dev->GetRenderTargetData(src, sys)) && SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
+        {
+            const int w = static_cast<int>(d.Width) / step, h = static_cast<int>(d.Height) / step;
+            const int rowBytes = (w * 3 + 3) & ~3;
+            std::vector<uint8_t> img(static_cast<size_t>(rowBytes) * h);
+            for (int y = 0; y < h; ++y)
+            {
+                const uint8_t* row = static_cast<const uint8_t*>(lr.pBits) + static_cast<size_t>(y * step) * lr.Pitch;
+                uint8_t* out = &img[static_cast<size_t>(h - 1 - y) * rowBytes];
+                for (int x = 0; x < w; ++x)
+                {
+                    uint8_t r, g, b;
+                    if (f16)
+                    {
+                        const uint16_t* p = reinterpret_cast<const uint16_t*>(row) + static_cast<size_t>(x * step) * 4;
+                        auto c = [](float v) { return static_cast<uint8_t>(std::clamp(v, 0.f, 1.f) * 255.f + 0.5f); };
+                        r = c(HalfToFloat(p[0])); g = c(HalfToFloat(p[1])); b = c(HalfToFloat(p[2]));
+                    }
+                    else
+                    {
+                        const uint8_t* p = row + static_cast<size_t>(x * step) * 4;
+                        if (bgra) { b = p[0]; g = p[1]; r = p[2]; }
+                        else { r = p[0]; g = p[1]; b = p[2]; }
+                    }
+                    out[x * 3 + 0] = b; out[x * 3 + 1] = g; out[x * 3 + 2] = r;
+                }
+            }
+            sys->UnlockRect();
+            FILE* f = std::fopen(path.c_str(), "wb");
+            if (f)
+            {
+                const uint32_t dataSize = static_cast<uint32_t>(img.size());
+                uint8_t hdr[54]{};
+                hdr[0] = 'B'; hdr[1] = 'M';
+                *reinterpret_cast<uint32_t*>(hdr + 2) = 54 + dataSize;
+                *reinterpret_cast<uint32_t*>(hdr + 10) = 54;
+                *reinterpret_cast<uint32_t*>(hdr + 14) = 40;
+                *reinterpret_cast<int32_t*>(hdr + 18) = w;
+                *reinterpret_cast<int32_t*>(hdr + 22) = h;
+                *reinterpret_cast<uint16_t*>(hdr + 26) = 1;
+                *reinterpret_cast<uint16_t*>(hdr + 28) = 24;
+                *reinterpret_cast<uint32_t*>(hdr + 34) = dataSize;
+                std::fwrite(hdr, 1, sizeof(hdr), f);
+                std::fwrite(img.data(), 1, img.size(), f);
+                std::fclose(f);
+                ok = true;
+            }
+        }
+        sys->Release();
+        Game::logMsg("debug dump %s: %s (%ux%u fmt=%u step=%d)", path.c_str(), ok ? "written" : "failed",
+            d.Width, d.Height, d.Format, step);
+        return ok;
+    }
+}
+
+void VR::MaybeDebugDumpPublished(uint32_t slot)
+{
+    static DWORD s_lastCheck = 0;
+    const DWORD now = GetTickCount();
+    if (now - s_lastCheck < 250)
+        return;
+    s_lastCheck = now;
+    const std::string trigger = bmvr::VrFilePath("dump.txt");
+    FILE* f = std::fopen(trigger.c_str(), "rb");
+    if (!f)
+        return;
+    char name[64] = "dump";
+    if (std::fscanf(f, "%63s", name) != 1)
+        std::strcpy(name, "dump");
+    std::fclose(f);
+    std::remove(trigger.c_str());
+    IDirect3DDevice9* dev = nullptr;
+    if (!g_D3DVR9 || FAILED(g_D3DVR9->GetD3DDevice(&dev)) || !dev)
+        return;
+    const std::string base = bmvr::VrFilePath(name);
+    if (slot < kOpenXrPublishSlots)
+    {
+        DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[0][slot], base + "-left.bmp", 4);
+        DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[1][slot], base + "-right.bmp", 4);
+    }
+    else
+        Game::logMsg("debug dump: no publish slot (%u)", slot);
+    DumpSurfaceBmp(dev, m_D9HUDSurface, base + "-hud.bmp", 2);
+    dev->Release();
+}
+
 void VR::PublishOpenXrPair(uint32_t slot, const OpenXrPendingPublish& pend)
 {
+    MaybeDebugDumpPublished(slot);
     if (pend.havePose)
     {
         L4D2VR_PublishOpenXrGameRenderPose(pend.pose);
