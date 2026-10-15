@@ -6201,9 +6201,12 @@ namespace
     // [eax+0x474]; call eax`; seen with AimDebug for the 357, Glock and MP5 on
     // stable, where it was 0x34DEF9). The others are the +0x474 calls directly
     // followed by GetShootAngles (+0x240) in weapon code (stable 0x48EDA4,
-    // 0x484C85, 0x484F0B, 0x48B435; all four moved +0x9D0).
+    // 0x484C85, 0x484F0B, 0x48B435; all four moved +0x9D0). 0x48D265: the tau
+    // cannon's fire routine (called only from CWeapon_Tau, vtable +0x49C),
+    // `mov eax,[eax+0x474]; call eax` (AimDebug weaponFire=0 before; tau
+    // shots started at the head on stable too).
     constexpr uint32_t kServerWeaponFireOriginReturnRvas[] = {
-        0x34E5D9, 0x48F774, 0x485655, 0x4858DB, 0x48BE05 };
+        0x34E5D9, 0x48F774, 0x485655, 0x4858DB, 0x48BE05, 0x48D265 };
 }
 
 Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out)

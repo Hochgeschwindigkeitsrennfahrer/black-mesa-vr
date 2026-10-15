@@ -11,6 +11,7 @@
 # env: BMVR_DLL (test d3d9.dll, required)  BMVR_ORIG_SHA (sha256 of the installed d3d9.dll, required)
 #      BMVR_PREFIX (prefix copy, default <scratch>/compatdata)  BMVR_DISPLAY (:78)  BMVR_W/BMVR_H (1280x640)
 #      BMVR_LAVAPIPE (~/Downloads/PSVR2/tools/lavapipe)  BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0; no Xvfb)
+#      BMVR_XVFB_GPU=1 (real GPU into the private Xvfb via MESA_VK_WSI_DEBUG=sw; fine with the desktop locked)
 set -euo pipefail
 out=$(realpath -m "$1"); shift
 STEAM=~/.local/share/Steam
@@ -66,8 +67,14 @@ else
 	sleep 1
 	export DISPLAY=$display
 	echo "$display" > "$out/display"
-	LVP=${BMVR_LAVAPIPE:-$HOME/Downloads/PSVR2/tools/lavapipe}
-	export VK_DRIVER_FILES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json VK_ICD_FILENAMES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json
+	if [[ -n ${BMVR_XVFB_GPU:-} ]]; then
+		# real GPU, presented into the private Xvfb through Mesa's CPU-copy WSI (Xvfb has no DRI3). Works
+		# with the desktop locked, where a window on :0 never gets its first Present completed.
+		export MESA_VK_WSI_DEBUG=sw
+	else
+		LVP=${BMVR_LAVAPIPE:-$HOME/Downloads/PSVR2/tools/lavapipe}
+		export VK_DRIVER_FILES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json VK_ICD_FILENAMES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json
+	fi
 fi
 export VR_PATHREG_OVERRIDE=/nonexistent/openvrpaths.vrpath XR_RUNTIME_JSON=/nonexistent/openxr.json
 export SDL_AUDIODRIVER=dummy PULSE_SERVER=/nonexistent ALSA_CONFIG_PATH=/nonexistent
