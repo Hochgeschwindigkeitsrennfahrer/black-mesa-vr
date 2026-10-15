@@ -28,6 +28,9 @@ ControllerPitchTilt=-35.0
 ControllerPitchTiltTouch=0
 ControllerPitchTiltIndex=0
 ControllerPitchTiltVive=-45.0
+# Player preference on top of the per-controller tilt above, in degrees
+# (negative = gun points lower). Also Options -> Game -> VR (bmvr_gun_pitch).
+GunPitchOffset=0
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
 ViewmodelPosOffsetXTouch=5.5
 
@@ -45,11 +48,34 @@ HeightOffset=0.0
 # Scene MSAA. 0 / 2 / 4 / 8 / 16. Restart after editing. Not the video menu.
 Msaa=4
 
+# Render each eye's own (asymmetric) HMD frustum instead of one symmetric
+# frustum that covers both eyes. On asymmetric HMDs (PSVR2: 61.5 deg out,
+# 43.5 deg in) the symmetric frustum wastes ~46 % of the eye pixels, so the
+# same RenderScale gets much sharper. OpenXR helper submits the runtime's
+# per-eye FOV. Restart required.
+OffCenterEyes=false
+
 Haptics=true
 HideCrosshair=true
 VrCrosshair=false
+# Aim marker as a red laser dot instead of the amber ticks, and/or a thin red
+# beam from the gun to where it points. Both follow the shot (tilt and
+# GunPitchOffset included); guns only. Also in Options -> Black Mesa.
+VrCrosshairDot=false
+VrLaserBeam=false
+# Beam half width in game units (1 unit ~ 2.5 cm); 0.06 = ~3 mm beam.
+VrLaserWidth=0.06
+# Beam start along the barrel in game units (+ = further out, 1 unit ~ 2.5 cm).
+VrLaserStartForward=0
 DisableViewBob=true
 LeftHanded=false
 
 # Crossbow zoom as a fraction of the headset field of view. 0.28 is about 3.5x.
 ScopeZoomFovScale=0.28
+
+# Right stick down: crouch only while held (false = toggle). Left stick click: sprint latches
+# until the stick is centred again (false = hold the click).
+CrouchStickHold=false
+SprintToggle=false
+# The VR settings above that also appear in Options -> Game (bmvr_* cvars) take
+# the value saved in bms/cfg/config.cfg once changed in the menu or console.

@@ -355,7 +355,17 @@ public:
 	float zFarViewmodel; //0x00E0
 	char pad_00E4[4]; //0x00E4
 	float m_flAspectRatio; //0x00E8
-	char pad_00EC[0x5C]; //0x00EC
+	// engine CViewSetup::ComputeViewMatrices (`engine+0x10098C`): if 0xEC,
+	// MatrixBuildPerspectiveOffCenterX(fov, aspect, zNear, zFar, bottom=0xF4,
+	// top=0xF0, left=0xF8, right=0xFC). Bounds are 0..1 fractions of the
+	// symmetric fov/aspect frustum (0 = left/bottom edge, 1 = right/top).
+	bool m_bOffCenter; //0x00EC
+	char pad_00ED[3]; //0x00ED
+	float m_flOffCenterTop; //0x00F0
+	float m_flOffCenterBottom; //0x00F4
+	float m_flOffCenterLeft; //0x00F8
+	float m_flOffCenterRight; //0x00FC
+	char pad_0100[0x48]; //0x0100
 }; //Size: 0x0148  (copy ctor last field 0x145; GetViewSetup at CViewRender+0x3FC is a second instance)
 static_assert(sizeof(CViewSetup) == 0x148);
 static_assert(offsetof(CViewSetup, width) == 0x10);
@@ -366,6 +376,8 @@ static_assert(offsetof(CViewSetup, fov) == 0xB4);
 static_assert(offsetof(CViewSetup, origin) == 0xBC);
 static_assert(offsetof(CViewSetup, angles) == 0xC8);
 static_assert(offsetof(CViewSetup, m_flAspectRatio) == 0xE8);
+static_assert(offsetof(CViewSetup, m_bOffCenter) == 0xEC);
+static_assert(offsetof(CViewSetup, m_flOffCenterRight) == 0xFC);
 
 class IBaseClientDLL
 {

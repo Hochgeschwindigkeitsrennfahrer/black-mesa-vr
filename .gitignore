@@ -17,3 +17,6 @@ CMakeUserPresets.json
 .git.upstream/
 third_party/l4d2vr-openxr/
 third_party/openxr/loader/
+build-linux/
+build-linux-helper/
+build-stable*/

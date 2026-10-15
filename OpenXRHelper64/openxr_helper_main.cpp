@@ -130,6 +130,9 @@ namespace
         bool enableHandTracking = false;
         bool disableProjectionLayer = false;
         bool useSymmetricProjectionFov = false;
+        // The game rendered each eye at exactly the runtime's per-eye FOV
+        // (off-centre CViewSetup): submit that FOV, never crop.
+        bool gameRendersRuntimeFov = false;
         bool useGameRenderPoseForProjection = false;
         int forceMonoProjectionEye = -1;
         int forceMonoProjectionView = -1;
@@ -800,6 +803,12 @@ namespace
                 uint32_t enabled = 0;
                 if (ParseUintArg(value, enabled))
                     options.useSymmetricProjectionFov = enabled != 0;
+            }
+            else if (const wchar_t* value = needsValue(L"--game-renders-runtime-fov"))
+            {
+                uint32_t enabled = 0;
+                if (ParseUintArg(value, enabled))
+                    options.gameRendersRuntimeFov = enabled != 0;
             }
             else if (const wchar_t* value = needsValue(L"--use-game-render-pose-for-projection"))
             {
@@ -8809,7 +8818,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 const bool explicitUv =
                     source.uMin > 0.001f || source.vMin > 0.001f
                     || source.uMax < 0.999f || source.vMax < 0.999f;
-                const bool cropProjection = m_UseRuntimeProjectionFov && m_HaveLocatedFov
+                const bool cropProjection = !m_GameRendersRuntimeFov
+                    && m_UseRuntimeProjectionFov && m_HaveLocatedFov
                     && !poseMono && !explicitUv;
                 if (cropProjection)
                 {
@@ -9103,6 +9113,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             const bool fullSourceBounds = IsFullSourceBounds(source);
             const bool useGameProjectionFov =
                 haveGameFov &&
+                !m_GameRendersRuntimeFov &&
                 !m_UseRuntimeProjectionFov &&
                 (useSymmetricProjectionFov || fullSourceBounds);
 
@@ -9144,6 +9155,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 
         int FrameLoop(const Options& options)
         {
+            m_GameRendersRuntimeFov = options.gameRendersRuntimeFov;
             const ULONGLONG startTicks = GetTickCount64();
             uint32_t submittedFrames = 0;
             bool shouldExit = false;
@@ -10236,6 +10248,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         int m_SwapProjectionEyesOption = -1;
         bool m_SwapProjectionEyes = false;
         bool m_UseRuntimeProjectionFov = false;
+        bool m_GameRendersRuntimeFov = false;
         bool m_HaveLocatedFov = false;
         XrFovf m_LocatedFov[L4D2VR_OPENXR_EYE_COUNT]{};
         char m_RuntimeName[XR_MAX_RUNTIME_NAME_SIZE]{};
@@ -10287,6 +10300,7 @@ int wmain(int argc, wchar_t** argv)
     log.Print("OpenXR projection horizontal mirror: %s", options.mirrorProjectionHorizontal ? "enabled" : "disabled");
     log.Print("OpenXR projection layer: %s", options.disableProjectionLayer ? "disabled" : "enabled");
     log.Print("OpenXR symmetric projection FOV submit: %s", options.useSymmetricProjectionFov ? "enabled" : "disabled");
+    log.Print("OpenXR game renders runtime per-eye FOV (off-centre): %s", options.gameRendersRuntimeFov ? "yes" : "no");
     log.Print("OpenXR game render pose projection submit: %s", options.useGameRenderPoseForProjection ? "enabled" : "disabled");
     log.Print(
         "OpenXR force mono projection eye: %s(%d)",

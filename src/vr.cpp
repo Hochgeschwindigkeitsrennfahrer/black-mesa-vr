@@ -5,6 +5,7 @@
 #include "MinHook.h"
 #include "d3d9_vr.h"
 #include "bmvr_flags.h"
+#include "bmvr_cvars.h"
 #include "hooks.h"
 #include "in_buttons.h"
 #include "trace.h"
@@ -2408,7 +2409,14 @@ bool VR::InitOpenVR()
     m_System->GetProjectionRaw(vr::Eye_Right, &r_left, &r_right, &r_top, &r_bottom);
 
     const float tanHalfFovX = (std::max)({ -l_left, l_right, -r_left, r_right });
-    const float tanHalfFovY = (std::max)({ -l_top, l_bottom, -r_top, r_bottom });
+    // NormalizeViewSetupForVREye renders this frustum at the eye RT's own
+    // aspect, so the engine's vertical half-FOV is tanX / rtAspect, not the
+    // HMD's max(|top|,|bottom|). The two only agree when tanX/tanY happens to
+    // equal the RT aspect (near-symmetric HMDs); PSVR2 (tanX/tanY 1.386 vs RT
+    // 0.984) got a ~29 % vertical squash. Derive it from the RT for every HMD.
+    const float rtAspect = (recW >= 640 && recH >= 360)
+        ? static_cast<float>(recW) / static_cast<float>(recH) : 1.0f;
+    const float tanHalfFovY = tanHalfFovX / rtAspect;
 
     // Same projection crop as L4D2VR vr_lifecycle_init.inl. Keep OpenVR v
     // unflipped on this DXVK path (Vulkan v-swap inverted the fused image).
@@ -2424,6 +2432,18 @@ bool VR::InitOpenVR()
         m_TextureBounds[0].uMin, m_TextureBounds[0].vMin, m_TextureBounds[0].uMax, m_TextureBounds[0].vMax,
         m_TextureBounds[1].uMin, m_TextureBounds[1].vMin, m_TextureBounds[1].uMax, m_TextureBounds[1].vMax);
 
+    {
+        // GetProjectionRaw: bottom (> 0) is the visual up edge, top (< 0)
+        // the down edge (same mapping as the OpenXR init below).
+        const float le[4] = { l_left, l_right, l_top, l_bottom };
+        const float re[4] = { r_left, r_right, r_top, r_bottom };
+        SetupOffCenter(le, re);
+        if (m_OffCenterActive)
+        {
+            m_TextureBounds[0] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
+            m_TextureBounds[1] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
+        }
+    }
     m_Aspect = tanHalfFovX / tanHalfFovY;
     m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
@@ -2594,8 +2614,18 @@ bool VR::InitOpenXR()
     };
     sanitizeTextureBounds(m_TextureBounds[0]);
     sanitizeTextureBounds(m_TextureBounds[1]);
+    {
+        // top = tan(angleDown) < 0, bottom = tan(angleUp) > 0 (see above).
+        const float le[4] = { l_left, l_right, l_top, l_bottom };
+        const float re[4] = { r_left, r_right, r_top, r_bottom };
+        SetupOffCenter(le, re);
+    }
 
-    m_Aspect = tanHalfFovX / tanHalfFovY;
+    // The engine renders at the eye RT's aspect, so overlays (VrCrosshair,
+    // hand boxes) must use it too; tanX/tanY (PSVR2 1.386) put them 1.41x too
+    // far off-centre. See the OpenVR init above.
+    m_Aspect = (m_RenderWidth >= 640 && m_RenderHeight >= 360)
+        ? static_cast<float>(m_RenderWidth) / static_cast<float>(m_RenderHeight) : 1.0f;
     m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
     m_FovRight = m_Fov;
@@ -3012,7 +3042,10 @@ void VR::PublishOpenXrEyeTexture(TextureID texID, const D3D9_TEXTURE_VR_DESC& de
         shared.vMax = 1.0f;
         if (submitTexture)
         {
-            shared.renderFovXDeg = 0.0f;
+            // The eye was rendered at m_Fov (NormalizeViewSetupForVREye). With 0
+            // the helper fell back to 90 deg and showed a 123 deg PSVR2 render
+            // as 90 deg (world ~0.54x). Aspect 0 = helper uses the RT's w/h.
+            shared.renderFovXDeg = (std::isfinite(m_Fov) && m_Fov > 1.0f && m_Fov < 179.0f) ? m_Fov : 0.0f;
             shared.renderAspect = 0.0f;
         }
         else
@@ -3895,6 +3928,7 @@ void VR::ProcessInput()
         s_atk = s_atk2 = s_reload = s_use = false;
         ClearUseGrab();
         m_CrouchToggled = false;
+        m_SprintLatched = false;
         m_WeaponMenuOpen = false;
         m_WeaponMenuClickHeld = false;
         m_WeaponMenuOpenedThisHold = false;
@@ -4012,15 +4046,15 @@ void VR::ProcessInput()
             ++s_zoomLog;
         }
     }
+    // UpdateAimCrosshair / UpdateRpgLaserPoint run on the game thread
+    // (TickMatQueueFromRenderView): this is the render thread, and the muzzle
+    // lookup sets up viewmodel bones under the model-cache lock, which
+    // deadlocked against the main thread's bone setup (2026-10-15).
     if (paused)
     {
         m_AimCrosshairValid = false;
+        m_AimBeamValid = false;
         m_RpgLaserPointValid = false;
-    }
-    else
-    {
-        UpdateAimCrosshair();
-        UpdateRpgLaserPoint();
     }
     if (!paused)
     {
@@ -4057,7 +4091,9 @@ void VR::ProcessInput()
         {
             if (turnY < -0.65f)
             {
-                if (!s_crouchAxis)
+                if (bmvr::g_CrouchStickHold)
+                    buttons |= IN_DUCK;
+                else if (!s_crouchAxis)
                     m_CrouchToggled = !m_CrouchToggled;
                 s_crouchAxis = true;
             }
@@ -4066,7 +4102,32 @@ void VR::ProcessInput()
         }
         if (m_CrouchToggled)
             buttons |= IN_DUCK;
-        if (PressedDigitalAction(m_ActionSprint))
+        if (bmvr::g_SprintToggle)
+        {
+            // Click latches; letting the move stick back to centre (or a
+            // second click) ends the sprint. The first 600 ms after the
+            // click ignore the centred stick, so clicking before pushing
+            // works too.
+            static bool s_sprintHeld;
+            static DWORD s_sprintSinceMs;
+            const bool sprintHeld = PressedDigitalAction(m_ActionSprint);
+            if (sprintHeld && !s_sprintHeld)
+            {
+                m_SprintLatched = !m_SprintLatched;
+                s_sprintSinceMs = GetTickCount();
+            }
+            s_sprintHeld = sprintHeld;
+            // Easing off the stick (below half deflection) also ends it, and
+            // the trigger ends it at once: BM blocks firing while sprinting.
+            if (m_SprintLatched && nx * nx + ny * ny < 0.5f * 0.5f
+                && GetTickCount() - s_sprintSinceMs > 600)
+                m_SprintLatched = false;
+            if (primaryHeld)
+                m_SprintLatched = false;
+            if (m_SprintLatched)
+                buttons |= IN_SPEED;
+        }
+        else if (PressedDigitalAction(m_ActionSprint))
             buttons |= IN_SPEED;
         if (GetTickCount() < m_MeleeAttackUntilMs)
             buttons |= IN_ATTACK;
@@ -5386,6 +5447,15 @@ void VR::FlushPendingQuit()
 void VR::FlushPendingGameUi()
 {
     FlushPendingQuit();
+    if (bmvr::g_FakeRuntime && m_Game)
+    {
+        char cmd[512];
+        while (L4D2VR_FakeHelperPopCommand(cmd, sizeof(cmd)))
+        {
+            const bool ok = m_Game->ClientCmd_Unrestricted(cmd);
+            Game::logMsg("fakehelper cmd '%s' ok=%d", cmd, ok ? 1 : 0);
+        }
+    }
     const int op = m_PendingGameUi.exchange(0, std::memory_order_acq_rel);
     if (op == 0 || !m_Game)
         return;
@@ -6034,10 +6104,11 @@ void VR::ApplyMenuCursor()
             float tau = bmvr::g_MenuCursorSmoothSec;
             if (!(tau >= 0.02f && tau <= 0.6f))
                 tau = 0.18f;
-            // Fast flicks cut lag; small tremor stays filtered.
+            // Fast flicks cut lag; small tremor stays filtered (the idle
+            // dead zone above already holds a resting cursor still).
             tau /= (1.f + speed / 2800.f);
-            if (tau < 0.04f)
-                tau = 0.04f;
+            if (tau < 0.015f)
+                tau = 0.015f;
             const float a = 1.f - expf(-dt / tau);
             m_MenuCursorSmoothX += a * dx;
             m_MenuCursorSmoothY += a * dy;
@@ -6084,9 +6155,41 @@ void VR::ApplyMenuCursor()
         }
     }
 
+    // Where the pointer was ~100 ms ago. Pulling the trigger tips the
+    // controller; since the menu pointer follows the hand closely (smoothing
+    // 0.05 s, 2026-10-14) the click landed on the neighbouring entry. Click
+    // where the user aimed before the pull.
+    struct CursorSample { DWORD ms; int x; int y; };
+    static CursorSample s_hist[128];
+    static int s_histN;
+    const DWORD histNow = GetTickCount();
+    if (haveHit)
+    {
+        s_hist[s_histN % 128] = { histNow, wx, wy };
+        ++s_histN;
+    }
     const bool click = PressedDigitalAction(m_ActionPrimaryAttack);
     if (click && !m_MenuTriggerWasDown)
     {
+        for (int i = 1; i <= 128 && i <= s_histN; ++i)
+        {
+            const CursorSample& smp = s_hist[(s_histN - i) % 128];
+            if (histNow - smp.ms > 250)
+                break;
+            if (histNow - smp.ms >= 100)
+            {
+                wx = smp.x;
+                wy = smp.y;
+                break;
+            }
+        }
+        if (hwnd)
+        {
+            POINT pt{ wx, wy };
+            ClientToScreen(hwnd, &pt);
+            SetCursorPos(pt.x, pt.y);
+            PostMessageA(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(wx, wy));
+        }
         if (hwnd)
         {
             const DWORD nowClick = GetTickCount();
@@ -6204,8 +6307,23 @@ bool VR::TryGetMeleeAim(Vector& origin, QAngle& angles) const
 void VR::UpdateAimCrosshair()
 {
     m_AimCrosshairValid = false;
-    if (!bmvr::g_VrCrosshair || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen)
+    m_AimBeamValid = false;
+    if (!(bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen)
         return;
+    // Guns only: no laser on the crowbar, thrown weapons, snarks or bare hands.
+    // The RPG keeps its own guidance dot and gets no beam.
+    std::string weaponKey;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        weaponKey = m_VmClass.numpadKey;
+    }
+    static const char* kAimAidWeapons[] = { "glock", "357", "mp5", "shotgun", "crossbow", "rpg", "gauss", "gluon", "hgun" };
+    bool gun = false;
+    for (const char* k : kAimAidWeapons)
+        gun = gun || weaponKey == k;
+    if (!gun)
+        return;
+    const bool wantBeam = bmvr::g_VrLaserBeam && weaponKey != "rpg";
     // The scope draws its own centred crosshair, and while zoomed the shot no
     // longer follows the controller ray this would trace.
     if (m_ScopeZoomActive)
@@ -6232,7 +6350,51 @@ void VR::UpdateAimCrosshair()
     ray.Init(origin, origin + dir * kMaxRangeHu);
     CGameTrace tr{};
     m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
-    if (tr.fraction >= 1.f)
+    const bool hit = tr.fraction < 1.f;
+
+    // Everything is kept relative to the aim frame (controller position +
+    // aim angles) and rebuilt from the current pose when drawn, so beam and
+    // dot stay locked to the gun instead of trailing it by a tick.
+    Vector pivot{}, f{}, r{}, u{};
+    if (!AimFrameNow(pivot, f, r, u))
+        return;
+    m_AimShootAlong = (origin - pivot).Dot(f);
+    m_AimHitDist = hit ? (tr.endpos - origin).Length() - 1.5f : 0.f;
+
+    if (wantBeam)
+    {
+        // Straight out of the barrel along the aim, from the muzzle
+        // attachment (the shot origin sits on the controller axis, a few cm
+        // under the barrel). Aiming it at the bullet hit instead bent the beam
+        // whenever the hit was close (an NPC right in front of the gun). Its
+        // own trace, so it stops at what it touches. The barrel offset is
+        // smoothed: the attachment comes from last frame's bones.
+        Vector muzzle{};
+        if (TryGetVrMuzzleWorld(muzzle))
+        {
+            const Vector d = muzzle - pivot;
+            const Vector local(d.Dot(f), d.Dot(r), d.Dot(u));
+            if (!m_AimBeamLocalValid || m_AimBeamLocalKey != weaponKey || (local - m_AimBeamLocal).Length() > 12.f)
+                m_AimBeamLocal = local;
+            else
+                m_AimBeamLocal = m_AimBeamLocal + (local - m_AimBeamLocal) * 0.08f;
+            m_AimBeamLocalKey = weaponKey;
+            m_AimBeamLocalValid = true;
+        }
+        if (m_AimBeamLocalValid)
+        {
+            const Vector start = pivot + f * m_AimBeamLocal.x + r * m_AimBeamLocal.y + u * m_AimBeamLocal.z;
+            CTraceFilterSkipTwoEntities beamFilter(player, m_Game->GetViewModelEntity(), 0);
+            Ray_t beamRay;
+            beamRay.Init(start, start + f * 1024.f);
+            CGameTrace btr{};
+            m_Game->m_EngineTrace->TraceRay(beamRay, MASK_SHOT, &beamFilter, &btr);
+            m_AimBeamHit = btr.fraction < 1.f && !btr.startsolid;
+            m_AimBeamDist = btr.startsolid ? 0.f : 1024.f * btr.fraction;
+            m_AimBeamValid = true;
+        }
+    }
+    if (!bmvr::g_VrCrosshair || !hit)
         return;
 
     // Pull the reticle a hair off the surface it landed on. The overlay pass
@@ -6242,12 +6404,134 @@ void VR::UpdateAimCrosshair()
     m_AimCrosshairValid = true;
 }
 
+bool VR::AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const
+{
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    if (body.LengthSqr() <= 1.f)
+        body = m_SetupOrigin;
+    pivot = GetRightControllerAbsPos(body);
+    if (pivot.LengthSqr() <= 1.f)
+        return false;
+    QAngle::AngleVectors(GetAimAngles(), &f, &r, &u);
+    return VectorNormalize(f) > 0.01f;
+}
+
+bool VR::AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) const
+{
+    Vector pivot{}, f{}, r{}, u{};
+    if (!AimFrameNow(pivot, f, r, u))
+        return false;
+    beamStart = pivot + f * (m_AimBeamLocal.x + bmvr::g_VrLaserStartForward)
+        + r * m_AimBeamLocal.y + u * m_AimBeamLocal.z;
+    const float len = (std::max)(0.f, m_AimBeamDist - bmvr::g_VrLaserStartForward);
+    beamEnd = beamStart + f * len;
+    dot = pivot + f * (m_AimShootAlong + m_AimHitDist);
+    return true;
+}
+
 bool VR::TryGetAimCrosshairWorld(Vector& out) const
 {
     if (!m_AimCrosshairValid)
         return false;
     out = m_AimCrosshairWorld;
     return true;
+}
+
+namespace
+{
+    // AimDebug: last shoot origin per side, so the angle hook (called right
+    // after Weapon_ShootPosition by FireBullets) can trace the actual shot.
+    struct AimDebugOrigin
+    {
+        Vector origin{};
+        Vector before{};
+        void* player = nullptr;
+        bool rewrote = false;
+        DWORD ms = 0;
+        bool valid = false;
+    };
+    AimDebugOrigin g_AimDebugOrigin[2];
+    int g_AimDebugLines = 0;
+    DWORD g_AimDebugLastMs = 0;
+    constexpr int kAimDebugMaxLines = 400;
+}
+
+void VR::AimDebugShootOrigin(bool server, void* player, bool rewrote, const Vector& before, const Vector& after)
+{
+    if (!bmvr::g_AimDebug)
+        return;
+    AimDebugOrigin& o = g_AimDebugOrigin[server ? 1 : 0];
+    o.origin = after;
+    o.before = before;
+    o.player = player;
+    o.rewrote = rewrote;
+    o.ms = GetTickCount();
+    o.valid = true;
+}
+
+void VR::AimDebugShootAngles(bool server, void* player, bool rewrote, const QAngle& before, const QAngle& after)
+{
+    if (!bmvr::g_AimDebug || g_AimDebugLines >= kAimDebugMaxLines)
+        return;
+    // Only while the trigger is held: these hooks also run for NPCs and
+    // non-firing queries.
+    if ((m_HeldButtons.load(std::memory_order_acquire) & IN_ATTACK) == 0)
+        return;
+    const DWORD now = GetTickCount();
+    if (now - g_AimDebugLastMs < 40)
+        return;
+    if (!m_Game || !m_Game->m_EngineTrace || !m_Game->m_EngineClient)
+        return;
+    g_AimDebugLastMs = now;
+    ++g_AimDebugLines;
+
+    C_BaseEntity* local = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+    auto trace = [&](const Vector& from, const QAngle& ang, Vector& hit) -> bool {
+        Vector dir{};
+        QAngle::AngleVectors(ang, &dir, nullptr, nullptr);
+        if (VectorNormalize(dir) <= 0.01f)
+            return false;
+        CTraceFilterSkipSelf filter(local, 0);
+        Ray_t ray;
+        ray.Init(from, from + dir * 8192.f);
+        CGameTrace tr{};
+        m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
+        hit = tr.endpos;
+        return tr.fraction < 1.f;
+    };
+
+    const AimDebugOrigin& o = g_AimDebugOrigin[server ? 1 : 0];
+    const bool haveOrigin = o.valid && o.player == player && now - o.ms < 250;
+    Vector shotHit{};
+    const bool shotHitOk = haveOrigin && trace(o.origin, after, shotHit);
+
+    Vector retOrigin{};
+    const bool haveRet = TryGetVrShootOrigin(retOrigin);
+    const QAngle retAng = GetAimAngles();
+    Vector retHit{};
+    const bool retHitOk = haveRet && trace(retOrigin, retAng, retHit);
+
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    const Vector eye = GetViewOrigin(body);
+    const Vector hand = GetRightControllerAbsPos(body);
+    Vector fwd, right, up;
+    QAngle::AngleVectors(retAng, &fwd, &right, &up);
+    const Vector dHit = shotHit - retHit;
+    const Vector dOrig = o.origin - retOrigin;
+
+    Game::logMsg("AimDebug %s player=%p origin rewrote=%d (%.1f,%.1f,%.1f) was (%.1f,%.1f,%.1f) age=%lums | "
+        "angles rewrote=%d (%.2f,%.2f) was (%.2f,%.2f) | reticle o=(%.1f,%.1f,%.1f) a=(%.2f,%.2f) crosshair=%d | "
+        "shotHit=%d (%.1f,%.1f,%.1f) retHit=%d (%.1f,%.1f,%.1f) dHit right=%.1f up=%.1f fwd=%.1f | "
+        "dOrigin right=%.1f up=%.1f fwd=%.1f | eye=(%.1f,%.1f,%.1f) hand=(%.1f,%.1f,%.1f) body=(%.1f,%.1f,%.1f)",
+        server ? "server" : "client", player,
+        o.rewrote ? 1 : 0, o.origin.x, o.origin.y, o.origin.z, o.before.x, o.before.y, o.before.z,
+        haveOrigin ? static_cast<unsigned long>(now - o.ms) : 9999ul,
+        rewrote ? 1 : 0, after.x, after.y, before.x, before.y,
+        retOrigin.x, retOrigin.y, retOrigin.z, retAng.x, retAng.y, m_AimCrosshairValid ? 1 : 0,
+        shotHitOk ? 1 : 0, shotHit.x, shotHit.y, shotHit.z, retHitOk ? 1 : 0, retHit.x, retHit.y, retHit.z,
+        dHit.Dot(right), dHit.Dot(up), dHit.Dot(fwd),
+        dOrig.Dot(right), dOrig.Dot(up), dOrig.Dot(fwd),
+        eye.x, eye.y, eye.z, hand.x, hand.y, hand.z, body.x, body.y, body.z);
 }
 
 void VR::UpdateRpgLaserPoint()
@@ -6366,6 +6650,33 @@ void VR::DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) 
         quad(sx - t * 0.5f, sy + gap, t, l, c);              // down
         quad(sx - t * 0.5f, sy - t * 0.5f, t, t, c);         // centre pip
     }
+}
+
+// Laser dot: a red disc with a dark rim. The caller sizes it like a real
+// laser spot (fixed world size, so it shrinks with distance) with a floor
+// that keeps it visible across a hangar.
+void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radius) const
+{
+    if (!device)
+        return;
+    struct Vert
+    {
+        float x, y, z, rhw;
+        D3DCOLOR color;
+    };
+    constexpr int kSegs = 16;
+    auto disc = [&](float r, D3DCOLOR centre, D3DCOLOR rim) {
+        Vert v[kSegs + 2];
+        v[0] = { sx, sy, 0.f, 1.f, centre };
+        for (int i = 0; i <= kSegs; ++i)
+        {
+            const float a = static_cast<float>(i) * (6.2831853f / kSegs);
+            v[i + 1] = { sx + cosf(a) * r, sy + sinf(a) * r, 0.f, 1.f, rim };
+        }
+        device->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, kSegs, v, sizeof(Vert));
+    };
+    disc(radius + (std::max)(0.75f, radius * 0.3f), D3DCOLOR_ARGB(120, 0, 0, 0), D3DCOLOR_ARGB(120, 0, 0, 0));
+    disc(radius, D3DCOLOR_ARGB(255, 255, 90, 70), D3DCOLOR_ARGB(235, 230, 20, 10));
 }
 
 bool VR::WantsWeaponActionAnim() const
@@ -6880,14 +7191,19 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     // gbmatch paints an HMD frustum into 16:9 pixels. Use the HMD aspect so
     // glove projection matches the anamorphic scene that squash-blits to the eye.
     const float pixelAspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
-    const float aspect = (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
-    const float projFov = HorizontalFovForAspect(aspect);
+    // OffCenterEyes: project into the union frustum (WorldRenderFov,
+    // m_OffCenterAspect), then remap to this eye's sub-rectangle.
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
     const float tanHalf = tanf(projFov * 0.5f * 3.14159265f / 180.f);
     if (!(tanHalf > 0.01f))
     {
         device->Release();
         return false;
     }
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
 
     auto project = [&](const Vector& world, float& sx, float& sy) -> bool {
         const Vector delta = world - eyeOrig;
@@ -6896,8 +7212,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             return false;
         const float x = delta.Dot(right);
         const float y = delta.Dot(up);
-        const float ndcX = (x / z) / tanHalf;
-        const float ndcY = ((y / z) * aspect) / tanHalf;
+        const float ndcX = (x / z) / tanHalf * ocSx + ocOx;
+        const float ndcY = ((y / z) * aspect) / tanHalf * ocSy + ocOy;
         sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
         sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
         return sx > -40.f && sy > -40.f
@@ -7187,19 +7503,88 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         }
 
         if (WeaponMenuOpen())
-            DrawWeaponMenu(device, w, h, eyeOrig, fwd, right, up);
+            DrawWeaponMenu(device, stereoEye, w, h, eyeOrig, fwd, right, up);
         else if (AimCrosshairVisible())
         {
-            float cx = 0.f, cy = 0.f;
-            if (project(m_AimCrosshairWorld, cx, cy))
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+            device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+            device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+            Vector beamA{}, beamB{}, dotNow{};
+            const bool havePoints = AimOverlayPointsNow(beamA, beamB, dotNow);
+            if (m_AimBeamValid && havePoints && (beamB - beamA).LengthSqr() > 1.f)
             {
-                device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-                device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-                device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-                device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-                DrawAimCrosshair(device, cx, cy, h);
-                device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+                // Clip to just in front of the eye, then a quad whose width is
+                // a fixed world size at each end (perspective taper), never
+                // thinner than a pixel so it does not shimmer far away.
+                Vector a = beamA;
+                Vector b = beamB;
+                constexpr float kNear = 4.f;
+                const float za = (a - eyeOrig).Dot(fwd);
+                const float zb = (b - eyeOrig).Dot(fwd);
+                if (za >= kNear || zb >= kNear)
+                {
+                    if (za < kNear)
+                        a = a + (b - a) * ((kNear - za) / (zb - za));
+                    else if (zb < kNear)
+                        b = a + (b - a) * ((kNear - za) / (zb - za));
+                    auto toScreen = [&](const Vector& p, float& sx, float& sy, float& z) {
+                        const Vector d = p - eyeOrig;
+                        z = (std::max)(kNear, d.Dot(fwd));
+                        const float ndcX = (d.Dot(right) / z) / tanHalf * ocSx + ocOx;
+                        const float ndcY = ((d.Dot(up) / z) * aspect) / tanHalf * ocSy + ocOy;
+                        sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
+                        sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
+                    };
+                    float ax, ay, az, bx, by, bz;
+                    toScreen(a, ax, ay, az);
+                    toScreen(b, bx, by, bz);
+                    float nx = -(by - ay);
+                    float ny = bx - ax;
+                    const float len = sqrtf(nx * nx + ny * ny);
+                    if (len > 0.5f)
+                    {
+                        nx /= len;
+                        ny /= len;
+                        float beamWidthHu = bmvr::g_VrLaserWidth; // half width; 0.06 = 3 mm beam
+                        if (!(beamWidthHu > 0.005f) || beamWidthHu > 1.f)
+                            beamWidthHu = 0.06f;
+                        const float pxPerHu = static_cast<float>(w) * 0.5f * ocSx / tanHalf;
+                        const float wa = (std::max)(0.5f, beamWidthHu * pxPerHu / az);
+                        const float wb = (std::max)(0.5f, beamWidthHu * pxPerHu / bz);
+                        const D3DCOLOR ca = D3DCOLOR_ARGB(170, 255, 40, 25);
+                        const D3DCOLOR cb = m_AimBeamHit
+                            ? D3DCOLOR_ARGB(110, 255, 40, 25) : D3DCOLOR_ARGB(0, 255, 40, 25);
+                        Vert v[4] = {
+                            { ax + nx * wa, ay + ny * wa, 0.f, 1.f, ca },
+                            { ax - nx * wa, ay - ny * wa, 0.f, 1.f, ca },
+                            { bx + nx * wb, by + ny * wb, 0.f, 1.f, cb },
+                            { bx - nx * wb, by - ny * wb, 0.f, 1.f, cb },
+                        };
+                        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vert));
+                    }
+                }
             }
+            float cx = 0.f, cy = 0.f;
+            if (m_AimCrosshairValid && project(havePoints ? dotNow : m_AimCrosshairWorld, cx, cy))
+            {
+                if (bmvr::g_VrCrosshairDot)
+                {
+                    float scale = bmvr::g_VrCrosshairScale;
+                    if (!(scale > 0.05f) || scale > 8.f)
+                        scale = 1.f;
+                    // World radius 0.25 u (~6 mm) x scale; floor 1.25 px per
+                    // 1440 px of eye height x scale.
+                    const Vector dotWorld = havePoints ? dotNow : m_AimCrosshairWorld;
+                    const float z = (std::max)(4.f, (dotWorld - eyeOrig).Dot(fwd));
+                    const float pxPerHu = static_cast<float>(w) * 0.5f * ocSx / tanHalf;
+                    const float floorPx = 1.25f * static_cast<float>(h) / 1440.f * scale;
+                    DrawAimDot(device, cx, cy, (std::max)(floorPx, 0.25f * scale * pxPerHu / z));
+                }
+                else
+                    DrawAimCrosshair(device, cx, cy, h);
+            }
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         }
 
         static int s_handLog;
@@ -7521,17 +7906,19 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     bool rightOk, const Vector& rightOrigin, const QAngle& rightAng,
     const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up)
 {
-    (void)stereoEye;
     if (!m_Game || !device)
         return;
     int health = -1, armor = -1, clip = -1, reserve = -1, secondary = -1, air = -1;
     if (!m_Game->ReadWristHudValues(health, armor, clip, reserve, secondary, air))
         return;
-    const float aspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
-    const float projFov = HorizontalFovForAspect(aspect);
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
     const float tanHalf = tanf(projFov * 0.5f * 3.14159265f / 180.f);
     if (!(tanHalf > 0.01f))
         return;
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
     auto project = [&](const Vector& world, float& sx, float& sy) -> bool {
         const Vector delta = world - eyeOrig;
         const float z = delta.Dot(fwd);
@@ -7539,8 +7926,8 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             return false;
         const float x = delta.Dot(right);
         const float y = delta.Dot(up);
-        const float ndcX = (x / z) / tanHalf;
-        const float ndcY = ((y / z) * aspect) / tanHalf;
+        const float ndcX = (x / z) / tanHalf * ocSx + ocOx;
+        const float ndcY = ((y / z) * aspect) / tanHalf * ocSy + ocOy;
         sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
         sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
         return sx > -80.f && sy > -80.f && sx < static_cast<float>(w) + 80.f && sy < static_cast<float>(h) + 80.f;
@@ -8783,6 +9170,13 @@ void VR::UpdateHl2vrMsaa()
 void VR::TickMatQueueFromRenderView()
 {
     UpdateHl2vrMsaa();
+    bmvr::TickVrCvars(m_Game);
+    // Entity attachments (muzzle) and traces belong on this thread.
+    if (!PauseUiActive())
+    {
+        UpdateAimCrosshair();
+        UpdateRpgLaserPoint();
+    }
     if (m_Game)
         m_Game->ProbeMatQueueModeFromRenderView();
     ApplyVrQualityOfLifeCvars();
@@ -9028,6 +9422,62 @@ bool VR::CopyFlashlightState(Vector& origin, Vector& forward) const
     origin = m_FlashlightOrigin;
     forward = m_FlashlightForward;
     return true;
+}
+
+bool VR::OffCenterForEye(int stereoEye, const float*& frac) const
+{
+    if (!m_OffCenterActive || (stereoEye != 1 && stereoEye != 2))
+        return false;
+    frac = m_OffCenterFrac[stereoEye - 1];
+    return true;
+}
+
+bool VR::OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const
+{
+    const float* f = nullptr;
+    if (!OffCenterForEye(stereoEye, f))
+        return false;
+    // Union NDC of the eye's edges: 2*frac-1. Map [2l-1, 2r-1] -> [-1, 1].
+    sx = 1.f / (f[1] - f[0]);
+    ox = -(f[0] + f[1] - 1.f) * sx;
+    sy = 1.f / (f[3] - f[2]);
+    oy = -(f[2] + f[3] - 1.f) * sy;
+    return true;
+}
+
+void VR::SetupOffCenter(const float leftEye[4], const float rightEye[4])
+{
+    m_OffCenterActive = false;
+    if (!bmvr::g_OffCenterEyes)
+        return;
+    const float* eyes[2] = { leftEye, rightEye };
+    float tanX = 0.f, tanY = 0.f;
+    for (const float* e : eyes)
+    {
+        if (!(e[0] < -0.001f && e[1] > 0.001f && e[2] < -0.001f && e[3] > 0.001f))
+        {
+            Game::logMsg("OffCenterEyes: invalid eye tangents l=%.4f r=%.4f d=%.4f u=%.4f, staying symmetric",
+                e[0], e[1], e[2], e[3]);
+            return;
+        }
+        tanX = (std::max)({ tanX, -e[0], e[1] });
+        tanY = (std::max)({ tanY, -e[2], e[3] });
+    }
+    for (int i = 0; i < 2; ++i)
+    {
+        m_OffCenterFrac[i][0] = 0.5f + 0.5f * eyes[i][0] / tanX;
+        m_OffCenterFrac[i][1] = 0.5f + 0.5f * eyes[i][1] / tanX;
+        m_OffCenterFrac[i][2] = 0.5f + 0.5f * eyes[i][2] / tanY;
+        m_OffCenterFrac[i][3] = 0.5f + 0.5f * eyes[i][3] / tanY;
+    }
+    m_OffCenterAspect = tanX / tanY;
+    m_OffCenterActive = true;
+    const float used = ((eyes[0][1] - eyes[0][0]) * (eyes[0][3] - eyes[0][2])) / (4.f * tanX * tanY);
+    Game::logMsg("OffCenterEyes on: union fov=%.2f aspect=%.4f L=(l %.4f r %.4f b %.4f t %.4f) R=(l %.4f r %.4f b %.4f t %.4f) left eye uses %.0f%% of the union",
+        2.f * atanf(tanX) * 180.f / 3.14159265f, m_OffCenterAspect,
+        m_OffCenterFrac[0][0], m_OffCenterFrac[0][1], m_OffCenterFrac[0][2], m_OffCenterFrac[0][3],
+        m_OffCenterFrac[1][0], m_OffCenterFrac[1][1], m_OffCenterFrac[1][2], m_OffCenterFrac[1][3],
+        used * 100.f);
 }
 
 float VR::WorldRenderFov() const
@@ -10819,6 +11269,33 @@ void VR::MirrorStereoToDesktopWindow()
         dest = m_D9DesktopMirrorSurface;
     }
 
+    if (bmvr::g_MirrorBothEyes && m_D9RightEyeSurface)
+    {
+        // Tests: both whole eye textures side by side (left half / right half),
+        // the images the helper is handed, unscaled in content.
+        const RECT halves[2] = {
+            { 0, 0, static_cast<LONG>(bbDesc.Width / 2), static_cast<LONG>(bbDesc.Height) },
+            { static_cast<LONG>(bbDesc.Width / 2), 0, static_cast<LONG>(bbDesc.Width), static_cast<LONG>(bbDesc.Height) } };
+        IDirect3DSurface9* eyes[2] = { m_D9LeftEyeSurface, m_D9RightEyeSurface };
+        HRESULT hrs[2] = { E_FAIL, E_FAIL };
+        m_CaptureReentry = true;
+        for (int e = 0; e < 2; ++e)
+            hrs[e] = StretchRectKeepDeviceState(device, eyes[e], nullptr, dest, &halves[e], D3DTEXF_LINEAR);
+        m_CaptureReentry = false;
+        if (dest == m_D9DesktopMirrorSurface && SUCCEEDED(hrs[0]))
+            m_DesktopMirrorHasImage.store(true, std::memory_order_release);
+        static int s_bothLog;
+        if (s_bothLog < 4 || FAILED(hrs[0]) || FAILED(hrs[1]))
+        {
+            Game::logMsg("Desktop mirror both eyes %ux%u -> %ux%u hr=0x%08X/0x%08X",
+                eyeW, eyeH, bbDesc.Width, bbDesc.Height, (unsigned)hrs[0], (unsigned)hrs[1]);
+            ++s_bothLog;
+        }
+        bb->Release();
+        device->Release();
+        return;
+    }
+
     m_CaptureReentry = true;
     HRESULT hr = StretchRectKeepDeviceState(
         device, m_D9LeftEyeSurface, srcPtr, dest, nullptr, D3DTEXF_LINEAR);
@@ -12574,6 +13051,7 @@ void VR::Update()
     s_lastPresentMs = nowMs;
     if (m_PresentTick == 1 || nowMs - s_fpsLogMs >= 1000)
     {
+        bmvr::LogFaultStats();
         const uint32_t dt = s_fpsLogMs ? (nowMs - s_fpsLogMs) : 0;
         const uint32_t dn = m_PresentTick - s_fpsLogTick;
         const unsigned fps = (dt > 0) ? (dn * 1000u / dt) : 0;

@@ -209,6 +209,18 @@ public:
             || m_AntiAliasing == 8 || m_AntiAliasing == 16;
     }
     float m_Aspect = 1.f;
+    // OffCenterEyes: the union frustum is fov=m_Fov, aspect=m_OffCenterAspect
+    // (tanX/tanY over both eyes); each eye renders the sub-rectangle
+    // m_OffCenterFrac[eye] = {left, right, bottom, top} (0..1 of the union).
+    bool m_OffCenterActive = false;
+    float m_OffCenterAspect = 1.f;
+    float m_OffCenterFrac[2][4]{};
+    // stereoEye 1 = left, 2 = right (0 / mono: false).
+    bool OffCenterForEye(int stereoEye, const float*& frac) const;
+    // Union-frustum NDC -> this eye's NDC: ndc' = ndc * s + o.
+    bool OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const;
+    // l/r/d/u = tangents of each eye's left/right/down/up half-angles.
+    void SetupOffCenter(const float leftEye[4], const float rightEye[4]);
     float m_Fov = 90.f;
     // Per-eye CalcFovFromProjection (widest of the four raw half-angles).
     float m_FovLeft = 90.f;
@@ -907,8 +919,17 @@ public:
     // safe from the render thread.
     void UpdateAimCrosshair();
     // Cleared by UpdateAimCrosshair when the reticle is off or the ray missed.
-    bool AimCrosshairVisible() const { return m_AimCrosshairValid; }
+    // Also true while only the laser beam is to be drawn.
+    bool AimCrosshairVisible() const { return m_AimCrosshairValid || m_AimBeamValid; }
     bool TryGetAimCrosshairWorld(Vector& out) const;
+    // Controller position + aim basis right now (render thread safe).
+    bool AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const;
+    // Beam ends and marker from the current pose and the last trace.
+    bool AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) const;
+    // AimDebug=true (config.txt): compare what the server fires with the
+    // reticle ray. Called from the shoot-origin/-angle hooks on the game thread.
+    void AimDebugShootOrigin(bool server, void* player, bool rewrote, const Vector& before, const Vector& after);
+    void AimDebugShootAngles(bool server, void* player, bool rewrote, const QAngle& before, const QAngle& after);
     // Gordon has no gloves before the HEV suit (intro tram). Sampled on the
     // game thread; defaults true so a failed netvar scan cannot hide the hands.
     // Combined with VrHideHandsWithoutSuit — false hides HEV gloves and the
@@ -935,7 +956,7 @@ public:
     bool EmptyHands() const { return m_EmptyHands; }
     void UpdateWeaponMenu(bool stickClickHeld, float deltaMs);
     void ApplyWeaponMenuWorldPose();
-    void DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
+    void DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
     bool UpdateWeaponFireHaptics();
     void AfterCreateMoveFireHaptics();
@@ -1131,6 +1152,14 @@ private:
     int m_PhysicalCrowbarLoadTries = 0;
     Vector m_AimCrosshairWorld{};
     bool m_AimCrosshairValid = false;
+    bool m_AimBeamValid = false;
+    bool m_AimBeamHit = false;
+    Vector m_AimBeamLocal{};          // muzzle in the aim frame (fwd, right, up)
+    bool m_AimBeamLocalValid = false;
+    std::string m_AimBeamLocalKey;
+    float m_AimBeamDist = 0.f;        // beam length from the muzzle
+    float m_AimShootAlong = 0.f;      // shot origin along the aim from the controller
+    float m_AimHitDist = 0.f;         // shot origin -> marker
     bool m_HasHevSuit = true;
     bool m_WearingHevSuit = true;
     bool m_ScopeZoomActive = false;
@@ -1149,9 +1178,11 @@ private:
     QAngle m_LastFireAim{};
     bool m_HasLastFireAim = false;
     void DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) const;
+    void DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radiusPx) const;
     DWORD m_WeaponActionAnimUntilMs = 0;
     int m_LatchedViewmodelIdleSeq = -1;
     bool m_CrouchToggled = false;
+    bool m_SprintLatched = false;
     bool m_HudOverlayReady = false;
     bool m_HudOverlayCreateAttempted = false;
     IDirect3DSurface9* m_PauseHudPrevRt = nullptr;

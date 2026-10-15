@@ -21,6 +21,36 @@
 
 namespace bmvr
 {
+    const std::wstring& TestDir()
+    {
+        static const std::wstring dir = [] {
+            wchar_t buf[MAX_PATH]{};
+            const DWORD n = GetEnvironmentVariableW(L"BMVR_TESTDIR", buf, MAX_PATH);
+            std::wstring d = (n > 0 && n < MAX_PATH) ? std::wstring(buf, n) : std::wstring();
+            while (!d.empty() && (d.back() == L'\\' || d.back() == L'/'))
+                d.pop_back();
+            return d;
+        }();
+        return dir;
+    }
+
+    std::string VrFilePath(const char* leaf)
+    {
+        std::string base;
+        const std::wstring& d = TestDir();
+        if (!d.empty())
+        {
+            const int n = WideCharToMultiByte(CP_ACP, 0, d.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (n > 1)
+            {
+                base.resize(static_cast<size_t>(n - 1));
+                WideCharToMultiByte(CP_ACP, 0, d.c_str(), -1, &base[0], n - 1, nullptr, nullptr);
+                base += "\\";
+            }
+        }
+        return base + "VR\\" + leaf;
+    }
+
     uint32_t g_RecommendedEyeWidth = 0;
     uint32_t g_RecommendedEyeHeight = 0;
     uint32_t g_FramebufferWidth = 0;
@@ -41,6 +71,7 @@ namespace bmvr
     float g_ControllerPitchTiltTouch = 0.f;
     float g_ControllerPitchTiltIndex = 0.f;
     float g_ControllerPitchTiltVive = -45.f;
+    float g_GunPitchOffset = 0.f;
     float g_AimPitchOffset = 0.f;
     bool g_DisableRecoilAim = true;
     float g_IPDScale = 1.f;
@@ -64,6 +95,18 @@ namespace bmvr
     bool g_HandHud = true;
     bool g_VrCrosshair = false;
     float g_VrCrosshairScale = 1.f;
+    bool g_VrCrosshairDot = false;
+    bool g_VrLaserBeam = false;
+    float g_VrLaserWidth = 0.06f;
+    float g_VrLaserStartForward = 0.f;
+    bool g_AimDebug = false;
+    bool g_OffCenterTest = false;
+    bool g_OffCenterEyes = false;
+    bool g_FakeRuntime = false;
+    bool g_MirrorBothEyes = false;
+    bool g_VrShotOriginFix = true;
+    bool g_CrouchStickHold = false;
+    bool g_SprintToggle = false;
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
@@ -218,6 +261,8 @@ namespace bmvr
 
     static std::wstring ModuleDir()
     {
+        if (!TestDir().empty())
+            return TestDir();
         wchar_t path[MAX_PATH]{};
         HMODULE mod = g_Module;
         if (!mod)
@@ -235,6 +280,8 @@ namespace bmvr
 
     static std::wstring ExeDir()
     {
+        if (!TestDir().empty())
+            return TestDir();
         wchar_t path[MAX_PATH]{};
         GetModuleFileNameW(nullptr, path, MAX_PATH);
         std::wstring full(path);
@@ -454,6 +501,12 @@ namespace bmvr
                 g_ControllerPitchTiltTouch = static_cast<float>(atof(val));
             else if (std::strcmp(n, "ControllerPitchTiltIndex") == 0)
                 g_ControllerPitchTiltIndex = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "GunPitchOffset") == 0)
+            {
+                const float s = static_cast<float>(atof(val));
+                if (s >= -60.f && s <= 60.f)
+                    g_GunPitchOffset = s;
+            }
             else if (std::strcmp(n, "ControllerPitchTiltVive") == 0)
                 g_ControllerPitchTiltVive = static_cast<float>(atof(val));
             else if (std::strcmp(n, "AimPitchOffset") == 0)
@@ -508,6 +561,31 @@ namespace bmvr
                 g_VrCrosshair = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrCrosshairScale") == 0)
                 g_VrCrosshairScale = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "VrCrosshairDot") == 0)
+                g_VrCrosshairDot = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrLaserBeam") == 0)
+                g_VrLaserBeam = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrLaserWidth") == 0)
+                g_VrLaserWidth = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "VrLaserStartForward") == 0)
+                g_VrLaserStartForward = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "AimDebug") == 0)
+                g_AimDebug = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrShotOriginFix") == 0)
+                g_VrShotOriginFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "CrouchStickHold") == 0)
+                g_CrouchStickHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "SprintToggle") == 0)
+                g_SprintToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MirrorBothEyes") == 0)
+                g_MirrorBothEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VRRuntimeBackend") == 0)
+                g_FakeRuntime = (_strnicmp(val, "fake", 4) == 0
+                    && (val[4] == 0 || val[4] == ' ' || val[4] == '\t'));
+            else if (std::strcmp(n, "OffCenterEyes") == 0)
+                g_OffCenterEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "OffCenterTest") == 0)
+                g_OffCenterTest = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHideHandsWithoutSuit") == 0)
                 g_HideHandsWithoutSuit = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrScopeUsesHmdAim") == 0)
@@ -1221,7 +1299,7 @@ namespace bmvr
             Log("Disabled %s this launch only (previous launch died; not skip-filed)", label);
     }
 
-    float EffectiveControllerPitchTilt(uint32_t controllerFamily)
+    static float FamilyControllerPitchTilt(uint32_t controllerFamily)
     {
         switch (controllerFamily)
         {
@@ -1235,6 +1313,13 @@ namespace bmvr
         default:
             return g_ControllerPitchTilt;
         }
+    }
+
+    float EffectiveControllerPitchTilt(uint32_t controllerFamily)
+    {
+        // The per-family tilt matches each controller's shape; the player's
+        // own preference (menu / GunPitchOffset) comes on top.
+        return FamilyControllerPitchTilt(controllerFamily) + g_GunPitchOffset;
     }
 
     void EffectiveVrHandsPoseOffset(uint32_t controllerFamily, float& x, float& y, float& z)
@@ -1528,6 +1613,24 @@ namespace bmvr
 
     bool TryHmdSwapchain() { return g_TryHmdSwapchain; }
     bool TryHmdFramebuffer() { return g_TryHmdFramebuffer; }
+    bool OffCenterTestActive()
+    {
+        if (!g_OffCenterTest)
+            return false;
+        static ULONGLONG s_lastCheck = 0;
+        static bool s_on = false;
+        const ULONGLONG now = GetTickCount64();
+        if (now - s_lastCheck >= 500)
+        {
+            s_lastCheck = now;
+            const std::wstring marker = ExeDir() + L"\\VR\\offcenter_test_on";
+            const bool on = GetFileAttributesW(marker.c_str()) != INVALID_FILE_ATTRIBUTES;
+            if (on != s_on)
+                Log(on ? "OffCenterTest on" : "OffCenterTest off");
+            s_on = on;
+        }
+        return s_on;
+    }
     bool TryHmdNative() { return g_TryHmdNative; }
     bool TryNamedRenderTargets() { return g_TryNamedRT; }
     bool TryNamedStereoWrap() { return g_TryNamedStereoWrap; }

@@ -4,6 +4,36 @@
 #include "vr.h"
 #include "offsets.h"
 #include "bmvr_flags.h"
+#include <intrin.h>
+
+// The areaportal setup's call into ComputeViewMatrices (E8 rel32 just before
+// kAreaPortalComputeViewReturnRva) must target `fn`; otherwise this is another
+// engine build and the return-address filter would never match.
+static bool AreaPortalComputeViewCallSiteOk(int fn)
+{
+    const uintptr_t engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
+    if (!engine || !fn)
+        return false;
+    const uintptr_t ret = engine + Offsets::kAreaPortalComputeViewReturnRva;
+    const auto* call = reinterpret_cast<const unsigned char*>(ret - 5);
+    bool ok = false;
+    __try
+    {
+        ok = call[0] == 0xE8
+            && ret + *reinterpret_cast<const int32_t*>(call + 1) == static_cast<uintptr_t>(fn);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+    Game::logMsg("Areaportal ComputeViewMatrices call site %s", ok ? "ok" : "MISMATCH (hook skipped)");
+    return ok;
+}
+
+// Offset of addr inside server.dll (0 if outside/unknown). AimDebug and the
+// shot-origin caller whitelist identify call sites by return address.
+static uint32_t ServerRva(uintptr_t addr)
+{
+    const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll"));
+    return base && addr > base ? static_cast<uint32_t>(addr - base) : 0;
+}
 #include "sigscanner.h"
 #include "in_buttons.h"
 #include "trace.h"
@@ -207,6 +237,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkGetBackBufferDimensions, "GetBackBufferDimensions");
     enableIfReady(hkGetScreenSize, "GetScreenSize");
     enableIfReady(hkGetScreenAspectRatio, "GetScreenAspectRatio");
+    enableIfReady(hkComputeViewMatrices, "ComputeViewMatrices");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -276,6 +307,10 @@ int Hooks::initSourceHooks()
         hkGetScreenSize.createHook((LPVOID)o.GetScreenSize.address, &dGetScreenSize);
     if (o.GetScreenAspectRatio.valid && !hkGetScreenAspectRatio.pTarget)
         hkGetScreenAspectRatio.createHook((LPVOID)o.GetScreenAspectRatio.address, &dGetScreenAspectRatio);
+    // OffCenterEyes only: the areaportal pass must see the centred union view.
+    if (bmvr::g_OffCenterEyes && o.ComputeViewMatrices.valid && !hkComputeViewMatrices.pTarget
+        && AreaPortalComputeViewCallSiteOk(o.ComputeViewMatrices.address))
+        hkComputeViewMatrices.createHook((LPVOID)o.ComputeViewMatrices.address, &dComputeViewMatrices);
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
@@ -1084,6 +1119,9 @@ namespace
             s_lc.action = SequenceLabelLooksLikeWeaponAction(label);
             s_lc.loco = SequenceLabelLooksLikeLocomotionOnly(label);
             s_lc.equip = SequenceLabelLooksLikeEquipOnly(label);
+            if (bmvr::g_AimDebug)
+                Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d tick=%lu",
+                    seq, label ? label : "?", s_lc.action ? 1 : 0, s_lc.loco ? 1 : 0, GetTickCount());
         }
         const bool isAction = s_lc.action;
         const bool isLoco = s_lc.loco;
@@ -1136,6 +1174,22 @@ namespace
                 ForceViewmodelIdlePose(viewmodel, hdr);
             }
             return;
+        }
+
+        // Sprint loop and its in/out transitions: show the aimed idle pose.
+        // Freezing them held the gun on the lowered first frame for as long
+        // as BM's server-side sprint-out lasted (~1 s after stopping, user
+        // 2026-10-14); in VR the gun is in the hand and should stay aimed.
+        if (!isAction && label)
+        {
+            char low[32]{};
+            for (int i = 0; i < 31 && label[i]; ++i)
+                low[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+            if (std::strstr(low, "sprint") != nullptr)
+            {
+                ForceViewmodelIdlePose(viewmodel, hdr);
+                return;
+            }
         }
 
         // Never rewrite m_nSequence. Freeze cycle/rate only for explicit
@@ -2713,7 +2767,7 @@ namespace
         EyeRtPush& operator=(const EyeRtPush&) = delete;
     };
 
-    void NormalizeViewSetupForVREye(CViewSetup& view, const VR* vr)
+    void NormalizeViewSetupForVREye(CViewSetup& view, const VR* vr, int stereoEye)
     {
         // L4D2VR hooks_render.inl: eye copies are HMD size + HMD FOV + HMD
         // aspect. 16:9 engine FOV + center-crop (2026-08-18) zoomed the world
@@ -2746,6 +2800,21 @@ namespace
         const float eyeFov = vr->WorldRenderFov();
         view.fov = eyeFov;
         view.fovViewmodel = eyeFov;
+        // OffCenterEyes: render only this eye's part of the union frustum.
+        // The engine builds it (ComputeViewMatrices, MatrixBuildPerspective-
+        // OffCenterX) from fov + aspect + the 0..1 sub-rectangle; culling and
+        // deferred lights follow the matrices (flat test 2026-10-11). The
+        // copy in DrawViewModels keeps the sub-rectangle.
+        const float* frac = nullptr;
+        if (vr->OffCenterForEye(stereoEye, frac))
+        {
+            view.m_flAspectRatio = vr->m_OffCenterAspect;
+            view.m_bOffCenter = true;
+            view.m_flOffCenterLeft = frac[0];
+            view.m_flOffCenterRight = frac[1];
+            view.m_flOffCenterBottom = frac[2];
+            view.m_flOffCenterTop = frac[3];
+        }
         // L4D2VR: native Source viewmodels use a separate projection and a
         // compressed 0..0.1 depth range so they draw over the world. In VR the
         // gun is a world-space mesh; keep Z (and therefore size vs world
@@ -3527,6 +3596,19 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         hkRenderView.fOriginal(ecx, view, clearFlags, drawFlags);
     };
 
+    if (setup.width >= 640 && setup.height >= 360 && !(m_VR && m_VR->m_IsVREnabled)
+        && bmvr::OffCenterTestActive())
+    {
+        CViewSetup view = setup;
+        view.m_bOffCenter = true;
+        view.m_flOffCenterLeft = 0.0f;
+        view.m_flOffCenterRight = 0.758f;
+        view.m_flOffCenterBottom = 0.0f;
+        view.m_flOffCenterTop = 1.0f;
+        callOriginal(view, nClearFlags, whatToDraw);
+        return;
+    }
+
     if (m_VR)
     {
         m_VR->FlushPendingGameUi();
@@ -3629,7 +3711,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 && m_VR->m_RenderWidth + 32 >= static_cast<UINT>(setup.width)
                 && m_VR->m_RenderHeight + 32 >= static_cast<UINT>(setup.height))
             {
-                NormalizeViewSetupForVREye(vrView, m_VR);
+                NormalizeViewSetupForVREye(vrView, m_VR, 0);
                 static int s_ptEye;
                 if (s_ptEye < 4)
                 {
@@ -3817,8 +3899,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             m_VR->NoteEngineScopeFov(setup.fov);
             CViewSetup leftEyeView = setup;
             CViewSetup rightEyeView = setup;
-            NormalizeViewSetupForVREye(leftEyeView, m_VR);
-            NormalizeViewSetupForVREye(rightEyeView, m_VR);
+            NormalizeViewSetupForVREye(leftEyeView, m_VR, 1);
+            NormalizeViewSetupForVREye(rightEyeView, m_VR, 2);
             m_VR->NoteStereoClipPlanes(leftEyeView.zNear, leftEyeView.zFar);
             applyL4d2VrHead(leftEyeView, true, true);
             applyL4d2VrHead(rightEyeView, true, false);
@@ -3866,8 +3948,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         m_VR->NoteEngineScopeFov(setup.fov);
         CViewSetup leftEyeView = setup;
         CViewSetup rightEyeView = setup;
-        NormalizeViewSetupForVREye(leftEyeView, m_VR);
-        NormalizeViewSetupForVREye(rightEyeView, m_VR);
+        NormalizeViewSetupForVREye(leftEyeView, m_VR, 1);
+        NormalizeViewSetupForVREye(rightEyeView, m_VR, 2);
         m_VR->NoteStereoClipPlanes(leftEyeView.zNear, leftEyeView.zFar);
         applyL4d2VrHead(leftEyeView, true, true);
         applyL4d2VrHead(rightEyeView, true, false);
@@ -3895,6 +3977,23 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 Game::logMsg("MC bake 1x view 0,0 %dx%d band=%u",
                     leftEyeView.width, leftEyeView.height, mcBand);
                 ++s_mcView;
+            }
+        }
+
+        if (bmvr::g_FakeRuntime)
+        {
+            // Headless tests: eye origins/angles in world units, ~1/s (world scale check).
+            static DWORD s_fakeEyeLogMs;
+            const DWORD nowMs = GetTickCount();
+            if (nowMs - s_fakeEyeLogMs >= 1000)
+            {
+                s_fakeEyeLogMs = nowMs;
+                Game::logMsg("fake eyes setup=(%.2f,%.2f,%.2f) L=(%.2f,%.2f,%.2f) R=(%.2f,%.2f,%.2f) ang=(%.2f,%.2f,%.2f) fov=%.3f aspect=%.4f ipdUnits=%.3f",
+                    setup.origin.x, setup.origin.y, setup.origin.z,
+                    leftEyeView.origin.x, leftEyeView.origin.y, leftEyeView.origin.z,
+                    rightEyeView.origin.x, rightEyeView.origin.y, rightEyeView.origin.z,
+                    leftEyeView.angles.x, leftEyeView.angles.y, leftEyeView.angles.z,
+                    leftEyeView.fov, leftEyeView.m_flAspectRatio, ipd);
             }
         }
 
@@ -4086,7 +4185,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         {
         if (m_VR->ShouldHwndBlitStereo())
             m_VR->FlushStereoBlitGpu();
-        if (bmvr::OffscreenWorldMatchesEyes())
+        if (bmvr::OffscreenWorldMatchesEyes() || bmvr::g_MirrorBothEyes)
             m_VR->MirrorStereoToDesktopWindow();
         else if (m_VR->m_IsVREnabled && !m_VR->WantPauseWorldOverlay()
             && !m_VR->ShouldHwndBlitStereo())
@@ -5105,6 +5204,35 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             }
         }
     }
+    // Menu background maps / loading (not gameplay): WorldRenderAtEyeSize
+    // grew _rt_FullFrameFB to the eye size, but these views still render at
+    // the window size into its top-left. BM's final composite then showed
+    // the background squeezed into the top-left with stale streaks below and
+    // right (window and VR menu panel, 2026-10-14).
+    // dev/engine_post_nxtgen samples the grown
+    // _rt_FullFrameFB through uvs the engine stretched by FullFrame/window
+    // (319x159 -> 379x387 on its 320x160 source), so everything past the
+    // drawn part read clamped edge texels. Give it the uvs it gets without
+    // grown RTs.
+    if (m_VR && eyeW >= 640 && eyeH >= 360
+        && !(m_VR->IsGameplayEligible() && EngineInGame())
+        && !StereoEyeWorldActive() && !OffscreenEyePassActive()
+        && std::strstr(matName, "engine_post") != nullptr
+        && origSrcW > 0 && origSrcH > 0
+        && (srcX1 > static_cast<float>(origSrcW) || srcY1 > static_cast<float>(origSrcH)))
+    {
+        static int s_postLog;
+        if (s_postLog < 4)
+        {
+            Game::logMsg("DSSR menu %s: uv (%.1f,%.1f)-(%.1f,%.1f) -> full %dx%d",
+                matName, srcX0, srcY0, srcX1, srcY1, origSrcW, origSrcH);
+            ++s_postLog;
+        }
+        srcX0 = 0.f;
+        srcY0 = 0.f;
+        srcX1 = static_cast<float>(origSrcW) - 1.f;
+        srcY1 = static_cast<float>(origSrcH) - 1.f;
+    }
     static int s_dssrLog;
     static int s_stereoDssrLog;
     static char s_seen[24][80];
@@ -5612,17 +5740,44 @@ namespace
         return FindPatternInModule(mod, hex);
     }
 
+    bool InServerDll(const void* p)
+    {
+        static uintptr_t s_base = 0, s_end = 0;
+        if (!s_base)
+        {
+            HMODULE mod = GetModuleHandleA("server.dll");
+            if (!mod)
+                return false;
+            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mod);
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+                reinterpret_cast<const unsigned char*>(mod) + dos->e_lfanew);
+            s_base = reinterpret_cast<uintptr_t>(mod);
+            s_end = s_base + nt->OptionalHeader.SizeOfImage;
+        }
+        const uintptr_t a = reinterpret_cast<uintptr_t>(p);
+        return a >= s_base && a < s_end;
+    }
+
     int ServerEntityIndex(void* ent)
     {
         if (!ent)
             return 0;
         int idx = 0;
+        // BM's server player has no IServerNetworkable vtable at +8 (null or a
+        // non-code pointer). Relying on __except cost ~1000 faults/s under
+        // Wine (8 fps, 2026-10-11) and called a garbage address half the time.
+        // Only call through a vtable and function that live in server.dll.
+        unsigned char* net = reinterpret_cast<unsigned char*>(ent) + 8;
+        void** vt = nullptr;
+        void* fn = nullptr;
+        using Fn = int(__thiscall*)(void*);
         __try
         {
-            unsigned char* net = reinterpret_cast<unsigned char*>(ent) + 8;
-            void** vt = *reinterpret_cast<void***>(net);
-            using Fn = int(__thiscall*)(void*);
-            idx = reinterpret_cast<Fn>(vt[0x24 / 4])(net);
+            vt = *reinterpret_cast<void***>(net);
+            if (InServerDll(vt))
+                fn = vt[0x24 / 4];
+            if (InServerDll(fn))
+                idx = reinterpret_cast<Fn>(fn)(net);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -5706,7 +5861,23 @@ namespace
         }
     }
 
-    Vector* RewriteShootOrigin(void* player, Vector* out, tWeaponShootPosition original, bool grabHold)
+    Vector* RewriteShootOriginImpl(void* player, Vector* out, tWeaponShootPosition original, bool grabHold);
+
+    Vector* RewriteShootOrigin(void* player, Vector* out, tWeaponShootPosition original, bool grabHold, bool server)
+    {
+        Vector* r = RewriteShootOriginImpl(player, out, original, grabHold);
+        if (bmvr::g_AimDebug && Hooks::m_VR && out && !grabHold)
+        {
+            Vector before{};
+            if (original)
+                original(player, &before);
+            const bool rewrote = (before - *out).LengthSqr() > 0.01f;
+            Hooks::m_VR->AimDebugShootOrigin(server, player, rewrote, before, *out);
+        }
+        return r;
+    }
+
+    Vector* RewriteShootOriginImpl(void* player, Vector* out, tWeaponShootPosition original, bool grabHold)
     {
         if (original && out)
             original(player, out);
@@ -5873,6 +6044,25 @@ void Hooks::EnsureWeaponShootOriginHooks()
             hkServerGrabHoldOrigin.pTarget = p;
         }
     }
+    if (server && !hkServerBmShootSource.pTarget)
+    {
+        auto* p = reinterpret_cast<unsigned char*>(server) + Offsets::kBlackMesaPlayer_ShootSource_Server;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            && CodeBytesMatch(p, "558BECFF7508E8????????8B45085DC20400"))
+        {
+            if (hkServerBmShootSource.createHook(p, &dServerBmShootSource) == 0
+                && hkServerBmShootSource.enableHook() == 0)
+                Game::logMsg("Hook enabled: server BM player +0x474 shot origin rva=0x%X", Offsets::kBlackMesaPlayer_ShootSource_Server);
+            else
+                Game::logMsg("server BM player +0x474 shot origin hook failed");
+        }
+        else
+        {
+            Game::logMsg("server BM player +0x474 shot origin skipped (bytes/rva 0x%X)", Offsets::kBlackMesaPlayer_ShootSource_Server);
+            hkServerBmShootSource.pTarget = p;
+        }
+    }
     if (server && !hkGrabSetTarget.pTarget)
     {
         auto* p = reinterpret_cast<unsigned char*>(server) + Offsets::kCGrabController_SetTargetPosition;
@@ -5947,7 +6137,22 @@ void __fastcall Hooks::dGetShootAngles(void* ecx, void* edx, QAngle* out)
     if (!hkGetShootAngles.fOriginal)
         return;
     hkGetShootAngles.fOriginal(ecx, out);
+    const QAngle before = out ? *out : QAngle{};
     ApplyVrShootAngles(ecx, out);
+    if (bmvr::g_AimDebug && m_VR && out)
+    {
+        if ((m_VR->m_HeldButtons.load(std::memory_order_acquire) & (IN_ATTACK | IN_ATTACK2)) != 0)
+        {
+            static int s_callerLog;
+            if (s_callerLog < 60)
+            {
+                ++s_callerLog;
+                Game::logMsg("AimDebug GetShootAngles caller rva=0x%X",
+                    ServerRva(reinterpret_cast<uintptr_t>(_ReturnAddress())));
+            }
+        }
+        m_VR->AimDebugShootAngles(true, ecx, (before.x != out->x || before.y != out->y), before, *out);
+    }
 }
 
 void __fastcall Hooks::dClientGetShootAngles(void* ecx, void* edx, QAngle* out)
@@ -5955,25 +6160,77 @@ void __fastcall Hooks::dClientGetShootAngles(void* ecx, void* edx, QAngle* out)
     (void)edx;
     if (hkClientGetShootAngles.fOriginal)
         hkClientGetShootAngles.fOriginal(ecx, out);
+    const QAngle before = out ? *out : QAngle{};
     ApplyVrShootAngles(ecx, out);
+    if (bmvr::g_AimDebug && m_VR && out)
+        m_VR->AimDebugShootAngles(false, ecx, (before.x != out->x || before.y != out->y), before, *out);
 }
 
 Vector* __fastcall Hooks::dClientWeaponShootPosition(void* ecx, void* edx, Vector* out)
 {
     (void)edx;
-    return RewriteShootOrigin(ecx, out, hkClientWeaponShootPosition.fOriginal, false);
+    return RewriteShootOrigin(ecx, out, hkClientWeaponShootPosition.fOriginal, false, false);
 }
 
 Vector* __fastcall Hooks::dServerWeaponShootPosition(void* ecx, void* edx, Vector* out)
 {
     (void)edx;
-    return RewriteShootOrigin(ecx, out, hkServerWeaponShootPosition.fOriginal, false);
+    return RewriteShootOrigin(ecx, out, hkServerWeaponShootPosition.fOriginal, false, true);
 }
 
 Vector* __fastcall Hooks::dServerGrabHoldOrigin(void* ecx, void* edx, Vector* out)
 {
     (void)edx;
-    return RewriteShootOrigin(ecx, out, hkServerGrabHoldOrigin.fOriginal, true);
+    return RewriteShootOrigin(ecx, out, hkServerGrabHoldOrigin.fOriginal, true, true);
+}
+
+namespace
+{
+    // Bullet origin. CBlackMesaPlayer overrides player vtable +0x474 with a
+    // thunk (server RVA 0x47C810 -> FUN_1012F2C0, the eye position); 0x77240
+    // above is only CBasePlayer's version, so the BM player's +0x474 calls never
+    // reached a hook, and neither does any weapon go through Weapon_ShootPosition
+    // (+0x23C). Bullets therefore left the head along the controller direction
+    // while the reticle sits on the controller ray: a constant world offset of
+    // (hand - head), "up-left" for a right hand held low. Measured headless with
+    // the fake runtime 2026-10-12 (decals on the eye-origin ray to ~1 px; 357,
+    // Glock, MP5). Only the weapon fire call sites below get the VR origin; every
+    // other caller (grab controller, AI, ...) keeps the original eye position.
+    // Return-address RVAs in server.dll (public-beta 25844216). 0x34E5D9: the
+    // shared bullet routine reads the shooter's +0x474 as vecSrc (`mov eax,
+    // [eax+0x474]; call eax`; seen with AimDebug for the 357, Glock and MP5 on
+    // stable, where it was 0x34DEF9). The others are the +0x474 calls directly
+    // followed by GetShootAngles (+0x240) in weapon code (stable 0x48EDA4,
+    // 0x484C85, 0x484F0B, 0x48B435; all four moved +0x9D0).
+    constexpr uint32_t kServerWeaponFireOriginReturnRvas[] = {
+        0x34E5D9, 0x48F774, 0x485655, 0x4858DB, 0x48BE05 };
+}
+
+Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out)
+{
+    (void)edx;
+    const uint32_t callerRva = ServerRva(reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    bool weaponFire = false;
+    if (bmvr::g_VrShotOriginFix)
+    {
+        for (uint32_t rva : kServerWeaponFireOriginReturnRvas)
+            weaponFire = weaponFire || (rva != 0 && callerRva == rva);
+    }
+    if (bmvr::g_AimDebug && m_VR
+        && (m_VR->m_HeldButtons.load(std::memory_order_acquire) & (IN_ATTACK | IN_ATTACK2)) != 0)
+    {
+        static int s_callerLog;
+        if (s_callerLog < 80)
+        {
+            ++s_callerLog;
+            Game::logMsg("AimDebug +0x474 origin caller rva=0x%X weaponFire=%d", callerRva, weaponFire ? 1 : 0);
+        }
+    }
+    if (weaponFire)
+        return RewriteShootOrigin(ecx, out, hkServerBmShootSource.fOriginal, false, true);
+    if (hkServerBmShootSource.fOriginal)
+        return hkServerBmShootSource.fOriginal(ecx, out);
+    return out;
 }
 
 void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang)
@@ -6004,12 +6261,23 @@ void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle*
         hkGrabSetTarget.fOriginal(ecx, pos ? &p : pos, ang ? &a : ang);
 }
 
+namespace
+{
+    // C_BaseAnimating::GetAttachment(int, Vector&, QAngle&) is built on the
+    // matrix overload, which is hooked too. Scale in the outer call only, or
+    // the point is pulled toward the controller twice (scale^2: ~6 cm short
+    // of the muzzle at ViewmodelScale 0.68).
+    thread_local int t_InAttachmentVec = 0;
+}
+
 int __fastcall Hooks::dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles)
 {
     (void)edx;
     int result = 0;
+    ++t_InAttachmentVec;
     if (hkGetAttachmentVec.fOriginal)
         result = hkGetAttachmentVec.fOriginal(ecx, number, origin, angles);
+    --t_InAttachmentVec;
     if (result && origin && m_VR)
         m_VR->ScaleViewmodelRenderableAttachment(ecx, *origin);
     return result;
@@ -6021,7 +6289,7 @@ int __fastcall Hooks::dGetAttachmentMatrix(void* ecx, void* edx, int number, flo
     int result = 0;
     if (hkGetAttachmentMatrix.fOriginal)
         result = hkGetAttachmentMatrix.fOriginal(ecx, number, matrix);
-    if (result && matrix && m_VR)
+    if (result && matrix && m_VR && t_InAttachmentVec == 0)
     {
         Vector origin(matrix[3], matrix[7], matrix[11]);
         if (m_VR->ScaleViewmodelRenderableAttachment(ecx, origin))
@@ -6323,7 +6591,7 @@ bool Hooks::EnsureWeaponVfxHooks()
     if (!hkEnvLaserDotDraw.pTarget)
     {
         constexpr const char* kDotBytes =
-            "558BEC83ECA0A1????????33C58945FCF745080000004E";
+            "558BEC81ECA0000000A1????????33C58945FCF745080000004E";
         auto* p = ResolveCode(client, Offsets::kCEnvLaserDot_Draw, kDotBytes);
         if (p)
         {
@@ -6995,6 +7263,39 @@ void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& hei
     }
 }
 
+// Areaportal culling with OffCenterEyes. The engine's areaportal setup
+// (engine+0x138CF0) copies the current view, sets its screen window to the
+// centred +-tan(fov/2) of that view (fov/aspect = the union frustum), then
+// projects doorways with the copy's ComputeViewMatrices — which honours
+// m_bOffCenter and so maps each eye's own sub-frustum onto -1..1. Doorway
+// rects then land in the wrong part of the window and rooms behind them were
+// culled while in view (2026-10-11 / 10-14). Clearing the flag on that
+// private copy gives the union projection, which matches the window; the
+// union contains both eyes, so culling stays conservative.
+void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToView, void* viewToProjection, void* worldToProjection)
+{
+    (void)edx;
+    static const uintptr_t s_engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
+    const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if (ecx && s_engine && ret == s_engine + Offsets::kAreaPortalComputeViewReturnRva
+        && m_VR && m_VR->m_OffCenterActive)
+    {
+        auto* view = static_cast<CViewSetup*>(ecx);
+        if (view->m_bOffCenter)
+        {
+            view->m_bOffCenter = false;
+            static int s_log;
+            if (s_log < 2)
+            {
+                Game::logMsg("Areaportal view: off-centre cleared on the portal copy (fov=%.1f aspect=%.3f)",
+                    view->fov, view->m_flAspectRatio);
+                ++s_log;
+            }
+        }
+    }
+    hkComputeViewMatrices.fOriginal(ecx, worldToView, viewToProjection, worldToProjection);
+}
+
 float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
 {
     (void)edx;
@@ -7019,8 +7320,9 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
                     || m_VR->CachedRt0MatchesEyes()
                     || m_VR->D3dRt0IsEyeSized()))))
     {
-        const float eyeAspect = static_cast<float>(m_VR->m_RenderWidth)
-            / static_cast<float>(m_VR->m_RenderHeight);
+        const float eyeAspect = m_VR->m_OffCenterActive
+            ? m_VR->m_OffCenterAspect
+            : static_cast<float>(m_VR->m_RenderWidth) / static_cast<float>(m_VR->m_RenderHeight);
         static int s_arLog;
         if (s_arLog < 8)
         {

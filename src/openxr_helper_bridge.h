@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "openxr_bridge_protocol.h"
@@ -16,6 +17,7 @@ struct OpenXrHelperLaunchConfig
     bool enableHandTracking = false;
     bool disableProjectionLayer = false;
     bool useSymmetricProjectionFov = false;
+    bool gameRendersRuntimeFov = false;
     bool useGameRenderPoseForProjection = true;
     int forceMonoProjectionEye = -1;
     int forceMonoProjectionView = -1;
@@ -50,3 +52,8 @@ void L4D2VR_PublishOpenXrSharedTexturePair(
 void L4D2VR_PublishOpenXrSharedTextureFrame(uint32_t frameId);
 void L4D2VR_PublishOpenXrOverlay(uint32_t overlayIndex, const L4D2VROpenXrOverlayDesc& overlay);
 void L4D2VR_PublishOpenXrOverlayFrame(uint32_t frameId);
+
+// VRRuntimeBackend=fake (vr_fake_helper.cpp): runs the helper's side of the
+// bridge in-process, and hands console commands from VR\cmd.txt to the game.
+void L4D2VR_StartFakeOpenXrHelper(L4D2VROpenXrBridgeState* state, bool gameRendersRuntimeFov);
+bool L4D2VR_FakeHelperPopCommand(char* out, size_t outSize);

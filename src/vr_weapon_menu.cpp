@@ -2060,7 +2060,7 @@ void VR::ApplyWeaponMenuWorldPose()
     }
 }
 
-void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
+void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up)
 {
     if (!m_WeaponMenuOpen || !device || m_WeaponMenuCount <= 0)
@@ -2069,11 +2069,14 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
     EnsureWeaponIcons(device);
     EnsureRadialTextures(device);
     const float pixelAspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
-    const float aspect = (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
-    const float projFov = HorizontalFovForAspect(aspect);
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
     const float tanHalf = tanf(projFov * 0.5f * kPi / 180.f);
     if (!(tanHalf > 0.01f))
         return;
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
 
     auto project = [&](const Vector& world, float& sx, float& sy, float& rhw) -> bool {
         const Vector delta = world - eyeOrig;
@@ -2083,8 +2086,8 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
         rhw = 1.f / z;
         const float x = delta.Dot(right);
         const float y = delta.Dot(up);
-        const float ndcX = (x * rhw) / tanHalf;
-        const float ndcY = ((y * rhw) * aspect) / tanHalf;
+        const float ndcX = (x * rhw) / tanHalf * ocSx + ocOx;
+        const float ndcY = ((y * rhw) * aspect) / tanHalf * ocSy + ocOy;
         sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
         sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
         return true;
