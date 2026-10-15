@@ -6459,9 +6459,11 @@ void VR::ApplyMenuCursor()
     bool click = s_trigLatched;
     float triggerValue = -1.f;
     vr::InputAnalogActionData_t trig{};
+    static float s_trigMinSinceClick = 1.f;
     if (GetAnalogActionData(m_ActionPrimaryAttack, trig))
     {
         triggerValue = trig.x;
+        s_trigMinSinceClick = (std::min)(s_trigMinSinceClick, trig.x);
         if (trig.x >= 0.6f)
             click = true;
         else if (trig.x <= 0.25f)
@@ -6516,11 +6518,12 @@ void VR::ApplyMenuCursor()
         static int s_clickLog;
         if (s_clickLog < 40)
         {
-            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d trigger=%.2f cross=%d t=%lu",
-                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, triggerValue, selectHeld ? 1 : 0,
-                static_cast<unsigned long>(histNow));
+            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d trigger=%.2f minSince=%.2f cross=%d t=%lu",
+                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, triggerValue, s_trigMinSinceClick,
+                selectHeld ? 1 : 0, static_cast<unsigned long>(histNow));
             ++s_clickLog;
         }
+        s_trigMinSinceClick = 1.f;
     }
     m_MenuTriggerWasDown = click;
 }

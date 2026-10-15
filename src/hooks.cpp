@@ -252,7 +252,6 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkLevelShutdown, "LevelShutdown");
     enableIfReady(hkCalcViewModelView, "CalcViewModelView");
     enableIfReady(hkGetViewModelFOV, "GetViewModelFOV");
-    enableIfReady(hkGetCursorPos, "GetCursorPos");
     enableIfReady(hkEndFrame, "EndFrame");
     enableIfReady(hkTraceRay, "TraceRay");
 }
