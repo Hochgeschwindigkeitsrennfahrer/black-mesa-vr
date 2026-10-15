@@ -6452,9 +6452,9 @@ void VR::ApplyMenuCursor()
         s_hist[s_histN % 128] = { histNow, wx, wy };
         ++s_histN;
     }
-    // Trigger with hysteresis: press past 0.6, re-arm only below 0.25. The
-    // digital action flips at 0.45 both ways, so a finger resting on the
-    // trigger near that point fired click after click while just pointing.
+    // Trigger with hysteresis: press past 0.9, re-arm only below 0.5. A
+    // finger resting on the PS VR2 Sense trigger reads 0.6-0.7 (log
+    // 2026-10-15) and its small movements clicked menu items on their own.
     static bool s_trigLatched;
     bool click = s_trigLatched;
     float triggerValue = -1.f;
@@ -6464,9 +6464,9 @@ void VR::ApplyMenuCursor()
     {
         triggerValue = trig.x;
         s_trigMinSinceClick = (std::min)(s_trigMinSinceClick, trig.x);
-        if (trig.x >= 0.6f)
+        if (trig.x >= kMenuTriggerPress)
             click = true;
-        else if (trig.x <= 0.25f)
+        else if (trig.x <= kMenuTriggerRearm)
             click = false;
     }
     else
@@ -6526,6 +6526,21 @@ void VR::ApplyMenuCursor()
         s_trigMinSinceClick = 1.f;
     }
     m_MenuTriggerWasDown = click;
+}
+
+bool VR::MenuTriggerClickHeld(bool& latch) const
+{
+    vr::InputAnalogActionData_t trig{};
+    if (GetAnalogActionData(m_ActionPrimaryAttack, trig))
+    {
+        if (trig.x >= kMenuTriggerPress)
+            latch = true;
+        else if (trig.x <= kMenuTriggerRearm)
+            latch = false;
+        return latch;
+    }
+    latch = PressedDigitalAction(m_ActionPrimaryAttack);
+    return latch;
 }
 
 bool VR::TryGetMenuCursorScreen(POINT& out) const

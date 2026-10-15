@@ -859,6 +859,11 @@ public:
     void ApplyWorldVguiTriggerClick(CUserCmd* cmd);
     bool WorldVguiSuppressAttack() const { return m_WorldVguiSuppressAttack; }
     bool TryGetMenuCursorScreen(POINT& out) const;
+    // Menu / settings-panel trigger click: full pull to click, half release
+    // to re-arm (a resting finger reads 0.6-0.7 on the PS VR2 Sense).
+    static constexpr float kMenuTriggerPress = 0.9f;
+    static constexpr float kMenuTriggerRearm = 0.5f;
+    bool MenuTriggerClickHeld(bool& latch) const;
     void DrawMenuCursorOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf);
     void ApplyMenuNavigation();
     void QueueEscapeKey();
