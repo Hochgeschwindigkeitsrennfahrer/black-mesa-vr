@@ -1,0 +1,103 @@
+#!/bin/bash
+# bm-run <outdir> [game args...] — run Black Mesa (Proton build) headless with a test d3d9.dll and the fake VR
+# runtime: private Xvfb + lavapipe (CPU Vulkan; Xvfb has no DRI3), a COPY of the Proton prefix, the test VR dir
+# <outdir>/VR (config.txt with VRRuntimeBackend=fake, fake.txt, cmd.txt) via BMVR_TESTDIR, logs in <outdir>.
+#
+# The game folder only gets the test DLL for the length of the run: the three installed d3d9.dll are
+# checked against $BMVR_ORIG_SHA (sha256 of the installed copies; refuses otherwise), replaced, and put back
+# (and re-verified) on exit, also on failure/^C. SteamVR is made unreachable (VR_PATHREG_OVERRIDE points
+# nowhere), and the run is killed if a vrserver ever shows up.
+#
+# env: BMVR_DLL (test d3d9.dll, required)  BMVR_ORIG_SHA (sha256 of the installed d3d9.dll, required)
+#      BMVR_PREFIX (prefix copy, default <scratch>/compatdata)  BMVR_DISPLAY (:78)  BMVR_W/BMVR_H (1280x640)
+#      BMVR_LAVAPIPE (dir with a 32-bit lavapipe ICD)  BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0; no Xvfb)
+#      BMVR_NEWUI=1 (no -oldgameui)  BMVR_XVFB_GPU=1 (real GPU into the private Xvfb via MESA_VK_WSI_DEBUG=sw; fine with the desktop locked)
+set -euo pipefail
+out=$(realpath -m "$1"); shift
+STEAM=~/.local/share/Steam
+GAME="$STEAM/steamapps/common/Black Mesa"
+PROTON="$STEAM/steamapps/common/Proton - Experimental"
+SLR="$STEAM/steamapps/common/SteamLinuxRuntime_4"
+DLLS=(d3d9.dll bin/d3d9.dll bin/thirdparty/dxvk-windows-x86/d3d9.dll)
+: "${BMVR_DLL:?test d3d9.dll}" "${BMVR_ORIG_SHA:?sha256 of the installed d3d9.dll}" "${BMVR_PREFIX:?prefix copy}"
+[[ -d $BMVR_PREFIX/pfx ]] || { echo "no prefix copy at $BMVR_PREFIX" >&2; exit 1; }
+pgrep -x bms.exe >/dev/null && { echo "Black Mesa is already running" >&2; exit 1; }
+pgrep -x vrserver >/dev/null && { echo "SteamVR is running; not testing next to it" >&2; exit 1; }
+mkdir -p "$out"
+
+for f in "${DLLS[@]}"; do
+	[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || { echo "$f is not the expected installed DLL; refusing" >&2; exit 1; }
+done
+cp "$GAME/d3d9.dll" "$out/orig-d3d9.dll"
+# -w/-h are saved by the game into bms/videoconfig.cfg (the player's resolution); put it back afterwards
+cp -a "$GAME/bms/videoconfig.cfg" "$out/orig-videoconfig.cfg" 2>/dev/null || true
+restore() {
+	local f ok=1
+	for f in "${DLLS[@]}"; do
+		cp "$out/orig-d3d9.dll" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
+		[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || ok=0
+	done
+	[[ -f $out/orig-videoconfig.cfg ]] && cp -a "$out/orig-videoconfig.cfg" "$GAME/bms/videoconfig.cfg"
+	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified)" >> "$out/run.log" \
+		|| echo "RESTORE FAILED" | tee -a "$out/run.log" >&2
+}
+cleanup() {
+	[[ -n ${game_pid:-} ]] && kill "$game_pid" 2>/dev/null || true
+	local p; for p in $(pgrep -x bms.exe); do kill "$p" 2>/dev/null || true; done
+	sleep 2
+	for p in $(pgrep -x bms.exe); do kill -9 "$p" 2>/dev/null || true; done
+	[[ -n ${xvfb_pid:-} ]] && kill "$xvfb_pid" 2>/dev/null || true
+	restore
+}
+trap cleanup EXIT
+for f in "${DLLS[@]}"; do
+	cp "$BMVR_DLL" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
+done
+echo "test DLL $(sha256sum < "$BMVR_DLL" | cut -c1-12) installed $(date +%T)" > "$out/run.log"
+
+if [[ -n ${BMVR_GPU:-} ]]; then
+	# real GPU on an existing X display (window appears there); 32-bit lavapipe crashes on map load since 2026-10-12
+	display=${BMVR_DISPLAY:-:0}
+	export DISPLAY=$display
+	echo "$display" > "$out/display"
+else
+	display=:${BMVR_DISPLAY:-78}
+	Xvfb "$display" -screen 0 ${BMVR_SCREEN:-1600x900x24} -nolisten tcp >"$out/xvfb.log" 2>&1 &
+	xvfb_pid=$!
+	sleep 1
+	export DISPLAY=$display
+	echo "$display" > "$out/display"
+	if [[ -n ${BMVR_XVFB_GPU:-} ]]; then
+		# real GPU, presented into the private Xvfb through Mesa's CPU-copy WSI (Xvfb has no DRI3). Works
+		# with the desktop locked, where a window on :0 never gets its first Present completed.
+		export MESA_VK_WSI_DEBUG=sw
+	else
+		LVP=${BMVR_LAVAPIPE:?set BMVR_LAVAPIPE or use BMVR_GPU=1}
+		export VK_DRIVER_FILES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json VK_ICD_FILENAMES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json
+	fi
+fi
+export VR_PATHREG_OVERRIDE=/nonexistent/openvrpaths.vrpath XR_RUNTIME_JSON=/nonexistent/openxr.json
+export SDL_AUDIODRIVER=dummy PULSE_SERVER=/nonexistent ALSA_CONFIG_PATH=/nonexistent
+export DXVK_LOG_PATH="Z:${out//\//\\}" DXVK_STATE_CACHE=0 DXVK_LOG_LEVEL=${DXVK_LOG_LEVEL:-warn}
+[[ -n ${BMVR_PROTON_LOG:-} ]] && export PROTON_LOG=1 PROTON_LOG_DIR="$out" WINEDEBUG=${WINEDEBUG:-+seh,+loaddll}
+export STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM STEAM_COMPAT_DATA_PATH=$BMVR_PREFIX STEAM_COMPAT_INSTALL_PATH=$GAME
+export STEAM_COMPAT_APP_ID=362890 SteamAppId=362890 SteamGameId=362890
+export WINEDLLOVERRIDES="d3d9=n,b"
+export BMVR_TESTDIR="Z:${out//\//\\}"
+
+# BMVR_NEWUI=1: Black Mesa's new (QML) game UI instead of -oldgameui
+ui_arg=-oldgameui
+[[ -n ${BMVR_NEWUI:-} ]] && ui_arg=
+
+cd "$GAME"
+"$SLR/_v2-entry-point" --verb=waitforexitandrun -- "$PROTON/proton" waitforexitandrun \
+	"$GAME/bms.exe" -steam -heapsize 524288 -processheap -novid -windowed -noborder $ui_arg -enabledxvk -nosound \
+	-w ${BMVR_W:-1280} -h ${BMVR_H:-640} "$@" >"$out/game.log" 2>&1 &
+game_pid=$!
+while kill -0 $game_pid 2>/dev/null; do
+	if pgrep -x vrserver >/dev/null || pgrep -x vrmonitor >/dev/null; then
+		echo "vrserver appeared during the test: stopping the game" | tee -a "$out/run.log" >&2
+		break
+	fi
+	sleep 1
+done

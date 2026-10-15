@@ -1758,7 +1758,7 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 {
     (void)deltaMs;
     const DWORD now = GetTickCount();
-    if (!m_GameplayEligible || !m_Game || PauseUiActive())
+    if (!m_GameplayEligible || !m_Game || PauseUiActive() || m_SettingsOpen)
     {
         m_WeaponMenuOpen = false;
         m_WeaponMenuClickHeld = false;
@@ -1943,6 +1943,17 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
             }
         };
         packInto(kWeaponHex, static_cast<int>(sizeof(kWeaponHex) / sizeof(kWeaponHex[0])));
+        // VR settings: one cell below the crowbar, outside the weapon brick.
+        if (placed < kMaxMenuSlots && take(0, -2))
+        {
+            WeaponMenuSlot& gear = m_WeaponMenuSlots[placed];
+            OffsetToPlane(0, -2, gear.planeX, gear.planeY);
+            gear.hudSlot = 0;
+            gear.hudPos = -2;
+            gear.settingsGear = true;
+            strncpy_s(gear.label, "VR", _TRUNCATE);
+            ++placed;
+        }
         m_WeaponMenuCount = placed;
         ApplyWeaponMenuWorldPose();
 
@@ -2019,7 +2030,11 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 
     if (!stickClickHeld && m_WeaponMenuClickHeld)
     {
-        if (m_WeaponMenuOpenedThisHold)
+        const bool openSettings = m_WeaponMenuOpen && m_WeaponMenuHover >= 0
+            && m_WeaponMenuHover < m_WeaponMenuCount && m_WeaponMenuSlots[m_WeaponMenuHover].settingsGear;
+        if (openSettings)
+            OpenSettingsPanel();
+        else if (m_WeaponMenuOpenedThisHold)
             QueueWeaponMenuSound(kWeaponSoundSelect, 0, 0);
         else if ((now - m_WeaponMenuClickStartMs) < kMenuHoldMs)
         {
@@ -2060,7 +2075,7 @@ void VR::ApplyWeaponMenuWorldPose()
     }
 }
 
-void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
+void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up)
 {
     if (!m_WeaponMenuOpen || !device || m_WeaponMenuCount <= 0)
@@ -2069,11 +2084,14 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
     EnsureWeaponIcons(device);
     EnsureRadialTextures(device);
     const float pixelAspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
-    const float aspect = (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
-    const float projFov = HorizontalFovForAspect(aspect);
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : (bmvr::UseGbMatchViewLock() && m_Aspect > 0.1f) ? m_Aspect : pixelAspect;
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
     const float tanHalf = tanf(projFov * 0.5f * kPi / 180.f);
     if (!(tanHalf > 0.01f))
         return;
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
 
     auto project = [&](const Vector& world, float& sx, float& sy, float& rhw) -> bool {
         const Vector delta = world - eyeOrig;
@@ -2083,8 +2101,8 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
         rhw = 1.f / z;
         const float x = delta.Dot(right);
         const float y = delta.Dot(up);
-        const float ndcX = (x * rhw) / tanHalf;
-        const float ndcY = ((y * rhw) * aspect) / tanHalf;
+        const float ndcX = (x * rhw) / tanHalf * ocSx + ocOx;
+        const float ndcY = ((y * rhw) * aspect) / tanHalf * ocSy + ocOy;
         sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(w);
         sy = (-ndcY * 0.5f + 0.5f) * static_cast<float>(h);
         return true;
@@ -2102,7 +2120,7 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
     };
 
     auto drawTexturedQuad = [&](IDirect3DTexture9* tex, const Vector& center,
-        float halfW, float halfH, D3DCOLOR tint) {
+        float halfW, float halfH, D3DCOLOR tint, bool mirrorU = false) {
         if (!tex)
             return;
         const Vector tl = center - m_WeaponMenuRight * halfW + m_WeaponMenuUp * halfH;
@@ -2125,10 +2143,10 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
         device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
         MenuVertTex tv[4] = {
-            { x0, y0, 0.f, r0, tint, 0.f, 0.f },
-            { x1, y1, 0.f, r1, tint, 1.f, 0.f },
-            { x2, y2, 0.f, r2, tint, 0.f, 1.f },
-            { x3, y3, 0.f, r3, tint, 1.f, 1.f }
+            { x0, y0, 0.f, r0, tint, mirrorU ? 1.f : 0.f, 0.f },
+            { x1, y1, 0.f, r1, tint, mirrorU ? 0.f : 1.f, 0.f },
+            { x2, y2, 0.f, r2, tint, mirrorU ? 1.f : 0.f, 1.f },
+            { x3, y3, 0.f, r3, tint, mirrorU ? 0.f : 1.f, 1.f }
         };
         device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tv, sizeof(MenuVertTex));
         device->SetTexture(0, nullptr);
@@ -2193,6 +2211,15 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, UINT w, UINT h,
         const WeaponMenuSlot& slot = m_WeaponMenuSlots[i];
         const bool hover = (i == m_WeaponMenuHover);
         const bool dry = slot.dry && !slot.emptyHand;
+        if (slot.settingsGear)
+        {
+            if (IDirect3DTexture9* gear = SettingsGearTexture(device))
+                // m_WeaponMenuRight = up x fwd points left in Source;
+                // text must not come out mirrored.
+                drawTexturedQuad(gear, slot.center, radiusHu * 0.62f, radiusHu * 0.31f,
+                    hover ? D3DCOLOR_XRGB(255, 255, 255) : pal.tintIdle, true);
+            continue;
+        }
         const bool showIcon = slot.entityIndex > 0 || (!slot.emptyHand && slot.kind > 0);
         if (!showIcon)
             continue;

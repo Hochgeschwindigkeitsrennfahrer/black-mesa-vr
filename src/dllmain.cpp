@@ -1,6 +1,8 @@
 #include <Windows.h>
 #include "game.h"
 #include "bmvr_flags.h"
+#include <cstdint>
+#include <cstring>
 
 static LONG CALLBACK FaultVeh(PEXCEPTION_POINTERS info)
 {
@@ -100,6 +102,68 @@ static void RestoreDesktopDisplayModes()
     EnumDisplayMonitors(nullptr, nullptr, RestoreMonitorMode, 0);
 }
 
+// Counts access violations (caught or not) so a guarded read that faults every
+// frame shows up in bmvr_log; under Wine each one costs a kernel round trip.
+namespace
+{
+    volatile LONG g_FaultCount = 0;
+    struct FaultSlot { volatile LONG addr; volatile LONG hits; };
+    FaultSlot g_FaultSlots[8]{};
+
+    LONG CALLBACK CountFaults(PEXCEPTION_POINTERS info)
+    {
+        if (info && info->ExceptionRecord
+            && info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
+        {
+            InterlockedIncrement(&g_FaultCount);
+            const LONG addr = static_cast<LONG>(reinterpret_cast<uintptr_t>(
+                info->ExceptionRecord->ExceptionAddress));
+            for (FaultSlot& s : g_FaultSlots)
+            {
+                if (s.addr == addr || InterlockedCompareExchange(&s.addr, addr, 0) == 0)
+                {
+                    InterlockedIncrement(&s.hits);
+                    break;
+                }
+            }
+        }
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+}
+
+namespace bmvr
+{
+    void LogFaultStats()
+    {
+        const LONG n = InterlockedExchange(&g_FaultCount, 0);
+        LONG topAddr = 0, topHits = 0;
+        for (FaultSlot& s : g_FaultSlots)
+        {
+            const LONG hits = InterlockedExchange(&s.hits, 0);
+            const LONG addr = InterlockedExchange(&s.addr, 0);
+            if (hits > topHits)
+            {
+                topHits = hits;
+                topAddr = addr;
+            }
+        }
+        if (n == 0)
+            return;
+        HMODULE mod = nullptr;
+        char name[MAX_PATH] = "?";
+        uintptr_t rva = static_cast<uintptr_t>(topAddr);
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCSTR>(static_cast<uintptr_t>(topAddr)), &mod) && mod)
+        {
+            GetModuleFileNameA(mod, name, MAX_PATH);
+            rva -= reinterpret_cast<uintptr_t>(mod);
+        }
+        const char* base = std::strrchr(name, '\\');
+        Log("Access violations since last report: %ld, top %ld at %s+0x%X",
+            n, topHits, base ? base + 1 : name, static_cast<unsigned>(rva));
+    }
+}
+
 static DWORD WINAPI InitBMVR(LPVOID param)
 {
 #ifdef _DEBUG
@@ -147,6 +211,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         SetEnvironmentVariableA("DXVK_FORCE_WINDOWED", "1");
         bmvr::SetDllModule(hModule);
         AddVectoredExceptionHandler(1, FaultVeh);
+        AddVectoredExceptionHandler(1, CountFaults);
         bmvr::StartWatchdog();
         bmvr::SetStage("dll_attach");
         CreateThread(nullptr, 0, InitBMVR, hModule, 0, nullptr);

@@ -1,6 +1,7 @@
 #pragma once
 #include <Windows.h>
 #include <cstdint>
+#include <string>
 
 // Crash-sticky retries of L4D2VR mechanisms the old OpenXR prototype banned.
 // If Black Mesa dies mid-attempt, the in-progress flag remains on disk and
@@ -168,6 +169,9 @@ namespace bmvr
     extern float g_ControllerPitchTiltTouch;
     extern float g_ControllerPitchTiltIndex;
     extern float g_ControllerPitchTiltVive;
+    // Player's extra gun pitch in degrees on top of the per-family tilt
+    // (GunPitchOffset in config.txt, bmvr_gun_pitch / Options -> Game).
+    extern float g_GunPitchOffset;
     float EffectiveControllerPitchTilt(uint32_t controllerFamily);
     // Trim applied to the firing pitch only, in degrees, positive = shoot
     // higher. Leaves the viewmodel alone, so it corrects a grip that aims low
@@ -218,6 +222,67 @@ namespace bmvr
     extern bool g_VrCrosshair;
     // Reticle size multiplier, for players who want it smaller or bolder.
     extern float g_VrCrosshairScale;
+    // Reticle drawn as a red laser dot instead of the amber ticks.
+    extern bool g_VrCrosshairDot;
+    // Thin red beam from the gun along the firing ray to where it lands.
+    extern bool g_VrLaserBeam;
+    // Beam half width in game units (1 unit ~ 2.5 cm).
+    extern float g_VrLaserWidth;
+    // Moves the beam start along the barrel (game units, + = forward).
+    extern float g_VrLaserStartForward;
+    // AimDebug=true: per shot, log the server bullet origin/direction and its
+    // traced hit next to the reticle ray and hit (bmvr_log "AimDebug").
+    extern bool g_AimDebug;
+    // OffCenterTest=true (flat only, diagnostic): while VR/offcenter_test_on
+    // exists, the main view renders the PSVR2 left-eye off-centre subrect
+    // (left 0, right 0.758 of the frustum) to check the engine's off-centre
+    // projection path (deferred lights, sky, water, viewmodel) on the desktop.
+    extern bool g_OffCenterTest;
+    // OffCenterEyes=true: each eye renders only its own asymmetric HMD
+    // frustum (CViewSetup m_bOffCenter) instead of the symmetric union, and
+    // is submitted at the runtime's per-eye FOV. PSVR2: ~54 % -> 100 % of
+    // the rendered pixels reach the eye.
+    extern bool g_OffCenterEyes;
+    bool OffCenterTestActive();
+    // Headless tests. BMVR_TESTDIR (a Windows path) stands in for the game
+    // folder for VR\config.txt, the logs, heartbeat, skip and crash-sticky
+    // flag files, so a test never reads or writes the player's files.
+    const std::wstring& TestDir();
+    // "<TestDir>\VR\<leaf>" when BMVR_TESTDIR is set, else "VR\<leaf>"
+    // (relative to the game folder, as before).
+    std::string VrFilePath(const char* leaf);
+    // VRRuntimeBackend=fake: the OpenXR helper path with an in-process fake
+    // helper (scripted poses/buttons from VR\fake.txt, PSVR2 projection, no
+    // SteamVR). See vr_fake_helper.cpp.
+    extern bool g_FakeRuntime;
+    // MirrorBothEyes=true: the desktop window shows both eye images side by
+    // side, each whole eye texture stretched into one half (tests take
+    // screenshots of it).
+    extern bool g_MirrorBothEyes;
+    // VrShotOriginFix=true (default): bullets fired through server player
+    // vtable +0x474 leave from the controller ray (TryGetVrShootOrigin), not
+    // the head. false = old behaviour (tests compare both).
+    extern bool g_VrShotOriginFix;
+    // Shots start at the muzzle attachment (not slid onto the controller axis).
+    extern bool g_VrShootFromMuzzle;
+    // Fixes, default on (a config key can turn each off):
+    extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
+    extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
+    extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
+    // Optional features, default off:
+    extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
+    extern bool g_SettingsTriangleHold;  // Triangle/Y hold opens the VR settings panel, tap pauses on release
+    // CrouchStickHold=true: right stick down crouches only while held
+    // (default false = each push toggles crouch).
+    extern bool g_CrouchStickHold;
+    // SprintToggle=true: one sprint click (left stick click) keeps sprinting
+    // until the left stick returns to centre or sprint is clicked again
+    // (default false = hold the click).
+    extern bool g_SprintToggle;
+    // VR settings panel pauses the game while open (setpause / unpause).
+    extern bool g_VrSettingsPause;
+    // Logs (and resets) the access-violation count since the last call.
+    void LogFaultStats();
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand
     // GLBs still draw on the intro tram. Depends on a scanned m_bWearingSuit
     // offset; set false if the scan ever misfires.

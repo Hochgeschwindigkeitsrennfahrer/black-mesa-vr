@@ -8,6 +8,10 @@
 
 struct IDirect3DDevice9;
 
+// Game thread: sample GetLightForPoint at a hand (0 left, 1 right) for the
+// glove shading; the draw path (material thread) only reads the cache.
+void VrHands_UpdatePalmLight(int hand, const Vector& pos);
+
 // BM hybrid gloves: L4D2VR GLB + summary-curl mechanism only.
 // No ValveBiped VM-pose, magazine interaction, or world-model pose relay.
 class BmVrGloves

@@ -1,0 +1,88 @@
+#!/bin/bash
+# bm-scenario <scenario file> <outdir> [game args...] — scripted headless VR test (bm-test / bm-run).
+# Typical game args: +sv_cheats 1 +map bm_c1a0a   (Steam must be running.)
+# Scenario lines, run in order once the mod logs its first stereo pair in a map ($BMVR_READY overrides):
+#   wait <seconds>
+#   cmd <console command>            appended to VR/cmd.txt (run on the engine thread within a frame or two)
+#   fake <fake.txt line>              replaces the line with the same first word in VR/fake.txt
+#   unfake <key>                      removes that line
+#   shot <name>                       screenshot of the game window -> <outdir>/<name>.png
+#   log                               copy the mod log now
+#   dump <name> [step]                mod writes VR/<name>-left/right/hud.bmp: the eye pair it publishes + overlay
+#                                     (every <step>th pixel, default 4)
+#   projcheck [left|right|both] [deg] projection check (bm-projcheck.py): window shots before/after turning the fake
+#                                     hmd about that eye (pitch, yaw, roll); fails unless each eye image uses the
+#                                     projection the fake helper says the real helper would submit (1.000 +- 2 %).
+# Keep scenarios short: 32-bit lavapipe has crashed ~70-90 s into a map (CS:S harness).
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+scenario=$(realpath "$1")
+out=$(realpath -m "$2")
+shift 2
+[[ -e $out ]] && { echo "$out exists; use a fresh dir" >&2; exit 1; }
+mkdir -p "$out/VR"
+"$here/bm-test" "$out" -condebug "$@" >"$out/bm-test.out" 2>&1 &
+runner=$!
+trap 'kill $runner 2>/dev/null || true; wait $runner 2>/dev/null || true' EXIT
+ready=${BMVR_READY:-Stereo HMD-fb pair done}
+for i in $(seq 1 ${BMVR_LOAD_TIMEOUT:-300}); do
+	grep -q "$ready" "$out/bmvr_log.txt" 2>/dev/null && break
+	kill -0 $runner 2>/dev/null || { echo "game exited before '$ready'"; exit 1; }
+	sleep 1
+done
+grep -q "$ready" "$out/bmvr_log.txt" 2>/dev/null || { echo "no '$ready' after ${i}s"; exit 1; }
+echo "ready after ${i}s"
+
+set_fake() {
+	local key=${1%% *}
+	grep -v "^$key " "$out/VR/fake.txt" > "$out/VR/fake.tmp" || true
+	echo "$1" >> "$out/VR/fake.tmp"
+	mv "$out/VR/fake.tmp" "$out/VR/fake.txt"
+}
+window_shot() {
+	local display id
+	display=$(cat "$out/display")
+	id=$(DISPLAY=$display xwininfo -root -tree | awk -v g="${BMVR_W:-1280}x${BMVR_H:-640}+" 'index($0, g) { print $1; exit }')
+	[[ -n $id ]] || { echo "no ${BMVR_W:-1280}x${BMVR_H:-640} window" >&2; return 1; }
+	DISPLAY=$display import -window "$id" "$1"
+}
+projcheck() {
+	local eyes=${1:-both} deg=${2:-12} base e turn line n rc=0 shots
+	[[ $eyes == both ]] && eyes="left right"
+	base=$(grep '^hmd ' "$out/VR/fake.txt" || echo "hmd 0 0 1.70 0 0 0")
+	for e in $eyes; do
+		set_fake "$base"; sleep ${BMVR_SETTLE:-4}
+		window_shot "$out/projcheck-$e-0.png" || return 1
+		shots=("$out/projcheck-$e-0.png" "$base")
+		n=0
+		for turn in "$deg 0 0" "0 $deg 0" "0 0 $deg"; do
+			n=$((n + 1))
+			line=$(python3 -I "$here/bm-projcheck.py" pose "$base" "$e" $turn)
+			set_fake "$line"; sleep ${BMVR_SETTLE:-4}
+			window_shot "$out/projcheck-$e-$n.png" || return 1
+			shots+=("$out/projcheck-$e-$n.png" "$line")
+		done
+		set_fake "$base"
+		python3 -I "$here/bm-projcheck.py" fit "$e" "$out/bmvr_log.txt" "${shots[@]}" || rc=1
+	done
+	return $rc
+}
+failed=0
+while IFS= read -r line || [[ -n $line ]]; do
+	[[ -z $line || $line == \#* ]] && continue
+	verb=${line%% *}; arg=${line#* }
+	case $verb in
+		wait) sleep "$arg" ;;
+		cmd) echo "$arg" >> "$out/VR/cmd.txt" ;;
+		fake) set_fake "$arg" ;;
+		unfake) grep -v "^$arg " "$out/VR/fake.txt" > "$out/VR/fake.tmp" || true; mv "$out/VR/fake.tmp" "$out/VR/fake.txt" ;;
+		shot) if window_shot "$out/$arg.png"; then echo "shot $arg"; else echo "shot $arg FAILED"; fi ;;
+		log) cp "$out/bmvr_log.txt" "$out/log-$(date +%H%M%S).txt" ;;
+		dump) echo "$arg" > "$out/VR/dump.txt"   # mod writes VR/<arg>-left/right/hud.bmp (published eyes + overlay)
+			for _ in $(seq 1 40); do [[ -e $out/VR/dump.txt ]] || break; sleep 0.25; done
+			[[ -e $out/VR/dump.txt ]] && echo "dump $arg: not picked up" || echo "dump $arg" ;;
+		projcheck) [[ $arg == projcheck ]] && arg=""; projcheck $arg || failed=1 ;;
+		*) echo "unknown: $line" ;;
+	esac
+done < "$scenario"
+exit $failed

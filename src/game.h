@@ -126,6 +126,8 @@ public:
     bool SetConVarFloat(const char* name, float value) const;
     bool GetConVarInt(const char* name, int& value) const;
     bool GetConVarFloat(const char* name, float& value) const;
+    // ICvar::FindVar (slot-probed); null when the cvar does not exist.
+    void* FindConVar(const char* name) const;
     bool MaterialVTableMatchesDump() const;
 
     static void logMsg(const char* fmt, ...);
