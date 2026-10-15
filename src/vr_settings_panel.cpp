@@ -27,6 +27,7 @@ namespace
     constexpr int kTexW = 1024;
     constexpr int kHeaderPx = 96;
     constexpr int kRowPx = 64;
+    constexpr int kSectionPx = 48;
     constexpr float kPanelWidthHu = 20.f;      // ~51 cm
     constexpr float kPanelDistanceHu = 24.f;   // ~61 cm in front of the eyes
     constexpr float kPanelDropHu = 3.f;        // a little below eye height
@@ -36,7 +37,7 @@ namespace
     constexpr int kPlusX0 = 880, kPlusX1 = 970;
     constexpr int kPillX0 = 790, kPillX1 = 970;
 
-    enum class RowKind { Toggle, Number, Close };
+    enum class RowKind { Section, Toggle, Number, Close };
 
     struct Row
     {
@@ -52,24 +53,49 @@ namespace
     std::vector<Row>& Rows()
     {
         static std::vector<Row> rows = {
+            { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
             { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
+            { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
             { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
-            { "Crouch only while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
-            { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
-            { "Snap turning", RowKind::Toggle, "SnapTurning", &bmvr::g_SnapTurning, nullptr, 0, 0, 0, nullptr },
-            { "Recenter resets turning", RowKind::Toggle, "RecenterResetsYaw", &bmvr::g_RecenterResetsYaw, nullptr, 0, 0, 0, nullptr },
+            { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
+            { "TURNING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Snap turning", RowKind::Toggle, "SnapTurning", &bmvr::g_SnapTurning, nullptr, 0, 0, 0, nullptr },
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
             { "Smooth turn speed", RowKind::Number, "TurnSpeed", nullptr, &bmvr::g_TurnSpeed, 0.05f, 0.05f, 1.f, "%.2f" },
-            { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
-            { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
+            { "Recenter resets turning", RowKind::Toggle, "RecenterResetsYaw", &bmvr::g_RecenterResetsYaw, nullptr, 0, 0, 0, nullptr },
+            { "MOVEMENT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Crouch only while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
+            { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
         return rows;
     }
 
-    int TexH() { return kHeaderPx + static_cast<int>(Rows().size()) * kRowPx + 16; }
+    int RowHeight(const Row& r) { return r.kind == RowKind::Section ? kSectionPx : kRowPx; }
+    int RowTop(int index)
+    {
+        int y = kHeaderPx;
+        for (int i = 0; i < index; ++i)
+            y += RowHeight(Rows()[i]);
+        return y;
+    }
+    // Row under texture y, or -1 (headings are not interactive).
+    int RowAt(int py)
+    {
+        const auto& rows = Rows();
+        int y = kHeaderPx;
+        for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+        {
+            const int h = RowHeight(rows[i]);
+            if (py >= y && py < y + h)
+                return rows[i].kind == RowKind::Section ? -1 : i;
+            y += h;
+        }
+        return -1;
+    }
+    int TexH() { return RowTop(static_cast<int>(Rows().size())) + 16; }
     float PanelHeightHu() { return kPanelWidthHu * static_cast<float>(TexH()) / kTexW; }
 
     std::string FormatValue(const Row& r)
@@ -252,8 +278,14 @@ namespace
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
         {
             const Row& r = rows[i];
-            const int y0 = kHeaderPx + i * kRowPx, y1 = y0 + kRowPx;
+            const int y0 = RowTop(i), y1 = y0 + RowHeight(r);
             const bool hover = (i == hoverRow);
+            if (r.kind == RowKind::Section)
+            {
+                c.text(r.label, 40, y0 + 8, c.w - 40, y1, kAmber, 26, true, DT_LEFT);
+                c.fill(40, y1 - 4, c.w - 40, y1 - 2, RGB(90, 70, 20));
+                continue;
+            }
             if (hover)
                 c.fill(16, y0 + 2, c.w - 16, y1 - 2, kRowHover);
             if (r.kind == RowKind::Close)
@@ -430,8 +462,8 @@ void VR::UpdateSettingsPanel()
                 m_SettingsHitValid = true;
                 const int px = static_cast<int>((x / kPanelWidthHu + 0.5f) * kTexW);
                 const int py = static_cast<int>((0.5f - y / PanelHeightHu()) * TexH());
-                const int r = (py - kHeaderPx) / kRowPx;
-                if (py >= kHeaderPx && r >= 0 && r < static_cast<int>(Rows().size()))
+                const int r = RowAt(py);
+                if (r >= 0)
                 {
                     row = r;
                     zone = (px >= kMinusX0 && px < kMinusX1) ? 0 : (px >= kPlusX0 && px < kPlusX1) ? 2 : 1;
@@ -464,6 +496,8 @@ void VR::UpdateSettingsPanel()
     Row& r = Rows()[row];
     switch (r.kind)
     {
+    case RowKind::Section:
+        return;
     case RowKind::Close:
         CloseSettingsPanel("close row");
         return;
