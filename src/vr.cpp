@@ -4192,7 +4192,19 @@ void VR::ProcessInput()
         const bool emptyHands = m_EmptyHands;
         const bool leftUse = PressedDigitalAction(m_ActionUse);
         // The settings panel takes trigger, Cross and Circle (reload / alt-fire).
-        const bool menuOwnsButtons = m_WeaponMenuOpen || m_SettingsOpen;
+        // They stay blocked after it (or the weapon menu) closes until they
+        // are released: the trigger/Circle press that closed the panel used
+        // to fire or alt-fire on the next frame.
+        static bool s_menuButtonsLatched;
+        const bool menuButtonHeld = primaryHeld
+            || PressedDigitalAction(m_ActionSecondaryAttack)
+            || PressedDigitalAction(m_ActionReload)
+            || PressedDigitalAction(m_ActionMenuSelect);
+        if (m_WeaponMenuOpen || m_SettingsOpen)
+            s_menuButtonsLatched = true;
+        else if (!menuButtonHeld)
+            s_menuButtonsLatched = false;
+        const bool menuOwnsButtons = s_menuButtonsLatched;
         if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped())
             buttons |= IN_ATTACK;
         if (!menuOwnsButtons && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
@@ -4202,7 +4214,7 @@ void VR::ProcessInput()
         // Left trigger is Use. Right trigger is Use only while holstered.
         // Hold to hold a pickup; release pulses a second Use to drop.
         UpdateUseGrab(buttons, leftUse, !menuOwnsButtons && emptyHands && primaryHeld);
-        if (!m_SettingsOpen && PressedDigitalAction(m_ActionReload))
+        if (!menuOwnsButtons && PressedDigitalAction(m_ActionReload))
             buttons |= IN_RELOAD;
         if (PressedDigitalAction(m_ActionCrouch))
             buttons |= IN_DUCK;
@@ -5628,6 +5640,12 @@ void VR::FlushPendingGameUi()
             const bool ok = m_Game->ClientCmd_Unrestricted(cmd);
             Game::logMsg("fakehelper cmd '%s' ok=%d", cmd, ok ? 1 : 0);
         }
+    }
+    if (const int pc = m_PendingPauseCmd.exchange(0, std::memory_order_acq_rel); pc && m_Game)
+    {
+        const char* cmd = (pc == 1) ? "setpause" : "unpause";
+        const bool ok = m_Game->ClientCmd_Unrestricted(cmd);
+        Game::logMsg("VR settings %s ok=%d", cmd, ok ? 1 : 0);
     }
     if (m_PendingQuickSave.exchange(false, std::memory_order_acq_rel) && m_Game)
     {

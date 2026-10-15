@@ -270,6 +270,8 @@ namespace bmvr
     // until the left stick returns to centre or sprint is clicked again
     // (default false = hold the click).
     extern bool g_SprintToggle;
+    // VR settings panel pauses the game while open (setpause / unpause).
+    extern bool g_VrSettingsPause;
     // Logs (and resets) the access-violation count since the last call.
     void LogFaultStats();
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand

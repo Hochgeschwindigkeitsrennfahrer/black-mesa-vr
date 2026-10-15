@@ -601,6 +601,8 @@ public:
     std::atomic<int> m_PendingInvDelta{ 0 };
     std::atomic<int> m_PendingWeaponSelect{ 0 };
     std::atomic<bool> m_PendingQuickSave{ false };
+    std::atomic<int> m_PendingPauseCmd{ 0 };   // 1 setpause, 2 unpause
+    bool m_SettingsPausedGame = false;
     std::atomic<uint32_t> m_PendingWeaponSounds{ 0 };
     std::atomic<int> m_PendingWeaponSoundKind{ 0 };
     std::atomic<int> m_PendingWeaponSoundEntity{ 0 };

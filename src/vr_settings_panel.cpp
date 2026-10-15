@@ -394,7 +394,11 @@ void VR::OpenSettingsPanel()
     m_SettingsClickHeld = true;   // ignore the trigger until it is released once
     m_SettingsBackHeld = true;
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 900, 0.35f);
-    Game::logMsg("VR settings panel opened");
+    // Pause without Black Mesa's menu (that would close the panel).
+    m_SettingsPausedGame = bmvr::g_VrSettingsPause;
+    if (m_SettingsPausedGame)
+        m_PendingPauseCmd.store(1, std::memory_order_release);
+    Game::logMsg("VR settings panel opened pause=%d", m_SettingsPausedGame ? 1 : 0);
 }
 
 void VR::CloseSettingsPanel(const char* why)
@@ -414,6 +418,10 @@ void VR::CloseSettingsPanel(const char* why)
         Game::logMsg("VR settings saved to config.txt: %s", ok ? "ok" : "FAILED");
     }
     m_SettingsChanged = false;
+    // Closed by Black Mesa's pause menu: leave the pause to that menu.
+    if (m_SettingsPausedGame && !(why && std::strcmp(why, "pause") == 0))
+        m_PendingPauseCmd.store(2, std::memory_order_release);
+    m_SettingsPausedGame = false;
     Game::logMsg("VR settings panel closed (%s)", why ? why : "");
 }
 
