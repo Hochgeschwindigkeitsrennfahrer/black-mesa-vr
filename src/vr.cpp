@@ -4390,8 +4390,7 @@ void VR::ProcessInput()
     else
         // Keep tracking held buttons while no menu panel is up: resetting to
         // false made a held Cross/trigger click again when the menu reappeared.
-        m_MenuTriggerWasDown = PressedDigitalAction(m_ActionPrimaryAttack)
-            || PressedDigitalAction(m_ActionMenuSelect);
+        m_MenuTriggerWasDown = PressedDigitalAction(m_ActionPrimaryAttack);
     // Recenter is a short tap of the same right-stick click that opens the
     // weapon menu. Do not recenter on press-edge while that click is held.
     if (resetHeld && !s_reset && !menuStick && !m_WeaponMenuOpenedThisHold)
@@ -6466,8 +6465,20 @@ void VR::ApplyMenuCursor()
     else
         click = PressedDigitalAction(m_ActionPrimaryAttack);
     s_trigLatched = click;
+    // Trigger only. Cross (a/click) read as pressed while the user only
+    // pointed (PS VR2 Sense via Touch emulation, 2026-10-15) and clicked
+    // whatever was under the pointer; Cross still confirms (Enter) when
+    // there is no pointer. Its edges are logged to see what it reports.
     const bool selectHeld = PressedDigitalAction(m_ActionMenuSelect);
-    click = click || selectHeld;
+    static bool s_selectWas;
+    static int s_selectLog;
+    if (selectHeld != s_selectWas && s_selectLog < 40)
+    {
+        Game::logMsg("Menu Cross %s t=%lu", selectHeld ? "down" : "up",
+            static_cast<unsigned long>(GetTickCount()));
+        ++s_selectLog;
+    }
+    s_selectWas = selectHeld;
     if (click && !m_MenuTriggerWasDown)
     {
         for (int i = 1; i <= 128 && i <= s_histN; ++i)

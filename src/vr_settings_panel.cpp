@@ -491,7 +491,8 @@ void VR::UpdateSettingsPanel()
         m_SettingsDirty = true;
     }
 
-    const bool click = PressedDigitalAction(m_ActionPrimaryAttack) || PressedDigitalAction(m_ActionMenuSelect);
+    // Trigger only (Cross can read as pressed without a press, see the menu).
+    const bool click = PressedDigitalAction(m_ActionPrimaryAttack);
     const bool back = PressedDigitalAction(m_ActionMenuBack);
     const bool clickEdge = click && !m_SettingsClickHeld;
     const bool backEdge = back && !m_SettingsBackHeld;
