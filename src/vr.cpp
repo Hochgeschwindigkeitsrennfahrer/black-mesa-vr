@@ -6413,6 +6413,11 @@ void VR::ApplyMenuCursor()
     // after Menu compositor (~700 Presents, last line controller poses L=1).
     // HWND messages are processed on the game thread. Do not call IInput here.
     HWND hwnd = FindGameHwnd();
+    if (haveHit)
+    {
+        m_MenuCursorHwnd = hwnd;
+        m_MenuCursorLiveMs = GetTickCount();
+    }
     if (hwnd && haveHit)
     {
         static DWORD s_lastMoveMs;
@@ -6518,6 +6523,19 @@ void VR::ApplyMenuCursor()
         }
     }
     m_MenuTriggerWasDown = click;
+}
+
+bool VR::TryGetMenuCursorScreen(POINT& out) const
+{
+    if (!m_MenuCursorValid || !m_MenuCursorHwnd || m_MenuCursorLiveMs == 0)
+        return false;
+    if (GetTickCount() - m_MenuCursorLiveMs > 250u)
+        return false;
+    POINT pt{ m_MenuCursorX, m_MenuCursorY };
+    if (!ClientToScreen(m_MenuCursorHwnd, &pt))
+        return false;
+    out = pt;
+    return true;
 }
 
 void VR::DrawMenuCursorOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf)
