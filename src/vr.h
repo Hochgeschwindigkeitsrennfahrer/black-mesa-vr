@@ -1000,6 +1000,8 @@ public:
     bool UpdateWeaponFireHaptics();
     void AfterCreateMoveFireHaptics();
     bool TryGetVrMuzzleWorld(Vector& origin) const;
+    bool TryGetRawMuzzleWorld(Vector& origin) const;
+    void UpdateMuzzleLocal(const std::string& weaponKey);
     bool TryGetVrShootOrigin(Vector& origin) const;
     // Visual beam/laser segment: muzzle start, aim-ray impact end.
     // Cached per frame so tau/gluon hooks get the same result.

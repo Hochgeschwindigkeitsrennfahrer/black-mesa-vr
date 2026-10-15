@@ -5074,6 +5074,62 @@ bool VR::ScaleViewmodelRenderableAttachment(void* renderable, Vector& origin) co
 
 bool VR::TryGetVrMuzzleWorld(Vector& origin) const
 {
+    // The muzzle offset measured while the gun was near the view centre
+    // (UpdateMuzzleLocal), placed on this frame's gun pose. The raw
+    // attachment drifts toward the view edges: Source's viewmodel attachment
+    // FOV correction (FormatViewModelAttachment) runs against a FOV that is
+    // not our per-eye one, so shots and laser swung around the barrel.
+    if (m_AimBeamLocalValid)
+    {
+        std::string key;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            key = m_VmClass.numpadKey;
+        }
+        Vector vo{}, vf{}, vr{}, vu{};
+        if (key == m_AimBeamLocalKey && GunFrameNow(vo, vf, vr, vu))
+        {
+            origin = vo + vf * m_AimBeamLocal.x + vr * m_AimBeamLocal.y + vu * m_AimBeamLocal.z;
+            return true;
+        }
+    }
+    return TryGetRawMuzzleWorld(origin);
+}
+
+void VR::UpdateMuzzleLocal(const std::string& weaponKey)
+{
+    Vector raw{}, vo{}, vf{}, vr{}, vu{};
+    if (!TryGetRawMuzzleWorld(raw) || !GunFrameNow(vo, vf, vr, vu))
+        return;
+    const Vector d = raw - vo;
+    const Vector local(d.Dot(vf), d.Dot(vr), d.Dot(vu));
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    Vector viewFwd, viewRight, viewUp;
+    GetViewBasis(&viewFwd, &viewRight, &viewUp);
+    Vector toMuzzle = raw - GetViewOrigin(body);
+    float offCentreDeg = 90.f;
+    if (VectorNormalize(toMuzzle) > 0.01f && VectorNormalize(viewFwd) > 0.01f)
+        offCentreDeg = acosf(std::clamp(toMuzzle.Dot(viewFwd), -1.f, 1.f)) * 57.29578f;
+    const bool fresh = !m_AimBeamLocalValid || m_AimBeamLocalKey != weaponKey;
+    const float drift = fresh ? 0.f : (local - m_AimBeamLocal).Length();
+    static DWORD s_logMs;
+    const DWORD now = GetTickCount();
+    if (now - s_logMs > 3000)
+    {
+        s_logMs = now;
+        Game::logMsg("Muzzle local %s offCentre=%.1fdeg rawDrift=%.2fHU local=(%.2f,%.2f,%.2f)",
+            weaponKey.c_str(), offCentreDeg, drift, local.x, local.y, local.z);
+    }
+    if (fresh)
+        m_AimBeamLocal = local;
+    else if (offCentreDeg < 10.f)
+        m_AimBeamLocal = m_AimBeamLocal + (local - m_AimBeamLocal) * 0.3f;
+    m_AimBeamLocalKey = weaponKey;
+    m_AimBeamLocalValid = true;
+}
+
+bool VR::TryGetRawMuzzleWorld(Vector& origin) const
+{
     if (!m_IsVREnabled || !m_ControllerPoseValid || !m_Game)
         return false;
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
@@ -6556,6 +6612,7 @@ void VR::UpdateAimCrosshair()
     if (PauseUiActive())
         return;
 
+    UpdateMuzzleLocal(weaponKey);
     // Same origin and direction the bullet uses, so the reticle cannot disagree
     // with where the shot goes.
     Vector origin{};
@@ -6586,23 +6643,7 @@ void VR::UpdateAimCrosshair()
 
     if (wantBeam || bmvr::g_VrShootFromMuzzle)
     {
-        // From the muzzle attachment to the shot's hit point (the dot), so
-        // beam, dot and gun meet. The muzzle offset is kept in the gun
-        // model's own frame, which rolls with the wrist; the aim frame has no
-        // roll, so an offset stored there swung around the barrel whenever
-        // the wrist turned. Smoothed: the attachment is last frame's bones.
-        Vector muzzle{}, vo{}, vf{}, vr{}, vu{};
-        if (TryGetVrMuzzleWorld(muzzle) && GunFrameNow(vo, vf, vr, vu))
-        {
-            const Vector d = muzzle - vo;
-            const Vector local(d.Dot(vf), d.Dot(vr), d.Dot(vu));
-            if (!m_AimBeamLocalValid || m_AimBeamLocalKey != weaponKey || (local - m_AimBeamLocal).Length() > 12.f)
-                m_AimBeamLocal = local;
-            else
-                m_AimBeamLocal = m_AimBeamLocal + (local - m_AimBeamLocal) * 0.08f;
-            m_AimBeamLocalKey = weaponKey;
-            m_AimBeamLocalValid = true;
-        }
+        // Beam from the muzzle (UpdateMuzzleLocal, gun frame) to the dot.
         if (m_AimBeamLocalValid)
         {
             m_AimBeamHit = hit;
@@ -8748,6 +8789,9 @@ void VR::ApplyTwoHandWeaponAim()
     const bool offhandOk = leftHanded ? m_PhysicalRightTrackingValid : m_LeftControllerTrackingValid;
     if (!m_RightControllerTrackingValid || !offhandOk)
     {
+        // A tracking blip while the grip is held keeps the hold (last pose).
+        if (m_TwoHandActive && LeftSupportGripValue() >= 0.20f)
+            return;
         clearTwoHand("tracking");
         return;
     }
@@ -8791,10 +8835,9 @@ void VR::ApplyTwoHandWeaponAim()
         if (pistol)
             m_TwoHandActive = holdingSqueeze && distToGrip <= stayR;
         else
-            // Long guns hold on as long as the grip is held (user, 2026-10-15:
-            // letting go with the grip still pressed made no sense); only a
-            // hand far off the gun (tracking jump, hand dropped) releases.
-            m_TwoHandActive = holdingSqueeze && (d - grip).Length() <= 0.45f * scale;
+            // Long guns: held for as long as the grip is (user, 2026-10-15).
+            // A distance cap let go on tracking jumps with the grip held.
+            m_TwoHandActive = holdingSqueeze;
     }
     else if (squeezing)
     {
