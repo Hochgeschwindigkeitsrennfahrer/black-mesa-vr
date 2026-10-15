@@ -6495,8 +6495,16 @@ void VR::ApplyMenuCursor()
                 break;
             if (histNow - smp.ms >= 100)
             {
-                wx = smp.x;
-                wy = smp.y;
+                // Only undo the small jerk of the pull itself. A larger
+                // move means the user was still travelling to the item;
+                // rewinding then clicked the one just passed (main menu,
+                // 2026-10-15: things opened that were not aimed at).
+                const int dx = smp.x - wx, dy = smp.y - wy;
+                if (dx * dx + dy * dy <= 24 * 24)
+                {
+                    wx = smp.x;
+                    wy = smp.y;
+                }
                 break;
             }
         }
