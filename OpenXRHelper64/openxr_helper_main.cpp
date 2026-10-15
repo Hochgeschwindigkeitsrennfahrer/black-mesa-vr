@@ -9460,20 +9460,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                 ? "game render"
                                 : "cached game render")
                             : "runtime located";
-                        // The eyes were drawn for the previous WaitFrame's
-                        // predicted time. Stamping xrEndFrame with this
-                        // frame's predicted time tells the runtime that old
-                        // pose is already current, so it does not timewarp
-                        // the ~11ms of head motion and the picture hitches.
-                        // Older than 40ms is a stall; keep the current
-                        // predicted time so xrEndFrame is not rejected.
-                        if (useGameRenderPoseForProjection && projectionRenderPose.displayTime > 0)
-                        {
-                            const XrTime poseTime = static_cast<XrTime>(projectionRenderPose.displayTime);
-                            const int64_t skewNs = static_cast<int64_t>(frameState.predictedDisplayTime) - static_cast<int64_t>(poseTime);
-                            if (skewNs >= 0 && skewNs <= 40000000)
-                                submitDisplayTime = poseTime;
-                        }
+                        // xrEndFrame keeps this frame's predicted display
+                        // time: SteamVR rejects any other value with
+                        // XR_ERROR_TIME_INVALID (helper exits, no picture).
+                        // Timewarp already uses the render pose stored in
+                        // each projection view.
 
                         if (sharedTexturesReady && eyeSwapchainsHaveContent)
                         {
