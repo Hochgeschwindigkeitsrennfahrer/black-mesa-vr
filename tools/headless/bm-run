@@ -10,7 +10,7 @@
 #
 # env: BMVR_DLL (test d3d9.dll, required)  BMVR_ORIG_SHA (sha256 of the installed d3d9.dll, required)
 #      BMVR_PREFIX (prefix copy, default <scratch>/compatdata)  BMVR_DISPLAY (:78)  BMVR_W/BMVR_H (1280x640)
-#      BMVR_LAVAPIPE (~/Downloads/PSVR2/tools/lavapipe)  BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0; no Xvfb)
+#      BMVR_LAVAPIPE (dir with a 32-bit lavapipe ICD)  BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0; no Xvfb)
 #      BMVR_NEWUI=1 (no -oldgameui)  BMVR_XVFB_GPU=1 (real GPU into the private Xvfb via MESA_VK_WSI_DEBUG=sw; fine with the desktop locked)
 set -euo pipefail
 out=$(realpath -m "$1"); shift
@@ -72,7 +72,7 @@ else
 		# with the desktop locked, where a window on :0 never gets its first Present completed.
 		export MESA_VK_WSI_DEBUG=sw
 	else
-		LVP=${BMVR_LAVAPIPE:-$HOME/Downloads/PSVR2/tools/lavapipe}
+		LVP=${BMVR_LAVAPIPE:?set BMVR_LAVAPIPE or use BMVR_GPU=1}
 		export VK_DRIVER_FILES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json VK_ICD_FILENAMES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json
 	fi
 fi

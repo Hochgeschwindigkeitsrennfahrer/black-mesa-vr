@@ -1,6 +1,6 @@
 # Cross-build the x64 OpenXRHelper64.exe on Linux: clang-cl + lld-link against an xwin "splat"
 # of the MSVC CRT + Windows SDK (x64). Usage:
-#   XWIN=~/Downloads/PSVR2/xwin/sdk cmake -G Ninja -S OpenXRHelper64 -B build-linux-helper \
+#   XWIN=/path/to/xwin/splat cmake -G Ninja -S OpenXRHelper64 -B build-linux-helper \
 #     -DCMAKE_TOOLCHAIN_FILE=cmake/clang-cl-xwin-x64.cmake -DCMAKE_BUILD_TYPE=Release
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_VERSION 10.0)

@@ -1,6 +1,6 @@
 # Cross-build the Win32 d3d9.dll on Linux: clang-cl + lld-link against an xwin "splat"
 # of the MSVC CRT + Windows SDK (x86). Usage:
-#   XWIN=~/Downloads/PSVR2/xwin/sdk cmake -G Ninja -B build-linux \
+#   XWIN=/path/to/xwin/splat cmake -G Ninja -B build-linux \
 #     -DCMAKE_TOOLCHAIN_FILE=cmake/clang-cl-xwin-x86.cmake -DCMAKE_BUILD_TYPE=Release
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_VERSION 10.0)
