@@ -9579,6 +9579,18 @@ void VR::TickMatQueueFromRenderView()
         UpdateAimCrosshair();
         UpdateRpgLaserPoint();
     }
+    // Glove lighting samples GetLightForPoint here, not in the draw path.
+    if (m_GameplayEligible && m_HmdPoseValid)
+    {
+        Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+        if (body.LengthSqr() > 1.f)
+        {
+            if (m_LeftControllerTrackingValid)
+                VrHands_UpdatePalmLight(0, GetLeftControllerAbsPos(body));
+            if (m_RightControllerTrackingValid)
+                VrHands_UpdatePalmLight(1, GetRightControllerAbsPos(body));
+        }
+    }
     if (m_Game)
         m_Game->ProbeMatQueueModeFromRenderView();
     ApplyVrQualityOfLifeCvars();

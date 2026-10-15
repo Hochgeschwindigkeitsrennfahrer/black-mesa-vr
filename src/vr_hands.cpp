@@ -10,6 +10,7 @@
 #include "openvr.h"
 
 #include <algorithm>
+#include <mutex>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -325,13 +326,44 @@ namespace
         return add;
     }
 
+    // GetLightForPoint goes through the engine's light cache, which is not
+    // thread-safe: called from the material thread (multicore) it raced the
+    // game thread and left a cycle in a cache bucket — engine.dll spun
+    // forever in the lookup (train intro, 2026-10-15). The game thread fills
+    // this cache (VR::TickMatQueueFromRenderView); drawing only reads it.
+    struct PalmLightEntry { Vector pos{}; Vector rgb{}; bool valid = false; };
+    std::mutex g_PalmLightMutex;
+    PalmLightEntry g_PalmLight[2];
+
+    bool CachedPalmLight(const Vector& palm, Vector& rgb)
+    {
+        std::lock_guard<std::mutex> lock(g_PalmLightMutex);
+        int best = -1;
+        float bestD = 48.f * 48.f;   // within ~1.2 m of a sampled hand
+        for (int i = 0; i < 2; ++i)
+        {
+            if (!g_PalmLight[i].valid)
+                continue;
+            const float d = (g_PalmLight[i].pos - palm).LengthSqr();
+            if (d < bestD)
+            {
+                bestD = d;
+                best = i;
+            }
+        }
+        if (best < 0)
+            return false;
+        rgb = g_PalmLight[best].rgb;
+        return true;
+    }
+
     Vector SamplePalmSceneLight(const Vector& palm, float& outEnvExposure)
     {
         // Diffuse uses a high floor so indoor gloves stay readable.
         // Spec/cubemap uses raw luma so dark rooms do not stay chrome.
         outEnvExposure = 0.45f;
         Vector rgb(1.f, 1.f, 1.f);
-        if (g_Game && g_Game->TryGetLightForPoint(palm, rgb, false))
+        if (CachedPalmLight(palm, rgb))
         {
             if (rgb.x > 1.5f || rgb.y > 1.5f || rgb.z > 1.5f)
             {
@@ -816,4 +848,17 @@ bool BmVrGloves::DrawForEye(
             (g_Game && g_Game->m_VR && g_Game->m_VR->SceneCubemap()) ? 1 : 0);
     }
     return drew;
+}
+
+void VrHands_UpdatePalmLight(int hand, const Vector& pos)
+{
+    // Game thread only (see CachedPalmLight).
+    if (hand < 0 || hand > 1 || !g_Game)
+        return;
+    Vector rgb(1.f, 1.f, 1.f);
+    const bool ok = g_Game->TryGetLightForPoint(pos, rgb, false);
+    std::lock_guard<std::mutex> lock(g_PalmLightMutex);
+    g_PalmLight[hand].pos = pos;
+    g_PalmLight[hand].rgb = rgb;
+    g_PalmLight[hand].valid = ok;
 }
