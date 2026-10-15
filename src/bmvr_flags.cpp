@@ -104,13 +104,15 @@ namespace bmvr
     bool g_OffCenterEyes = false;
     bool g_FakeRuntime = false;
     bool g_MirrorBothEyes = false;
-    bool g_VrShotOriginFix = false;
-    bool g_VrShootFromMuzzle = false;
+    // Fixes: on by default, a config key can turn each off.
+    bool g_VrShotOriginFix = true;
+    bool g_VrShootFromMuzzle = true;
+    bool g_TwoHandHoldWhileGrip = true;
+    bool g_VrSkipMotionBlur = true;
+    bool g_SprintAimedPose = true;
+    // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = false;
     bool g_SettingsTriangleHold = false;
-    bool g_TwoHandHoldWhileGrip = false;
-    bool g_VrSkipMotionBlur = false;
-    bool g_SprintAimedPose = false;
     bool g_CrouchStickHold = false;
     bool g_SprintToggle = false;
     bool g_VrSettingsPause = true;

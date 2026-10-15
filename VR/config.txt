@@ -80,24 +80,12 @@ SprintToggle=false
 # The VR settings panel (weapon menu: the VR SETTINGS slot below the crowbar)
 # changes several of these live and writes them back here. They are also
 # bmvr_* console cvars.
-# Optional behaviour, all off by default (= previous behaviour):
-# Bullets leave from the controller instead of the head on the weapon-fire
-# paths the client hook does not cover (server side).
-VrShotOriginFix=false
-# Bullets start at the gun's muzzle along the aim (needs VrShotOriginFix for
-# server-side shots). Up close they hit where the barrel points.
-VrShootFromMuzzle=false
+
+# Optional features, off by default:
 # Hand behind the shoulder ~0.25 s (light buzz), then grip: left = quick save
 # (GAME SAVED shown), right = crowbar.
 ShoulderGestures=false
 # Hold Triangle/Y 0.6 s = VR settings panel; a tap pauses on release.
 SettingsTriangleHold=false
-# Long guns stay two-handed for as long as the support grip is held.
-TwoHandHoldWhileGrip=false
-# Skip the engine's motion blur pass in VR (full-eye pass per eye; the public
-# beta turns mat_motion_blur_enabled back on after cfg files).
-VrSkipMotionBlur=false
-# Sprint animations show the aimed idle pose instead of the lowered gun.
-SprintAimedPose=false
 # The VR settings panel pauses the game while it is open.
 VrSettingsPause=true
