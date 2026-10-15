@@ -5093,6 +5093,20 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
     const bool windowUv = LooksLikeWindowUv(srcX0, srcY0, srcX1, srcY1);
     const bool potSrc = SrcLooksLikePowerOfTwoFb(srcWidth, srcHeight, eyeW, eyeH);
     const bool waterWarp = matName && std::strstr(matName, "water_warp") != nullptr;
+    // No motion blur in VR. The beta re-enables mat_motion_blur_enabled after
+    // our cfg (2026-10-15) and ran a full-eye blur pass per eye. The pass
+    // draws over the scene still in the target, so skipping it is safe.
+    if (matName && std::strstr(matName, "motion_blur") != nullptr
+        && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible())
+    {
+        static int s_skipBlur;
+        if (s_skipBlur < 2)
+        {
+            Game::logMsg("DSSR skip motion blur %s dest=%dx%d", matName, width, height);
+            ++s_skipBlur;
+        }
+        return;
+    }
     if (StereoBloomMaterial(matName) && Hooks::m_VR
         && Hooks::m_VR->StereoWorldPassActive()
         && (bmvr::OffscreenWorldMatchesEyes() || Hooks::m_VR->ShouldHwndBlitStereo()))
