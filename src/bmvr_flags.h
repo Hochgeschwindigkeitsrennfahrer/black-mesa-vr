@@ -265,6 +265,12 @@ namespace bmvr
     extern bool g_VrShotOriginFix;
     // Shots start at the muzzle attachment (not slid onto the controller axis).
     extern bool g_VrShootFromMuzzle;
+    // Opt-in (default = upstream behaviour):
+    extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
+    extern bool g_SettingsTriangleHold;  // Triangle/Y hold opens the VR settings panel, tap pauses on release
+    extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
+    extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
+    extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
     // CrouchStickHold=true: right stick down crouches only while held
     // (default false = each push toggles crouch).
     extern bool g_CrouchStickHold;

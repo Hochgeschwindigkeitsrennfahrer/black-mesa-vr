@@ -29,7 +29,7 @@ ControllerPitchTiltTouch=0
 ControllerPitchTiltIndex=0
 ControllerPitchTiltVive=-45.0
 # Player preference on top of the per-controller tilt above, in degrees
-# (negative = gun points lower). Also Options -> Game -> VR (bmvr_gun_pitch).
+# (negative = gun points lower). Also in the VR settings panel (bmvr_gun_pitch).
 GunPitchOffset=0
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
 ViewmodelPosOffsetXTouch=5.5
@@ -60,7 +60,7 @@ HideCrosshair=true
 VrCrosshair=false
 # Aim marker as a red laser dot instead of the amber ticks, and/or a thin red
 # beam from the gun to where it points. Both follow the shot (tilt and
-# GunPitchOffset included); guns only. Also in Options -> Black Mesa.
+# GunPitchOffset included); guns only. Also in the VR settings panel.
 VrCrosshairDot=false
 VrLaserBeam=false
 # Beam half width in game units (1 unit ~ 2.5 cm); 0.06 = ~3 mm beam.
@@ -77,5 +77,27 @@ ScopeZoomFovScale=0.28
 # until the stick is centred again (false = hold the click).
 CrouchStickHold=false
 SprintToggle=false
-# The VR settings above that also appear in Options -> Game (bmvr_* cvars) take
-# the value saved in bms/cfg/config.cfg once changed in the menu or console.
+# The VR settings panel (weapon menu: the VR SETTINGS slot below the crowbar)
+# changes several of these live and writes them back here. They are also
+# bmvr_* console cvars.
+# Optional behaviour, all off by default (= previous behaviour):
+# Bullets leave from the controller instead of the head on the weapon-fire
+# paths the client hook does not cover (server side).
+VrShotOriginFix=false
+# Bullets start at the gun's muzzle along the aim (needs VrShotOriginFix for
+# server-side shots). Up close they hit where the barrel points.
+VrShootFromMuzzle=false
+# Hand behind the shoulder ~0.25 s (light buzz), then grip: left = quick save
+# (GAME SAVED shown), right = crowbar.
+ShoulderGestures=false
+# Hold Triangle/Y 0.6 s = VR settings panel; a tap pauses on release.
+SettingsTriangleHold=false
+# Long guns stay two-handed for as long as the support grip is held.
+TwoHandHoldWhileGrip=false
+# Skip the engine's motion blur pass in VR (full-eye pass per eye; the public
+# beta turns mat_motion_blur_enabled back on after cfg files).
+VrSkipMotionBlur=false
+# Sprint animations show the aimed idle pose instead of the lowered gun.
+SprintAimedPose=false
+# The VR settings panel pauses the game while it is open.
+VrSettingsPause=true

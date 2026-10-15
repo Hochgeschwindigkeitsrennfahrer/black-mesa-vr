@@ -104,8 +104,13 @@ namespace bmvr
     bool g_OffCenterEyes = false;
     bool g_FakeRuntime = false;
     bool g_MirrorBothEyes = false;
-    bool g_VrShotOriginFix = true;
-    bool g_VrShootFromMuzzle = true;
+    bool g_VrShotOriginFix = false;
+    bool g_VrShootFromMuzzle = false;
+    bool g_ShoulderGestures = false;
+    bool g_SettingsTriangleHold = false;
+    bool g_TwoHandHoldWhileGrip = false;
+    bool g_VrSkipMotionBlur = false;
+    bool g_SprintAimedPose = false;
     bool g_CrouchStickHold = false;
     bool g_SprintToggle = false;
     bool g_VrSettingsPause = true;
@@ -583,6 +588,16 @@ namespace bmvr
                 g_VrSettingsPause = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrShootFromMuzzle") == 0)
                 g_VrShootFromMuzzle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ShoulderGestures") == 0)
+                g_ShoulderGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "SettingsTriangleHold") == 0)
+                g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "TwoHandHoldWhileGrip") == 0)
+                g_TwoHandHoldWhileGrip = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrSkipMotionBlur") == 0)
+                g_VrSkipMotionBlur = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "SprintAimedPose") == 0)
+                g_SprintAimedPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MirrorBothEyes") == 0)
                 g_MirrorBothEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VRRuntimeBackend") == 0)

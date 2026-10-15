@@ -1180,7 +1180,7 @@ namespace
         // Freezing them held the gun on the lowered first frame for as long
         // as BM's server-side sprint-out lasted (~1 s after stopping, user
         // 2026-10-14); in VR the gun is in the hand and should stay aimed.
-        if (!isAction && label)
+        if (bmvr::g_SprintAimedPose && !isAction && label)
         {
             char low[32]{};
             for (int i = 0; i < 31 && label[i]; ++i)
@@ -5096,7 +5096,7 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
     // No motion blur in VR. The beta re-enables mat_motion_blur_enabled after
     // our cfg (2026-10-15) and ran a full-eye blur pass per eye. The pass
     // draws over the scene still in the target, so skipping it is safe.
-    if (matName && std::strstr(matName, "motion_blur") != nullptr
+    if (bmvr::g_VrSkipMotionBlur && matName && std::strstr(matName, "motion_blur") != nullptr
         && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible())
     {
         static int s_skipBlur;

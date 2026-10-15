@@ -4344,7 +4344,7 @@ void VR::ProcessInput()
     static bool s_pauseDeferred;
     static bool s_pauseHoldFired;
     constexpr DWORD kSettingsHoldMs = 600;
-    const bool pauseHoldable = !paused && !IsMenuUp() && !m_SettingsOpen;
+    const bool pauseHoldable = bmvr::g_SettingsTriangleHold && !paused && !IsMenuUp() && !m_SettingsOpen;
     if (m_GameplayEligible && pauseHeld && !s_pause)
     {
         s_pauseHoldFired = false;
@@ -5079,7 +5079,7 @@ bool VR::TryGetVrMuzzleWorld(Vector& origin) const
     // attachment drifts toward the view edges: Source's viewmodel attachment
     // FOV correction (FormatViewModelAttachment) runs against a FOV that is
     // not our per-eye one, so shots and laser swung around the barrel.
-    if (m_AimBeamLocalValid)
+    if (bmvr::g_VrShootFromMuzzle && m_AimBeamLocalValid)
     {
         std::string key;
         {
@@ -8790,7 +8790,7 @@ void VR::ApplyTwoHandWeaponAim()
     if (!m_RightControllerTrackingValid || !offhandOk)
     {
         // A tracking blip while the grip is held keeps the hold (last pose).
-        if (m_TwoHandActive && LeftSupportGripValue() >= 0.20f)
+        if (bmvr::g_TwoHandHoldWhileGrip && m_TwoHandActive && LeftSupportGripValue() >= 0.20f)
             return;
         clearTwoHand("tracking");
         return;
@@ -8820,7 +8820,7 @@ void VR::ApplyTwoHandWeaponAim()
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
     const bool pistol = m_VmClass.offhandPistol;
     const float enterR = (pistol ? 0.07f : 0.05f) * scale;
-    const float stayR = 0.14f * scale;   // pistol support hand
+    const float stayR = (pistol ? 0.14f : 0.12f) * scale;
     const float slop = 0.04f * scale;
     const float railHu = m_VmClass.offhandRailMeters * scale;
     const float alongMin = gx - slop;
@@ -8835,9 +8835,11 @@ void VR::ApplyTwoHandWeaponAim()
         if (pistol)
             m_TwoHandActive = holdingSqueeze && distToGrip <= stayR;
         else
-            // Long guns: held for as long as the grip is (user, 2026-10-15).
-            // A distance cap let go on tracking jumps with the grip held.
-            m_TwoHandActive = holdingSqueeze;
+            // TwoHandHoldWhileGrip: held for as long as the grip is (a
+            // distance cap let go on tracking jumps with the grip held).
+            m_TwoHandActive = bmvr::g_TwoHandHoldWhileGrip ? holdingSqueeze
+                : (holdingSqueeze && lat <= stayR
+                    && along >= (alongMin - slop) && along <= (alongMax + slop));
     }
     else if (squeezing)
     {
@@ -8944,7 +8946,7 @@ bool VR::UpdateShoulderGestures(bool paused)
     // grip does not also toggle the flashlight there.
     struct Zone { DWORD enteredMs = 0; bool armed = false; bool gripDown = true; };
     static Zone s_left, s_right;
-    const bool active = m_GameplayEligible && !paused && !MenuGameplayBlocked()
+    const bool active = bmvr::g_ShoulderGestures && m_GameplayEligible && !paused && !MenuGameplayBlocked()
         && !m_WeaponMenuOpen && !m_SettingsOpen && m_HmdPoseValid;
     if (!active)
     {
