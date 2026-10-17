@@ -29,10 +29,16 @@ static bool AreaPortalComputeViewCallSiteOk(int fn)
 
 // Offset of addr inside server.dll (0 if outside/unknown). AimDebug and the
 // shot-origin caller whitelist identify call sites by return address.
+// dServerBmShootSource calls this on every player +0x474 call, so the module
+// base is looked up once (GetModuleHandleA takes the loader lock; costly
+// under Wine). server.dll stays loaded for the whole map, and is looked up
+// again if it was not loaded yet.
 static uint32_t ServerRva(uintptr_t addr)
 {
-    const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll"));
-    return base && addr > base ? static_cast<uint32_t>(addr - base) : 0;
+    static uintptr_t s_base = 0;
+    if (!s_base)
+        s_base = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll"));
+    return s_base && addr > s_base ? static_cast<uint32_t>(addr - s_base) : 0;
 }
 #include "sigscanner.h"
 #include "in_buttons.h"

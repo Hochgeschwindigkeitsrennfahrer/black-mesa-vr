@@ -2408,7 +2408,15 @@ bool VR::InitOpenVR()
     float r_left = 0, r_right = 0, r_top = 0, r_bottom = 0;
     m_System->GetProjectionRaw(vr::Eye_Right, &r_left, &r_right, &r_top, &r_bottom);
 
-    const float tanHalfFovX = (std::max)({ -l_left, l_right, -r_left, r_right });
+    {
+        // GetProjectionRaw: bottom (> 0) is the visual up edge, top (< 0)
+        // the down edge (same mapping as the OpenXR init below).
+        const float le[4] = { l_left, l_right, l_top, l_bottom };
+        const float re[4] = { r_left, r_right, r_top, r_bottom };
+        SetupOffCenter(le, re);
+    }
+
+    float tanHalfFovX = (std::max)({ -l_left, l_right, -r_left, r_right });
     // NormalizeViewSetupForVREye renders this frustum at the eye RT's own
     // aspect, so the engine's vertical half-FOV is tanX / rtAspect, not the
     // HMD's max(|top|,|bottom|). The two only agree when tanX/tanY happens to
@@ -2416,6 +2424,18 @@ bool VR::InitOpenVR()
     // 0.984) got a ~29 % vertical squash. Derive it from the RT for every HMD.
     const float rtAspect = (recW >= 640 && recH >= 360)
         ? static_cast<float>(recW) / static_cast<float>(recH) : 1.0f;
+    // An HMD whose vertical FOV is taller than tanX / rtAspect would get
+    // texture bounds outside 0..1 (the compositor samples past the eye
+    // texture at the top and bottom). Widen the symmetric frustum until it
+    // covers the HMD vertically too. OffCenterEyes keeps the raw union: its
+    // per-eye sub-rectangles (SetupOffCenter) are fractions of that frustum.
+    const float hmdTanHalfFovY = (std::max)({ -l_top, l_bottom, -r_top, r_bottom });
+    if (!m_OffCenterActive && std::isfinite(hmdTanHalfFovY) && hmdTanHalfFovY * rtAspect > tanHalfFovX)
+    {
+        Game::logMsg("OpenVR render FOV widened for the HMD's vertical FOV: tanX %.4f -> %.4f (hmd tanY %.4f, RT aspect %.4f)",
+            tanHalfFovX, hmdTanHalfFovY * rtAspect, hmdTanHalfFovY, rtAspect);
+        tanHalfFovX = hmdTanHalfFovY * rtAspect;
+    }
     const float tanHalfFovY = tanHalfFovX / rtAspect;
 
     // Same projection crop as L4D2VR vr_lifecycle_init.inl. Keep OpenVR v
@@ -2428,22 +2448,25 @@ bool VR::InitOpenVR()
     m_TextureBounds[1].uMax = 0.5f + 0.5f * r_right / tanHalfFovX;
     m_TextureBounds[1].vMin = 0.5f - 0.5f * r_bottom / tanHalfFovY;
     m_TextureBounds[1].vMax = 0.5f - 0.5f * r_top / tanHalfFovY;
+    // Same guard as the OpenXR init: never hand the compositor UVs outside
+    // the texture (rounding, or GetProjectionRaw edge cases).
+    for (vr::VRTextureBounds_t& bounds : m_TextureBounds)
+    {
+        bounds.uMin = std::clamp(bounds.uMin, 0.0f, 1.0f);
+        bounds.uMax = std::clamp(bounds.uMax, 0.0f, 1.0f);
+        bounds.vMin = std::clamp(bounds.vMin, 0.0f, 1.0f);
+        bounds.vMax = std::clamp(bounds.vMax, 0.0f, 1.0f);
+        if (bounds.uMax <= bounds.uMin || bounds.vMax <= bounds.vMin)
+            bounds = vr::VRTextureBounds_t{ 0.0f, 0.0f, 1.0f, 1.0f };
+    }
+    if (m_OffCenterActive)
+    {
+        m_TextureBounds[0] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
+        m_TextureBounds[1] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
+    }
     Game::logMsg("OpenVR projection UV L=(%.3f,%.3f)-(%.3f,%.3f) R=(%.3f,%.3f)-(%.3f,%.3f)",
         m_TextureBounds[0].uMin, m_TextureBounds[0].vMin, m_TextureBounds[0].uMax, m_TextureBounds[0].vMax,
         m_TextureBounds[1].uMin, m_TextureBounds[1].vMin, m_TextureBounds[1].uMax, m_TextureBounds[1].vMax);
-
-    {
-        // GetProjectionRaw: bottom (> 0) is the visual up edge, top (< 0)
-        // the down edge (same mapping as the OpenXR init below).
-        const float le[4] = { l_left, l_right, l_top, l_bottom };
-        const float re[4] = { r_left, r_right, r_top, r_bottom };
-        SetupOffCenter(le, re);
-        if (m_OffCenterActive)
-        {
-            m_TextureBounds[0] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
-            m_TextureBounds[1] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
-        }
-    }
     m_Aspect = tanHalfFovX / tanHalfFovY;
     m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
@@ -3401,6 +3424,10 @@ namespace
 
 void VR::MaybeDebugDumpPublished(uint32_t slot)
 {
+    // Test aid only: the trigger file is polled on the publish path, so
+    // players' builds skip it (headless tests set BMVR_TESTDIR).
+    if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime)
+        return;
     static DWORD s_lastCheck = 0;
     const DWORD now = GetTickCount();
     if (now - s_lastCheck < 250)
@@ -5114,9 +5141,11 @@ void VR::UpdateMuzzleLocal(const std::string& weaponKey)
         offCentreDeg = acosf(std::clamp(toMuzzle.Dot(viewFwd), -1.f, 1.f)) * 57.29578f;
     const bool fresh = !m_AimBeamLocalValid || m_AimBeamLocalKey != weaponKey;
     const float drift = fresh ? 0.f : (local - m_AimBeamLocal).Length();
+    // Runs every frame by default (VrShootFromMuzzle): log a weapon change,
+    // and the drift every 3 s only with AimDebug.
     static DWORD s_logMs;
     const DWORD now = GetTickCount();
-    if (now - s_logMs > 3000)
+    if (fresh || (bmvr::g_AimDebug && now - s_logMs > 3000))
     {
         s_logMs = now;
         Game::logMsg("Muzzle local %s offCentre=%.1fdeg rawDrift=%.2fHU local=(%.2f,%.2f,%.2f)",
@@ -6646,7 +6675,11 @@ void VR::UpdateAimCrosshair()
 {
     m_AimCrosshairValid = false;
     m_AimBeamValid = false;
-    if (!(bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen
+    // VrShootFromMuzzle needs the muzzle offset (UpdateMuzzleLocal) even with
+    // the marker and beam off; without it shots used the raw attachment,
+    // which drifts toward the view edges.
+    const bool wantAimAid = bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam;
+    if (!(wantAimAid || bmvr::g_VrShootFromMuzzle) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen
         || m_SettingsOpen)
         return;
     // Guns only: no laser on the crowbar, thrown weapons, snarks or bare hands.
@@ -6673,6 +6706,8 @@ void VR::UpdateAimCrosshair()
         return;
 
     UpdateMuzzleLocal(weaponKey);
+    if (!wantAimAid)
+        return;
     // Same origin and direction the bullet uses, so the reticle cannot disagree
     // with where the shot goes.
     Vector origin{};
