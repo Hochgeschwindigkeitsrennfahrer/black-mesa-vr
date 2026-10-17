@@ -285,11 +285,6 @@ int Hooks::initSourceHooks()
         hkCalcViewModelView.createHook((LPVOID)o.CalcViewModelView.address, &dCalcViewModelView);
     if (o.GetViewModelFOV.valid)
         hkGetViewModelFOV.createHook((LPVOID)o.GetViewModelFOV.address, &dGetViewModelFOV);
-    // VGUI reads the menu cursor back with GetCursorPos. Under Wine our
-    // SetCursorPos only moves the pointer while the game window has focus,
-    // so unfocused the menu hovered/clicked at the real desktop mouse.
-    if (HMODULE user32 = GetModuleHandleA("user32.dll"))
-        hkGetCursorPos.createHook((LPVOID)GetProcAddress(user32, "GetCursorPos"), &dGetCursorPos);
     if (o.AdjustEngineViewport.valid)
         hkAdjustEngineViewport.createHook((LPVOID)o.AdjustEngineViewport.address, &dAdjustEngineViewport);
     if (o.Viewport.valid)
@@ -4575,14 +4570,6 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
         return;
     }
     hkCalcViewModelView.fOriginal(ecx, owner, eyePosition, eyeAngles);
-}
-
-BOOL WINAPI Hooks::dGetCursorPos(LPPOINT point)
-{
-    // While a VR menu pointer is live, report it; otherwise the real cursor.
-    if (point && m_VR && m_VR->TryGetMenuCursorScreen(*point))
-        return TRUE;
-    return hkGetCursorPos.fOriginal ? hkGetCursorPos.fOriginal(point) : FALSE;
 }
 
 float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)

@@ -84,7 +84,6 @@ typedef void(__thiscall* tEndRTAlloc)(void* thisptr);
 typedef void(__thiscall* tDrawFilledRect)(void* thisptr, int x0, int y0, int x1, int y1);
 typedef void(__thiscall* tDrawTexturedRect)(void* thisptr, int x0, int y0, int x1, int y1);
 typedef float(__thiscall* tGetViewModelFOV)(void* thisptr);
-typedef BOOL(WINAPI* tGetCursorPos)(LPPOINT point);
 typedef void(__thiscall* tEndFrame)(void* thisptr);
 typedef void(__thiscall* tTraceRay)(void* thisptr, const Ray_t& ray, unsigned int fMask, CTraceFilter* filter, CGameTrace* pTrace);
 typedef void(__thiscall* tImpulseCommands)(void* thisptr);
@@ -153,7 +152,6 @@ public:
     static inline Hook<tDrawFilledRect> hkDrawFilledRect;
     static inline Hook<tDrawTexturedRect> hkDrawTexturedRect;
     static inline Hook<tGetViewModelFOV> hkGetViewModelFOV;
-    static inline Hook<tGetCursorPos> hkGetCursorPos;
     static inline Hook<tEndFrame> hkEndFrame;
     static inline Hook<tTraceRay> hkTraceRay;
     static inline Hook<tImpulseCommands> hkImpulseCommands;
@@ -221,7 +219,6 @@ public:
     static void __fastcall dDrawFilledRect(void* ecx, void* edx, int x0, int y0, int x1, int y1);
     static void __fastcall dDrawTexturedRect(void* ecx, void* edx, int x0, int y0, int x1, int y1);
     static float __fastcall dGetViewModelFOV(void* ecx, void* edx);
-    static BOOL WINAPI dGetCursorPos(LPPOINT point);
     static void __fastcall dEndFrame(void* ecx, void* edx);
     static void __fastcall dTraceRay(void* ecx, void* edx, const Ray_t& ray, unsigned int fMask, CTraceFilter* filter, CGameTrace* pTrace);
     static void __fastcall dImpulseCommands(void* ecx, void* edx);

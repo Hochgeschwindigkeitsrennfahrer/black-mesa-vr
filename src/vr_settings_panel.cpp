@@ -491,10 +491,7 @@ void VR::UpdateSettingsPanel()
         m_SettingsDirty = true;
     }
 
-    // Trigger only, full pull (Cross and a resting finger on the trigger
-    // both read as presses on the PS VR2 Sense, see the menu).
-    static bool s_panelTrigLatch;
-    const bool click = MenuTriggerClickHeld(s_panelTrigLatch);
+    const bool click = PressedDigitalAction(m_ActionPrimaryAttack) || PressedDigitalAction(m_ActionMenuSelect);
     const bool back = PressedDigitalAction(m_ActionMenuBack);
     const bool clickEdge = click && !m_SettingsClickHeld;
     const bool backEdge = back && !m_SettingsBackHeld;
