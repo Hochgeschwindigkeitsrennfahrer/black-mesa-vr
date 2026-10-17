@@ -258,6 +258,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkLevelShutdown, "LevelShutdown");
     enableIfReady(hkCalcViewModelView, "CalcViewModelView");
     enableIfReady(hkGetViewModelFOV, "GetViewModelFOV");
+    enableIfReady(hkGetCursorPos, "GetCursorPos");
     enableIfReady(hkEndFrame, "EndFrame");
     enableIfReady(hkTraceRay, "TraceRay");
 }
@@ -285,6 +286,14 @@ int Hooks::initSourceHooks()
         hkCalcViewModelView.createHook((LPVOID)o.CalcViewModelView.address, &dCalcViewModelView);
     if (o.GetViewModelFOV.valid)
         hkGetViewModelFOV.createHook((LPVOID)o.GetViewModelFOV.address, &dGetViewModelFOV);
+    // VGUI reads the menu cursor back with GetCursorPos (vgui::Button fires on
+    // release only if the cursor is still over it). Under Wine our
+    // SetCursorPos only moves the pointer while the game window has focus,
+    // so unfocused the menu hovered/clicked at the real desktop mouse.
+    // Re-enabled 2026-10-17: the phantom clicks that got it switched off in
+    // 4d77b7f came from Steam Input, not from this hook.
+    if (HMODULE user32 = GetModuleHandleA("user32.dll"))
+        hkGetCursorPos.createHook((LPVOID)GetProcAddress(user32, "GetCursorPos"), &dGetCursorPos);
     if (o.AdjustEngineViewport.valid)
         hkAdjustEngineViewport.createHook((LPVOID)o.AdjustEngineViewport.address, &dAdjustEngineViewport);
     if (o.Viewport.valid)
@@ -4570,6 +4579,14 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
         return;
     }
     hkCalcViewModelView.fOriginal(ecx, owner, eyePosition, eyeAngles);
+}
+
+BOOL WINAPI Hooks::dGetCursorPos(LPPOINT point)
+{
+    // While a VR menu pointer is live, report it; otherwise the real cursor.
+    if (point && m_VR && m_VR->TryGetMenuCursorScreen(*point))
+        return TRUE;
+    return hkGetCursorPos.fOriginal ? hkGetCursorPos.fOriginal(point) : FALSE;
 }
 
 float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)

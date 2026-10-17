@@ -858,6 +858,9 @@ public:
     // InternalMousePressed(MOUSE_LEFT=0). Trigger is otherwise only IN_ATTACK.
     void ApplyWorldVguiTriggerClick(CUserCmd* cmd);
     bool WorldVguiSuppressAttack() const { return m_WorldVguiSuppressAttack; }
+    // VR pointer in screen coordinates while it hit a menu in the last
+    // 250 ms (Hooks::dGetCursorPos).
+    bool TryGetMenuCursorScreen(POINT& out) const;
     void DrawMenuCursorOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf);
     void ApplyMenuNavigation();
     void QueueEscapeKey();
@@ -1253,6 +1256,8 @@ private:
     Vector m_MenuPanelFwd{};
     Vector m_MenuPanelRight{};
     Vector m_MenuPanelUp{};
+    HWND m_MenuCursorHwnd = nullptr;
+    DWORD m_MenuCursorLiveMs = 0;   // last frame the VR pointer hit the menu
     DWORD m_MenuClickMs = 0;
     int m_MenuClickX = 0;
     int m_MenuClickY = 0;
