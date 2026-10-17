@@ -2438,21 +2438,36 @@ bool VR::InitOpenVR()
     }
     const float tanHalfFovY = tanHalfFovX / rtAspect;
 
-    // Same projection crop as L4D2VR vr_lifecycle_init.inl. Keep OpenVR v
-    // unflipped on this DXVK path (Vulkan v-swap inverted the fused image).
-    // LeftEyeCullPad: the left eye is rendered with its tangents scaled
-    // (EyeRenderFov), so its crop is that much smaller.
-    const float leftScale = LeftEyeTanScale();
-    m_TextureBounds[0].uMin = 0.5f + 0.5f * l_left / (tanHalfFovX * leftScale);
-    m_TextureBounds[0].uMax = 0.5f + 0.5f * l_right / (tanHalfFovX * leftScale);
-    m_TextureBounds[0].vMin = 0.5f - 0.5f * l_bottom / (tanHalfFovY * leftScale);
-    m_TextureBounds[0].vMax = 0.5f - 0.5f * l_top / (tanHalfFovY * leftScale);
-    m_TextureBounds[1].uMin = 0.5f + 0.5f * r_left / tanHalfFovX;
-    m_TextureBounds[1].uMax = 0.5f + 0.5f * r_right / tanHalfFovX;
-    m_TextureBounds[1].vMin = 0.5f - 0.5f * r_bottom / tanHalfFovY;
-    m_TextureBounds[1].vMax = 0.5f - 0.5f * r_top / tanHalfFovY;
-    if (leftScale > 1.f)
-        Game::logMsg("LeftEyeCullPad: left eye rendered %.0f%% wider (tan)", (leftScale - 1.f) * 100.f);
+    m_Aspect = tanHalfFovX / tanHalfFovY;
+    m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
+
+    // Same projection crop as L4D2VR vr_lifecycle_init.inl, per eye: the
+    // HMD eye's tangents inside the rectangle that eye is rendered with
+    // (EyeRenderRect: symmetric, the runtime eye with OffCenterEyes, the left
+    // eye widened to the right by LeftEyeCullPad). Keep OpenVR v unflipped on
+    // this DXVK path (Vulkan v-swap inverted the fused image).
+    {
+        // {left, right, down (raw top), up (raw bottom)}
+        const float raw[2][4] = {
+            { l_left, l_right, l_top, l_bottom },
+            { r_left, r_right, r_top, r_bottom } };
+        for (int e = 0; e < 2; ++e)
+        {
+            float rect[4];
+            if (!EyeRenderRect(e + 1, rect, rtAspect))
+                continue;
+            const float w = rect[1] - rect[0];
+            const float h = rect[3] - rect[2];
+            vr::VRTextureBounds_t& bounds = m_TextureBounds[e];
+            bounds.uMin = (raw[e][0] - rect[0]) / w;
+            bounds.uMax = (raw[e][1] - rect[0]) / w;
+            bounds.vMin = (rect[3] - raw[e][3]) / h;
+            bounds.vMax = (rect[3] - raw[e][2]) / h;
+        }
+    }
+    if (LeftEyeCullPadTan() > 0.f)
+        Game::logMsg("LeftEyeCullPad: left eye right edge +%.3f tan (%.0f%% of the half-FOV)",
+            LeftEyeCullPadTan(), (std::min)(bmvr::g_LeftEyeCullPad, 0.25f) * 100.f);
     // Same guard as the OpenXR init: never hand the compositor UVs outside
     // the texture (rounding, or GetProjectionRaw edge cases).
     for (vr::VRTextureBounds_t& bounds : m_TextureBounds)
@@ -2464,16 +2479,9 @@ bool VR::InitOpenVR()
         if (bounds.uMax <= bounds.uMin || bounds.vMax <= bounds.vMin)
             bounds = vr::VRTextureBounds_t{ 0.0f, 0.0f, 1.0f, 1.0f };
     }
-    if (m_OffCenterActive)
-    {
-        m_TextureBounds[0] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
-        m_TextureBounds[1] = vr::VRTextureBounds_t{ 0.f, 0.f, 1.f, 1.f };
-    }
     Game::logMsg("OpenVR projection UV L=(%.3f,%.3f)-(%.3f,%.3f) R=(%.3f,%.3f)-(%.3f,%.3f)",
         m_TextureBounds[0].uMin, m_TextureBounds[0].vMin, m_TextureBounds[0].uMax, m_TextureBounds[0].vMax,
         m_TextureBounds[1].uMin, m_TextureBounds[1].vMin, m_TextureBounds[1].uMax, m_TextureBounds[1].vMax);
-    m_Aspect = tanHalfFovX / tanHalfFovY;
-    m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
     m_FovRight = m_Fov;
     ChooseEyeRenderSize();
@@ -2657,9 +2665,9 @@ bool VR::InitOpenXR()
     m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
     m_FovLeft = m_Fov;
     m_FovRight = m_Fov;
-    if (LeftEyeTanScale() > 1.f)
-        Game::logMsg("LeftEyeCullPad: left eye rendered %.0f%% wider (tan), fov %.2f -> %.2f",
-            (LeftEyeTanScale() - 1.f) * 100.f, m_Fov, EyeRenderFov(1, m_Fov));
+    if (LeftEyeCullPadTan() > 0.f)
+        Game::logMsg("LeftEyeCullPad: left eye right edge +%.3f tan (%.0f%% of the half-FOV)",
+            LeftEyeCullPadTan(), (std::min)(bmvr::g_LeftEyeCullPad, 0.25f) * 100.f);
     ChooseEyeRenderSize();
     BindOpenXrActionHandles();
 
@@ -3182,10 +3190,27 @@ void VR::PublishOpenXrResolvedEyeTextures(uint32_t frameId, bool panel2d)
         const float hmdFov = m_Fov;
         if (hmdFov > 10.f && hmdFov < 179.f)
         {
-            // LeftEyeCullPad: the left eye was drawn wider (EyeRenderFov).
-            publishLeft.renderFovXDeg = EyeRenderFov(1, hmdFov);
+            publishLeft.renderFovXDeg = hmdFov;
             publishRight.renderFovXDeg = hmdFov;
         }
+        // An off-centre eye (OffCenterEyes, the left eye widened by
+        // LeftEyeCullPad) hands the helper the exact rectangle it was drawn
+        // with (unscoped, like renderFovXDeg); the helper submits that FOV
+        // uncropped. Symmetric eyes keep the renderFovXDeg path.
+        auto setExplicitFov = [&](L4D2VROpenXrSharedTextureDesc& desc, int stereoEye) {
+            float rect[4];
+            const float imageAspect = desc.height
+                ? static_cast<float>(desc.width) / static_cast<float>(desc.height) : 0.f;
+            if (EyeRenderIsCustom(stereoEye) && EyeRenderRect(stereoEye, rect, imageAspect))
+            {
+                desc.tanLeft = rect[0];
+                desc.tanRight = rect[1];
+                desc.tanDown = rect[2];
+                desc.tanUp = rect[3];
+            }
+        };
+        setExplicitFov(publishLeft, 1);
+        setExplicitFov(publishRight, 2);
     }
     // 2D GameUI is a letterboxed blit, not a 90° world frustum. A non-zero
     // renderFovXDeg made the helper use "game-when-full-bounds" FOV on WMR.
@@ -3195,6 +3220,8 @@ void VR::PublishOpenXrResolvedEyeTextures(uint32_t frameId, bool panel2d)
     {
         publishLeft.renderFovXDeg = 0.f;
         publishRight.renderFovXDeg = 0.f;
+        publishLeft.tanLeft = publishLeft.tanRight = publishLeft.tanDown = publishLeft.tanUp = 0.f;
+        publishRight.tanLeft = publishRight.tanRight = publishRight.tanDown = publishRight.tanUp = 0.f;
     }
     // Hands/HUD/wheel are in-eye overlays; helper contain-blits the full RT.
     publishLeft.uMin = 0.0f;
@@ -9888,60 +9915,128 @@ bool VR::CopyFlashlightState(Vector& origin, Vector& forward) const
     return true;
 }
 
-bool VR::OffCenterForEye(int stereoEye, const float*& frac) const
+float VR::LeftEyeCullPadTan() const
 {
-    if (!m_OffCenterActive || (stereoEye != 1 && stereoEye != 2))
+    // Fraction of the union half-FOV tangent (tan(m_Fov / 2)) added to the
+    // left eye's right edge.
+    const float pad = (std::min)(bmvr::g_LeftEyeCullPad, 0.25f);
+    if (!(pad > 0.f) || !(m_Fov > 10.f && m_Fov < 179.f))
+        return 0.f;
+    return pad * tanf(m_Fov * 0.5f * (3.14159265358979323846f / 180.f));
+}
+
+bool VR::EyeRenderIsCustom(int stereoEye) const
+{
+    if (stereoEye != 1 && stereoEye != 2)
         return false;
-    frac = m_OffCenterFrac[stereoEye - 1];
+    return m_OffCenterActive || (stereoEye == 1 && LeftEyeCullPadTan() > 0.f);
+}
+
+float VR::EyeRtAspect() const
+{
+    if (m_RenderWidth >= 640 && m_RenderHeight >= 360)
+        return static_cast<float>(m_RenderWidth) / static_cast<float>(m_RenderHeight);
+    return (m_Aspect > 0.1f) ? m_Aspect : 1.f;
+}
+
+bool VR::EyeRenderRect(int stereoEye, float rect[4], float rtAspect) const
+{
+    if (stereoEye != 1 && stereoEye != 2)
+        return false;
+    if (m_OffCenterActive && m_EyeTanValid)
+    {
+        for (int i = 0; i < 4; ++i)
+            rect[i] = m_EyeTan[stereoEye - 1][i];
+    }
+    else
+    {
+        const float tX = tanf(m_Fov * 0.5f * (3.14159265358979323846f / 180.f));
+        const float a = (rtAspect > 0.1f) ? rtAspect : EyeRtAspect();
+        rect[0] = -tX;
+        rect[1] = tX;
+        rect[2] = -tX / a;
+        rect[3] = tX / a;
+    }
+    if (stereoEye == 1)
+        rect[1] += LeftEyeCullPadTan();
     return true;
 }
 
-float VR::LeftEyeTanScale() const
+bool VR::EyeOffCenterView(int stereoEye, float& fovDeg, float& aspect, float frac[4]) const
 {
-    if (m_OffCenterActive || !(bmvr::g_LeftEyeCullPad > 0.f))
-        return 1.f;
-    return 1.f + (std::min)(bmvr::g_LeftEyeCullPad, 0.25f);
+    if (!EyeRenderIsCustom(stereoEye))
+        return false;
+    float r[4];
+    if (!EyeRenderRect(stereoEye, r))
+        return false;
+    // The engine builds an off-centre view as fractions of a centred
+    // fov/aspect frustum: use the smallest one holding this eye's rectangle.
+    // Scoped (WorldRenderFov narrower than m_Fov) scales every tangent alike.
+    const float ux = (std::max)(-r[0], r[1]);
+    const float uy = (std::max)(-r[2], r[3]);
+    if (!(ux > 0.001f && uy > 0.001f))
+        return false;
+    constexpr float kDegToRad = 3.14159265358979323846f / 180.f;
+    const float k = tanf(WorldRenderFov() * 0.5f * kDegToRad) / tanf(m_Fov * 0.5f * kDegToRad);
+    fovDeg = 2.f * atanf(ux * k) / kDegToRad;
+    aspect = ux / uy;
+    frac[0] = 0.5f + 0.5f * r[0] / ux;   // left
+    frac[1] = 0.5f + 0.5f * r[1] / ux;   // right
+    frac[2] = 0.5f + 0.5f * r[2] / uy;   // bottom
+    frac[3] = 0.5f + 0.5f * r[3] / uy;   // top
+    return true;
 }
 
-float VR::EyeRenderFov(int stereoEye, float baseFov) const
+float VR::EyeRenderFov(int stereoEye) const
 {
-    const float s = LeftEyeTanScale();
-    if (stereoEye != 1 || s <= 1.f || !(baseFov > 1.f && baseFov < 179.f))
-        return baseFov;
-    constexpr float kDegToRad = 3.14159265358979323846f / 180.f;
-    const float fov = 2.f * atanf(tanf(baseFov * 0.5f * kDegToRad) * s) / kDegToRad;
-    return (fov < 179.f) ? fov : baseFov;
+    float fov = 0.f, aspect = 0.f, frac[4];
+    if (EyeOffCenterView(stereoEye, fov, aspect, frac))
+        return fov;
+    return WorldRenderFov();
+}
+
+bool VR::EyeRenderAspect(int stereoEye, float& aspect) const
+{
+    float fov = 0.f, frac[4];
+    return EyeOffCenterView(stereoEye, fov, aspect, frac);
 }
 
 bool VR::OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const
 {
-    const float* f = nullptr;
-    if (!OffCenterForEye(stereoEye, f))
-    {
-        // LeftEyeCullPad: the left eye was rendered with tangents scaled by s
-        // (same aspect), so overlays projected with the unpadded FOV shrink
-        // toward the centre by 1/s.
-        const float s = LeftEyeTanScale();
-        if (stereoEye != 1 || s <= 1.f)
-            return false;
-        sx = sy = 1.f / s;
-        ox = oy = 0.f;
-        return true;
-    }
-    // Union NDC of the eye's edges: 2*frac-1. Map [2l-1, 2r-1] -> [-1, 1].
-    sx = 1.f / (f[1] - f[0]);
-    ox = -(f[0] + f[1] - 1.f) * sx;
-    sy = 1.f / (f[3] - f[2]);
-    oy = -(f[2] + f[3] - 1.f) * sy;
+    if (!EyeRenderIsCustom(stereoEye))
+        return false;
+    float r[4];
+    if (!EyeRenderRect(stereoEye, r))
+        return false;
+    // Overlays project into a reference frustum: the union (m_Fov,
+    // m_OffCenterAspect) with OffCenterEyes, else the symmetric eye frustum.
+    // Map its NDC onto this eye's rendered rectangle [L, R] x [D, U]. Scope
+    // scales reference and rectangle alike, so unscoped values serve.
+    const float refX = tanf(m_Fov * 0.5f * (3.14159265358979323846f / 180.f));
+    const float refY = m_OffCenterActive ? refX / m_OffCenterAspect : refX / EyeRtAspect();
+    if (!(r[1] - r[0] > 0.001f && r[3] - r[2] > 0.001f))
+        return false;
+    sx = 2.f * refX / (r[1] - r[0]);
+    ox = -(r[1] + r[0]) / (r[1] - r[0]);
+    sy = 2.f * refY / (r[3] - r[2]);
+    oy = -(r[3] + r[2]) / (r[3] - r[2]);
     return true;
 }
 
 void VR::SetupOffCenter(const float leftEye[4], const float rightEye[4])
 {
     m_OffCenterActive = false;
+    const float* eyes[2] = { leftEye, rightEye };
+    m_EyeTanValid = true;
+    for (int i = 0; i < 2; ++i)
+    {
+        for (int j = 0; j < 4; ++j)
+            m_EyeTan[i][j] = eyes[i][j];
+        m_EyeTanValid = m_EyeTanValid && eyes[i][0] < -0.001f && eyes[i][1] > 0.001f
+            && eyes[i][2] < -0.001f && eyes[i][3] > 0.001f;
+    }
     if (!bmvr::g_OffCenterEyes)
         return;
-    const float* eyes[2] = { leftEye, rightEye };
     float tanX = 0.f, tanY = 0.f;
     for (const float* e : eyes)
     {

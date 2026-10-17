@@ -119,7 +119,7 @@ namespace bmvr
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
-    float g_LeftEyeCullPad = 0.f;
+    float g_LeftEyeCullPad = 0.05f;
     float g_ScopeZoomSmoothSec = 0.16f;
     float g_VrHandsPoseRotX = 0.f;
     float g_VrHandsPoseRotY = 180.f;

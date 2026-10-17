@@ -426,3 +426,13 @@ Do **not** drop `mat_queue_mode` to 0 for GameUI. Do not use `GetForegroundWindo
 
 Fix (compiled; pause+tab not HMD-verified): skip Present **eye** StretchRect whenever in-game pause overlay is up (`WantPauseWorldOverlay`; not the 2D main-menu panel). HUD overlay TransferSurface only while the HWND is still activated. `WM_ACTIVATE` `WA_INACTIVE` sets `NoteAppActivated(false)` earlier than `ACTIVATEAPP`. Extra-paint already returns if `!AppActivated()`. Do not 22 ms pose-wait during pause overlay. Leftover HWND under GameUI still draws (do not set `m_StereoEyesDrawnThisFrame` for pause). Do not skip copies on focus-loss without GameUI.
 
+
+## Near props pop in at the far right (2026-10-17)
+
+**Symptom (HMD, PSVR2, OffCenterEyes on and off):** mugs, chairs, railings, vending machines appear late at the far right edge while turning the head. The world itself is there. Strafing did not show it.
+
+**Cause (inferred from the fix, engine site not located):** Black Mesa culls props for the right eye with what it computed for the left eye's view. Our stereo pair calls `RenderView` once per eye with its own `CViewSetup`, so the reuse is inside the engine. The right eye sees about IPD/z further right than the left eye, which only matters for near objects.
+
+**Verified:** rendering the left eye wider (experiment `LeftEyeCullPad=0.05`, symmetric widening) removed the pop-in.
+
+**What the code does (`LeftEyeCullPad`, default 0.05, 0 = off):** only the left eye's right edge moves out, by that fraction of `tan(m_Fov/2)`. `VR::EyeRenderRect` gives each eye's rendered rectangle in tangent space; an eye that is not the plain symmetric frustum is rendered off-centre (`EyeOffCenterView` → `CViewSetup` `m_bOffCenter`, the same path as `OffCenterEyes`). The areaportal `ComputeViewMatrices` hook and `GetScreenAspectRatio` follow the eye. Overlays and gloves remap through `OffCenterNdc`. Submit: OpenVR texture bounds per eye from the rectangle; OpenXR bridge v15 `tanLeft/Right/Down/Up` on the eye desc, which the helper submits as the layer FOV, uncropped. The game DLL and `OpenXRHelper64` must be installed together (the helper refuses a v14/v15 mismatch). Not HMD-verified in this form yet.

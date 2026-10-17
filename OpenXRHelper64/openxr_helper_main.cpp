@@ -1427,8 +1427,28 @@ namespace
         float vMax = 1.0f;
         float renderFovXDeg = 90.0f;
         float renderAspect = 1.0f;
+        // Explicit rendered frustum (bridge v15); valid only when all four set.
+        bool haveExplicitFov = false;
+        XrFovf explicitFov{};
         bool ownsImport = true;
     };
+
+    void ApplyExplicitFov(VulkanGameEyeTexture& eye, const L4D2VROpenXrSharedTextureDesc& desc)
+    {
+        const bool ok = std::isfinite(desc.tanLeft) && std::isfinite(desc.tanRight)
+            && std::isfinite(desc.tanDown) && std::isfinite(desc.tanUp)
+            && desc.tanLeft < desc.tanRight - 0.001f && desc.tanDown < desc.tanUp - 0.001f
+            && std::fabs(desc.tanLeft) < 20.0f && std::fabs(desc.tanRight) < 20.0f
+            && std::fabs(desc.tanDown) < 20.0f && std::fabs(desc.tanUp) < 20.0f;
+        eye.haveExplicitFov = ok;
+        if (ok)
+        {
+            eye.explicitFov.angleLeft = std::atan(desc.tanLeft);
+            eye.explicitFov.angleRight = std::atan(desc.tanRight);
+            eye.explicitFov.angleDown = std::atan(desc.tanDown);
+            eye.explicitFov.angleUp = std::atan(desc.tanUp);
+        }
+    }
 
     class BridgeWriter
     {
@@ -3103,6 +3123,7 @@ namespace
             eye.renderAspect = (std::isfinite(desc.renderAspect) && desc.renderAspect > 0.1f && desc.renderAspect < 10.0f)
                 ? desc.renderAspect
                 : ((desc.height > 0) ? (static_cast<float>(desc.width) / static_cast<float>(desc.height)) : 1.0f);
+            ApplyExplicitFov(eye, desc);
             if (eye.uMax <= eye.uMin)
             {
                 eye.uMin = 0.0f;
@@ -7674,6 +7695,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             eye.renderAspect = (std::isfinite(desc.renderAspect) && desc.renderAspect > 0.1f && desc.renderAspect < 10.0f)
                 ? desc.renderAspect
                 : ((desc.height > 0) ? (static_cast<float>(desc.width) / static_cast<float>(desc.height)) : 1.0f);
+            ApplyExplicitFov(eye, desc);
             if (eye.uMax <= eye.uMin)
             {
                 eye.uMin = 0.0f;
@@ -7925,6 +7947,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             eye.renderAspect = (std::isfinite(desc.renderAspect) && desc.renderAspect > 0.1f && desc.renderAspect < 10.0f)
                 ? desc.renderAspect
                 : ((desc.height > 0) ? (static_cast<float>(desc.width) / static_cast<float>(desc.height)) : 1.0f);
+            ApplyExplicitFov(eye, desc);
             if (eye.uMax <= eye.uMin)
             {
                 eye.uMin = 0.0f;
@@ -8818,7 +8841,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 const bool explicitUv =
                     source.uMin > 0.001f || source.vMin > 0.001f
                     || source.uMax < 0.999f || source.vMax < 0.999f;
-                const bool cropProjection = !m_GameRendersRuntimeFov
+                const bool cropProjection = !m_GameRendersRuntimeFov && !source.haveExplicitFov
                     && m_UseRuntimeProjectionFov && m_HaveLocatedFov
                     && !poseMono && !explicitUv;
                 if (cropProjection)
@@ -9106,6 +9129,21 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             uint32_t eyeIndex,
             bool useSymmetricProjectionFov)
         {
+            // The game said exactly which frustum this image covers.
+            if (m_Bridge.HasState() && source.haveExplicitFov)
+            {
+                static bool s_loggedExplicit[2] = {};
+                if (eyeIndex < 2 && !s_loggedExplicit[eyeIndex])
+                {
+                    s_loggedExplicit[eyeIndex] = true;
+                    m_Log.Print("Using explicit game projection FOV eye=%u (L=%.4f R=%.4f U=%.4f D=%.4f) runtime=(L=%.4f R=%.4f U=%.4f D=%.4f)",
+                        eyeIndex,
+                        source.explicitFov.angleLeft, source.explicitFov.angleRight,
+                        source.explicitFov.angleUp, source.explicitFov.angleDown,
+                        runtimeFov.angleLeft, runtimeFov.angleRight, runtimeFov.angleUp, runtimeFov.angleDown);
+                }
+                return source.explicitFov;
+            }
             XrFovf gameFov{};
             const bool haveGameFov =
                 m_Bridge.HasState() &&

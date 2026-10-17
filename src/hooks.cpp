@@ -322,8 +322,9 @@ int Hooks::initSourceHooks()
         hkGetScreenSize.createHook((LPVOID)o.GetScreenSize.address, &dGetScreenSize);
     if (o.GetScreenAspectRatio.valid && !hkGetScreenAspectRatio.pTarget)
         hkGetScreenAspectRatio.createHook((LPVOID)o.GetScreenAspectRatio.address, &dGetScreenAspectRatio);
-    // OffCenterEyes only: the areaportal pass must see the centred union view.
-    if (bmvr::g_OffCenterEyes && o.ComputeViewMatrices.valid && !hkComputeViewMatrices.pTarget
+    // Off-centre eyes only (OffCenterEyes, LeftEyeCullPad): the areaportal
+    // pass must see the centred union view.
+    if ((bmvr::g_OffCenterEyes || bmvr::g_LeftEyeCullPad > 0.f) && o.ComputeViewMatrices.valid && !hkComputeViewMatrices.pTarget
         && AreaPortalComputeViewCallSiteOk(o.ComputeViewMatrices.address))
         hkComputeViewMatrices.createHook((LPVOID)o.ComputeViewMatrices.address, &dComputeViewMatrices);
     if (o.CreateNamedRTEx.valid)
@@ -2812,19 +2813,22 @@ namespace
         // the stereo pass so the gun frustum matches world/gloves.
         const float rtAspect = static_cast<float>(eyeWidth) / static_cast<float>(eyeHeight);
         view.m_flAspectRatio = rtAspect;
-        // LeftEyeCullPad widens the left eye only (culling follows the view).
-        const float eyeFov = vr->EyeRenderFov(stereoEye, vr->WorldRenderFov());
+        const float eyeFov = vr->WorldRenderFov();
         view.fov = eyeFov;
         view.fovViewmodel = eyeFov;
-        // OffCenterEyes: render only this eye's part of the union frustum.
-        // The engine builds it (ComputeViewMatrices, MatrixBuildPerspective-
+        // Off-centre eye (OffCenterEyes, and/or the left eye widened to the
+        // right by LeftEyeCullPad): render exactly this eye's rectangle. The
+        // engine builds it (ComputeViewMatrices, MatrixBuildPerspective-
         // OffCenterX) from fov + aspect + the 0..1 sub-rectangle; culling and
-        // deferred lights follow the matrices (flat test 2026-10-11). The
+        // deferred lights follow the matrices (flat test 2026-10-11; widened
+        // left eye fixed the far-right prop pop-in, HMD 2026-10-17). The
         // copy in DrawViewModels keeps the sub-rectangle.
-        const float* frac = nullptr;
-        if (vr->OffCenterForEye(stereoEye, frac))
+        float ocFov = 0.f, ocAspect = 0.f, frac[4];
+        if (vr->EyeOffCenterView(stereoEye, ocFov, ocAspect, frac))
         {
-            view.m_flAspectRatio = vr->m_OffCenterAspect;
+            view.fov = ocFov;
+            view.fovViewmodel = ocFov;
+            view.m_flAspectRatio = ocAspect;
             view.m_bOffCenter = true;
             view.m_flOffCenterLeft = frac[0];
             view.m_flOffCenterRight = frac[1];
@@ -4599,7 +4603,7 @@ float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)
 {
     (void)edx;
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame() && m_VR->m_Fov > 10.f)
-        return m_VR->EyeRenderFov(m_VR->m_StereoEye, m_VR->WorldRenderFov());
+        return m_VR->EyeRenderFov(m_VR->m_StereoEye);
     if (hkGetViewModelFOV.fOriginal)
         return hkGetViewModelFOV.fOriginal(ecx);
     return 54.f;
@@ -7324,7 +7328,7 @@ void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& hei
     }
 }
 
-// Areaportal culling with OffCenterEyes. The engine's areaportal setup
+// Areaportal culling with off-centre eyes (OffCenterEyes, LeftEyeCullPad). The engine's areaportal setup
 // (engine+0x138CF0) copies the current view, sets its screen window to the
 // centred +-tan(fov/2) of that view (fov/aspect = the union frustum), then
 // projects doorways with the copy's ComputeViewMatrices — which honours
@@ -7339,7 +7343,7 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
     static const uintptr_t s_engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
     const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
     if (ecx && s_engine && ret == s_engine + Offsets::kAreaPortalComputeViewReturnRva
-        && m_VR && m_VR->m_OffCenterActive)
+        && m_VR && m_VR->AnyEyeOffCenter())
     {
         auto* view = static_cast<CViewSetup*>(ecx);
         if (view->m_bOffCenter)
@@ -7381,9 +7385,9 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
                     || m_VR->CachedRt0MatchesEyes()
                     || m_VR->D3dRt0IsEyeSized()))))
     {
-        const float eyeAspect = m_VR->m_OffCenterActive
-            ? m_VR->m_OffCenterAspect
-            : static_cast<float>(m_VR->m_RenderWidth) / static_cast<float>(m_VR->m_RenderHeight);
+        // Off-centre eye: the centred union aspect its sub-rectangle is of.
+        float eyeAspect = static_cast<float>(m_VR->m_RenderWidth) / static_cast<float>(m_VR->m_RenderHeight);
+        m_VR->EyeRenderAspect(m_VR->m_StereoEye, eyeAspect);
         static int s_arLog;
         if (s_arLog < 8)
         {

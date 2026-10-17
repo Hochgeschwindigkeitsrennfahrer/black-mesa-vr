@@ -26,7 +26,7 @@ inline void L4D2VR_SeqlockAcquire()
 }
 
 constexpr uint32_t L4D2VR_OPENXR_BRIDGE_MAGIC = 0x5258344Cu; // L4XR
-constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 14;
+constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 15;
 // 13: XR_KHR_visibility_mask hidden triangle list (NDC xy per eye).
 // 14: helperConsumingFrameId / helperConsumedFrameId (helper -> game blit
 //     progress; the game reuses a publish slot only once the helper's blit
@@ -252,6 +252,16 @@ struct L4D2VROpenXrSharedTextureDesc
     float vMax = 1.0f;
     float renderFovXDeg = 90.0f;
     float renderAspect = 1.0f;
+    // Bridge v15: tangents of the frustum the whole texture was rendered with
+    // (left < 0 < right, down < 0 < up). When all four are set the helper
+    // submits exactly this FOV and never crops; it overrides renderFovXDeg /
+    // renderAspect and the runtime FOV. 0 = unset (old behaviour). Used for
+    // an eye rendered off-centre, e.g. the left eye widened to the right by
+    // LeftEyeCullPad.
+    float tanLeft = 0.0f;
+    float tanRight = 0.0f;
+    float tanDown = 0.0f;
+    float tanUp = 0.0f;
 };
 
 struct L4D2VROpenXrOverlayDesc

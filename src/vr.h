@@ -219,15 +219,29 @@ public:
     bool m_OffCenterActive = false;
     float m_OffCenterAspect = 1.f;
     float m_OffCenterFrac[2][4]{};
-    // stereoEye 1 = left, 2 = right (0 / mono: false).
-    bool OffCenterForEye(int stereoEye, const float*& frac) const;
-    // Union-frustum NDC -> this eye's NDC: ndc' = ndc * s + o. Also the
-    // LeftEyeCullPad remap for the left eye (s = 1 / LeftEyeTanScale()).
+    // Runtime per-eye tangents {left, right, down, up} (both modes).
+    float m_EyeTan[2][4]{};
+    bool m_EyeTanValid = false;
+    // Per-eye rendered rectangle in tangent space {L, R, D, U}, unscoped
+    // (stereoEye 1 = left, 2 = right): the runtime eye with OffCenterEyes,
+    // else the symmetric frustum (tan(m_Fov / 2), vertical from rtAspect, 0 =
+    // the eye RT's aspect). The left eye's right edge is pushed out by
+    // LeftEyeCullPad so its culling also covers the right eye's view.
+    bool EyeRenderRect(int stereoEye, float rect[4], float rtAspect = 0.f) const;
+    // True when the eye's rectangle is not the symmetric frustum (render it
+    // off-centre, submit its explicit FOV).
+    bool EyeRenderIsCustom(int stereoEye) const;
+    float LeftEyeCullPadTan() const;
+    float EyeRtAspect() const;
+    // CViewSetup for a custom eye: centred fov/aspect holding the rectangle
+    // (scope-aware) and the 0..1 sub-rectangle {left, right, bottom, top}.
+    bool EyeOffCenterView(int stereoEye, float& fovDeg, float& aspect, float frac[4]) const;
+    // Horizontal fov / aspect the engine renders this eye with.
+    float EyeRenderFov(int stereoEye) const;
+    bool EyeRenderAspect(int stereoEye, float& aspect) const;
+    // Overlay reference-frustum NDC -> this eye's NDC: ndc' = ndc * s + o.
     bool OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const;
-    // LeftEyeCullPad: 1 + pad for the left eye's half-FOV tangents (1 = off).
-    float LeftEyeTanScale() const;
-    // baseFov (horizontal, degrees) widened for stereoEye 1 by LeftEyeTanScale.
-    float EyeRenderFov(int stereoEye, float baseFov) const;
+    bool AnyEyeOffCenter() const { return EyeRenderIsCustom(1) || EyeRenderIsCustom(2); }
     // l/r/d/u = tangents of each eye's left/right/down/up half-angles.
     void SetupOffCenter(const float leftEye[4], const float rightEye[4]);
     float m_Fov = 90.f;

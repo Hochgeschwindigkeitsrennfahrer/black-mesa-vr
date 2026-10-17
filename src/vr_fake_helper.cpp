@@ -194,7 +194,14 @@ namespace
         // declared tangents over the swapchain image: left/right (x, right +), up/down (up +)
         float L, R, U, D;
         const char* mode;
-        if (!gameRendersRuntimeFov && full)
+        const bool explicitFov = d.tanLeft < d.tanRight - 0.001f && d.tanDown < d.tanUp - 0.001f;
+        if (explicitFov)
+        {
+            // Bridge v15: the game declared the rendered rectangle (off-centre eye).
+            L = d.tanLeft; R = d.tanRight; U = d.tanUp; D = d.tanDown;
+            mode = "game-explicit";
+        }
+        else if (!gameRendersRuntimeFov && full)
         {
             const float tx = tanf(0.5f * fovX * kPi / 180.0f);
             L = -tx; R = tx; U = tx / aspect; D = -tx / aspect;
@@ -380,6 +387,7 @@ namespace
                         const L4D2VROpenXrSharedTextureDesc& o = lastDecl[e];
                         const bool differs = d.width != o.width || d.height != o.height
                             || d.renderFovXDeg != o.renderFovXDeg || d.renderAspect != o.renderAspect
+                            || d.tanLeft != o.tanLeft || d.tanRight != o.tanRight
                             || d.uMin != o.uMin || d.uMax != o.uMax || d.vMin != o.vMin || d.vMax != o.vMax;
                         if (differs && loggedDecl < 64)
                         {
