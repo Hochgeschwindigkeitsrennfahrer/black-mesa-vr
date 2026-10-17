@@ -294,6 +294,14 @@ namespace bmvr
     // zoomed. Compositor / OpenXR submit keep the real HMD FOV, so the
     // narrower render is magnified in the lenses. 0.28 ≈ 3.5× (HL2 20/75).
     extern float g_ScopeZoomFovScale;
+    // LeftEyeCullPad (experiment, default 0 = off): the left eye renders this
+    // fraction wider (tan of the half-FOV, both axes) and is submitted at that
+    // wider FOV, so engine culling that the right eye seems to inherit from
+    // the left eye also covers the right eye's extra view (near props popping
+    // in at the far right). 0.05 covers props ~0.7 m and further at 64 mm IPD.
+    // Costs ~5 % left-eye sharpness per axis. Off with OffCenterEyes. Not for
+    // the Oculus OpenXR runtime (its helper crop assumes both eyes at m_Fov).
+    extern float g_LeftEyeCullPad;
     // Exponential smoothing time (seconds) applied to HMD pitch/yaw while
     // scoped. Magnification otherwise turns every micro-movement into shake.
     extern float g_ScopeZoomSmoothSec;

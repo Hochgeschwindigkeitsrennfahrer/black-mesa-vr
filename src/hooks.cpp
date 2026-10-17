@@ -2812,7 +2812,8 @@ namespace
         // the stereo pass so the gun frustum matches world/gloves.
         const float rtAspect = static_cast<float>(eyeWidth) / static_cast<float>(eyeHeight);
         view.m_flAspectRatio = rtAspect;
-        const float eyeFov = vr->WorldRenderFov();
+        // LeftEyeCullPad widens the left eye only (culling follows the view).
+        const float eyeFov = vr->EyeRenderFov(stereoEye, vr->WorldRenderFov());
         view.fov = eyeFov;
         view.fovViewmodel = eyeFov;
         // OffCenterEyes: render only this eye's part of the union frustum.
@@ -4598,7 +4599,7 @@ float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)
 {
     (void)edx;
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame() && m_VR->m_Fov > 10.f)
-        return m_VR->WorldRenderFov();
+        return m_VR->EyeRenderFov(m_VR->m_StereoEye, m_VR->WorldRenderFov());
     if (hkGetViewModelFOV.fOriginal)
         return hkGetViewModelFOV.fOriginal(ecx);
     return 54.f;

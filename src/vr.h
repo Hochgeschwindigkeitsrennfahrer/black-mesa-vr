@@ -221,8 +221,13 @@ public:
     float m_OffCenterFrac[2][4]{};
     // stereoEye 1 = left, 2 = right (0 / mono: false).
     bool OffCenterForEye(int stereoEye, const float*& frac) const;
-    // Union-frustum NDC -> this eye's NDC: ndc' = ndc * s + o.
+    // Union-frustum NDC -> this eye's NDC: ndc' = ndc * s + o. Also the
+    // LeftEyeCullPad remap for the left eye (s = 1 / LeftEyeTanScale()).
     bool OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const;
+    // LeftEyeCullPad: 1 + pad for the left eye's half-FOV tangents (1 = off).
+    float LeftEyeTanScale() const;
+    // baseFov (horizontal, degrees) widened for stereoEye 1 by LeftEyeTanScale.
+    float EyeRenderFov(int stereoEye, float baseFov) const;
     // l/r/d/u = tangents of each eye's left/right/down/up half-angles.
     void SetupOffCenter(const float leftEye[4], const float rightEye[4]);
     float m_Fov = 90.f;
