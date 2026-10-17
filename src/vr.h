@@ -1257,6 +1257,12 @@ private:
     Vector m_MenuPanelRight{};
     Vector m_MenuPanelUp{};
     HWND m_MenuCursorHwnd = nullptr;
+public:
+    // dGetCursorPos answers with the VR pointer / the real cursor (click log).
+    std::atomic<long> m_CursorHookHits{ 0 };
+    std::atomic<long> m_CursorHookPass{ 0 };
+    std::atomic<bool> m_MenuPanelUpForCursor{ false };
+private:
     DWORD m_MenuCursorLiveMs = 0;   // last frame the VR pointer hit the menu
     DWORD m_MenuClickMs = 0;
     int m_MenuClickX = 0;

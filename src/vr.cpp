@@ -4409,7 +4409,9 @@ void VR::ProcessInput()
             QueueGameUiToggle(paused);
         }
     }
-    if (Want2dMenuPanel() || WantPauseWorldOverlay())
+    const bool menuPanelUp = Want2dMenuPanel() || WantPauseWorldOverlay();
+    m_MenuPanelUpForCursor.store(menuPanelUp, std::memory_order_relaxed);
+    if (menuPanelUp)
     {
         ApplyMenuNavigation();
         ApplyMenuCursor();
@@ -6342,6 +6344,11 @@ void VR::ApplyMenuCursor()
         havePointerPose = true;
     }
 
+    // On the panel this frame, before the idle dead zone below drops haveHit
+    // for a still pointer. GetCursorPos (Hooks::dGetCursorPos) must keep
+    // reporting the pointer while it rests on a button, or a careful aim then
+    // a still trigger pull clicks at the real desktop mouse after 250 ms.
+    const bool onPanel = haveHit;
     if (haveHit && havePointerPose && m_MenuPointerLastValid)
     {
         const float dx = pointerPos[0] - m_MenuPointerLastPos[0];
@@ -6441,7 +6448,7 @@ void VR::ApplyMenuCursor()
     // after Menu compositor (~700 Presents, last line controller poses L=1).
     // HWND messages are processed on the game thread. Do not call IInput here.
     HWND hwnd = FindGameHwnd();
-    if (haveHit)
+    if (onPanel)
     {
         m_MenuCursorHwnd = hwnd;
         m_MenuCursorLiveMs = GetTickCount();
@@ -6496,10 +6503,23 @@ void VR::ApplyMenuCursor()
             }
         }
         static int s_clickLog;
-        if (s_clickLog < 8)
+        if (s_clickLog < 40)
         {
-            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d",
-                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0);
+            // cursorHook: GetCursorPos calls since the last click answered
+            // with the VR pointer / passed to the real cursor. Pause (in-game
+            // GameUI) vs main menu differ here if VGUI reads the cursor
+            // another way in game.
+            POINT real{};
+            const BOOL haveReal = Hooks::hkGetCursorPos.fOriginal
+                ? Hooks::hkGetCursorPos.fOriginal(&real) : ::GetCursorPos(&real);
+            POINT ptr{};
+            const bool live = TryGetMenuCursorScreen(ptr);
+            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d overlay=%d cursorHook=%ld/%ld live=%d ptrScreen=%ld,%ld real=%ld,%ld focus=%d fg=%d hud=%dx%d",
+                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, WantPauseWorldOverlay() ? 1 : 0,
+                static_cast<long>(m_CursorHookHits.exchange(0)), static_cast<long>(m_CursorHookPass.exchange(0)),
+                live ? 1 : 0, ptr.x, ptr.y, haveReal ? real.x : -1L, haveReal ? real.y : -1L,
+                (hwnd && GetFocus() == hwnd) ? 1 : 0, (hwnd && GetForegroundWindow() == hwnd) ? 1 : 0,
+                hudW, hudH);
             ++s_clickLog;
         }
     }
@@ -6508,7 +6528,12 @@ void VR::ApplyMenuCursor()
 
 bool VR::TryGetMenuCursorScreen(POINT& out) const
 {
-    if (!m_MenuCursorValid || !m_MenuCursorHwnd || m_MenuCursorLiveMs == 0)
+    // Only while a VR menu panel is up (flag from ProcessInput: this runs on
+    // whatever thread calls GetCursorPos, so no engine calls here). Right
+    // after the menu closes the game's own readers (mouse look) get the real
+    // cursor again.
+    if (!m_MenuCursorValid || !m_MenuCursorHwnd || m_MenuCursorLiveMs == 0
+        || !m_MenuPanelUpForCursor.load(std::memory_order_relaxed))
         return false;
     if (GetTickCount() - m_MenuCursorLiveMs > 250u)
         return false;
