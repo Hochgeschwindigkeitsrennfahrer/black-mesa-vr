@@ -4415,7 +4415,10 @@ void VR::ProcessInput()
         ApplyMenuCursor();
     }
     else
-        m_MenuTriggerWasDown = false;
+        // Keep tracking the held trigger while no menu panel is up: resetting
+        // to false made a trigger still held from gameplay (e.g. pausing
+        // while firing) click as soon as the menu appeared.
+        m_MenuTriggerWasDown = PressedDigitalAction(m_ActionPrimaryAttack);
     // Recenter is a short tap of the same right-stick click that opens the
     // weapon menu. Do not recenter on press-edge while that click is held.
     if (resetHeld && !s_reset && !menuStick && !m_WeaponMenuOpenedThisHold)
