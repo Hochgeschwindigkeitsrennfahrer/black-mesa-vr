@@ -31,6 +31,14 @@ done
 cp "$GAME/d3d9.dll" "$out/orig-d3d9.dll"
 # -w/-h are saved by the game into bms/videoconfig.cfg (the player's resolution); put it back afterwards
 cp -a "$GAME/bms/videoconfig.cfg" "$out/orig-videoconfig.cfg" 2>/dev/null || true
+# The game also writes every archived cvar a test sets (e.g. cl_csm_enabled, np_gr_quality) into
+# bms/cfg/config.cfg on exit, and Steam Cloud keeps a copy in userdata/*/362890/remote/cfg (2026-10-25:
+# a test's cl_csm_enabled 1 ended up in the player's config). Put both back afterwards.
+CLOUD_CFGS=("$STEAM"/userdata/*/362890/remote/cfg/config.cfg)
+cp -a "$GAME/bms/cfg/config.cfg" "$out/orig-config.cfg" 2>/dev/null || true
+for i in "${!CLOUD_CFGS[@]}"; do
+	[[ -f ${CLOUD_CFGS[$i]} ]] && cp -a "${CLOUD_CFGS[$i]}" "$out/orig-cloud-config-$i.cfg"
+done
 restore() {
 	local f ok=1
 	for f in "${DLLS[@]}"; do
@@ -38,7 +46,12 @@ restore() {
 		[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || ok=0
 	done
 	[[ -f $out/orig-videoconfig.cfg ]] && cp -a "$out/orig-videoconfig.cfg" "$GAME/bms/videoconfig.cfg"
-	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified)" >> "$out/run.log" \
+	[[ -f $out/orig-config.cfg ]] && cp -a "$out/orig-config.cfg" "$GAME/bms/cfg/config.cfg"
+	local i
+	for i in "${!CLOUD_CFGS[@]}"; do
+		[[ -f $out/orig-cloud-config-$i.cfg ]] && cp -a "$out/orig-cloud-config-$i.cfg" "${CLOUD_CFGS[$i]}"
+	done
+	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified) + videoconfig/config.cfg" >> "$out/run.log" \
 		|| echo "RESTORE FAILED" | tee -a "$out/run.log" >&2
 }
 cleanup() {
