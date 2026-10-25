@@ -108,6 +108,7 @@ namespace bmvr
     bool g_VrShotOriginFix = true;
     bool g_VrShootFromMuzzle = true;
     bool g_TwoHandHoldWhileGrip = true;
+    bool g_TwoHandGripToggle = false;
     bool g_VrSkipMotionBlur = true;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
@@ -596,6 +597,8 @@ namespace bmvr
                 g_ShoulderGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SettingsTriangleHold") == 0)
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "TwoHandGripToggle") == 0)
+                g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandHoldWhileGrip") == 0)
                 g_TwoHandHoldWhileGrip = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSkipMotionBlur") == 0)

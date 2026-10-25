@@ -17,7 +17,7 @@
 //   left <x> <y> <z> <pitch> <yaw> <roll>     controller (grip = aim)
 //   right <x> <y> <z> <pitch> <yaw> <roll>
 //   buttons <name> ...           attack attack2 reload jump duck use recenter pause flashlight
-//                                select back next prev weaponmenu
+//                                select back next prev weaponmenu sprint gripleft (pressed = analog 1)
 //   move <x> <y> / turn <x> <y>  sticks
 // <VR dir>\cmd.txt: console commands, one per line, appended by the test; each new
 // line is run once (ClientCmd_Unrestricted on the engine thread).
@@ -132,6 +132,7 @@ namespace
         if (b == "prev") return (int)A::PrevItem;
         if (b == "weaponmenu") return (int)A::InventoryQuickSwitch;
         if (b == "sprint") return (int)A::CustomAction1;
+        if (b == "gripleft") return (int)A::InventoryGripLeft;
         return 0;
     }
 
@@ -360,6 +361,7 @@ namespace
                 prevButtons[a] = script.buttons[a];
                 L4D2VROpenXrAnalogActionDesc& an = in.analogActions[a];
                 an.active = 1;
+                an.x = script.buttons[a] ? 1.f : 0.f;   // pressed = full pull/squeeze
             }
             in.analogActions[(int)L4D2VROpenXrActionId::Walk].x = script.moveX;
             in.analogActions[(int)L4D2VROpenXrActionId::Walk].y = script.moveY;

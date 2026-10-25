@@ -1150,6 +1150,7 @@ private:
     bool UpdateShoulderGestures(bool paused);
     bool ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const;
     bool m_TwoHandActive = false;
+    bool m_TwoHandGripWasDown = false;   // TwoHandGripToggle press edge
     bool m_OffhandGripBoneValid = false;
     float m_OffhandGripGx = 0.f;
     float m_OffhandGripGy = 0.f;

@@ -77,6 +77,9 @@ ScopeZoomFovScale=0.28
 # until the stick is centred again (false = hold the click).
 CrouchStickHold=false
 SprintToggle=false
+# Two-handed guns: squeezing the support grip on the gun latches the hold (no need to
+# keep squeezing); squeeze again, or take the hand away from the gun, to let go.
+TwoHandGripToggle=false
 # The VR settings panel (weapon menu: the VR SETTINGS slot below the crowbar)
 # changes several of these live and writes them back here. They are also
 # bmvr_* console cvars.

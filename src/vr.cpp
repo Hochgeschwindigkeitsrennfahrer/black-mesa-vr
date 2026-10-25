@@ -8958,8 +8958,9 @@ void VR::ApplyTwoHandWeaponAim()
     const bool offhandOk = leftHanded ? m_PhysicalRightTrackingValid : m_LeftControllerTrackingValid;
     if (!m_RightControllerTrackingValid || !offhandOk)
     {
-        // A tracking blip while the grip is held keeps the hold (last pose).
-        if (bmvr::g_TwoHandHoldWhileGrip && m_TwoHandActive && LeftSupportGripValue() >= 0.20f)
+        // A tracking blip while the grip is held (or latched) keeps the hold (last pose).
+        if (m_TwoHandActive && (bmvr::g_TwoHandGripToggle
+            || (bmvr::g_TwoHandHoldWhileGrip && LeftSupportGripValue() >= 0.20f)))
             return;
         clearTwoHand("tracking");
         return;
@@ -8997,9 +8998,26 @@ void VR::ApplyTwoHandWeaponAim()
     const float gripVal = LeftSupportGripValue();
     const bool squeezing = gripVal >= 0.35f;
     const bool holdingSqueeze = gripVal >= 0.20f;
+    // Squeeze edge with hysteresis (down at 0.35, re-armed below 0.20).
+    const bool squeezeEdge = squeezing && !m_TwoHandGripWasDown;
+    if (squeezing)
+        m_TwoHandGripWasDown = true;
+    else if (!holdingSqueeze)
+        m_TwoHandGripWasDown = false;
 
     const bool was = m_TwoHandActive;
-    if (m_TwoHandActive)
+    if (m_TwoHandActive && bmvr::g_TwoHandGripToggle)
+    {
+        // Latched: a new squeeze lets go, and so does a support hand taken
+        // well off the gun (else the aim would follow a hand that left it).
+        const float leaveR = (pistol ? 0.20f : 0.30f) * scale;
+        if (squeezeEdge)
+            m_TwoHandActive = false;
+        else if (pistol ? distToGrip > leaveR
+            : (lat > leaveR || along < alongMin - leaveR || along > alongMax + leaveR))
+            m_TwoHandActive = false;
+    }
+    else if (m_TwoHandActive)
     {
         if (pistol)
             m_TwoHandActive = holdingSqueeze && distToGrip <= stayR;
@@ -9010,7 +9028,7 @@ void VR::ApplyTwoHandWeaponAim()
                 : (holdingSqueeze && lat <= stayR
                     && along >= (alongMin - slop) && along <= (alongMax + slop));
     }
-    else if (squeezing)
+    else if (bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
     {
         bool onPoint = pistol
             ? (distToGrip < enterR)
@@ -9025,6 +9043,16 @@ void VR::ApplyTwoHandWeaponAim()
             PulseHandHaptic(leftHanded
                 ? vr::TrackedControllerRole_RightHand
                 : vr::TrackedControllerRole_LeftHand, 2200, 0.55f);
+        }
+        else if (squeezeEdge)
+        {
+            static int s_missLog;
+            if (s_missLog < 20)
+            {
+                Game::logMsg("Two-hand miss dist=%.1f lat=%.1f (enter %.1f) along=%.1f (%.1f..%.1f) d=%.1f,%.1f,%.1f grip=%.1f,%.1f,%.1f",
+                    distToGrip, lat, enterR, along, alongMin, alongMax, d.x, d.y, d.z, grip.x, grip.y, grip.z);
+                ++s_missLog;
+            }
         }
     }
     if (m_TwoHandActive != was)
