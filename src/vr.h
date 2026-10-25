@@ -880,6 +880,11 @@ public:
     // VR pointer in screen coordinates while it hit a menu in the last
     // 250 ms (Hooks::dGetCursorPos).
     bool TryGetMenuCursorScreen(POINT& out) const;
+    // Menu / settings-panel trigger click: full pull to click, half release
+    // to re-arm (a resting finger reads 0.6-0.7 on the PS VR2 Sense).
+    static constexpr float kMenuTriggerPress = 0.9f;
+    static constexpr float kMenuTriggerRearm = 0.5f;
+    bool MenuTriggerClickHeld(bool& latch) const;
     void DrawMenuCursorOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf);
     void ApplyMenuNavigation();
     void QueueEscapeKey();
@@ -1283,9 +1288,6 @@ public:
     std::atomic<bool> m_MenuPanelUpForCursor{ false };
 private:
     DWORD m_MenuCursorLiveMs = 0;   // last frame the VR pointer hit the menu
-    DWORD m_MenuClickMs = 0;
-    int m_MenuClickX = 0;
-    int m_MenuClickY = 0;
     bool m_WorldVguiTriggerWasDown = false;
     bool m_WorldVguiSuppressAttack = false;
     bool m_WeaponMenuOpen = false;

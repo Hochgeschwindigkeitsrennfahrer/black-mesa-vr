@@ -4453,9 +4453,8 @@ void VR::ProcessInput()
         ApplyMenuCursor();
     }
     else
-        // Keep tracking the held trigger while no menu panel is up: resetting
-        // to false made a trigger still held from gameplay (e.g. pausing
-        // while firing) click as soon as the menu appeared.
+        // Keep tracking held buttons while no menu panel is up: resetting to
+        // false made a held Cross/trigger click again when the menu reappeared.
         m_MenuTriggerWasDown = PressedDigitalAction(m_ActionPrimaryAttack);
     // Recenter is a short tap of the same right-stick click that opens the
     // weapon menu. Do not recenter on press-edge while that click is held.
@@ -5739,7 +5738,9 @@ void VR::ApplyMenuNavigation()
     }
 
     const bool select = PressedDigitalAction(m_ActionMenuSelect);
-    if (select && !s_ok)
+    // With a pointer on the menu, Cross clicks there (menu pointer code);
+    // Enter would activate whatever has keyboard focus instead.
+    if (select && !s_ok && !m_MenuCursorValid)
     {
         QueueKeyToHwnd(hwnd, VK_RETURN);
         Game::logMsg("Menu confirm A/MenuSelect");
@@ -6510,33 +6511,89 @@ void VR::ApplyMenuCursor()
         }
     }
 
-    const bool click = PressedDigitalAction(m_ActionPrimaryAttack);
+    // Where the pointer was ~100 ms ago. Pulling the trigger tips the
+    // controller; since the menu pointer follows the hand closely (smoothing
+    // 0.05 s, 2026-10-14) the click landed on the neighbouring entry. Click
+    // where the user aimed before the pull.
+    struct CursorSample { DWORD ms; int x; int y; };
+    static CursorSample s_hist[128];
+    static int s_histN;
+    const DWORD histNow = GetTickCount();
+    if (haveHit)
+    {
+        s_hist[s_histN % 128] = { histNow, wx, wy };
+        ++s_histN;
+    }
+    // Trigger with hysteresis: press past 0.9, re-arm only below 0.5. A
+    // finger resting on the PS VR2 Sense trigger reads 0.6-0.7 (log
+    // 2026-10-15) and its small movements clicked menu items on their own.
+    static bool s_trigLatched;
+    bool click = s_trigLatched;
+    float triggerValue = -1.f;
+    vr::InputAnalogActionData_t trig{};
+    static float s_trigMinSinceClick = 1.f;
+    if (GetAnalogActionData(m_ActionPrimaryAttack, trig))
+    {
+        triggerValue = trig.x;
+        s_trigMinSinceClick = (std::min)(s_trigMinSinceClick, trig.x);
+        if (trig.x >= kMenuTriggerPress)
+            click = true;
+        else if (trig.x <= kMenuTriggerRearm)
+            click = false;
+    }
+    else
+        click = PressedDigitalAction(m_ActionPrimaryAttack);
+    s_trigLatched = click;
+    // Trigger only. Cross (a/click) read as pressed while the user only
+    // pointed (PS VR2 Sense via Touch emulation, 2026-10-15) and clicked
+    // whatever was under the pointer; Cross still confirms (Enter) when
+    // there is no pointer. Its edges are logged to see what it reports.
+    const bool selectHeld = PressedDigitalAction(m_ActionMenuSelect);
+    static bool s_selectWas;
+    static int s_selectLog;
+    if (selectHeld != s_selectWas && s_selectLog < 40)
+    {
+        Game::logMsg("Menu Cross %s t=%lu", selectHeld ? "down" : "up",
+            static_cast<unsigned long>(GetTickCount()));
+        ++s_selectLog;
+    }
+    s_selectWas = selectHeld;
     if (click && !m_MenuTriggerWasDown)
     {
+        for (int i = 1; i <= 128 && i <= s_histN; ++i)
+        {
+            const CursorSample& smp = s_hist[(s_histN - i) % 128];
+            if (histNow - smp.ms > 250)
+                break;
+            if (histNow - smp.ms >= 100)
+            {
+                // Only undo the small jerk of the pull itself. A larger
+                // move means the user was still travelling to the item;
+                // rewinding then clicked the one just passed (main menu,
+                // 2026-10-15: things opened that were not aimed at).
+                const int dx = smp.x - wx, dy = smp.y - wy;
+                if (dx * dx + dy * dy <= 24 * 24)
+                {
+                    wx = smp.x;
+                    wy = smp.y;
+                }
+                break;
+            }
+        }
         if (hwnd)
         {
-            const DWORD nowClick = GetTickCount();
-            const int dx = wx - m_MenuClickX;
-            const int dy = wy - m_MenuClickY;
-            const DWORD dblMs = GetDoubleClickTime();
-            const bool dbl = m_MenuClickMs != 0
-                && (nowClick - m_MenuClickMs) <= (dblMs ? dblMs : 500u)
-                && (dx * dx + dy * dy) <= 36 * 36;
-            if (dbl)
-            {
-                PostMessageA(hwnd, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(wx, wy));
-                PostMessageA(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(wx, wy));
-                m_MenuClickMs = 0;
-                Game::logMsg("VR menu double-click at %d,%d", wx, wy);
-            }
-            else
-            {
-                PostMessageA(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(wx, wy));
-                PostMessageA(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(wx, wy));
-                m_MenuClickMs = nowClick;
-                m_MenuClickX = wx;
-                m_MenuClickY = wy;
-            }
+            POINT pt{ wx, wy };
+            ClientToScreen(hwnd, &pt);
+            SetCursorPos(pt.x, pt.y);
+            PostMessageA(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(wx, wy));
+        }
+        // Single clicks only. Two pulls within the double-click time used to
+        // become WM_LBUTTONDBLCLK, which opens/loads the item in BM's lists
+        // and menus when the user merely clicked again.
+        if (hwnd)
+        {
+            PostMessageA(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(wx, wy));
+            PostMessageA(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(wx, wy));
         }
         static int s_clickLog;
         if (s_clickLog < 40)
@@ -6550,16 +6607,33 @@ void VR::ApplyMenuCursor()
                 ? Hooks::hkGetCursorPos.fOriginal(&real) : ::GetCursorPos(&real);
             POINT ptr{};
             const bool live = TryGetMenuCursorScreen(ptr);
-            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d overlay=%d cursorHook=%ld/%ld live=%d ptrScreen=%ld,%ld real=%ld,%ld focus=%d fg=%d hud=%dx%d",
-                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, WantPauseWorldOverlay() ? 1 : 0,
+            Game::logMsg("VR menu click at %d,%d menuMap=%d pause=%d trigger=%.2f minSince=%.2f cross=%d t=%lu overlay=%d cursorHook=%ld/%ld live=%d ptrScreen=%ld,%ld real=%ld,%ld focus=%d fg=%d hud=%dx%d",
+                wx, wy, menuMap ? 1 : 0, pauseUi ? 1 : 0, triggerValue, s_trigMinSinceClick,
+                selectHeld ? 1 : 0, static_cast<unsigned long>(histNow), WantPauseWorldOverlay() ? 1 : 0,
                 static_cast<long>(m_CursorHookHits.exchange(0)), static_cast<long>(m_CursorHookPass.exchange(0)),
                 live ? 1 : 0, ptr.x, ptr.y, haveReal ? real.x : -1L, haveReal ? real.y : -1L,
                 (hwnd && GetFocus() == hwnd) ? 1 : 0, (hwnd && GetForegroundWindow() == hwnd) ? 1 : 0,
                 hudW, hudH);
             ++s_clickLog;
         }
+        s_trigMinSinceClick = 1.f;
     }
     m_MenuTriggerWasDown = click;
+}
+
+bool VR::MenuTriggerClickHeld(bool& latch) const
+{
+    vr::InputAnalogActionData_t trig{};
+    if (GetAnalogActionData(m_ActionPrimaryAttack, trig))
+    {
+        if (trig.x >= kMenuTriggerPress)
+            latch = true;
+        else if (trig.x <= kMenuTriggerRearm)
+            latch = false;
+        return latch;
+    }
+    latch = PressedDigitalAction(m_ActionPrimaryAttack);
+    return latch;
 }
 
 bool VR::TryGetMenuCursorScreen(POINT& out) const
