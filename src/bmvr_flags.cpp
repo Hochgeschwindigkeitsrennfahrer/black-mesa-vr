@@ -109,6 +109,7 @@ namespace bmvr
     bool g_VrShootFromMuzzle = true;
     bool g_TwoHandHoldWhileGrip = true;
     bool g_VrSkipMotionBlur = true;
+    int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = false;

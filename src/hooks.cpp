@@ -3620,6 +3620,13 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     CurrentViewScope curView(setup);
     if (!hkRenderView.fOriginal)
         return;
+    // Trace frames count top-level RenderViews (BM skips the EndFrame hook);
+    // the trigger sets frames + 1 so the frame it lands in is not counted.
+    if (bmvr::g_PassTraceFrames > 0 && g_RenderViewNest == 1)
+        --bmvr::g_PassTraceFrames;
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: RenderView nest=%d eye=%d %dx%d draw=0x%x clear=0x%x", g_RenderViewNest,
+            m_VR ? m_VR->m_StereoEye : -1, setup.width, setup.height, whatToDraw, nClearFlags);
 
     if (g_RenderViewNest > 1)
     {
@@ -4619,7 +4626,10 @@ void __fastcall Hooks::dAdjustEngineViewport(void* ecx, void* edx, int& x, int& 
 void __fastcall Hooks::dViewport(void* ecx, void* edx, int x, int y, int width, int height)
 {
     NoteMatContext(ecx);
+    const int trW = width, trH = height;
     ClampStereoViewport(x, y, width, height);
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: Viewport %dx%d -> %d,%d %dx%d", trW, trH, x, y, width, height);
     if (hkViewport.fOriginal)
         hkViewport.fOriginal(ecx, x, y, width, height);
 }
@@ -4984,6 +4994,7 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
     NoteMatContext(ecx);
     const char* pushName = SafeTextureName(pTexture);
     const RtNameClass nameClass = ClassifyRtName(pushName);
+    const int trInW = nViewW, trInH = nViewH;
     // Grow world G-buffer viewports before NotePushRt so the stack records
     // 3168, and so a `_rt_gb*` push while flashlight is still parent is not
     // skipped by AuxSceneRtBound().
@@ -5087,6 +5098,15 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
             ++s_pushLog;
         }
     }
+    if (bmvr::g_PassTraceFrames > 0)
+    {
+        int texW = 0, texH = 0;
+        QueryTextureSize(pTexture, texW, texH);
+        Game::logMsg("trace: PushRT %s tex=%dx%d depth=%s vp %dx%d -> %d,%d %dx%d world=%d aux=%d eye=%d",
+            SafeTextureName(pTexture), texW, texH, SafeTextureName(pDepthTexture), trInW, trInH,
+            nViewX, nViewY, nViewW, nViewH, nameClass.world ? 1 : 0, nameClass.aux ? 1 : 0,
+            m_VR ? m_VR->m_StereoEye : -1);
+    }
     if (hkPushRenderTargetAndViewport.fOriginal)
         hkPushRenderTargetAndViewport.fOriginal(ecx, pTexture, pDepthTexture, nViewX, nViewY, nViewW, nViewH);
     if (m_VR && !m_VR->HudPaintActive() && !m_VR->ShouldHwndBlitStereo()
@@ -5102,6 +5122,8 @@ void __fastcall Hooks::dPopRenderTargetAndViewport(void* ecx, void* edx)
         m_VR->BlitEngineHudRtToOverlay();
     if (hkPopRenderTargetAndViewport.fOriginal)
         hkPopRenderTargetAndViewport.fOriginal(ecx);
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: PopRT");
     NotePopRt();
 }
 
@@ -5334,6 +5356,15 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             ++s_seenN;
         }
     }
+    if (bmvr::g_PassTraceFrames > 0)
+    {
+        int rtW = 0, rtH = 0;
+        const char* rtName = "";
+        QueryContextColorRtSize(ecx, rtW, rtH, &rtName);
+        Game::logMsg("trace: DSSR %s dest %d,%d %dx%d -> %d,%d %dx%d src=%dx%d uv=(%.1f,%.1f)-(%.1f,%.1f) rt=%s %dx%d",
+            matName, origX, origY, origW, origH, destX, destY, width, height, srcWidth, srcHeight,
+            srcX0, srcY0, srcX1, srcY1, rtName, rtW, rtH);
+    }
     if (hkDrawScreenSpaceRectangle.fOriginal)
         hkDrawScreenSpaceRectangle.fOriginal(ecx, material, destX, destY, width, height,
             srcX0, srcY0, srcX1, srcY1, srcWidth, srcHeight, clientRenderable, xDice, yDice);
@@ -5528,6 +5559,11 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     else
         clipToBounds(srcRect, expanded, destW, destH, "src-unk");
     clipToBounds(dstRect, expandedDst, destW, destH, "dst");
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: CopyRT -> %s %dx%d from %s %dx%d src=%d,%d %dx%d dst=%d,%d %dx%d grew=%d",
+            SafeTextureName(texture), destW, destH, srcName, srcW, srcH,
+            srcRect ? srcRect->x : -1, srcRect ? srcRect->y : -1, srcRect ? srcRect->width : -1, srcRect ? srcRect->height : -1,
+            dstRect ? dstRect->x : -1, dstRect ? dstRect->y : -1, dstRect ? dstRect->width : -1, dstRect ? dstRect->height : -1, grew);
     if (hkCopyRenderTargetToTextureEx.fOriginal)
         hkCopyRenderTargetToTextureEx.fOriginal(ecx, texture, renderTargetId, srcRect, dstRect);
 }
@@ -7416,8 +7452,16 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     const bool haveFb = bmvr::TryHmdFramebuffer() && bmvr::HaveHmdFramebufferSize(fbW, fbH);
     const bool fullMode = sizeMode == RT_SIZE_FULL_FRAME_BUFFER
         || sizeMode == RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP;
+    // BM's light shafts (god rays, np_gr_quality) draw _rt_lsMask with the
+    // G-buffer depth and copy the scene into _rt_lsScene; PushRT already
+    // treats _rt_ls* as eye-sized world targets. Left at the window size the
+    // mask pass ran with a depth buffer of another size and a viewport larger
+    // than its target, and the composite replaced the eye with the mask:
+    // world gone, black/white plus the source's glow, whenever the source
+    // was in front (bm_c1a3c, 2026-10-25). Grow them with FullFrame.
+    const bool namedLs = name && std::strstr(name, "_rt_ls") != nullptr;
     const bool namedFb = name && (std::strstr(name, "_rt_FullFrameFB")
-        || std::strstr(name, "_rt_ResolvedFullFrame"));
+        || std::strstr(name, "_rt_ResolvedFullFrame") || namedLs);
     const bool namedGb = name && std::strstr(name, "_rt_gb")
         && !std::strstr(name, "shadow") && !std::strstr(name, "Shadow")
         && !std::strstr(name, "flashlight") && !std::strstr(name, "Flashlight")
@@ -7621,7 +7665,7 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
                 && std::abs(ah - static_cast<int>(fbH)) < 32)
                 bmvr::EndRisky(L"ff_hmdfit");
         }
-        else if (aw > 0 && namedFb && bmvr::g_FullFrameActualWidth < 640)
+        else if (aw > 0 && namedFb && !namedLs && bmvr::g_FullFrameActualWidth < 640)
         {
             bmvr::g_FullFrameActualWidth = static_cast<uint32_t>(aw);
             bmvr::g_FullFrameActualHeight = static_cast<uint32_t>(ah);

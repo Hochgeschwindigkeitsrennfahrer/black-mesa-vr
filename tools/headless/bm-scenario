@@ -8,6 +8,7 @@
 #   unfake <key>                      removes that line
 #   shot <name>                       screenshot of the game window -> <outdir>/<name>.png
 #   log                               copy the mod log now
+#   trace [frames]                    mod logs every render pass (RT push/pop, copies, viewports, screen rects) for N frames
 #   dump <name> [step]                mod writes VR/<name>-left/right/hud.bmp: the eye pair it publishes + overlay
 #                                     (every <step>th pixel, default 4)
 #   projcheck [left|right|both] [deg] projection check (bm-projcheck.py): window shots before/after turning the fake
@@ -78,6 +79,8 @@ while IFS= read -r line || [[ -n $line ]]; do
 		unfake) grep -v "^$arg " "$out/VR/fake.txt" > "$out/VR/fake.tmp" || true; mv "$out/VR/fake.tmp" "$out/VR/fake.txt" ;;
 		shot) if window_shot "$out/$arg.png"; then echo "shot $arg"; else echo "shot $arg FAILED"; fi ;;
 		log) cp "$out/bmvr_log.txt" "$out/log-$(date +%H%M%S).txt" ;;
+		trace) echo "${arg:-2}" > "$out/VR/trace.txt"   # mod logs every RT push/pop/copy/viewport/screen rect for <arg> frames
+			sleep 1 ;;
 		dump) echo "$arg" > "$out/VR/dump.txt"   # mod writes VR/<arg>-left/right/hud.bmp (published eyes + overlay)
 			for _ in $(seq 1 40); do [[ -e $out/VR/dump.txt ]] || break; sleep 0.25; done
 			[[ -e $out/VR/dump.txt ]] && echo "dump $arg: not picked up" || echo "dump $arg" ;;

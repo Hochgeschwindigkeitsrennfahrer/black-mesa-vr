@@ -3469,6 +3469,19 @@ void VR::MaybeDebugDumpPublished(uint32_t slot)
     if (now - s_lastCheck < 250)
         return;
     s_lastCheck = now;
+    // VR/trace.txt [frames]: log every RT push/pop, copy, viewport and
+    // screen-space draw for that many frames (default 2).
+    const std::string traceTrigger = bmvr::VrFilePath("trace.txt");
+    if (FILE* tf = std::fopen(traceTrigger.c_str(), "rb"))
+    {
+        int frames = 2;
+        if (std::fscanf(tf, "%d", &frames) < 1)
+            frames = 2;
+        std::fclose(tf);
+        std::remove(traceTrigger.c_str());
+        bmvr::g_PassTraceFrames = std::clamp(frames, 1, 8) + 1;
+        Game::logMsg("trace: %d frames", bmvr::g_PassTraceFrames - 1);
+    }
     const std::string trigger = bmvr::VrFilePath("dump.txt");
     FILE* f = std::fopen(trigger.c_str(), "rb");
     if (!f)

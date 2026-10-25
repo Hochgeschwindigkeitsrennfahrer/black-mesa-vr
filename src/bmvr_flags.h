@@ -268,6 +268,8 @@ namespace bmvr
     // Fixes, default on (a config key can turn each off):
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
+    // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
+    extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
     // Optional features, default off:
     extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
