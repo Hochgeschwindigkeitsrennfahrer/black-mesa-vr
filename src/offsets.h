@@ -160,6 +160,9 @@ public:
     // forward*speed + up*lift + 0.x * player velocity from GetShootAngles and
     // calls this. It places the grenade via kGrenadeThrowPosition_Server, then
     // DispatchSpawn, then the grenade's SetVelocity (vtable +0x3B4).
+    // mode: 0 = origin at owner EyePosition (vtable +0x230), 1 = halfway
+    // between eye and throw position, else the throw position. The frag
+    // passes 0.
     // Bytes: 55 8B EC 8B 45 08 83 EC 30 83 F8 15.
     static constexpr int kGrenadeCreate_Server = 0x3798A0;
     // server.dll throw position, cdecl (grenade, Vector* pos, QAngle* ang,

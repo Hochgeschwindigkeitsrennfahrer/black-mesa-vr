@@ -7931,8 +7931,12 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
     *velocity = hand + playerVel;
     Game::logMsg("VR frag throw: hand %.0f u/s -> (%.0f,%.0f,%.0f) (game %.0f u/s)",
         hand.Length(), velocity->x, velocity->y, velocity->z, before.Length());
+    // Mode 0 (the frag's) places the grenade at the owner's EyePosition and
+    // ignores the throw position, 1 at the middle of the two; any other value
+    // uses the throw position, which dGrenadeThrowPosition moves to the hand.
+    constexpr int kSpawnAtThrowPosition = 2;
     g_VrFragSpawn = true;
-    void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, mode);
+    void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, kSpawnAtThrowPosition);
     g_VrFragSpawn = false;
     return grenade;
 }
@@ -7972,6 +7976,7 @@ bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* an
             return ok;
         }
     }
+    Game::logMsg("VR frag throw: spawned at the hand, %.0f units from the game's point", (hand - *pos).Length());
     *pos = hand;
     return ok;
 }
