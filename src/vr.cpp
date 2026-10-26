@@ -4481,6 +4481,11 @@ void VR::ProcessInput()
         // while firing) click as soon as the menu appeared. Same 0.9 / 0.5
         // latch as the menu click itself.
         m_MenuTriggerWasDown = MenuTriggerClickHeld(m_MenuTriggerLatch);
+    // Right-stick tap is bare hands / last weapon in gameplay (weapon menu);
+    // the weapon menu is off while a menu panel is up, so there the tap still
+    // recenters (main menu and loading have no VR settings panel).
+    if (menuPanelUp && resetHeld && !s_reset)
+        Recenter("right-stick tap in a menu");
     const bool atk = PressedDigitalAction(m_ActionPrimaryAttack);
     const bool atk2 = PressedDigitalAction(m_ActionSecondaryAttack);
     const bool reload = PressedDigitalAction(m_ActionReload);
@@ -6400,6 +6405,7 @@ void VR::ApplyMenuCursor()
     // reporting the pointer while it rests on a button, or a careful aim then
     // a still trigger pull clicks at the real desktop mouse after 250 ms.
     const bool onPanel = haveHit;
+    bool pointerPastDeadZone = false;
     if (haveHit && havePointerPose && m_MenuPointerLastValid)
     {
         const float dx = pointerPos[0] - m_MenuPointerLastPos[0];
@@ -6432,14 +6438,20 @@ void VR::ApplyMenuCursor()
         // put. Only at rest: the menu runs at ~280 fps, so a per-frame test
         // also swallowed slow sweeps until 0.45 deg had piled up, and the
         // cursor crossed the buttons in ~13 px steps (the laggy hover).
+        // The reference pose only moves when the threshold is crossed, so a
+        // slow sweep crosses it every 0.45 deg and keeps the 0.2 s window
+        // open; a per-frame reference never crossed it at 280 fps.
         constexpr double kMoveHoldMs = 200.0;
         const double nowMoveMs = QpcNowMs();
         if (dPos >= 0.004f || dAng >= 0.45f)
+        {
             m_MenuPointerMoveMs = nowMoveMs;
+            pointerPastDeadZone = true;
+        }
         else if (nowMoveMs - m_MenuPointerMoveMs > kMoveHoldMs)
             haveHit = false;
     }
-    if (haveHit && havePointerPose)
+    if (haveHit && havePointerPose && (pointerPastDeadZone || !m_MenuPointerLastValid))
     {
         m_MenuPointerLastPos[0] = pointerPos[0];
         m_MenuPointerLastPos[1] = pointerPos[1];

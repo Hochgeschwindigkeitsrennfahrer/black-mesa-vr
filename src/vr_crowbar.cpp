@@ -517,8 +517,9 @@ void VR::UpdateCrowbarMelee()
 // the last 0.1 s before the release, x 2/3 x ThrowScale, at most 1000 u/s.
 // The finger opens a moment after the arm has peaked, so the release frame
 // alone throws short. Black Mesa may throw only once the pin-pull animation
-// has finished, after the arm has stopped, so the window runs from 0.1 s
-// before the trigger release up to the server's throw (at most 1 s back).
+// has finished, after the arm has stopped, so the window is anchored on the
+// trigger release (0.1 s before to 0.05 s after) rather than on the server's
+// throw, when that release is at most 1 s old.
 void VR::SampleThrowHand()
 {
     if (!m_ControllerPoseValid || !m_GameplayEligible)
@@ -538,7 +539,10 @@ void VR::SampleThrowHand()
     if (m_ThrowAttackHeld && !attack)
         m_ThrowReleaseT = now;
     m_ThrowAttackHeld = attack;
-    m_ThrowSamples[m_ThrowSampleNext] = { now, WorldToYawLocal(hand, body, GetViewAngle().y) };
+    // Unrotate by the stick-turn yaw only (the tracking space's world yaw):
+    // the head's yaw would turn the hand's offset from the body into speed
+    // whenever the player looks around during the throw.
+    m_ThrowSamples[m_ThrowSampleNext] = { now, WorldToYawLocal(hand, body, m_RotationOffsetY.load(std::memory_order_acquire)) };
     m_ThrowSampleNext = (m_ThrowSampleNext + 1) % kThrowSamples;
     m_ThrowHandWorld = hand;
     m_ThrowHandValid = true;
@@ -563,9 +567,19 @@ bool VR::TryGetThrowVelocity(Vector& out)
         return false;
     const int newest = (m_ThrowSampleNext + kThrowSamples - 1) % kThrowSamples;
     const double newestT = m_ThrowSamples[newest].t;
+    // Window: the last 0.1 s, or, when the trigger was let go within the
+    // last second, 0.1 s before the release up to just after it. Samples
+    // between the release and the server's throw (BM waits for the pin
+    // animation) are the follow-through or the arm coming back, which can be
+    // faster than the throw and point anywhere.
+    constexpr double kAfterReleaseSec = 0.05;
     double since = newestT - kWindowSec;
+    double until = newestT;
     if (m_ThrowReleaseT > 0.0 && newestT - m_ThrowReleaseT < 1.0)
-        since = std::min(since, m_ThrowReleaseT - kWindowSec);
+    {
+        since = m_ThrowReleaseT - kWindowSec;
+        until = m_ThrowReleaseT + kAfterReleaseSec;
+    }
     Vector best{};
     float bestSpeed = -1.f;
     // Walk back from the newest sample: each one against the closest older
@@ -575,6 +589,8 @@ bool VR::TryGetThrowVelocity(Vector& out)
         const ThrowSample& a = m_ThrowSamples[(newest - k + kThrowSamples) % kThrowSamples];
         if (a.t <= 0.0 || a.t < since)
             break;
+        if (a.t > until)
+            continue;
         for (int j = k + 1; j < kThrowSamples; ++j)
         {
             const ThrowSample& b = m_ThrowSamples[(newest - j + kThrowSamples) % kThrowSamples];
@@ -595,9 +611,9 @@ bool VR::TryGetThrowVelocity(Vector& out)
     }
     if (bestSpeed < 0.f)
         return false;
-    // Back from body-yaw space to world.
+    // Back from tracking-space yaw to world.
     float s = 0.f, c = 1.f;
-    SinCos(DEG2RAD(GetViewAngle().y), &s, &c);
+    SinCos(DEG2RAD(m_RotationOffsetY.load(std::memory_order_acquire)), &s, &c);
     Vector world(best.x * c - best.y * s, best.x * s + best.y * c, best.z);
     world *= (2.f / 3.f) * std::max(0.1f, bmvr::g_ThrowScale);
     const float speed = world.Length();

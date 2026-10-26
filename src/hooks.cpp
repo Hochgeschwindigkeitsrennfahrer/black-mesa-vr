@@ -7952,6 +7952,26 @@ bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* an
         Game::logMsg("VR frag throw: hand %.0f units from the game's point, kept the game's", (hand - *pos).Length());
         return ok;
     }
+    // The game's point passed its own trace from the eye. A hand reaching
+    // through a wall, a door or a prop must not spawn the grenade on the
+    // other side: trace from the game's point to the hand and keep the
+    // game's point if anything solid is in between. (Server and client run
+    // on the game thread in single player, so the client trace is safe here.)
+    if (m_Game && m_Game->m_EngineTrace)
+    {
+        C_BaseEntity* player = m_Game->GetLocalPlayerEntity();
+        C_BaseEntity* vm = m_Game->GetViewModelEntity();
+        CTraceFilterSkipTwoEntities filter(player, vm, 0);
+        Ray_t ray;
+        ray.Init(*pos, hand);
+        CGameTrace tr{};
+        m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT_HULL, &filter, &tr);
+        if (tr.startsolid || tr.fraction < 1.f)
+        {
+            Game::logMsg("VR frag throw: hand behind geometry (fraction %.2f), kept the game's point", tr.fraction);
+            return ok;
+        }
+    }
     *pos = hand;
     return ok;
 }

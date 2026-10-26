@@ -1226,7 +1226,9 @@ private:
     // Hand throw (vr_crowbar.cpp): right-hand positions relative to the body,
     // unrotated by the view yaw, so walking and turning add nothing.
     struct ThrowSample { double t; Vector local; };
-    static constexpr int kThrowSamples = 160;   // ~1.3 s at 120 Hz
+    // One sample per Present: 512 keeps the release window (up to 1 s back)
+    // even at ~400 fps.
+    static constexpr int kThrowSamples = 512;
     double m_ThrowReleaseT = 0.0;               // trigger let go (IN_ATTACK 1 -> 0)
     bool m_ThrowAttackHeld = false;
     ThrowSample m_ThrowSamples[kThrowSamples]{};
