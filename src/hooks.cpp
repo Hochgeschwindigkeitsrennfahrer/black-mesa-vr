@@ -6459,6 +6459,8 @@ Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out
 void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang)
 {
     (void)edx;
+    if (m_VR)
+        m_VR->NoteGrabControllerActive();
     Vector p{};
     QAngle a{};
     if (pos)

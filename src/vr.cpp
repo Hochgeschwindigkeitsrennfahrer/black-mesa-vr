@@ -5425,6 +5425,7 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
             m_GrabHandLeft = leftUse;
             m_LastGrabHandLeft = m_GrabHandLeft;
             m_UseHeldSinceMs = now;
+            m_UsePressTick = GetTickCount64();
             m_UseDropRetries = 0;
             static int s_latchLog;
             if (s_latchLog < 12)
@@ -5433,7 +5434,9 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
                 ++s_latchLog;
             }
         }
-        else if (m_UseHeldSinceMs > 0.0 && (now - m_UseHeldSinceMs) >= 100.0)
+        // Was: any hold over 100 ms counted as carrying, so letting go of
+        // train controls held that long pulsed a second Use that let go of them.
+        else if (GrabControllerRecentlyActive())
             m_GrabHoldingPhysics = true;
         buttons |= IN_USE;
         m_UseWasHeld = true;

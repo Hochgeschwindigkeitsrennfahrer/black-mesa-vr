@@ -715,10 +715,27 @@ public:
     // Weapon fire, shoot origin, and flashlight must not follow a leftover
     // left-hand Use latch. Only a live physics hold redirects those.
     bool UseGrabRedirectsFire() const { return m_GrabLatched && m_GrabUseEntityHeld; }
-    // While Use is held the game's +use trace (eye along the usercmd angles)
-    // must point where the pressing hand points, or the left trigger picks up
-    // what the gun points at and then holds it in the left hand.
-    bool UseAimFollowsGrabHand() const { return m_GrabLatched && (m_GrabUseEntityHeld || m_UseWasHeld); }
+    // The game's +use trace (eye along the usercmd angles) runs on the press
+    // tick, so the angles follow the pressing hand for the first 0.3 s of a
+    // press; otherwise the left trigger picks up what the gun points at and
+    // holds it in the left hand. Not for the whole hold: Use held on train
+    // controls or a charger would turn the gun's shots to the left hand.
+    bool UseAimFollowsGrabHand() const
+    {
+        return UseGrabRedirectsFire()
+            || (m_GrabLatched && m_UseWasHeld && GetTickCount64() - m_UsePressTick < 300);
+    }
+    // The server grab controller sets its target every tick while the player
+    // carries something (Hooks::dGrabSetTarget). The client's m_hUseEntity
+    // read never sees BM pickups, so this is what tells a carried prop (drop
+    // it with a second Use on release) from train controls, buttons and
+    // chargers (leave them alone).
+    void NoteGrabControllerActive() { m_GrabControllerSeenTick.store(GetTickCount64(), std::memory_order_release); }
+    bool GrabControllerRecentlyActive() const
+    {
+        const uint64_t t = m_GrabControllerSeenTick.load(std::memory_order_acquire);
+        return t != 0 && GetTickCount64() - t < 250;
+    }
     bool GrabHandTrackingValid() const
     {
         if (!m_GrabLatched)
@@ -1352,6 +1369,8 @@ private:
     double m_UseDropGapUntilMs = 0.0;
     double m_UseDropPulseUntilMs = 0.0;
     double m_UseHeldSinceMs = 0.0;
+    uint64_t m_UsePressTick = 0;
+    std::atomic<uint64_t> m_GrabControllerSeenTick{ 0 };
     double m_UseDropClassifyUntilMs = 0.0;
     double m_UseDropSettleUntilMs = 0.0;
     int m_UseDropRetries = 0;
