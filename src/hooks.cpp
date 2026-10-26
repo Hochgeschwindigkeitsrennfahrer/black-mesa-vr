@@ -1420,6 +1420,79 @@ namespace
         Hooks::m_VR->NoteViewmodelOffhandWorld(world);
     }
 
+    // studiohdr_t numlocalattachments / localattachmentindex (after
+    // numbodyparts 232 / bodypartindex 236); mstudioattachment_t is
+    // sznameindex, flags, localbone, matrix3x4 local, int unused[8] = 92 bytes.
+    constexpr int kStudioHdrNumLocalAttachments = 240;
+    constexpr int kStudioHdrLocalAttachmentIndex = 244;
+    constexpr int kStudioAttachmentSize = 92;
+
+    // Muzzle attachment taken from the bone matrices the viewmodel is drawn
+    // with. The game's GetAttachment runs FormatViewModelAttachment, which
+    // stretches the point sideways from the centre of the (desktop) main view
+    // by tan(fov)/tan(viewmodel fov): the beam started left of the barrel
+    // with the gun held left and right of it held right (user 2026-10-26).
+    // These are the drawn bones (rigid re-lock, scale), so the point is where
+    // the barrel is on screen in this very frame.
+    void SampleViewmodelMuzzle(unsigned char* hdr, const float* bones12, int nBones)
+    {
+        if (!hdr || !bones12 || nBones <= 0 || !Hooks::m_VR)
+            return;
+        static unsigned char* s_hdr = nullptr;
+        static int s_bone = -1;
+        static float s_local[3][4]{};
+        if (hdr != s_hdr)
+        {
+            s_hdr = hdr;
+            s_bone = -1;
+            int length = 0, num = 0, index = 0;
+            __try
+            {
+                length = *reinterpret_cast<int*>(hdr + kStudioHdrLength);
+                num = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalAttachments);
+                index = *reinterpret_cast<int*>(hdr + kStudioHdrLocalAttachmentIndex);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return;
+            }
+            if (length < 256 || length > 4 * 1024 * 1024 || num <= 0 || num > 64
+                || index < 0 || index + num * kStudioAttachmentSize > length)
+                return;
+            static const char* kNames[] = { "muzzle", "Fire01", "Fire02" };
+            for (const char* want : kNames)
+            {
+                for (int i = 0; i < num && s_bone < 0; ++i)
+                {
+                    unsigned char* att = hdr + index + i * kStudioAttachmentSize;
+                    int szname = 0, bone = -1;
+                    __try
+                    {
+                        szname = *reinterpret_cast<int*>(att);
+                        bone = *reinterpret_cast<int*>(att + 8);
+                        std::memcpy(s_local, att + 12, sizeof(s_local));
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        continue;
+                    }
+                    if (_stricmp(StudioRelString(att, szname), want) == 0 && bone >= 0)
+                        s_bone = bone;
+                }
+                if (s_bone >= 0)
+                    break;
+            }
+            Game::logMsg("Viewmodel muzzle attachment from model data: bone %d", s_bone);
+        }
+        if (s_bone < 0 || s_bone >= nBones)
+            return;
+        float world[3][4];
+        MulMatrix3x4(reinterpret_cast<const float(*)[4]>(bones12 + s_bone * 12), s_local, world);
+        Hooks::m_VR->NoteViewmodelMuzzleDrawn(
+            Vector(world[0][3], world[1][3], world[2][3]),
+            Vector(world[0][0], world[1][0], world[2][0]));
+    }
+
     // Frag grenade: the grenade is its own root bone (GrenadeSpawn, pins are
     // its children) and the pin-pull/throw animations swing it across the
     // view while the hidden arms do the work. In VR the hand holds still, so
@@ -5045,6 +5118,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
                 SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
+                SampleViewmodelMuzzle(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);
