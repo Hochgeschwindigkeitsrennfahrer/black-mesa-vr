@@ -5077,33 +5077,38 @@ bool VR::LadderMode(int& moveBits, bool& onLadder) const
     if (!m_Game)
         return false;
     constexpr int kMoveTypeLadder = 9;
-    constexpr int kContentsLadder = 0x20000000;
-    // MASK_PLAYERSOLID: solid, window, grate, moveable, playerclip, monster.
-    constexpr unsigned kMaskPlayerSolid = 0x1 | 0x2 | 0x8 | 0x4000 | 0x10000 | 0x2000000;
     constexpr float kStickDeflection = 0.2f;
     const float f = m_WalkForward.load(std::memory_order_acquire);
     const float s = m_WalkSide.load(std::memory_order_acquire);
     bool ladder = m_Game->LocalPlayerMoveType() == kMoveTypeLadder;
     onLadder = ladder;
+    Vector origin{};
     if (!ladder && f * f + s * s > kStickDeflection * kStickDeflection
-        && m_Game->m_EngineTrace && m_SetupOrigin.LengthSqr() > 1.f)
+        && m_Game->LocalPlayerAbsOrigin(origin))
     {
-        // The step onto the ladder still ran LadderMove with the gun's angles;
-        // a gun turned away from the ladder read as walking off it.
-        Vector hmdF{}, hmdR{};
-        QAngle::AngleVectors(QAngle(0.f, GetViewAngle().y, 0.f), &hmdF, &hmdR, nullptr);
-        Vector dir = hmdF * f + hmdR * s;
-        if (VectorNormalize(dir) > 0.01f)
+        // BM's ladders are func_useableladders: no ladder brush, just a line
+        // between two mount points. HL2 auto-mounts within 32 units of it
+        // (CheckLadderAutoMountCone) when the view faces it within 15
+        // degrees; with the gun's angles that rarely held, so the head's
+        // angles take over from 48 units.
+        constexpr float kNearHu = 48.f;
+        Vector bottoms[32], tops[32];
+        const int n = m_Game->CollectLadders(bottoms, tops, 32);
+        for (int i = 0; i < n && !ladder; ++i)
         {
-            // Torso box below the engine eye (eye 64 standing, 28 ducked).
-            C_BaseEntity* player = m_Game->GetLocalPlayerEntity();
-            C_BaseEntity* vm = m_Game->GetViewModelEntity();
-            CTraceFilterSkipTwoEntities filter(player, vm, 0);
-            Ray_t ray;
-            ray.Init(m_SetupOrigin, m_SetupOrigin + dir * 8.f, Vector(-16.f, -16.f, -24.f), Vector(16.f, 16.f, 4.f));
-            CGameTrace tr{};
-            m_Game->m_EngineTrace->TraceRay(ray, kMaskPlayerSolid | kContentsLadder, &filter, &tr);
-            ladder = (tr.startsolid || tr.fraction < 1.f) && (tr.contents & kContentsLadder) != 0;
+            const Vector axis = tops[i] - bottoms[i];
+            const float len2 = axis.LengthSqr();
+            float t = len2 > 1.f ? (origin - bottoms[i]).Dot(axis) / len2 : 0.f;
+            t = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
+            const Vector closest = bottoms[i] + axis * t;
+            if ((closest - origin).LengthSqr() < kNearHu * kNearHu)
+                ladder = true;
+        }
+        static int s_nearLog;
+        if (ladder && s_nearLog < 8)
+        {
+            Game::logMsg("Ladder near (%d ladders on the map)", n);
+            ++s_nearLog;
         }
     }
     if (!ladder)

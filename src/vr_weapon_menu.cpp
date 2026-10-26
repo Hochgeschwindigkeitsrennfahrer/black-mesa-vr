@@ -1865,11 +1865,10 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
                 // Opened low (hand down by the hip), an upright plane is seen
                 // edge-on: tilt it back about its horizontal axis to face the
                 // eye, by the angle the eye looks down at it (max 60 degrees).
-                const Vector center = hand + yawFwd * kMenuHandForwardHu;
                 Vector menuFwd = yawFwd;
                 Vector menuUp = worldUp;
                 {
-                    const Vector toCenter = center - eye;
+                    const Vector toCenter = hand + yawFwd * kMenuHandForwardHu - eye;
                     const float flat = sqrtf(toCenter.x * toCenter.x + toCenter.y * toCenter.y);
                     constexpr float kMaxTiltRad = 60.f * 3.14159265f / 180.f;
                     float tilt = (flat > 1.f) ? atan2f(-toCenter.z, flat) : 0.f;
@@ -1882,6 +1881,10 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
                         menuUp = worldUp * c + yawFwd * sn;    // top leans away
                     }
                 }
+                // Centre on the hand's line along the (tilted) normal: hover
+                // projects the hand along it, so an offset centre put the hand
+                // on the slot below (the crowbar) at open.
+                const Vector center = hand + menuFwd * kMenuHandForwardHu;
                 m_WeaponMenuLatchBody = body;
                 m_WeaponMenuLatchWorld = center;
                 m_WeaponMenuLatchDelta = m_WeaponMenuLatchWorld - body;

@@ -856,6 +856,78 @@ int Game::LocalPlayerMoveType()
     return value;
 }
 
+bool Game::LocalPlayerAbsOrigin(Vector& out)
+{
+    if (!m_EngineClient || !m_ClientEntityList)
+        return false;
+    const int local = m_EngineClient->GetLocalPlayer();
+    void* player = local > 0 ? m_ClientEntityList->GetClientEntity(local) : nullptr;
+    if (!player)
+        return false;
+    __try
+    {
+        out = *reinterpret_cast<const Vector*>(static_cast<const char*>(player) + Offsets::kCBaseEntity_AbsOrigin);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+    return out.LengthSqr() > 0.f;
+}
+
+int Game::CollectLadders(Vector* bottoms, Vector* tops, int maxLadders)
+{
+    static int s_index[64];
+    static int s_count = 0;
+    static DWORD s_scanMs = 0;
+    if (!m_ClientEntityList)
+        return 0;
+    const DWORD now = GetTickCount();
+    if (s_scanMs == 0 || now - s_scanMs > 1000)
+    {
+        s_scanMs = now;
+        s_count = 0;
+        const int hi = m_ClientEntityList->GetHighestEntityIndex();
+        for (int e = 1; e <= hi && s_count < 64; ++e)
+        {
+            const char* name = GetEntityNetworkName(e);
+            if (name && std::strcmp(name, "CFuncLadder") == 0)
+                s_index[s_count++] = e;
+        }
+    }
+    int n = 0;
+    for (int i = 0; i < s_count && n < maxLadders; ++i)
+    {
+        const char* ent = static_cast<const char*>(m_ClientEntityList->GetClientEntity(s_index[i]));
+        if (!ent)
+            continue;
+        __try
+        {
+            const Vector org = *reinterpret_cast<const Vector*>(ent + Offsets::kCBaseEntity_AbsOrigin);
+            bottoms[n] = org + *reinterpret_cast<const Vector*>(ent + Offsets::kCFuncLadder_MountBottom);
+            tops[n] = org + *reinterpret_cast<const Vector*>(ent + Offsets::kCFuncLadder_MountTop);
+            ++n;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+    static int s_loggedCount = -1;
+    if (n != s_loggedCount)
+    {
+        s_loggedCount = n;
+        Vector me{};
+        const bool haveMe = LocalPlayerAbsOrigin(me);
+        if (n > 0)
+            Game::logMsg("Ladders: %d on the map; first bottom (%.0f,%.0f,%.0f) top (%.0f,%.0f,%.0f), player (%.0f,%.0f,%.0f)%s",
+                n, bottoms[0].x, bottoms[0].y, bottoms[0].z, tops[0].x, tops[0].y, tops[0].z,
+                me.x, me.y, me.z, haveMe ? "" : " (unknown)");
+        else
+            Game::logMsg("Ladders: none on the map");
+    }
+    return n;
+}
+
 bool Game::LocalPlayerHasSuit()
 {
     ScanWristHudNetVars();

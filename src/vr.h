@@ -715,8 +715,8 @@ public:
     // hand's own angles from the eye miss a button the hand points at from
     // hip height by the eye-hand offset.
     QAngle GetUseAimAnglesFromEye() const;
-    // True on a ladder (MOVETYPE_LADDER; onLadder) or when the stick walks
-    // the body into one within a few units. moveBits = IN_FORWARD/BACK/
+    // True on a ladder (MOVETYPE_LADDER; onLadder) or with the stick
+    // deflected within 48 units of a func_useableladder's mount line. moveBits = IN_FORWARD/BACK/
     // MOVELEFT/MOVERIGHT from the stick at 0.2 deflection (head frame):
     // LadderMove climbs only on those bits, which gameplay sets past 0.5, so
     // a gentle walk-in mounted the ladder and then hung there.

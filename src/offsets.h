@@ -250,6 +250,10 @@ public:
     // client.dll C_BaseEntity prediction datamap m_MoveType (FIELD_CHARACTER),
     // one byte; MOVETYPE_LADDER = 9.
     static constexpr int kCBaseEntity_MoveType = 0x17C;
+    // client.dll DT_FuncLadder (HL2 func_useableladder): player mount points,
+    // relative to the ladder's origin (func_ladder.cpp Spawn subtracts it).
+    static constexpr int kCFuncLadder_MountTop = 0x6C0;
+    static constexpr int kCFuncLadder_MountBottom = 0x6CC;
     static constexpr int kCBasePlayer_AirFinished = 0x16e4;
 
     // client.dll C_Weapon_RPG laser update (FUN_10291F80). CHudCrosshair Paint
