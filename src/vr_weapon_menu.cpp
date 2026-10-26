@@ -1853,19 +1853,41 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 
                 const Vector body = MenuPlayerBody(this);
                 Vector hand{};
+                Vector eye{};
                 {
                     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
                     hand = ControllerTrackingToWorld(body, m_PhysicalRightPosAbs);
+                    eye = ControllerTrackingToWorld(body, m_HmdPosAbs);
                 }
 
                 // HL2VR OpenWeaponSelection: screen centre at
                 // PrimaryHandOrigin() + yaw-forward * 4, vertical plane.
+                // Opened low (hand down by the hip), an upright plane is seen
+                // edge-on: tilt it back about its horizontal axis to face the
+                // eye, by the angle the eye looks down at it (max 60 degrees).
+                const Vector center = hand + yawFwd * kMenuHandForwardHu;
+                Vector menuFwd = yawFwd;
+                Vector menuUp = worldUp;
+                {
+                    const Vector toCenter = center - eye;
+                    const float flat = sqrtf(toCenter.x * toCenter.x + toCenter.y * toCenter.y);
+                    constexpr float kMaxTiltRad = 60.f * 3.14159265f / 180.f;
+                    float tilt = (flat > 1.f) ? atan2f(-toCenter.z, flat) : 0.f;
+                    if (tilt > kMaxTiltRad)
+                        tilt = kMaxTiltRad;
+                    if (tilt > 0.f)
+                    {
+                        const float c = cosf(tilt), sn = sinf(tilt);
+                        menuFwd = yawFwd * c - worldUp * sn;   // normal along the line of sight
+                        menuUp = worldUp * c + yawFwd * sn;    // top leans away
+                    }
+                }
                 m_WeaponMenuLatchBody = body;
-                m_WeaponMenuLatchWorld = hand + yawFwd * kMenuHandForwardHu;
+                m_WeaponMenuLatchWorld = center;
                 m_WeaponMenuLatchDelta = m_WeaponMenuLatchWorld - body;
-                m_WeaponMenuLatchFwd = yawFwd;
+                m_WeaponMenuLatchFwd = menuFwd;
                 m_WeaponMenuLatchRight = yawRight;
-                m_WeaponMenuLatchUp = worldUp;
+                m_WeaponMenuLatchUp = menuUp;
                 m_WeaponMenuLatchYaw = m_RotationOffsetY.load(std::memory_order_acquire);
                 m_WeaponMenuLatched = true;
             }
