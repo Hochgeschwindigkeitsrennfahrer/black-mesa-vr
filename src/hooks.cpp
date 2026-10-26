@@ -4390,9 +4390,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     //  - stick back = IN_FORWARD with the view turned round and 45 degrees
     //    down: always climbs down, and at the bottom the dismount behind the
     //    player is 'in front' of that view, so it steps off backwards;
-    //  - jump = the view turned round, stick zeroed: always away from the
-    //    ladder, and positive forwardmove is held off for 0.5 s so the
-    //    auto-mount cone does not grab the ladder straight back.
+    //  - jump = along the stick (head frame) or the view, stick zeroed so
+    //    HL2 does not flip it; positive forwardmove is held off for 0.5 s so
+    //    the auto-mount cone does not grab the ladder straight back.
     // Firing keeps the gun's angles and the stock behaviour.
     static ULONGLONG s_ladderJumpUntil = 0;
     int ladderBits = 0;
@@ -4456,8 +4456,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             float yaw = hmdVa.y;
             if (ladderJump)
             {
+                // Along the stick (head frame), or the view with the stick
+                // centred. The turned-round view jumped backwards for a
+                // player looking at where they wanted to go.
                 pitch = -10.f;   // facing up a little adds the jump's +50 z
-                yaw += 180.f;
+                const float f = m_VR->m_WalkForward.load(std::memory_order_acquire);
+                const float sd = m_VR->m_WalkSide.load(std::memory_order_acquire);
+                if (f * f + sd * sd > 0.2f * 0.2f)
+                    yaw -= atan2f(sd, f) * 180.f / 3.14159265f;   // Source yaw grows to the left
             }
             else if (ladderBack)
             {

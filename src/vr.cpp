@@ -9153,12 +9153,29 @@ void VR::ApplyTwoHandWeaponAim()
     {
         // Latched: a new squeeze lets go, and so does a support hand taken
         // well off the gun (else the aim would follow a hand that left it).
-        const float leaveR = (pistol ? 0.20f : 0.30f) * scale;
+        // Distance from the grip point held for 0.25 s: the old lateral test
+        // against the posed model axis drifted to its 0.30 m limit while the
+        // hand still held the shotgun's pump (2026-10-26 log: lat 11.8-12.9).
+        static DWORD s_leaveSinceMs;
+        const float leaveR = (pistol ? 0.20f : 0.45f) * scale;
         if (squeezeEdge)
+        {
             m_TwoHandActive = false;
-        else if (pistol ? distToGrip > leaveR
-            : (lat > leaveR || along < alongMin - leaveR || along > alongMax + leaveR))
-            m_TwoHandActive = false;
+            s_leaveSinceMs = 0;
+        }
+        else if (distToGrip > leaveR)
+        {
+            const DWORD now = GetTickCount();
+            if (s_leaveSinceMs == 0)
+                s_leaveSinceMs = now;
+            else if (now - s_leaveSinceMs >= 250)
+            {
+                m_TwoHandActive = false;
+                s_leaveSinceMs = 0;
+            }
+        }
+        else
+            s_leaveSinceMs = 0;
     }
     else if (m_TwoHandActive)
     {
