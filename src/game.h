@@ -88,6 +88,8 @@ public:
     bool LocalPlayerZooming();
     // -1 if the netvar is missing/retired, otherwise 0 or 1.
     int LocalPlayerZoomFlag();
+    // MOVETYPE_* of the local player (9 = ladder), -1 when unavailable.
+    int LocalPlayerMoveType();
     int RpgLaserOnOffset() const;
     int RpgLaserDotOffset() const;
     C_BaseEntity* FindEntityByNetworkNameContains(const char* token);

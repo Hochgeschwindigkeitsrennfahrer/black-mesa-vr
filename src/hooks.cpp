@@ -4405,9 +4405,36 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         // Pickup follow uses the grab hand. Weapon fire / flashlight must not:
         // leftover left-Use latch used to keep viewangles and shoot origin on
         // that hand after a door, button, or charger.
-        if (m_VR->UseGrabRedirectsFire() && m_VR->GrabHandTrackingValid())
+        if (m_VR->UseAimFollowsGrabHand() && m_VR->GrabHandTrackingValid())
         {
             apply(m_VR->GetUseAimAngles());
+            return;
+        }
+        // On a func_ladder, Source's LadderMove climbs along the usercmd
+        // angles from the IN_FORWARD/IN_BACK bits, which come from the stick
+        // relative to the head. With the gun's angles a gun turned away from
+        // the ladder pushed off it, and climbing down needed the gun pitched
+        // past 45 degrees. Use the head instead, pitch doubled so looking
+        // ~23 degrees down climbs down. Firing keeps the gun aim.
+        constexpr int kMoveTypeLadder = 9;
+        constexpr float kLadderPitchScale = 2.f;
+        if (m_Game && m_Game->LocalPlayerMoveType() == kMoveTypeLadder
+            && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0)
+        {
+            const Vector hmdVa = m_VR->GetViewAngle();
+            float pitch = hmdVa.x;
+            if (pitch > 180.f)
+                pitch -= 360.f;
+            pitch *= kLadderPitchScale;
+            if (pitch > 89.f) pitch = 89.f;
+            if (pitch < -89.f) pitch = -89.f;
+            static int s_ladderLog;
+            if (s_ladderLog < 8)
+            {
+                Game::logMsg("Ladder aim: head yaw %.0f pitch %.0f -> %.0f", hmdVa.y, hmdVa.x, pitch);
+                ++s_ladderLog;
+            }
+            apply(QAngle(pitch, hmdVa.y, 0.f));
             return;
         }
         // Looking down a scope, the crosshair is fixed in the middle of the

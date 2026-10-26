@@ -715,6 +715,10 @@ public:
     // Weapon fire, shoot origin, and flashlight must not follow a leftover
     // left-hand Use latch. Only a live physics hold redirects those.
     bool UseGrabRedirectsFire() const { return m_GrabLatched && m_GrabUseEntityHeld; }
+    // While Use is held the game's +use trace (eye along the usercmd angles)
+    // must point where the pressing hand points, or the left trigger picks up
+    // what the gun points at and then holds it in the left hand.
+    bool UseAimFollowsGrabHand() const { return m_GrabLatched && (m_GrabUseEntityHeld || m_UseWasHeld); }
     bool GrabHandTrackingValid() const
     {
         if (!m_GrabLatched)

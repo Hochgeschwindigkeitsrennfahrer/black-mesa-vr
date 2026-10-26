@@ -611,6 +611,7 @@ namespace
     int g_nvRpgLaserDot = -1;
     int g_nvWaterLevel = -1;
     int g_nvAirFinished = -1;
+    int g_nvMoveType = -1;
     bool g_nvScanned = false;
 
     const char* FindStringInImage(const unsigned char* base, size_t size, const char* s)
@@ -775,12 +776,17 @@ void Game::ScanWristHudNetVars()
         base, imgSize, "m_AirFinished", 0x1400, 0x1800);
     if (g_nvAirFinished < 0)
         g_nvAirFinished = Offsets::kCBasePlayer_AirFinished;
+    // Datamap typedescription_t: name pointer, then the field offset.
+    g_nvMoveType = FindRecvPropOffsetPlus4(
+        base, imgSize, "m_MoveType", 0x100, 0x200, false);
+    if (g_nvMoveType < 0)
+        g_nvMoveType = Offsets::kCBaseEntity_MoveType;
     Game::logMsg("Wrist HUD netvars health=%d armor=%d clip1=%d clip2=%d ammo=%d primType=%d secType=%d",
         g_nvHealth, g_nvArmor, g_nvClip1, g_nvClip2, g_nvAmmoBase, g_nvPrimaryAmmoType,
         g_nvSecondaryAmmoType);
-    Game::logMsg("VR netvars m_Local=%d m_bWearingSuit(+local)=%d suit=%d zooming=%d flashlight=%d rpgLaserOn=%d rpgLaserDot=%d water=%d airFinished=%d",
+    Game::logMsg("VR netvars m_Local=%d m_bWearingSuit(+local)=%d suit=%d zooming=%d flashlight=%d rpgLaserOn=%d rpgLaserDot=%d water=%d airFinished=%d moveType=%d",
         localData, suitInLocal, g_nvWearingSuit, g_nvZooming, flashlight,
-        g_nvRpgLaserOn, g_nvRpgLaserDot, g_nvWaterLevel, g_nvAirFinished);
+        g_nvRpgLaserOn, g_nvRpgLaserDot, g_nvWaterLevel, g_nvAirFinished, g_nvMoveType);
 }
 
 // Reads a networked bool. Returns -1 when the offset is unresolved, has been
@@ -812,6 +818,39 @@ int Game::ReadPlayerFlagByte(int& offset)
     {
         Game::logMsg("VR netvar at +0x%X read %u, not a bool — offset retired", offset, value);
         offset = -1;
+        return -1;
+    }
+    return value;
+}
+
+// MOVETYPE_* of the local player, -1 when unavailable. Retired like the
+// bools above when it reads past MOVETYPE_CUSTOM (11).
+int Game::LocalPlayerMoveType()
+{
+    ScanWristHudNetVars();
+    if (g_nvMoveType < 0 || !m_EngineClient || !m_ClientEntityList)
+        return -1;
+    const int local = m_EngineClient->GetLocalPlayer();
+    if (local <= 0)
+        return -1;
+    void* player = m_ClientEntityList->GetClientEntity(local);
+    if (!player)
+        return -1;
+    unsigned char value = 0;
+    __try
+    {
+        value = *reinterpret_cast<volatile unsigned char*>(
+            static_cast<unsigned char*>(player) + g_nvMoveType);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        g_nvMoveType = -1;
+        return -1;
+    }
+    if (value > 11)
+    {
+        Game::logMsg("VR movetype at +0x%X read %u, offset retired", g_nvMoveType, value);
+        g_nvMoveType = -1;
         return -1;
     }
     return value;

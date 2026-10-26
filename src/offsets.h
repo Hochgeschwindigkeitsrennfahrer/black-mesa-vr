@@ -247,6 +247,9 @@ public:
     // DT_LocalPlayerExclusive (FUN_100b7240): m_nWaterLevel +0x180 (byte),
     // m_AirFinished +0x16e4 (float). WL_Eyes == 3 is fully underwater.
     static constexpr int kCBasePlayer_nWaterLevel = 0x180;
+    // client.dll C_BaseEntity prediction datamap m_MoveType (FIELD_CHARACTER),
+    // one byte; MOVETYPE_LADDER = 9.
+    static constexpr int kCBaseEntity_MoveType = 0x17C;
     static constexpr int kCBasePlayer_AirFinished = 0x16e4;
 
     // client.dll C_Weapon_RPG laser update (FUN_10291F80). CHudCrosshair Paint
