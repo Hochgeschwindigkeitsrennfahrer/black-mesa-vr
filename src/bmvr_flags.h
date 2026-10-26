@@ -400,13 +400,17 @@ namespace bmvr
     // 2D GameUI in the HMD: fraction of the full-width letterbox (1 = glued to
     // the view). ~0.70 is a closer monitor; lower = farther / smaller.
     extern float g_MenuPanelScale;
-    // HL2VR hlvr_menu_forward / overlay width, in metres. Defaults match the
-    // OpenXR helper 2D quad (0.65 m × 1.05 m, 2026-09-03). Do not copy
-    // HL2VR's 150 Source-unit (~3.8 m) distance — that was too far here.
+    // HL2VR hlvr_menu_forward / overlay width, in metres (main menu quad and
+    // pause overlay; the game publishes them to the OpenXR helper, bridge v16).
+    // 1.4 m × 1.6 m (~60°) since 2026-10-26: 0.65 m × 1.05 m (~78°, 2026-09-03)
+    // felt too close and made pointer lag obvious next to the hand. Do not
+    // copy HL2VR's 150 Source-unit (~3.8 m) distance — too far here. VR
+    // settings panel: MENU section.
     extern float g_MenuForwardMeters;
     extern float g_MenuWidthMeters;
     extern float g_MenuHeightOffsetMeters;
-    // Seconds of low-pass on the VR menu pointer (hand tremor).
+    // Seconds of low-pass on the VR menu pointer (hand tremor). 0.05 since
+    // 2026-10-26 (0.18 dragged behind slow aiming).
     extern float g_MenuCursorSmoothSec;
 
     bool TryHudOverlay();

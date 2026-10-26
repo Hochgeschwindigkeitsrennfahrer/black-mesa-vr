@@ -26,7 +26,7 @@ inline void L4D2VR_SeqlockAcquire()
 }
 
 constexpr uint32_t L4D2VR_OPENXR_BRIDGE_MAGIC = 0x5258344Cu; // L4XR
-constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 15;
+constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 16;
 // 13: XR_KHR_visibility_mask hidden triangle list (NDC xy per eye).
 // 14: helperConsumingFrameId / helperConsumedFrameId (helper -> game blit
 //     progress; the game reuses a publish slot only once the helper's blit
@@ -300,6 +300,19 @@ struct L4D2VROpenXrPoseDesc
     float orientation[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 };
 
+// Bridge v16, game -> helper: where the mono 2D menu quad (main menu / load
+// GameUI) sits, the same numbers the game's menu pointer ray uses. distance /
+// width / offsetY in metres from the latched head pose; contentScale is the
+// letterbox fraction the game drew the menu into the eye image at
+// (MenuPanelScale). 0 = helper default.
+struct L4D2VROpenXrMenuQuadDesc
+{
+    float distanceMeters = 0.0f;
+    float widthMeters = 0.0f;
+    float offsetYMeters = 0.0f;
+    float contentScale = 0.0f;
+};
+
 struct L4D2VROpenXrControllerPoseDesc
 {
     uint32_t valid = 0;
@@ -456,4 +469,6 @@ struct L4D2VROpenXrBridgeState
     uint32_t helperConsumedFrameId = 0;
     uint32_t helperConsumedCount = 0;
     uint32_t reservedTail0 = 0;
+    uint32_t menuQuadGeneration = 0;
+    L4D2VROpenXrMenuQuadDesc menuQuad = {};
 };

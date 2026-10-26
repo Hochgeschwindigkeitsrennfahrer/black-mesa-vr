@@ -186,10 +186,10 @@ namespace bmvr
     float g_HudDistance = 1.05f;
     float g_HudSize = 0.70f;
     float g_MenuPanelScale = 0.70f;
-    float g_MenuForwardMeters = 0.65f;
-    float g_MenuWidthMeters = 1.05f;
+    float g_MenuForwardMeters = 1.4f;
+    float g_MenuWidthMeters = 1.6f;
     float g_MenuHeightOffsetMeters = -0.02f;
-    float g_MenuCursorSmoothSec = 0.18f;
+    float g_MenuCursorSmoothSec = 0.05f;
 
     static HMODULE g_Module = nullptr;
     static std::mutex g_LogMutex;

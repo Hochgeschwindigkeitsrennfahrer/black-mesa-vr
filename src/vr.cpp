@@ -3232,6 +3232,14 @@ void VR::PublishOpenXrResolvedEyeTextures(uint32_t frameId, bool panel2d)
     publishRight.vMin = 0.0f;
     publishRight.uMax = 1.0f;
     publishRight.vMax = 1.0f;
+    {
+        // The helper draws the 2D menu quad where the pointer ray expects it
+        // (IntersectMenuPanelUv uses the same metrics); only sent on change.
+        L4D2VROpenXrMenuQuadDesc menu{};
+        GetMenuOverlayMetrics(menu.distanceMeters, menu.widthMeters, menu.offsetYMeters);
+        menu.contentScale = bmvr::g_MenuPanelScale;
+        L4D2VR_PublishOpenXrMenuQuad(menu);
+    }
     L4D2VR_PublishOpenXrSharedTexturePair(publishLeft, publishRight);
     L4D2VR_PublishOpenXrSharedTextureFrame(frameId);
     m_OpenXrLastPublishedSharedTextureFrameId.store(frameId, std::memory_order_release);
@@ -5988,9 +5996,9 @@ void VR::GetMenuOverlayMetrics(float& distM, float& widthM, float& yOffM) const
     widthM = bmvr::g_MenuWidthMeters;
     yOffM = bmvr::g_MenuHeightOffsetMeters;
     if (!(distM > 0.2f && distM < 4.f))
-        distM = 0.65f;
+        distM = 1.4f;
     if (!(widthM > 0.4f && widthM < 4.f))
-        widthM = 1.05f;
+        widthM = 1.6f;
     if (!(yOffM >= -0.5f && yOffM <= 0.5f))
         yOffM = -0.02f;
 }
@@ -6471,7 +6479,7 @@ void VR::ApplyMenuCursor()
             const float speed = sqrtf(dx * dx + dy * dy) / dt;
             float tau = bmvr::g_MenuCursorSmoothSec;
             if (!(tau >= 0.02f && tau <= 0.6f))
-                tau = 0.18f;
+                tau = 0.05f;
             // Fast flicks cut lag; small tremor stays filtered (the idle
             // dead zone above already holds a resting cursor still).
             tau /= (1.f + speed / 2800.f);

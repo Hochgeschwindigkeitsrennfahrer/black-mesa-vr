@@ -80,6 +80,12 @@ SprintToggle=false
 # Two-handed guns: squeezing the support grip on the gun latches the hold (no need to
 # keep squeezing); squeeze again, or take the hand away from the gun, to let go.
 TwoHandGripToggle=false
+# Main menu / pause panel: distance and width in metres, height offset (+ = up), and menu
+# pointer smoothing in seconds (lower = more direct). Also in the VR settings panel (MENU).
+MenuForwardMeters=1.4
+MenuWidthMeters=1.6
+MenuHeightOffsetMeters=-0.02
+MenuCursorSmoothSec=0.05
 # The VR settings panel (weapon menu: the VR SETTINGS slot below the crowbar)
 # changes several of these live and writes them back here. They are also
 # bmvr_* console cvars.

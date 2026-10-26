@@ -52,6 +52,7 @@ void L4D2VR_PublishOpenXrSharedTexturePair(
 void L4D2VR_PublishOpenXrSharedTextureFrame(uint32_t frameId);
 void L4D2VR_PublishOpenXrOverlay(uint32_t overlayIndex, const L4D2VROpenXrOverlayDesc& overlay);
 void L4D2VR_PublishOpenXrOverlayFrame(uint32_t frameId);
+void L4D2VR_PublishOpenXrMenuQuad(const L4D2VROpenXrMenuQuadDesc& menu);
 
 // VRRuntimeBackend=fake (vr_fake_helper.cpp): runs the helper's side of the
 // bridge in-process, and hands console commands from VR\cmd.txt to the game.

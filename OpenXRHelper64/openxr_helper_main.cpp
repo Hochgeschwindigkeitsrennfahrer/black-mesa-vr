@@ -1667,6 +1667,27 @@ namespace
             return false;
         }
 
+        bool ReadMenuQuad(L4D2VROpenXrMenuQuadDesc& menu) const
+        {
+            if (!m_State)
+                return false;
+            for (int attempt = 0; attempt < 3; ++attempt)
+            {
+                const uint32_t gen0 = m_State->menuQuadGeneration;
+                if (gen0 == 0 || (gen0 & 1u))
+                    continue;
+                L4D2VR_SeqlockAcquire();
+                L4D2VROpenXrMenuQuadDesc snapshot = m_State->menuQuad;
+                L4D2VR_SeqlockAcquire();
+                if (m_State->menuQuadGeneration == gen0)
+                {
+                    menu = snapshot;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         bool ReadGameRenderPose(L4D2VROpenXrPoseDesc& pose, uint32_t* generation = nullptr) const
         {
             if (!m_State)
@@ -9957,14 +9978,32 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             // ~43° and 1.15m (too far vs the old projection).
                             // Crop to that letterbox and sit it ~arm's length
                             // at ~78° so it reads like MenuPanelScale=0.70.
-                            constexpr float kMenuQuadDistanceM = 0.65f;
-                            constexpr float kMenuQuadWidthM = 1.05f;
-                            constexpr float kMenuQuadContentScale = 0.70f;
+                            // Defaults; the game publishes its MenuForwardMeters /
+                            // MenuWidthMeters / MenuHeightOffsetMeters / MenuPanelScale
+                            // (bridge v16) so the picture matches its pointer ray.
+                            float menuDistanceM = 1.4f;
+                            float menuWidthM = 1.6f;
+                            float menuOffsetYM = -0.02f;
+                            float menuContentScale = 0.70f;
+                            {
+                                L4D2VROpenXrMenuQuadDesc mq{};
+                                if (m_Bridge.ReadMenuQuad(mq))
+                                {
+                                    if (std::isfinite(mq.distanceMeters) && mq.distanceMeters > 0.1f && mq.distanceMeters < 10.0f)
+                                        menuDistanceM = mq.distanceMeters;
+                                    if (std::isfinite(mq.widthMeters) && mq.widthMeters > 0.1f && mq.widthMeters < 10.0f)
+                                        menuWidthM = mq.widthMeters;
+                                    if (std::isfinite(mq.offsetYMeters) && std::fabs(mq.offsetYMeters) <= 1.0f)
+                                        menuOffsetYM = mq.offsetYMeters;
+                                    if (std::isfinite(mq.contentScale) && mq.contentScale >= 0.2f && mq.contentScale <= 1.0f)
+                                        menuContentScale = mq.contentScale;
+                                }
+                            }
                             L4D2VROpenXrOverlayDesc menu{};
-                            menu.distanceMeters = kMenuQuadDistanceM;
-                            menu.widthMeters = kMenuQuadWidthM;
+                            menu.distanceMeters = menuDistanceM;
+                            menu.widthMeters = menuWidthM;
                             menu.heightMeters = menu.widthMeters * 9.0f / 16.0f;
-                            menu.offsetMeters[1] = -0.02f;
+                            menu.offsetMeters[1] = menuOffsetYM;
 
                             XrPosef menuCenter{};
                             menuCenter.orientation = XrQuaternionf{ 0.0f, 0.0f, 0.0f, 1.0f };
@@ -9982,9 +10021,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             XrRect2Di crop = AspectFitImageRect(m_Eyes[0].width, m_Eyes[0].height, 16u, 9u);
                             {
                                 const int32_t cw = std::max(1, static_cast<int32_t>(
-                                    static_cast<float>(crop.extent.width) * kMenuQuadContentScale + 0.5f));
+                                    static_cast<float>(crop.extent.width) * menuContentScale + 0.5f));
                                 const int32_t ch = std::max(1, static_cast<int32_t>(
-                                    static_cast<float>(crop.extent.height) * kMenuQuadContentScale + 0.5f));
+                                    static_cast<float>(crop.extent.height) * menuContentScale + 0.5f));
                                 crop.offset.x += (crop.extent.width - cw) / 2;
                                 crop.offset.y += (crop.extent.height - ch) / 2;
                                 crop.extent.width = cw;
@@ -10007,10 +10046,14 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             quad.size.width = menu.widthMeters;
                             quad.size.height = menu.heightMeters;
                             addedMono2dQuad = true;
-                            static bool s_loggedMono2dQuad = false;
-                            if (!s_loggedMono2dQuad)
+                            // Logged again when the game changes the placement.
+                            static float s_loggedMenuQuad[3] = { -1.0f, -1.0f, -1.0f };
+                            if (s_loggedMenuQuad[0] != menu.distanceMeters || s_loggedMenuQuad[1] != menu.widthMeters
+                                || s_loggedMenuQuad[2] != menuContentScale)
                             {
-                                s_loggedMono2dQuad = true;
+                                s_loggedMenuQuad[0] = menu.distanceMeters;
+                                s_loggedMenuQuad[1] = menu.widthMeters;
+                                s_loggedMenuQuad[2] = menuContentScale;
                                 m_Log.Print(
                                     "OpenXR 2D menu/pause: quad layer both-eyes crop=%d,%d %dx%d size=%.2fx%.2fm dist=%.2fm; stereo projection skipped",
                                     crop.offset.x,

@@ -358,6 +358,8 @@ Next: when `POSE_FLAG_MONO`, skip the projection layer and submit one `XrComposi
 **2026-09-03:** first quad used pause-HUD 1.15 m × 1.35 m and a 16:9 crop of the portrait swapchain. The 0.70 letterbox sat at ~43° and felt far. Quad is now 0.65 m × 1.05 m (~78°) cropped to that letterbox. Confirm in the helper log:
 
     OpenXR 2D menu/pause: quad layer both-eyes ... dist=0.65m; stereo projection skipped
+
+**2026-10-26:** the helper no longer hardcodes the quad. The game publishes `MenuForwardMeters` / `MenuWidthMeters` / `MenuHeightOffsetMeters` / `MenuPanelScale` (bridge v16 `menuQuad`), which `IntersectMenuPanelUv` already used for the pointer ray; before, changing them in `config.txt` moved the pointer but not the picture. Defaults 1.4 m × 1.6 m (~60°): 0.65 m (~78°) felt too close next to the hand and made pointer lag obvious. Pointer smoothing default 0.18 s → 0.05 s. All four are in the VR settings panel (MENU).
     [OpenXR][EndFrameSubmit] ... projection=0 ... overlays=1 mono2dQuad=1
 
 Do not Y-flip the 2D capture. Do not turn stereo eye-swap back on (Link duplication is not L/R swap).
