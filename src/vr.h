@@ -1292,6 +1292,8 @@ private:
     int m_MenuCursorY = 0;
     double m_MenuCursorSmoothMs = 0.0;
     bool m_MenuPointerLastValid = false;
+    // Pointer moving (last change past the dead zone < 0.2 s ago): no dead zone.
+    double m_MenuPointerMoveMs = 0.0;
     float m_MenuPointerLastPos[3]{};
     float m_MenuPointerLastDir[3]{};
     bool m_MenuPanelPoseValid = false;

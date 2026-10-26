@@ -6428,8 +6428,15 @@ void VR::ApplyMenuCursor()
         if (c < -1.f)
             c = -1.f;
         const float dAng = acosf(c) * (180.f / 3.14159265f);
-        // Idle tracking noise, not a real aim change. Leave the cursor put.
-        if (dPos < 0.004f && dAng < 0.45f)
+        // Idle tracking noise, not a real aim change: leave a resting cursor
+        // put. Only at rest: the menu runs at ~280 fps, so a per-frame test
+        // also swallowed slow sweeps until 0.45 deg had piled up, and the
+        // cursor crossed the buttons in ~13 px steps (the laggy hover).
+        constexpr double kMoveHoldMs = 200.0;
+        const double nowMoveMs = QpcNowMs();
+        if (dPos >= 0.004f || dAng >= 0.45f)
+            m_MenuPointerMoveMs = nowMoveMs;
+        else if (nowMoveMs - m_MenuPointerMoveMs > kMoveHoldMs)
             haveHit = false;
     }
     if (haveHit && havePointerPose)
