@@ -880,6 +880,8 @@ public:
     // VR pointer in screen coordinates while it hit a menu in the last
     // 250 ms (Hooks::dGetCursorPos).
     bool TryGetMenuCursorScreen(POINT& out) const;
+    // The pointer hit the menu panel in the last 250 ms.
+    bool MenuPointerLive() const;
     // Menu / settings-panel trigger click: full pull to click, half release
     // to re-arm (a resting finger reads 0.6-0.7 on the PS VR2 Sense).
     static constexpr float kMenuTriggerPress = 0.9f;
@@ -1265,6 +1267,7 @@ private:
     bool m_OpenXrHudOverlayPublished = false;
     std::atomic<bool> m_HudPaintedThisFrame{ false };
     bool m_MenuTriggerWasDown = false;
+    bool m_MenuTriggerLatch = false;   // MenuTriggerClickHeld state, menu and gameplay
     bool m_MenuCursorValid = false;
     bool m_MenuCursorSmoothValid = false;
     float m_MenuCursorSmoothX = 0.f;
@@ -1289,6 +1292,12 @@ public:
     std::atomic<bool> m_MenuPanelUpForCursor{ false };
 private:
     DWORD m_MenuCursorLiveMs = 0;   // last frame the VR pointer hit the menu
+    // Click point (after the rewind) the GetCursorPos hook reports until
+    // m_MenuClickHoldUntilMs, so VGUI's press/release see where we clicked.
+    static constexpr DWORD kMenuClickHoldMs = 150;
+    int m_MenuClickHoldX = 0;
+    int m_MenuClickHoldY = 0;
+    std::atomic<DWORD> m_MenuClickHoldUntilMs{ 0 };
     bool m_WorldVguiTriggerWasDown = false;
     bool m_WorldVguiSuppressAttack = false;
     bool m_WeaponMenuOpen = false;

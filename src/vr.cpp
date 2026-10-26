@@ -4466,9 +4466,11 @@ void VR::ProcessInput()
         ApplyMenuCursor();
     }
     else
-        // Keep tracking held buttons while no menu panel is up: resetting to
-        // false made a held Cross/trigger click again when the menu reappeared.
-        m_MenuTriggerWasDown = PressedDigitalAction(m_ActionPrimaryAttack);
+        // Keep tracking the held trigger while no menu panel is up: resetting
+        // to false made a trigger still held from gameplay (e.g. pausing
+        // while firing) click as soon as the menu appeared. Same 0.9 / 0.5
+        // latch as the menu click itself.
+        m_MenuTriggerWasDown = MenuTriggerClickHeld(m_MenuTriggerLatch);
     // Recenter is a short tap of the same right-stick click that opens the
     // weapon menu. Do not recenter on press-edge while that click is held.
     if (resetHeld && !s_reset && !menuStick && !m_WeaponMenuOpenedThisHold)
@@ -5751,9 +5753,11 @@ void VR::ApplyMenuNavigation()
     }
 
     const bool select = PressedDigitalAction(m_ActionMenuSelect);
-    // With a pointer on the menu, Cross clicks there (menu pointer code);
-    // Enter would activate whatever has keyboard focus instead.
-    if (select && !s_ok && !m_MenuCursorValid)
+    // While the pointer is on the menu, menus click with the trigger only
+    // (Enter would activate whatever has keyboard focus instead). Otherwise
+    // Cross confirms. m_MenuCursorValid stays true once the pointer has hit
+    // a menu, so it is the 250 ms liveness that decides, not that flag.
+    if (select && !s_ok && !MenuPointerLive())
     {
         QueueKeyToHwnd(hwnd, VK_RETURN);
         Game::logMsg("Menu confirm A/MenuSelect");
@@ -6540,8 +6544,9 @@ void VR::ApplyMenuCursor()
     // Trigger with hysteresis: press past 0.9, re-arm only below 0.5. A
     // finger resting on the PS VR2 Sense trigger reads 0.6-0.7 (log
     // 2026-10-15) and its small movements clicked menu items on their own.
-    static bool s_trigLatched;
-    bool click = s_trigLatched;
+    // Same latch as outside menus (ProcessInput), so a menu that opens with
+    // the trigger resting between the thresholds starts from its real state.
+    bool click = m_MenuTriggerLatch;
     float triggerValue = -1.f;
     vr::InputAnalogActionData_t trig{};
     static float s_trigMinSinceClick = 1.f;
@@ -6556,11 +6561,11 @@ void VR::ApplyMenuCursor()
     }
     else
         click = PressedDigitalAction(m_ActionPrimaryAttack);
-    s_trigLatched = click;
+    m_MenuTriggerLatch = click;
     // Trigger only. Cross (a/click) read as pressed while the user only
     // pointed (PS VR2 Sense via Touch emulation, 2026-10-15) and clicked
-    // whatever was under the pointer; Cross still confirms (Enter) when
-    // there is no pointer. Its edges are logged to see what it reports.
+    // whatever was under the pointer; Cross still confirms (Enter) when the
+    // pointer is not on the menu (ApplyMenuNavigation). Its edges are logged.
     const bool selectHeld = PressedDigitalAction(m_ActionMenuSelect);
     static bool s_selectWas;
     static int s_selectLog;
@@ -6593,6 +6598,14 @@ void VR::ApplyMenuCursor()
                 break;
             }
         }
+        // VGUI reads the click position back through GetCursorPos (the hook
+        // answers with the live pointer), and SetCursorPos does not move the
+        // cursor while the window is unfocused under Wine. Report the
+        // rewound click point for a moment so press and release both land
+        // on the item the user aimed at.
+        m_MenuClickHoldX = wx;
+        m_MenuClickHoldY = wy;
+        m_MenuClickHoldUntilMs.store(GetTickCount() + kMenuClickHoldMs, std::memory_order_release);
         if (hwnd)
         {
             POINT pt{ wx, wy };
@@ -6649,6 +6662,11 @@ bool VR::MenuTriggerClickHeld(bool& latch) const
     return latch;
 }
 
+bool VR::MenuPointerLive() const
+{
+    return m_MenuCursorValid && m_MenuCursorLiveMs != 0 && GetTickCount() - m_MenuCursorLiveMs <= 250u;
+}
+
 bool VR::TryGetMenuCursorScreen(POINT& out) const
 {
     // Only while a VR menu panel is up (flag from ProcessInput: this runs on
@@ -6658,9 +6676,15 @@ bool VR::TryGetMenuCursorScreen(POINT& out) const
     if (!m_MenuCursorValid || !m_MenuCursorHwnd || m_MenuCursorLiveMs == 0
         || !m_MenuPanelUpForCursor.load(std::memory_order_relaxed))
         return false;
-    if (GetTickCount() - m_MenuCursorLiveMs > 250u)
+    const DWORD now = GetTickCount();
+    if (now - m_MenuCursorLiveMs > 250u)
         return false;
     POINT pt{ m_MenuCursorX, m_MenuCursorY };
+    // Just after a click: the (possibly rewound) click point, see
+    // ApplyMenuCursor.
+    const DWORD holdUntil = m_MenuClickHoldUntilMs.load(std::memory_order_acquire);
+    if (holdUntil != 0 && static_cast<int32_t>(holdUntil - now) > 0)
+        pt = POINT{ m_MenuClickHoldX, m_MenuClickHoldY };
     if (!ClientToScreen(m_MenuCursorHwnd, &pt))
         return false;
     out = pt;
@@ -8948,6 +8972,19 @@ void VR::ApplyTwoHandWeaponAim()
         m_TwoHandSmoothValid = false;
     };
 
+    // Support-grip press edge for TwoHandGripToggle (down at 0.35, re-armed
+    // below 0.20). Tracked before the early returns below, or a release
+    // during a menu / weapon switch / tracking loss went unseen and the next
+    // squeeze did not count.
+    const float gripVal = LeftSupportGripValue();
+    const bool squeezing = gripVal >= 0.35f;
+    const bool holdingSqueeze = gripVal >= 0.20f;
+    const bool squeezeEdge = squeezing && !m_TwoHandGripWasDown;
+    if (squeezing)
+        m_TwoHandGripWasDown = true;
+    else if (!holdingSqueeze)
+        m_TwoHandGripWasDown = false;
+
     if (!m_VmClass.twoHand || m_EmptyHands || !m_HasHeldWeapon || IsMenuUp() || WeaponMenuOpen())
     {
         clearTwoHand("weapon/menu");
@@ -8960,7 +8997,7 @@ void VR::ApplyTwoHandWeaponAim()
     {
         // A tracking blip while the grip is held (or latched) keeps the hold (last pose).
         if (m_TwoHandActive && (bmvr::g_TwoHandGripToggle
-            || (bmvr::g_TwoHandHoldWhileGrip && LeftSupportGripValue() >= 0.20f)))
+            || (bmvr::g_TwoHandHoldWhileGrip && holdingSqueeze)))
             return;
         clearTwoHand("tracking");
         return;
@@ -8995,15 +9032,6 @@ void VR::ApplyTwoHandWeaponAim()
     const float railHu = m_VmClass.offhandRailMeters * scale;
     const float alongMin = gx - slop;
     const float alongMax = gx + (std::max)(railHu, 0.04f * scale);
-    const float gripVal = LeftSupportGripValue();
-    const bool squeezing = gripVal >= 0.35f;
-    const bool holdingSqueeze = gripVal >= 0.20f;
-    // Squeeze edge with hysteresis (down at 0.35, re-armed below 0.20).
-    const bool squeezeEdge = squeezing && !m_TwoHandGripWasDown;
-    if (squeezing)
-        m_TwoHandGripWasDown = true;
-    else if (!holdingSqueeze)
-        m_TwoHandGripWasDown = false;
 
     const bool was = m_TwoHandActive;
     if (m_TwoHandActive && bmvr::g_TwoHandGripToggle)

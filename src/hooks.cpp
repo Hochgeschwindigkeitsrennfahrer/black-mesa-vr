@@ -7458,8 +7458,10 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     // mask pass ran with a depth buffer of another size and a viewport larger
     // than its target, and the composite replaced the eye with the mask:
     // world gone, black/white plus the source's glow, whenever the source
-    // was in front (bm_c1a3c, 2026-10-25). Grow them with FullFrame.
-    const bool namedLs = name && std::strstr(name, "_rt_ls") != nullptr;
+    // was in front (bm_c1a3c, 2026-10-25). Grow them with FullFrame. Only
+    // the full-frame-sized ones (all four are RT_SIZE_FULL_FRAME_BUFFER on
+    // this build); a smaller _rt_ls* would otherwise be blown up to the eye.
+    const bool namedLs = name && fullMode && std::strstr(name, "_rt_ls") != nullptr;
     const bool namedFb = name && (std::strstr(name, "_rt_FullFrameFB")
         || std::strstr(name, "_rt_ResolvedFullFrame") || namedLs);
     const bool namedGb = name && std::strstr(name, "_rt_gb")
