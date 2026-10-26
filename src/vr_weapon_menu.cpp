@@ -1795,8 +1795,8 @@ void VR::ToggleEmptyHands()
             m_PendingWeaponSelect.store(prev, std::memory_order_release);
         Game::logMsg("Right-stick tap: weapon entity=%d", prev);
     }
+    // No menu sound: the quick swap never opens the weapon menu.
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 900, 0.35f);
-    QueueWeaponMenuSound(kWeaponSoundSelect, 0, 0);
 }
 
 void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
