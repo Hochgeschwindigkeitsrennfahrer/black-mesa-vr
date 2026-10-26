@@ -9307,8 +9307,10 @@ bool VR::UpdateShoulderGestures(bool paused)
         const float lateral = d.Dot(right) / scale * side;
         const float height = d.z / scale;
         // Closer than the first try (2026-10-15: crowbar a reach too far):
-        // level with the eyes counts, and lower down.
-        return along < 0.04f && height > -0.38f && height < 0.30f
+        // level with the eyes counts. Not below the shoulder (~20 cm under
+        // the eyes): down to -0.38 a shotgun stock held in close at chest
+        // height took the crowbar on the grip squeeze (2026-10-26).
+        return along < 0.04f && height > -0.20f && height < 0.30f
             && lateral > 0.05f && lateral < 0.50f;
     };
     auto gripValue = [&](vr::VRActionHandle_t h) {
@@ -9345,7 +9347,9 @@ bool VR::UpdateShoulderGestures(bool paused)
     };
 
     const bool leftIn = m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
-    const bool rightIn = m_PhysicalRightTrackingValid && inZone(m_PhysicalRightPosAbs, 1.f);
+    // Not while both hands hold the gun: that grip squeeze is the gun's.
+    const bool rightIn = m_PhysicalRightTrackingValid && !m_TwoHandActive
+        && inZone(m_PhysicalRightPosAbs, 1.f);
     if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand))
     {
         m_PendingQuickSave.store(true, std::memory_order_release);
@@ -9367,7 +9371,9 @@ bool VR::UpdateShoulderGestures(bool paused)
                 m_EmptyHands = false;
                 m_PendingWeaponSelect.store(inv[i].entityIndex, std::memory_order_release);
                 PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
-                Game::logMsg("Shoulder gesture: crowbar entity=%d", inv[i].entityIndex);
+                const Vector d = m_PhysicalRightPosAbs - m_HmdPosAbs;
+                Game::logMsg("Shoulder gesture: crowbar entity=%d (hand %.2f m ahead, %.2f m up, %.2f m right of the head)",
+                    inv[i].entityIndex, d.Dot(fwd) / scale, d.z / scale, d.Dot(right) / scale);
                 break;
             }
         }
