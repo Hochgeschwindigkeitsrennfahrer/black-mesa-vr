@@ -5070,6 +5070,89 @@ QAngle VR::GetUseAimAngles() const
     return aim;
 }
 
+bool VR::LadderMode(int& moveBits) const
+{
+    moveBits = 0;
+    if (!m_Game)
+        return false;
+    constexpr int kMoveTypeLadder = 9;
+    constexpr int kContentsLadder = 0x20000000;
+    // MASK_PLAYERSOLID: solid, window, grate, moveable, playerclip, monster.
+    constexpr unsigned kMaskPlayerSolid = 0x1 | 0x2 | 0x8 | 0x4000 | 0x10000 | 0x2000000;
+    constexpr float kStickDeflection = 0.2f;
+    const float f = m_WalkForward.load(std::memory_order_acquire);
+    const float s = m_WalkSide.load(std::memory_order_acquire);
+    bool ladder = m_Game->LocalPlayerMoveType() == kMoveTypeLadder;
+    if (!ladder && f * f + s * s > kStickDeflection * kStickDeflection
+        && m_Game->m_EngineTrace && m_SetupOrigin.LengthSqr() > 1.f)
+    {
+        // The step onto the ladder still ran LadderMove with the gun's angles;
+        // a gun turned away from the ladder read as walking off it.
+        Vector hmdF{}, hmdR{};
+        QAngle::AngleVectors(QAngle(0.f, GetViewAngle().y, 0.f), &hmdF, &hmdR, nullptr);
+        Vector dir = hmdF * f + hmdR * s;
+        if (VectorNormalize(dir) > 0.01f)
+        {
+            // Torso box below the engine eye (eye 64 standing, 28 ducked).
+            C_BaseEntity* player = m_Game->GetLocalPlayerEntity();
+            C_BaseEntity* vm = m_Game->GetViewModelEntity();
+            CTraceFilterSkipTwoEntities filter(player, vm, 0);
+            Ray_t ray;
+            ray.Init(m_SetupOrigin, m_SetupOrigin + dir * 8.f, Vector(-16.f, -16.f, -24.f), Vector(16.f, 16.f, 4.f));
+            CGameTrace tr{};
+            m_Game->m_EngineTrace->TraceRay(ray, kMaskPlayerSolid | kContentsLadder, &filter, &tr);
+            ladder = (tr.startsolid || tr.fraction < 1.f) && (tr.contents & kContentsLadder) != 0;
+        }
+    }
+    if (!ladder)
+        return false;
+    if (f > kStickDeflection)
+        moveBits |= IN_FORWARD;
+    else if (f < -kStickDeflection)
+        moveBits |= IN_BACK;
+    if (s > kStickDeflection)
+        moveBits |= IN_MOVERIGHT;
+    else if (s < -kStickDeflection)
+        moveBits |= IN_MOVELEFT;
+    return true;
+}
+
+QAngle VR::GetUseAimAnglesFromEye() const
+{
+    const QAngle handAim = GetUseAimAngles();
+    Vector hand{};
+    if (!m_Game || !m_Game->m_EngineTrace || m_SetupOrigin.LengthSqr() <= 1.f
+        || !TryGetVrUseOrigin(hand))
+        return handAim;
+    // A little beyond the game's use reach (~80 units from the eye).
+    constexpr float kReach = 96.f;
+    Vector dir{};
+    QAngle::AngleVectors(handAim, &dir, nullptr, nullptr);
+    if (VectorNormalize(dir) <= 0.01f)
+        return handAim;
+    Vector end = hand + dir * kReach;
+    C_BaseEntity* player = m_Game->GetLocalPlayerEntity();
+    C_BaseEntity* vm = m_Game->GetViewModelEntity();
+    CTraceFilterSkipTwoEntities filter(player, vm, 0);
+    Ray_t ray;
+    ray.Init(hand, end);
+    CGameTrace tr{};
+    m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
+    if (tr.fraction < 1.f && !tr.startsolid)
+        end = tr.endpos;
+    Vector toTarget = end - m_SetupOrigin;
+    if (VectorNormalize(toTarget) <= 0.01f)
+        return handAim;
+    QAngle aim{};
+    QAngle::VectorAngles(toTarget, aim);
+    if (aim.x > 180.f) aim.x -= 360.f;
+    if (aim.x < -180.f) aim.x += 360.f;
+    if (aim.x > 89.f) aim.x = 89.f;
+    if (aim.x < -89.f) aim.x = -89.f;
+    aim.z = 0.f;
+    return aim;
+}
+
 Vector VR::GetRecommendedViewmodelAbsPos(const Vector& eyePosition) const
 {
     Vector base = eyePosition;

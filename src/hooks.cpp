@@ -4380,6 +4380,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     // Yaw actually written to cmd->viewangles this tick. Movement is expressed
     // relative to viewangles, so the stick-to-usercmd conversion below has to
     // use the same yaw or strafing skews whenever the aim source changes.
+    int ladderBits = 0;
+    const bool ladderMode = m_VR && m_VR->m_IsVREnabled && cmd->command_number
+        && m_VR->IsGameplayEligible() && m_VR->LadderMode(ladderBits);
     QAngle appliedAim{};
     bool haveAppliedAim = false;
     auto applyControllerAim = [&]() {
@@ -4407,27 +4410,26 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         // that hand after a door, button, or charger.
         if (m_VR->UseAimFollowsGrabHand() && m_VR->GrabHandTrackingValid())
         {
-            apply(m_VR->GetUseAimAngles());
+            apply(m_VR->UseGrabRedirectsFire() ? m_VR->GetUseAimAngles() : m_VR->GetUseAimAnglesFromEye());
             return;
         }
-        // On a func_ladder, Source's LadderMove climbs along the usercmd
-        // angles from the IN_FORWARD/IN_BACK bits, which come from the stick
-        // relative to the head. With the gun's angles a gun turned away from
-        // the ladder pushed off it, and climbing down needed the gun pitched
-        // past 45 degrees. Use the head instead, pitch doubled so looking
-        // ~23 degrees down climbs down. Firing keeps the gun aim.
-        constexpr int kMoveTypeLadder = 9;
-        constexpr float kLadderPitchScale = 2.f;
-        if (m_Game && m_Game->LocalPlayerMoveType() == kMoveTypeLadder
-            && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0)
+        // On a func_ladder (or stepping onto one), Source's LadderMove climbs
+        // along the usercmd angles from the IN_FORWARD/IN_BACK bits, which
+        // come from the stick relative to the head. With the gun's angles a
+        // gun turned away from the ladder pushed off it, and climbing down
+        // needed the gun pitched past 45 degrees. Use the head's yaw; vertical
+        // speed goes with cos - sin of the pitch, so make it decisive: looking
+        // more than 20 degrees down = pitch 80 (down at ~80 %), otherwise at
+        // most level (up at full speed). Firing keeps the gun aim.
+        constexpr float kLadderDownLookDeg = 20.f;
+        constexpr float kLadderDownPitch = 80.f;
+        if (ladderMode && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0)
         {
             const Vector hmdVa = m_VR->GetViewAngle();
             float pitch = hmdVa.x;
             if (pitch > 180.f)
                 pitch -= 360.f;
-            pitch *= kLadderPitchScale;
-            if (pitch > 89.f) pitch = 89.f;
-            if (pitch < -89.f) pitch = -89.f;
+            pitch = pitch > kLadderDownLookDeg ? kLadderDownPitch : (pitch > 0.f ? 0.f : pitch);
             static int s_ladderLog;
             if (s_ladderLog < 8)
             {
@@ -4529,6 +4531,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             cmd->sidemove += analogS;
         }
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+        if (ladderMode)
+            cmd->buttons |= ladderBits;
         const int inv = m_VR->m_PendingInvDelta.exchange(0, std::memory_order_acq_rel);
         if (inv != 0 && m_Game)
         {
@@ -4590,6 +4594,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+    if (ladderMode)
+        cmd->buttons |= ladderBits;
 
     EnsureServerFlashlightHook();
     EnsureWeaponShootOriginHooks();
