@@ -4599,10 +4599,14 @@ BOOL WINAPI Hooks::dGetCursorPos(LPPOINT point)
     if (point && m_VR && m_VR->TryGetMenuCursorScreen(*point))
     {
         m_VR->m_CursorHookHits.fetch_add(1, std::memory_order_relaxed);
+        m_VR->m_CursorHookHitsSec.fetch_add(1, std::memory_order_relaxed);
         return TRUE;
     }
     if (m_VR)
+    {
         m_VR->m_CursorHookPass.fetch_add(1, std::memory_order_relaxed);
+        m_VR->m_CursorHookPassSec.fetch_add(1, std::memory_order_relaxed);
+    }
     return hkGetCursorPos.fOriginal ? hkGetCursorPos.fOriginal(point) : FALSE;
 }
 

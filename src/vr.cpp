@@ -6505,7 +6505,15 @@ void VR::ApplyMenuCursor()
     if (onPanel)
     {
         m_MenuCursorHwnd = hwnd;
-        m_MenuCursorLiveMs = GetTickCount();
+        // Screen position for the GetCursorPos hook, computed here once per
+        // Present: VGUI can call GetCursorPos many times a frame, and the
+        // hook must not make a window-manager call (ClientToScreen) each time.
+        POINT sp{ wx, wy };
+        if (hwnd && ClientToScreen(hwnd, &sp))
+        {
+            m_MenuCursorScreen.store(PackScreenPoint(sp), std::memory_order_relaxed);
+            m_MenuCursorLiveMs = GetTickCount();
+        }
     }
     if (hwnd && haveHit)
     {
@@ -6603,9 +6611,14 @@ void VR::ApplyMenuCursor()
         // cursor while the window is unfocused under Wine. Report the
         // rewound click point for a moment so press and release both land
         // on the item the user aimed at.
-        m_MenuClickHoldX = wx;
-        m_MenuClickHoldY = wy;
-        m_MenuClickHoldUntilMs.store(GetTickCount() + kMenuClickHoldMs, std::memory_order_release);
+        {
+            POINT hp{ wx, wy };
+            if (hwnd && ClientToScreen(hwnd, &hp))
+            {
+                m_MenuClickHoldScreen.store(PackScreenPoint(hp), std::memory_order_relaxed);
+                m_MenuClickHoldUntilMs.store(GetTickCount() + kMenuClickHoldMs, std::memory_order_release);
+            }
+        }
         if (hwnd)
         {
             POINT pt{ wx, wy };
@@ -6673,21 +6686,19 @@ bool VR::TryGetMenuCursorScreen(POINT& out) const
     // whatever thread calls GetCursorPos, so no engine calls here). Right
     // after the menu closes the game's own readers (mouse look) get the real
     // cursor again.
-    if (!m_MenuCursorValid || !m_MenuCursorHwnd || m_MenuCursorLiveMs == 0
+    // No system calls beyond GetTickCount: positions are converted to screen
+    // coordinates in ApplyMenuCursor.
+    if (!bmvr::g_MenuCursorHook || !m_MenuCursorValid || !m_MenuCursorHwnd || m_MenuCursorLiveMs == 0
         || !m_MenuPanelUpForCursor.load(std::memory_order_relaxed))
         return false;
     const DWORD now = GetTickCount();
     if (now - m_MenuCursorLiveMs > 250u)
         return false;
-    POINT pt{ m_MenuCursorX, m_MenuCursorY };
     // Just after a click: the (possibly rewound) click point, see
     // ApplyMenuCursor.
     const DWORD holdUntil = m_MenuClickHoldUntilMs.load(std::memory_order_acquire);
-    if (holdUntil != 0 && static_cast<int32_t>(holdUntil - now) > 0)
-        pt = POINT{ m_MenuClickHoldX, m_MenuClickHoldY };
-    if (!ClientToScreen(m_MenuCursorHwnd, &pt))
-        return false;
-    out = pt;
+    const bool hold = holdUntil != 0 && static_cast<int32_t>(holdUntil - now) > 0;
+    out = UnpackScreenPoint((hold ? m_MenuClickHoldScreen : m_MenuCursorScreen).load(std::memory_order_relaxed));
     return true;
 }
 
@@ -13798,6 +13809,15 @@ void VR::Update()
             m_PoseWaitCount.load(std::memory_order_relaxed),
             m_WaitedPoseTick.load(std::memory_order_acquire)
                 ? (nowMs - m_WaitedPoseTick.load(std::memory_order_acquire)) : 0xffffffffu);
+        if (m_MenuPanelUpForCursor.load(std::memory_order_relaxed))
+        {
+            // Menu lag diagnosis: GetCursorPos calls/s answered with the VR
+            // pointer vs passed through (main menu vs pause, hover vs not).
+            const long hits = m_CursorHookHitsSec.exchange(0);
+            const long pass = m_CursorHookPassSec.exchange(0);
+            Game::logMsg("menu cursor hook %ld/%ld per %ums (pointer/real) live=%d hook=%d",
+                hits, pass, dt, MenuPointerLive() ? 1 : 0, bmvr::g_MenuCursorHook ? 1 : 0);
+        }
         s_fpsLogMs = nowMs;
         s_fpsLogTick = m_PresentTick;
     }

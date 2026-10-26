@@ -1289,15 +1289,27 @@ public:
     // dGetCursorPos answers with the VR pointer / the real cursor (click log).
     std::atomic<long> m_CursorHookHits{ 0 };
     std::atomic<long> m_CursorHookPass{ 0 };
+    std::atomic<long> m_CursorHookHitsSec{ 0 };
+    std::atomic<long> m_CursorHookPassSec{ 0 };
     std::atomic<bool> m_MenuPanelUpForCursor{ false };
 private:
     DWORD m_MenuCursorLiveMs = 0;   // last frame the VR pointer hit the menu
     // Click point (after the rewind) the GetCursorPos hook reports until
     // m_MenuClickHoldUntilMs, so VGUI's press/release see where we clicked.
     static constexpr DWORD kMenuClickHoldMs = 150;
-    int m_MenuClickHoldX = 0;
-    int m_MenuClickHoldY = 0;
     std::atomic<DWORD> m_MenuClickHoldUntilMs{ 0 };
+    // Screen points for the GetCursorPos hook, packed x/y so one atomic load
+    // never mixes two frames.
+    std::atomic<uint64_t> m_MenuCursorScreen{ 0 };
+    std::atomic<uint64_t> m_MenuClickHoldScreen{ 0 };
+    static uint64_t PackScreenPoint(const POINT& p)
+    {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(p.x)) << 32) | static_cast<uint32_t>(p.y);
+    }
+    static POINT UnpackScreenPoint(uint64_t v)
+    {
+        return POINT{ static_cast<LONG>(static_cast<int32_t>(v >> 32)), static_cast<LONG>(static_cast<int32_t>(v & 0xffffffffu)) };
+    }
     bool m_WorldVguiTriggerWasDown = false;
     bool m_WorldVguiSuppressAttack = false;
     bool m_WeaponMenuOpen = false;

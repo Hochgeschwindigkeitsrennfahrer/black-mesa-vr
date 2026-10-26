@@ -307,6 +307,9 @@ namespace bmvr
     // Works with and without OffCenterEyes. Same RT size, so the left eye
     // loses ~2.5 % horizontal sharpness at 0.05; no extra pixels.
     extern float g_LeftEyeCullPad;
+    // MenuCursorHook (default true): GetCursorPos reports the VR menu pointer
+    // while it is on a menu panel. false = real cursor (A/B test aid).
+    extern bool g_MenuCursorHook;
     // Exponential smoothing time (seconds) applied to HMD pitch/yaw while
     // scoped. Magnification otherwise turns every micro-movement into shake.
     extern float g_ScopeZoomSmoothSec;
