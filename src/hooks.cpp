@@ -1420,6 +1420,59 @@ namespace
         Hooks::m_VR->NoteViewmodelOffhandWorld(world);
     }
 
+    // Frag grenade: the grenade is its own root bone (GrenadeSpawn, pins are
+    // its children) and the pin-pull/throw animations swing it across the
+    // view while the hidden arms do the work. In VR the hand holds still, so
+    // keep GrenadeSpawn where it sits in idle (entity-relative pose recorded
+    // during idle1/idle2) and let only the pins move. Returns the extra delta
+    // to apply to every bone before the rigid move, or false for none.
+    bool GrenadeHoldCorrection(unsigned char* hdr, const void* bones, int nBones,
+        const float entity[3][4], float out[3][4])
+    {
+        static unsigned char* s_hdr = nullptr;
+        static int s_bone = -1;
+        static bool s_haveAnchor = false;
+        static float s_anchor[3][4];
+        if (hdr != s_hdr)
+        {
+            s_hdr = hdr;
+            s_bone = FindStudioBoneIndex(hdr, "GrenadeSpawn");
+            s_haveAnchor = false;
+        }
+        if (s_bone < 0 || s_bone >= nBones || !Hooks::m_Game)
+            return false;
+        void* vm = Hooks::m_Game->GetViewModelEntity();
+        int seq = -1;
+        float cur[3][4];
+        __try
+        {
+            if (vm)
+                seq = *reinterpret_cast<int*>(static_cast<char*>(vm) + kViewmodelSequence);
+            std::memcpy(cur, static_cast<const float*>(bones) + s_bone * 12, sizeof(cur));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        const char* label = seq >= 0 ? StudioSequenceLabel(hdr, seq) : nullptr;
+        float entityInv[3][4];
+        InvertMatrix3x4TR(entity, entityInv);
+        if (label && (_stricmp(label, "idle1") == 0 || _stricmp(label, "idle2") == 0))
+        {
+            MulMatrix3x4(entityInv, cur, s_anchor);
+            s_haveAnchor = true;
+            return false;
+        }
+        if (!s_haveAnchor)
+            return false;
+        // out = entity * anchor * cur^-1: moves GrenadeSpawn back onto its idle pose.
+        float want[3][4], curInv[3][4];
+        MulMatrix3x4(entity, s_anchor, want);
+        InvertMatrix3x4TR(cur, curInv);
+        MulMatrix3x4(want, curInv, out);
+        return true;
+    }
+
     bool SehCopyAndFixViewmodelMatrices(float* dst, const void* src, int count,
         const float pivot[3], float scale,
         const float yFixOrigin[3], const float right[3], const float up[3], const float fwd[3],
@@ -4890,11 +4943,24 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
             unsigned char* hdr = ResolveStudioHdr(state);
             const int nBones = StudioHdrNumBones(hdr);
+            const float* boneDelta = rigidPtr;
+            float grenadeDelta[3][4]{};
+            if (rigidPtr && pCustomBoneToWorld && nBones > 0 && modelName
+                && (std::strstr(modelName, "v_grenade") || std::strstr(modelName, "v_Grenade")))
+            {
+                float entity[3][4]{}, hold[3][4]{};
+                BuildMatrix3x4FromOrgAngles(entity, info.origin, info.angles);
+                if (GrenadeHoldCorrection(hdr, pCustomBoneToWorld, nBones, entity, hold))
+                {
+                    MulMatrix3x4(rigidDelta, hold, grenadeDelta);
+                    boneDelta = &grenadeDelta[0][0];
+                }
+            }
             bool usedBones = false;
             if (pCustomBoneToWorld && nBones > 0
                 && SehCopyAndFixViewmodelMatrices(&g_ScaledViewmodelBones[slot][0][0][0], pCustomBoneToWorld,
                     nBones, pivot3, needScale ? scale : 1.f, pivot3, right3, up3, fwd3,
-                    needYFix ? yFix : 1.f, rigidPtr))
+                    needYFix ? yFix : 1.f, boneDelta))
             {
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
@@ -6204,6 +6270,30 @@ void Hooks::EnsureWeaponShootOriginHooks()
             hkGetShootAngles.pTarget = p;
         }
     }
+    auto hookServerFn = [&](auto& hook, int rva, const char* bytes, auto detour, const char* what)
+    {
+        if (!server || hook.pTarget)
+            return;
+        auto* p = reinterpret_cast<unsigned char*>(server) + rva;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            && CodeBytesMatch(p, bytes))
+        {
+            if (hook.createHook(p, detour) == 0 && hook.enableHook() == 0)
+                Game::logMsg("Hook enabled: %s rva=0x%X", what, rva);
+            else
+                Game::logMsg("%s hook failed", what);
+        }
+        else
+        {
+            Game::logMsg("%s skipped (bytes/rva 0x%X)", what, rva);
+            hook.pTarget = p;
+        }
+    };
+    hookServerFn(hkGrenadeCreate, Offsets::kGrenadeCreate_Server, "558BEC8B450883EC3083F815",
+        &dGrenadeCreate, "server grenade create");
+    hookServerFn(hkGrenadeThrowPosition, Offsets::kGrenadeThrowPosition_Server, "558BEC81EC88000000",
+        &dGrenadeThrowPosition, "server grenade throw position");
     if (client && !hkClientGetShootAngles.pTarget)
     {
         // Same GetShootAngles body as server (EyeAngles vtable +0x234, then punch).
@@ -6230,7 +6320,8 @@ void Hooks::EnsureWeaponShootOriginHooks()
         && hkClientWeaponShootPosition.pTarget && hkGetAttachmentVec.pTarget
         && hkGetAttachmentMatrix.pTarget && hkServerWeaponShootPosition.pTarget
         && hkServerGrabHoldOrigin.pTarget && hkGrabSetTarget.pTarget
-        && hkGetShootAngles.pTarget && hkClientGetShootAngles.pTarget;
+        && hkGetShootAngles.pTarget && hkClientGetShootAngles.pTarget
+        && hkGrenadeCreate.pTarget && hkGrenadeThrowPosition.pTarget;
 }
 
 void __fastcall Hooks::dGetShootAngles(void* ecx, void* edx, QAngle* out)
@@ -7805,4 +7896,62 @@ void bmvr::InstallEarlyFramebufferHook()
                 Log("Hook enabled: GetScreenAspectRatio rva=0x%X", aspectOff);
         }
     }
+}
+
+namespace
+{
+    // Set while the server spawns a frag the local VR player threw, so the
+    // throw-position hook (also used by NPC and other grenades) only moves that one.
+    bool g_VrFragSpawn = false;
+}
+
+void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode)
+{
+    constexpr int kGrenadeTypeFrag = 1;
+    if (!hkGrenadeCreate.fOriginal)
+        return nullptr;
+    Vector hand{};
+    if (type != kGrenadeTypeFrag || !bmvr::g_VrHandThrow || !velocity || !m_VR
+        || !ShouldRewriteShootAngles(owner) || !m_VR->TryGetThrowVelocity(hand))
+        return hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, mode);
+
+    // The game added a share of the player's own velocity to its aimed throw;
+    // keep the player's full velocity like Lambda1VR (hand speed is relative
+    // to the body).
+    Vector playerVel{};
+    __try
+    {
+        constexpr int kAbsVelocity = 0x218;   // FUN_10487250 reads +0x218..0x220
+        playerVel = *reinterpret_cast<const Vector*>(static_cast<const char*>(owner) + kAbsVelocity);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+    const Vector before = *velocity;
+    *velocity = hand + playerVel;
+    Game::logMsg("VR frag throw: hand %.0f u/s -> (%.0f,%.0f,%.0f) (game %.0f u/s)",
+        hand.Length(), velocity->x, velocity->y, velocity->z, before.Length());
+    g_VrFragSpawn = true;
+    void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, mode);
+    g_VrFragSpawn = false;
+    return grenade;
+}
+
+bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* ang, void* owner)
+{
+    if (!hkGrenadeThrowPosition.fOriginal)
+        return false;
+    const bool ok = hkGrenadeThrowPosition.fOriginal(grenade, pos, ang, owner);
+    Vector hand{};
+    if (!ok || !g_VrFragSpawn || !pos || !m_VR || !m_VR->TryGetThrowOrigin(hand))
+        return ok;
+    // The game's point is a little ahead of the eye after a trace from the
+    // eye; a hand far from it (arm through a wall, stale pose) keeps it.
+    if ((hand - *pos).LengthSqr() > 60.f * 60.f)
+    {
+        Game::logMsg("VR frag throw: hand %.0f units from the game's point, kept the game's", (hand - *pos).Length());
+        return ok;
+    }
+    *pos = hand;
+    return ok;
 }

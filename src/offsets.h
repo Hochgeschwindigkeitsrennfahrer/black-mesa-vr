@@ -153,6 +153,20 @@ public:
     // fire upward. These are server offsets; the client copies the mod already
     // zeroes live at different addresses and only drive the viewmodel.
     static constexpr int kBlackMesaPlayer_GetShootAngles_Server = 0x47F660;
+
+    // server.dll grenade spawn, cdecl (type, Vector* velocity, AngularImpulse*,
+    // CBaseEntity* owner, CBaseEntity* thrower, int mode) -> grenade. Type 1 =
+    // frag: CWeapon_Frag's throw (FUN_10487250, vtable 0x10729204) builds
+    // forward*speed + up*lift + 0.x * player velocity from GetShootAngles and
+    // calls this. It places the grenade via kGrenadeThrowPosition_Server, then
+    // DispatchSpawn, then the grenade's SetVelocity (vtable +0x3B4).
+    // Bytes: 55 8B EC 8B 45 08 83 EC 30 83 F8 15.
+    static constexpr int kGrenadeCreate_Server = 0x3798A0;
+    // server.dll throw position, cdecl (grenade, Vector* pos, QAngle* ang,
+    // CBaseEntity* owner) -> bool (false = spawn refused, grenade removed):
+    // owner EyePosition (+0x230) / EyeAngles (+0x234), an offset, then a
+    // trace back to the eye. Bytes: 55 8B EC 81 EC 88 00 00 00.
+    static constexpr int kGrenadeThrowPosition_Server = 0x483060;
     static constexpr int kBlackMesaPlayer_RecoilPunchAngles_Server = 0x14BC;
 
     // C_BaseAnimating IClientRenderable GetAttachment. `this` is entity+4.

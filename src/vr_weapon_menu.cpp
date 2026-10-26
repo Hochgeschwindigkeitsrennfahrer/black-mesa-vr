@@ -1754,6 +1754,51 @@ bool VR::WeaponMenuStickHeld() const
     return PressedDigitalAction(m_ActionResetPosition);
 }
 
+void VR::Recenter(const char* why)
+{
+    m_HmdOriginLatched = false;
+    m_MenuPanelPoseValid = false;
+    ++m_MenuOverlayEpoch;
+    if (bmvr::g_RecenterResetsYaw)
+        m_RotationOffsetY.store(0.f, std::memory_order_release);
+    Game::logMsg("Recenter (%s)%s", why, bmvr::g_RecenterResetsYaw ? " + yaw" : "");
+}
+
+// Right-stick tap (HL2VR style): bare hands <-> the weapon held before.
+// Holstering never changes the game's active weapon, so going back only
+// re-selects when that weapon changed meanwhile (e.g. a pickup).
+void VR::ToggleEmptyHands()
+{
+    if (!m_EmptyHands)
+    {
+        Game::InventoryWeapon inv[kMaxMenuSlots]{};
+        const int n = m_Game->CollectInventoryWeapons(inv, kMaxMenuSlots);
+        if (n <= 0)
+            return;
+        C_BaseEntity* active = m_Game->GetActiveWeaponEntity();
+        for (int i = 0; i < n; ++i)
+        {
+            if (m_Game->GetClientEntity(inv[i].entityIndex) != active)
+                continue;
+            m_WeaponMenuPrevEntity = inv[i].entityIndex;
+            m_WeaponMenuPrevKind = KindFromNames(inv[i].modelName, inv[i].networkName);
+            break;
+        }
+        m_EmptyHands = true;
+        Game::logMsg("Right-stick tap: hands");
+    }
+    else
+    {
+        m_EmptyHands = false;
+        const int prev = m_WeaponMenuPrevEntity;
+        if (prev > 0 && m_Game->GetClientEntity(prev) != m_Game->GetActiveWeaponEntity())
+            m_PendingWeaponSelect.store(prev, std::memory_order_release);
+        Game::logMsg("Right-stick tap: weapon entity=%d", prev);
+    }
+    PulseHandHaptic(vr::TrackedControllerRole_RightHand, 900, 0.35f);
+    QueueWeaponMenuSound(kWeaponSoundSelect, 0, 0);
+}
+
 void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 {
     (void)deltaMs;
@@ -2037,12 +2082,7 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
         else if (m_WeaponMenuOpenedThisHold)
             QueueWeaponMenuSound(kWeaponSoundSelect, 0, 0);
         else if ((now - m_WeaponMenuClickStartMs) < kMenuHoldMs)
-        {
-            m_HmdOriginLatched = false;
-            if (bmvr::g_RecenterResetsYaw)
-                m_RotationOffsetY.store(0.f, std::memory_order_release);
-            Game::logMsg("Right-stick tap: recenter");
-        }
+            ToggleEmptyHands();
         m_WeaponMenuOpen = false;
         m_WeaponMenuClickHeld = false;
         m_WeaponMenuOpenedThisHold = false;

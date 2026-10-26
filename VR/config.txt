@@ -80,6 +80,11 @@ SprintToggle=false
 # Two-handed guns: squeezing the support grip on the gun latches the hold (no need to
 # keep squeezing); squeeze again, or take the hand away from the gun, to let go.
 TwoHandGripToggle=false
+# Frag grenade: thrown from the hand at the hand's speed (fastest moment of the last 0.1 s
+# before the trigger is let go) x 2/3 x ThrowScale, capped at 1000 units/s, as in Lambda1VR.
+# false = the game's fixed throw along the aim.
+VrHandThrow=true
+ThrowScale=3.75
 # Main menu / pause panel: distance and width in metres, height offset (+ = up), and menu
 # pointer smoothing in seconds (lower = more direct). Also in the VR settings panel (MENU).
 MenuForwardMeters=1.4

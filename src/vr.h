@@ -938,6 +938,10 @@ public:
     void NoteHudPainted() { m_HudPaintedThisFrame.store(true, std::memory_order_release); }
     bool HudPaintedThisFrame() const { return m_HudPaintedThisFrame.load(std::memory_order_acquire); }
     void UpdateCrowbarMelee();
+    // Hand throw: sampled every input frame; read by the server grenade hooks.
+    void SampleThrowHand();
+    bool TryGetThrowVelocity(Vector& out);
+    bool TryGetThrowOrigin(Vector& out);
     // HL2VR physical crowbar (vr_crowbar.mdl on the hand, tip-velocity hits).
     static bool IsCrowbarWeaponModel(const char* model);
     bool IsCrowbarEquipped() const;
@@ -1145,6 +1149,8 @@ private:
         bool rightOk, const Vector& rightOrigin, const QAngle& rightAng,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
     void RefreshActiveWeaponModel();
+    void ToggleEmptyHands();
+    void Recenter(const char* why);
     void RefreshHeldWeaponState();
     void ApplyViewmodelBasisOffsets();
     void ApplyTwoHandWeaponAim();
@@ -1217,6 +1223,16 @@ private:
     QAngle m_MeleeBladeAngles{};
     bool m_MeleeBladeAnglesValid = false;
     Vector m_CrowbarPrevTipLocal{};
+    // Hand throw (vr_crowbar.cpp): right-hand positions relative to the body,
+    // unrotated by the view yaw, so walking and turning add nothing.
+    struct ThrowSample { double t; Vector local; };
+    static constexpr int kThrowSamples = 160;   // ~1.3 s at 120 Hz
+    double m_ThrowReleaseT = 0.0;               // trigger let go (IN_ATTACK 1 -> 0)
+    bool m_ThrowAttackHeld = false;
+    ThrowSample m_ThrowSamples[kThrowSamples]{};
+    int m_ThrowSampleNext = 0;
+    Vector m_ThrowHandWorld{};
+    bool m_ThrowHandValid = false;
     DWORD m_CrowbarLastMotionCheckMs = 0;
     DWORD m_CrowbarNextAttackMs = 0;
     DWORD m_CrowbarNextSwingSoundMs = 0;

@@ -4216,6 +4216,8 @@ void VR::ProcessInput()
     RefreshActiveWeaponModel();
     if (!paused && !MenuGameplayBlocked() && !m_WeaponMenuOpen && !m_EmptyHands)
         UpdateCrowbarMelee();
+    if (!paused)
+        SampleThrowHand();
     m_WearingHevSuit = m_Game->LocalPlayerHasSuit();
     m_HasHevSuit = !bmvr::g_HideHandsWithoutSuit || m_WearingHevSuit;
     const bool scopedWeapon = ViewmodelIsScoped();
@@ -4479,19 +4481,6 @@ void VR::ProcessInput()
         // while firing) click as soon as the menu appeared. Same 0.9 / 0.5
         // latch as the menu click itself.
         m_MenuTriggerWasDown = MenuTriggerClickHeld(m_MenuTriggerLatch);
-    // Recenter is a short tap of the same right-stick click that opens the
-    // weapon menu. Do not recenter on press-edge while that click is held.
-    if (resetHeld && !s_reset && !menuStick && !m_WeaponMenuOpenedThisHold)
-    {
-        m_HmdOriginLatched = false;
-        m_MenuPanelPoseValid = false;
-        ++m_MenuOverlayEpoch;
-        if (bmvr::g_RecenterResetsYaw)
-            m_RotationOffsetY.store(0.f, std::memory_order_release);
-        Game::logMsg("ResetPosition: cleared HMD origin latch%s",
-            bmvr::g_RecenterResetsYaw ? " + yaw" : "");
-    }
-
     const bool atk = PressedDigitalAction(m_ActionPrimaryAttack);
     const bool atk2 = PressedDigitalAction(m_ActionSecondaryAttack);
     const bool reload = PressedDigitalAction(m_ActionReload);
