@@ -4430,6 +4430,12 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             if (pitch > 180.f)
                 pitch -= 360.f;
             pitch = pitch > kLadderDownLookDeg ? kLadderDownPitch : (pitch > 0.f ? 0.f : pitch);
+            // Stick back at a level pitch climbs down at full speed and, on
+            // the floor, steps off the ladder (moving away = dismount). At
+            // pitch 80 'back' pointed away and up: the player climbed up
+            // instead of getting off at the bottom.
+            if (ladderBits & IN_BACK)
+                pitch = 0.f;
             static int s_ladderLog;
             if (s_ladderLog < 8)
             {
