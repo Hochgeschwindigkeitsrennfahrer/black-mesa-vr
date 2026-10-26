@@ -715,12 +715,12 @@ public:
     // hand's own angles from the eye miss a button the hand points at from
     // hip height by the eye-hand offset.
     QAngle GetUseAimAnglesFromEye() const;
-    // True on a func_ladder or when the stick walks the body into one within
-    // a few units. moveBits = IN_FORWARD/BACK/MOVELEFT/MOVERIGHT from the
-    // stick at 0.2 deflection (head frame): LadderMove climbs only on those
-    // bits, which gameplay sets past 0.5, so a gentle walk-in mounted the
-    // ladder and then hung there.
-    bool LadderMode(int& moveBits) const;
+    // True on a ladder (MOVETYPE_LADDER; onLadder) or when the stick walks
+    // the body into one within a few units. moveBits = IN_FORWARD/BACK/
+    // MOVELEFT/MOVERIGHT from the stick at 0.2 deflection (head frame):
+    // LadderMove climbs only on those bits, which gameplay sets past 0.5, so
+    // a gentle walk-in mounted the ladder and then hung there.
+    bool LadderMode(int& moveBits, bool& onLadder) const;
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover

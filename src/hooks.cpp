@@ -4380,9 +4380,42 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     // Yaw actually written to cmd->viewangles this tick. Movement is expressed
     // relative to viewangles, so the stick-to-usercmd conversion below has to
     // use the same yaw or strafing skews whenever the aim source changes.
+    // Black Mesa's ladders are HL2 func_useableladders (CHL2GameMovement::
+    // LadderMove / FullLadderMove, SDK hl_gamemovement.cpp). There the view
+    // direction decides everything: stick forward climbs up unless looking
+    // > ~17 degrees down, stick back climbs the opposite way of the view,
+    // the auto-dismount at either end needs an info_ladder_dismount within
+    // 60 degrees of the full 3D view direction, and jump leaves along the
+    // view. Ladder mode therefore sends the head's angles, except:
+    //  - stick back = IN_FORWARD with the view turned round and 45 degrees
+    //    down: always climbs down, and at the bottom the dismount behind the
+    //    player is 'in front' of that view, so it steps off backwards;
+    //  - jump = the view turned round, stick zeroed: always away from the
+    //    ladder, and positive forwardmove is held off for 0.5 s so the
+    //    auto-mount cone does not grab the ladder straight back.
+    // Firing keeps the gun's angles and the stock behaviour.
+    static ULONGLONG s_ladderJumpUntil = 0;
     int ladderBits = 0;
+    bool onLadder = false;
+    const ULONGLONG ladderNow = GetTickCount64();
+    const bool afterLadderJump = ladderNow < s_ladderJumpUntil;
     const bool ladderMode = m_VR && m_VR->m_IsVREnabled && cmd->command_number
-        && m_VR->IsGameplayEligible() && m_VR->LadderMode(ladderBits);
+        && m_VR->IsGameplayEligible() && !afterLadderJump
+        && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0
+        && m_VR->LadderMode(ladderBits, onLadder);
+    const bool ladderJump = ladderMode && onLadder && (m_VR->HeldButtons() & IN_JUMP) != 0;
+    const bool ladderBack = ladderMode && onLadder && !ladderJump && (ladderBits & IN_BACK) != 0;
+    if (ladderJump)
+        s_ladderJumpUntil = ladderNow + 500;
+    if (ladderBack)
+        ladderBits = IN_FORWARD;   // side bits would be mirrored in the turned view
+    auto applyLadderButtons = [&]() {
+        if (!ladderMode)
+            return;
+        if (ladderBack)
+            cmd->buttons &= ~(IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
+        cmd->buttons |= ladderBits;
+    };
     QAngle appliedAim{};
     bool haveAppliedAim = false;
     auto applyControllerAim = [&]() {
@@ -4413,36 +4446,33 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             apply(m_VR->UseGrabRedirectsFire() ? m_VR->GetUseAimAngles() : m_VR->GetUseAimAnglesFromEye());
             return;
         }
-        // On a func_ladder (or stepping onto one), Source's LadderMove climbs
-        // along the usercmd angles from the IN_FORWARD/IN_BACK bits, which
-        // come from the stick relative to the head. With the gun's angles a
-        // gun turned away from the ladder pushed off it, and climbing down
-        // needed the gun pitched past 45 degrees. Use the head's yaw; vertical
-        // speed goes with cos - sin of the pitch, so make it decisive: looking
-        // more than 20 degrees down = pitch 80 (down at ~80 %), otherwise at
-        // most level (up at full speed). Firing keeps the gun aim.
-        constexpr float kLadderDownLookDeg = 20.f;
-        constexpr float kLadderDownPitch = 80.f;
-        if (ladderMode && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0)
+        // Ladder mode (see above where ladderMode is computed).
+        if (ladderMode)
         {
             const Vector hmdVa = m_VR->GetViewAngle();
             float pitch = hmdVa.x;
             if (pitch > 180.f)
                 pitch -= 360.f;
-            pitch = pitch > kLadderDownLookDeg ? kLadderDownPitch : (pitch > 0.f ? 0.f : pitch);
-            // Stick back at a level pitch climbs down at full speed and, on
-            // the floor, steps off the ladder (moving away = dismount). At
-            // pitch 80 'back' pointed away and up: the player climbed up
-            // instead of getting off at the bottom.
-            if (ladderBits & IN_BACK)
-                pitch = 0.f;
-            static int s_ladderLog;
-            if (s_ladderLog < 8)
+            float yaw = hmdVa.y;
+            if (ladderJump)
             {
-                Game::logMsg("Ladder aim: head yaw %.0f pitch %.0f -> %.0f", hmdVa.y, hmdVa.x, pitch);
+                pitch = -10.f;   // facing up a little adds the jump's +50 z
+                yaw += 180.f;
+            }
+            else if (ladderBack)
+            {
+                pitch = 45.f;
+                yaw += 180.f;
+            }
+            static int s_ladderLog;
+            if (s_ladderLog < 24)
+            {
+                Game::logMsg("Ladder aim: %s%s head yaw %.0f pitch %.0f -> yaw %.0f pitch %.0f",
+                    onLadder ? "on" : "near", ladderJump ? " jump" : (ladderBack ? " back" : ""),
+                    hmdVa.y, hmdVa.x, yaw, pitch);
                 ++s_ladderLog;
             }
-            apply(QAngle(pitch, hmdVa.y, 0.f));
+            apply(QAngle(pitch, yaw, 0.f));
             return;
         }
         // Looking down a scope, the crosshair is fixed in the middle of the
@@ -4537,8 +4567,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             cmd->sidemove += analogS;
         }
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
-        if (ladderMode)
-            cmd->buttons |= ladderBits;
+        applyLadderButtons();
+        if (ladderJump)
+        {
+            cmd->forwardmove = 0.f;
+            cmd->sidemove = 0.f;
+        }
+        else if (afterLadderJump && cmd->forwardmove > 0.f)
+            cmd->forwardmove = 0.f;
         const int inv = m_VR->m_PendingInvDelta.exchange(0, std::memory_order_acq_rel);
         if (inv != 0 && m_Game)
         {
@@ -4600,8 +4636,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
-    if (ladderMode)
-        cmd->buttons |= ladderBits;
+    applyLadderButtons();
 
     EnsureServerFlashlightHook();
     EnsureWeaponShootOriginHooks();

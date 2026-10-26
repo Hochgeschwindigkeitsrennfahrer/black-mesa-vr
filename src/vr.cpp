@@ -5070,9 +5070,10 @@ QAngle VR::GetUseAimAngles() const
     return aim;
 }
 
-bool VR::LadderMode(int& moveBits) const
+bool VR::LadderMode(int& moveBits, bool& onLadder) const
 {
     moveBits = 0;
+    onLadder = false;
     if (!m_Game)
         return false;
     constexpr int kMoveTypeLadder = 9;
@@ -5083,6 +5084,7 @@ bool VR::LadderMode(int& moveBits) const
     const float f = m_WalkForward.load(std::memory_order_acquire);
     const float s = m_WalkSide.load(std::memory_order_acquire);
     bool ladder = m_Game->LocalPlayerMoveType() == kMoveTypeLadder;
+    onLadder = ladder;
     if (!ladder && f * f + s * s > kStickDeflection * kStickDeflection
         && m_Game->m_EngineTrace && m_SetupOrigin.LengthSqr() > 1.f)
     {
