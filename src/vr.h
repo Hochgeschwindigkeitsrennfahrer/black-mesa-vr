@@ -1033,13 +1033,16 @@ public:
     bool SettingsPanelOpen() const { return m_SettingsOpen; }
     void OpenSettingsPanel();
     void CloseSettingsPanel(const char* why);
-    void ShowToast(const char* text);
+    // Short head-locked message (quick save); detail = optional smaller second line.
+    void ShowToast(const char* text, DWORD ms = kToastMs, const char* detail = nullptr);
     bool ToastVisible() const;
     void DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
     static constexpr DWORD kToastMs = 2500;
     char m_ToastText[32]{};
+    char m_ToastDetail[64]{};
     DWORD m_ToastUntilMs = 0;
+    int m_MissingOffsetsWarned = 0;   // Game::missingOffsetCount() at the last "out of date" toast
     void UpdateSettingsPanel();
     void DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);

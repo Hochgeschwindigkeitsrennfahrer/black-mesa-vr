@@ -37,7 +37,10 @@ struct Offset
         if (newOffset == -1)
         {
             if (!optional)
+            {
                 Game::logMsg("Signature not found in %s: %s", this->moduleName.c_str(), this->signature.c_str());
+                Game::noteMissingOffset((this->moduleName + ": " + this->signature).c_str());
+            }
             return;
         }
         this->address = (int)((uintptr_t)GetModuleHandleA(this->moduleName.c_str()) + this->offset);

@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <mutex>
+#include <set>
 using tCreateInterface = void*(__cdecl*)(const char* name, int* returnCode);
 
 static HMODULE GetModuleWithRetry(const char* dllname, int maxTries = 1800, int delayMs = 100)
@@ -637,6 +639,7 @@ namespace
         if (!s)
         {
             Game::logMsg("WristHUD RecvProp '%s': string not found", propName);
+            Game::noteMissingOffset(propName);
             return -1;
         }
         const uintptr_t nameVA = reinterpret_cast<uintptr_t>(s);
@@ -675,6 +678,7 @@ namespace
         if (!s)
         {
             Game::logMsg("WristHUD datamap '%s': string not found", propName);
+            Game::noteMissingOffset(propName);
             return -1;
         }
         const uintptr_t nameVA = reinterpret_cast<uintptr_t>(s);
@@ -1861,6 +1865,24 @@ void Game::logMsg(const char* fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
     bmvr::Log("%s", buf);
+}
+
+namespace
+{
+    std::mutex g_MissingOffsetsMutex;
+    std::set<std::string> g_MissingOffsets;
+}
+
+void Game::noteMissingOffset(const char* what)
+{
+    std::lock_guard<std::mutex> lock(g_MissingOffsetsMutex);
+    g_MissingOffsets.insert(what ? what : "?");
+}
+
+int Game::missingOffsetCount()
+{
+    std::lock_guard<std::mutex> lock(g_MissingOffsetsMutex);
+    return static_cast<int>(g_MissingOffsets.size());
 }
 
 void Game::errorMsg(const char* msg)

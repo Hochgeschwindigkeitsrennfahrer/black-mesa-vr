@@ -181,6 +181,7 @@ namespace
         IDirect3DTexture9* gearGpu = nullptr;
         IDirect3DTexture9* toastGpu = nullptr;
         char toastText[32]{};
+        char toastDetail[64]{};
         int w = 0, h = 0;
     };
     PanelGfx g_Gfx;
@@ -671,10 +672,11 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-void VR::ShowToast(const char* text)
+void VR::ShowToast(const char* text, DWORD ms, const char* detail)
 {
     strncpy_s(m_ToastText, text ? text : "", _TRUNCATE);
-    m_ToastUntilMs = GetTickCount() + kToastMs;
+    strncpy_s(m_ToastDetail, detail ? detail : "", _TRUNCATE);
+    m_ToastUntilMs = GetTickCount() + ms;
 }
 
 bool VR::ToastVisible() const
@@ -691,15 +693,20 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     if (g_Gfx.device && g_Gfx.device != device)
         ReleaseGfx();
     g_Gfx.device = device;
-    if (!g_Gfx.toastGpu || std::strcmp(g_Gfx.toastText, m_ToastText) != 0)
+    const bool detail = m_ToastDetail[0] != 0;
+    const int texH = detail ? 144 : 96;
+    if (!g_Gfx.toastGpu || std::strcmp(g_Gfx.toastText, m_ToastText) != 0
+        || std::strcmp(g_Gfx.toastDetail, m_ToastDetail) != 0)
     {
         if (g_Gfx.toastGpu) { g_Gfx.toastGpu->Release(); g_Gfx.toastGpu = nullptr; }
-        Canvas c(512, 96);
+        Canvas c(512, texH);
         if (!c.ok())
             return;
         c.fill(0, 0, c.w, c.h, kBg);
         c.fill(0, 0, c.w, 5, kAmber);
-        c.text(m_ToastText, 0, 5, c.w, c.h, kAmber, 54, true, DT_CENTER);
+        c.text(m_ToastText, 0, 5, c.w, 96, kAmber, detail ? 46 : 54, true, DT_CENTER);
+        if (detail)
+            c.text(m_ToastDetail, 8, 92, c.w - 8, c.h - 8, kText, 24, false, DT_CENTER);
         c.setAlpha(225);
         IDirect3DTexture9* sys = nullptr;
         if (!Upload(device, c, sys, g_Gfx.toastGpu) && g_Gfx.toastGpu)
@@ -710,6 +717,7 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         if (sys)
             sys->Release();
         strncpy_s(g_Gfx.toastText, m_ToastText, _TRUNCATE);
+        strncpy_s(g_Gfx.toastDetail, m_ToastDetail, _TRUNCATE);
     }
     if (!g_Gfx.toastGpu)
         return;
@@ -739,7 +747,7 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     const Vector head = GetViewOrigin(body);
     const Vector po = head + fwd * 30.f - up * 5.f;
-    const float hw = 6.f, hh = hw * 96.f / 512.f;
+    const float hw = detail ? 10.f : 6.f, hh = hw * static_cast<float>(texH) / 512.f;  // warnings: larger, readable
     const Vector corners[4] = { po - right * hw + up * hh, po + right * hw + up * hh, po - right * hw - up * hh, po + right * hw - up * hh };
     const int left = static_cast<int>(m_ToastUntilMs - GetTickCount());
     const int alpha = (std::min)(255, (std::max)(0, left * 255 / 400));

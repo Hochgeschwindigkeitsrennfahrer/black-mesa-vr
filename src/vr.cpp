@@ -7710,6 +7710,21 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     if (!(m_Fov > 10.f) || !m_HmdOriginLatched)
         return false;
 
+    // Offsets that no longer match the game (a Black Mesa update) only showed in bmvr_log.txt, so
+    // players ran for a session with fixes silently off (2026-10-27). Warn in the headset once in a
+    // map, and again if more go missing later (server.dll hooks resolve after the first map load).
+    const int missingOffsets = Game::missingOffsetCount();
+    if (missingOffsets > m_MissingOffsetsWarned && m_Game && m_Game->m_EngineClient
+        && m_Game->m_EngineClient->IsInGame())
+    {
+        m_MissingOffsetsWarned = missingOffsets;
+        char detail[64];
+        sprintf_s(detail, "%d hook%s missing - Black Mesa updated?", missingOffsets,
+            missingOffsets == 1 ? "" : "s");
+        Game::logMsg("Out-of-date warning shown: %s", detail);
+        ShowToast("VR MOD OUT OF DATE", 10000, detail);
+    }
+
     bool leftOk = false;
     bool rightOk = false;
     QAngle leftAng{};
@@ -10857,7 +10872,7 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
     IDirect3DSurface9* right = m_D9RightEyeSurface;
     if (!IsMenuUp()
         && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible()))
+            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible() || ToastVisible()))
     {
         DrawIndependentHandMarkers(left, 1, true, true);
         DrawIndependentHandMarkers(right, 2, true, true);
