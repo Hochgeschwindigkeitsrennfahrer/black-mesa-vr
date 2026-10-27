@@ -5921,30 +5921,18 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
     // The game lights from the body's eye point along the eye angles, which
     // in VR are the gun aim: the beam points with the hand but starts at the
     // body, so it bends round corners the hand reaches past. Start it at the
-    // right hand instead. The game adds its shoulder offset (PosY -10) along
-    // its own time-smoothed basis, so subtracting it here along the current
-    // basis left a wobble whenever the hand turned: zero those cvars instead
-    // (not archived, back to the defaults on restart). PosX (5 forward) stays.
-    static int s_calls, s_fallback, s_jumps, s_failElig, s_failTrack, s_failIngame, s_failBody;
-    static Vector s_lastBody;
-    static float s_maxJump;
-    static Vector s_lastHand;
-    static uint64_t s_statTick;
-    ++s_calls;
+    // right hand instead. The game adds its shoulder offset (PosY, -28 from
+    // skill.cfg) along its own time-smoothed basis, so subtracting it here
+    // along the current basis left a wobble whenever the hand turned: zero
+    // those cvars instead (not archived). PosX (skill.cfg -5) stays.
     Vector p{}, f{}, r{}, u{};
     bool vr = false;
-    if (m_VR && !m_VR->IsGameplayEligible()) ++s_failElig;
-    if (m_VR && !m_VR->m_RightControllerTrackingValid) ++s_failTrack;
-    if (!EngineInGame()) ++s_failIngame;
     static Vector s_lastOffset;
     static bool s_haveOffset;
     if (pos && fwd && right && up && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
         && (m_VR->m_RightControllerTrackingValid || s_haveOffset) && EngineInGame())
     {
-        const bool stereoBody = m_VR->m_HasStereoBodyOrigin;
-        const Vector body = stereoBody ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
-        if (body.LengthSqr() <= 1.f)
-            ++s_failBody;
+        const Vector body = m_VR->m_HasStereoBodyOrigin ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
         if (body.LengthSqr() > 1.f)
         {
             // skill.cfg sets them (PosY -28) and runs again on every map
@@ -5984,33 +5972,11 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
                 s_haveOffset = true;
             }
             else
-            {
-                ++s_failTrack;
                 hand = body + s_lastOffset;
-            }
             if (VectorNormalize(f) > 0.001f && hand.LengthSqr() > 1.f)
             {
                 p = hand;
                 vr = true;
-                const float jump = (hand - s_lastHand).Length();
-                if (s_lastHand.LengthSqr() > 1.f && jump > s_maxJump)
-                    s_maxJump = jump;
-                if (s_lastHand.LengthSqr() > 1.f && jump > 4.f)
-                {
-                    ++s_jumps;
-                    static int s_jumpLog;
-                    if (s_jumpLog < 12)
-                    {
-                        ++s_jumpLog;
-                        Game::logMsg("BM flashlight jump %.1f: hand (%.1f,%.1f,%.1f) was (%.1f,%.1f,%.1f) body %s (%.1f,%.1f,%.1f) was (%.1f,%.1f,%.1f) setup (%.1f,%.1f,%.1f) game eye (%.1f,%.1f,%.1f) eye %d",
-                            jump, hand.x, hand.y, hand.z, s_lastHand.x, s_lastHand.y, s_lastHand.z,
-                            stereoBody ? "stereo" : "setup", body.x, body.y, body.z, s_lastBody.x, s_lastBody.y, s_lastBody.z,
-                            m_VR->m_SetupOrigin.x, m_VR->m_SetupOrigin.y, m_VR->m_SetupOrigin.z,
-                            pos->x, pos->y, pos->z, m_VR->m_StereoEye);
-                    }
-                }
-                s_lastHand = hand;
-                s_lastBody = body;
                 static int s_log;
                 if (s_log < 4)
                 {
@@ -6020,18 +5986,6 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
                 }
             }
         }
-    }
-    if (!vr)
-        ++s_fallback;
-    const uint64_t nowTick = GetTickCount64();
-    if (nowTick - s_statTick >= 5000)
-    {
-        if (s_statTick)
-            Game::logMsg("BM flashlight 5s: calls=%d fallback=%d (elig %d track %d ingame %d body %d) jumps>4=%d maxHandJump=%.1f thread=%lu",
-                s_calls, s_fallback, s_failElig, s_failTrack, s_failIngame, s_failBody, s_jumps, s_maxJump, GetCurrentThreadId());
-        s_statTick = nowTick;
-        s_calls = s_fallback = s_jumps = s_failElig = s_failTrack = s_failIngame = s_failBody = 0;
-        s_maxJump = 0.f;
     }
     if (vr)
         hkBmFlashlightUpdate.fOriginal(ecx, &p, player, &f, &r, &u);
