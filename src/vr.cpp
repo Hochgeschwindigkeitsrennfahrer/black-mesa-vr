@@ -11626,8 +11626,49 @@ void VR::ResolveMsaaEyesToSubmit(IDirect3DDevice9* device)
     m_CaptureReentry = false;
 }
 
+// Pause-menu layer copies (FixPauseLayerAlpha / PauseLayerColourFromBackbuffer).
+// Kept between frames (created per frame they made the menu flicker) and
+// dropped here before a device Reset, with the other VR render targets.
+static IDirect3DTexture9* g_PauseLayerCopyTex;
+static IDirect3DTexture9* g_PauseFrameCopyTex;
+static void ReleasePauseLayerCopies()
+{
+    if (g_PauseLayerCopyTex)
+    {
+        g_PauseLayerCopyTex->Release();
+        g_PauseLayerCopyTex = nullptr;
+    }
+    if (g_PauseFrameCopyTex)
+    {
+        g_PauseFrameCopyTex->Release();
+        g_PauseFrameCopyTex = nullptr;
+    }
+}
+
+// Cached render-target texture of the given size/format (recreated on change).
+static IDirect3DTexture9* CachedPauseCopy(IDirect3DTexture9*& slot, IDirect3DDevice9* device, UINT w, UINT h, D3DFORMAT fmt)
+{
+    if (slot)
+    {
+        D3DSURFACE_DESC d{};
+        IDirect3DDevice9* owner = nullptr;
+        bool same = SUCCEEDED(slot->GetLevelDesc(0, &d)) && d.Width == w && d.Height == h && d.Format == fmt
+            && SUCCEEDED(slot->GetDevice(&owner)) && owner == device;
+        if (owner)
+            owner->Release();
+        if (same)
+            return slot;
+        slot->Release();
+        slot = nullptr;
+    }
+    if (FAILED(device->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &slot, nullptr)))
+        slot = nullptr;
+    return slot;
+}
+
 void VR::ReleaseVRRenderTargetsForDeviceReset()
 {
+    ReleasePauseLayerCopies();
     std::lock_guard<TextureStateMutex> lock(m_TextureMutex);
     // Reset rebinds RT0 / recreates the backbuffer behind the hooks.
     g_Rt0ActualPtr = nullptr;
@@ -12545,15 +12586,9 @@ static IDirect3DPixelShader9* PauseAlphaFromColourShader(IDirect3DDevice9* devic
     return s_ps;
 }
 
-// New per call, released by the caller (a kept D3DPOOL_DEFAULT render
-// target blocks the device Reset of a video-settings apply).
 static IDirect3DTexture9* PauseLayerCopy(IDirect3DDevice9* device, const D3DSURFACE_DESC& desc)
 {
-    IDirect3DTexture9* tex = nullptr;
-    if (FAILED(device->CreateTexture(desc.Width, desc.Height, 1, D3DUSAGE_RENDERTARGET, desc.Format,
-        D3DPOOL_DEFAULT, &tex, nullptr)))
-        tex = nullptr;
-    return tex;
+    return CachedPauseCopy(g_PauseLayerCopyTex, device, desc.Width, desc.Height, desc.Format);
 }
 
 // The VR layer is a second VGUI paint, and in it the windows come out in
@@ -12570,15 +12605,11 @@ static void PauseLayerColourFromBackbuffer(IDirect3DDevice9* device, IDirect3DSu
     IDirect3DSurface9* bb = nullptr;
     if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
         return;
-    // Created and released per call: a D3DPOOL_DEFAULT render target kept
-    // alive makes the device Reset fail when video settings are applied
-    // from the pause menu (game crashed twice, 2026-10-27).
     D3DSURFACE_DESC bbDesc{};
     IDirect3DTexture9* copy = nullptr;
     IDirect3DSurface9* copySurf = nullptr;
     if (SUCCEEDED(bb->GetDesc(&bbDesc)))
-        device->CreateTexture(bbDesc.Width, bbDesc.Height, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
-            D3DPOOL_DEFAULT, &copy, nullptr);
+        copy = CachedPauseCopy(g_PauseFrameCopyTex, device, bbDesc.Width, bbDesc.Height, D3DFMT_A8R8G8B8);
     if (copy && SUCCEEDED(copy->GetSurfaceLevel(0, &copySurf))
         && FAILED(device->StretchRect(bb, nullptr, copySurf, nullptr, D3DTEXF_POINT)))
     {
@@ -12588,8 +12619,6 @@ static void PauseLayerColourFromBackbuffer(IDirect3DDevice9* device, IDirect3DSu
     bb->Release();
     if (!copySurf)
     {
-        if (copy)
-            copy->Release();
         static int s_fail;
         if (s_fail++ < 3)
             Game::logMsg("Pause layer: backbuffer copy failed (bb %ux%u, layer %ux%u)", bbDesc.Width, bbDesc.Height, desc.Width, desc.Height);
@@ -12599,7 +12628,6 @@ static void PauseLayerColourFromBackbuffer(IDirect3DDevice9* device, IDirect3DSu
     if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
     {
         copySurf->Release();
-        copy->Release();
         return;
     }
     IDirect3DSurface9* prevRt = nullptr;
@@ -12655,7 +12683,6 @@ static void PauseLayerColourFromBackbuffer(IDirect3DDevice9* device, IDirect3DSu
     if (prevDs)
         prevDs->Release();
     copySurf->Release();
-    copy->Release();
     static int s_ok;
     if (s_ok++ < 2)
         Game::logMsg("Pause layer: colour from the presented frame %ux%u -> layer %ux%u", bbDesc.Width, bbDesc.Height, desc.Width, desc.Height);
@@ -12676,8 +12703,6 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         copySurf->Release();
         copySurf = nullptr;
     }
-    // Released at the end of this function (copySurf keeps it alive until then).
-    struct TexRelease { IDirect3DTexture9* t; ~TexRelease() { if (t) t->Release(); } } releaseCopy{ copy };
     IDirect3DStateBlock9* saved = nullptr;
     if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
         return;
