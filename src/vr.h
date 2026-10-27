@@ -729,12 +729,15 @@ public:
     // The game's +use trace (eye along the usercmd angles) runs on the press
     // tick, so the angles follow the pressing hand for the first 0.3 s of a
     // press; otherwise the left trigger picks up what the gun points at and
-    // holds it in the left hand. Not for the whole hold: Use held on train
-    // controls or a charger would turn the gun's shots to the left hand.
+    // holds it in the left hand. For the whole hold, since chargers re-trace
+    // the use entity every tick (the 0.3 s limit dropped L2 off a charger),
+    // except while firing: Use held on train controls turned the gun's shots
+    // to the left hand.
     bool UseAimFollowsGrabHand() const
     {
         return UseGrabRedirectsFire()
-            || (m_GrabLatched && m_UseWasHeld && GetTickCount64() - m_UsePressTick < 300);
+            || (m_GrabLatched && m_UseWasHeld
+                && (GetTickCount64() - m_UsePressTick < 300 || !m_UseFireHeld));
     }
     // The server grab controller sets its target every tick while the player
     // carries something (Hooks::dGrabSetTarget). The client's m_hUseEntity
@@ -1396,6 +1399,7 @@ private:
     int m_UseDropRetries = 0;
     // Use release / end of the last drop pulse (GetTickCount64).
     uint64_t m_UseReleaseTick = 0;
+    bool m_UseFireHeld = false;
     uint64_t m_UseDropPulseEndTick = 0;
     // True while inventory has a weapon and empty-hands is not selected.
     // Sampled on the game thread for right-glove visibility.

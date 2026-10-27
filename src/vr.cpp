@@ -4303,6 +4303,7 @@ void VR::ProcessInput()
             buttons |= IN_JUMP;
         // Left trigger is Use. Right trigger is Use only while holstered.
         // Hold to hold a pickup; release pulses a second Use to drop.
+        m_UseFireHeld = (buttons & (IN_ATTACK | IN_ATTACK2)) != 0;
         UpdateUseGrab(buttons, leftUse, !menuOwnsButtons && emptyHands && primaryHeld);
         if (!menuOwnsButtons && PressedDigitalAction(m_ActionReload))
             buttons |= IN_RELOAD;
