@@ -12572,8 +12572,10 @@ namespace pausediag
 {
     std::atomic<int> beginOk, beginFail, endCalls, endBound, stampCalls, fixCalls, fixDescFail, transfers;
     std::atomic<int> paintCalls, paintSkipWant, paintSkipApp, paintSkipDone, paintSkipReady, paintQueued, paintDirect;
+    // Bounding box of the painted pixels from the last readback (x0 > x1 = none).
+    int boxX0 = 1, boxY0 = 1, boxX1 = 0, boxY1 = 0;
     // Alpha of painted pixels (any rgb > 8/255): quarters 0-.25-.5-.75-1, plus unpainted pixels with alpha.
-    void Histogram(IDirect3DDevice9* device, IDirect3DSurface9* surf, const D3DSURFACE_DESC& desc, const char* tag)
+    void Histogram(IDirect3DDevice9* device, IDirect3DSurface9* surf, const D3DSURFACE_DESC& desc, const char* tag, bool log, bool box)
     {
         static IDirect3DSurface9* s_sys;
         static UINT s_w, s_h;
@@ -12599,6 +12601,7 @@ namespace pausediag
         if (FAILED(s_sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
             return;
         int q[4] = {}, painted = 0, alphaOnly = 0;
+        int bx0 = static_cast<int>(desc.Width), by0 = static_cast<int>(desc.Height), bx1 = -1, by1 = -1;
         for (UINT y = 0; y < desc.Height; y += 2)
         {
             const uint32_t* row = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(lr.pBits) + y * lr.Pitch);
@@ -12609,6 +12612,10 @@ namespace pausediag
                 if (r > 8 || g > 8 || b > 8)
                 {
                     ++painted;
+                    bx0 = (std::min)(bx0, static_cast<int>(x));
+                    bx1 = (std::max)(bx1, static_cast<int>(x));
+                    by0 = (std::min)(by0, static_cast<int>(y));
+                    by1 = (std::max)(by1, static_cast<int>(y));
                     ++q[(std::min)(3, a / 64)];
                 }
                 else if (a > 8)
@@ -12616,8 +12623,16 @@ namespace pausediag
             }
         }
         s_sys->UnlockRect();
-        Game::logMsg("pausediag %s: painted=%d alpha<.25=%d .25-.5=%d .5-.75=%d >=.75=%d  unpaintedWithAlpha=%d (fmt %d, %ux%u)",
-            tag, painted, q[0], q[1], q[2], q[3], alphaOnly, (int)desc.Format, desc.Width, desc.Height);
+        if (box)
+        {
+            boxX0 = bx0 - 6;
+            boxY0 = by0 - 6;
+            boxX1 = bx1 + 8;
+            boxY1 = by1 + 8;
+        }
+        if (log)
+            Game::logMsg("pausediag %s: painted=%d alpha<.25=%d .25-.5=%d .5-.75=%d >=.75=%d  unpaintedWithAlpha=%d box=%d,%d-%d,%d (fmt %d, %ux%u)",
+                tag, painted, q[0], q[1], q[2], q[3], alphaOnly, bx0, by0, bx1, by1, (int)desc.Format, desc.Width, desc.Height);
     }
 }
 
@@ -12630,12 +12645,16 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         ++pausediag::fixDescFail;
         return;
     }
-    static ULONGLONG s_histMs;
-    const bool hist = GetTickCount64() - s_histMs >= 1000;
+    // The box readback runs 4x a second; the histogram is logged once a second.
+    static ULONGLONG s_histMs, s_logMs;
+    const bool hist = GetTickCount64() - s_histMs >= 250;
+    const bool histLog = hist && GetTickCount64() - s_logMs >= 1000;
     if (hist)
     {
         s_histMs = GetTickCount64();
-        pausediag::Histogram(device, surf, desc, "before");
+        if (histLog)
+            s_logMs = s_histMs;
+        pausediag::Histogram(device, surf, desc, "before", histLog, true);
     }
     IDirect3DPixelShader9* fromColour = PauseAlphaFromColourShader(device);
     IDirect3DTexture9* copy = fromColour ? PauseLayerCopy(device, desc) : nullptr;
@@ -12711,6 +12730,22 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         for (int i = 0; i < passes; ++i)
             device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(V));
+        // Dialog backgrounds that sample the screen behind them (Video ->
+        // Advanced) paint nothing into this layer: black, alpha 0 (pausediag:
+        // opening it barely raised the painted count). Make the box around
+        // everything painted opaque; the frozen world behind the menu is not
+        // needed there.
+        if (pausediag::boxX1 > pausediag::boxX0 && pausediag::boxY1 > pausediag::boxY0)
+        {
+            const float bx0 = static_cast<float>((std::max)(0, pausediag::boxX0)) - 0.5f;
+            const float by0 = static_cast<float>((std::max)(0, pausediag::boxY0)) - 0.5f;
+            const float bx1 = static_cast<float>((std::min)(static_cast<int>(desc.Width), pausediag::boxX1)) - 0.5f;
+            const float by1 = static_cast<float>((std::min)(static_cast<int>(desc.Height), pausediag::boxY1)) - 0.5f;
+            const V box[4] = { { bx0, by0, 0.f, 1.f, white }, { bx1, by0, 0.f, 1.f, white },
+                { bx0, by1, 0.f, 1.f, white }, { bx1, by1, 0.f, 1.f, white } };
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, box, sizeof(V));
+        }
     }
     else if (copySurf)
         copySurf->Release();
@@ -12724,8 +12759,8 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
     device->SetDepthStencilSurface(prevDs);
     if (prevDs)
         prevDs->Release();
-    if (hist)
-        pausediag::Histogram(device, surf, desc, "after");
+    if (histLog)
+        pausediag::Histogram(device, surf, desc, "after", true, false);
 }
 
 void VR::StampPauseOverlayCursor()
