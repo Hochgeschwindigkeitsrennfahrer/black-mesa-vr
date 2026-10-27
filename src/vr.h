@@ -747,6 +747,12 @@ public:
         const uint64_t t = m_GrabControllerSeenTick.load(std::memory_order_acquire);
         return t != 0 && GetTickCount64() - t < 250;
     }
+    // Still carrying after time t. The 250 ms window above looks back past a
+    // press that already dropped the prop, so release decisions use this.
+    bool GrabControllerActiveAfter(uint64_t t) const
+    {
+        return m_GrabControllerSeenTick.load(std::memory_order_acquire) > t;
+    }
     bool GrabHandTrackingValid() const
     {
         if (!m_GrabLatched)
@@ -1388,6 +1394,9 @@ private:
     double m_UseDropClassifyUntilMs = 0.0;
     double m_UseDropSettleUntilMs = 0.0;
     int m_UseDropRetries = 0;
+    // Use release / end of the last drop pulse (GetTickCount64).
+    uint64_t m_UseReleaseTick = 0;
+    uint64_t m_UseDropPulseEndTick = 0;
     // True while inventory has a weapon and empty-hands is not selected.
     // Sampled on the game thread for right-glove visibility.
     bool m_HasHeldWeapon = false;

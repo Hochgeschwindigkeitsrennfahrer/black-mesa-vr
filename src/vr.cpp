@@ -5485,6 +5485,8 @@ void VR::ClearUseGrab()
     m_UseDropClassifyUntilMs = 0.0;
     m_UseDropSettleUntilMs = 0.0;
     m_UseDropRetries = 0;
+    m_UseReleaseTick = 0;
+    m_UseDropPulseEndTick = 0;
 }
 
 void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
@@ -5493,6 +5495,9 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
     const double now = QpcNowMs();
     const bool worldToggle = UseEntityIsWorldToggle(m_Game);
     const bool heldProp = UseEntityIsHeldProp(m_Game);
+    // Server usercmds lag the client by a tick or two, so controller calls
+    // within this margin of a release can still be from before it.
+    constexpr uint64_t kGrabLagMs = 50;
     m_GrabUseEntityHeld = heldProp;
     if (heldProp)
         m_GrabHoldingPhysics = true;
@@ -5554,6 +5559,12 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
             return;
         }
         m_UseDropClassifyUntilMs = now + 200.0;
+        m_UseReleaseTick = GetTickCount64();
+        // Decided again from what the controller does after the release: a
+        // second click whose press already dropped the prop must not pulse
+        // (the pulse picked it up again), and a click released before the
+        // controller started still has to drop it.
+        m_GrabHoldingPhysics = false;
     }
     m_UseWasHeld = false;
 
@@ -5564,8 +5575,13 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
             ClearUseGrab();
             return;
         }
+        if (!heldProp && GrabControllerActiveAfter(m_UseReleaseTick + kGrabLagMs))
+            m_GrabHoldingPhysics = true;
         if (heldProp || m_GrabHoldingPhysics)
+        {
+            Game::logMsg("Use release: still carrying, drop pulse %d", m_UseDropRetries + 1);
             startDropPulse();
+        }
         else if (now >= m_UseDropClassifyUntilMs)
         {
             m_UseDropClassifyUntilMs = 0.0;
@@ -5585,14 +5601,16 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
             m_UseDropGapUntilMs = 0.0;
             m_UseDropPulseUntilMs = 0.0;
             m_UseDropSettleUntilMs = now + 220.0;
+            m_UseDropPulseEndTick = GetTickCount64();
         }
         return;
     }
 
     if (m_UseDropSettleUntilMs > 0.0)
     {
-        if (heldProp)
+        if (heldProp || GrabControllerActiveAfter(m_UseDropPulseEndTick + kGrabLagMs))
         {
+            Game::logMsg("Use drop pulse missed, retry %d", m_UseDropRetries + 1);
             startDropPulse();
             if (m_UseDropPulseUntilMs <= 0.0)
                 m_UseDropSettleUntilMs = 0.0;
@@ -5601,8 +5619,7 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
         if (now >= m_UseDropSettleUntilMs)
         {
             m_UseDropSettleUntilMs = 0.0;
-            if (!heldProp)
-                ClearUseGrab();
+            ClearUseGrab();
         }
         return;
     }

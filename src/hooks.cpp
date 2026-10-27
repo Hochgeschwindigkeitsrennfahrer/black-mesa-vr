@@ -5861,6 +5861,7 @@ void __fastcall Hooks::dImpulseCommands(void* ecx, void* edx)
 
 void Hooks::EnsureClientFlashlightHook()
 {
+    EnsureBmFlashlightHook();
     if (hkUpdateFlashlightState.pTarget)
         return;
     HMODULE client = GetModuleHandleA("client.dll");
@@ -5885,6 +5886,80 @@ void Hooks::EnsureClientFlashlightHook()
     }
     Game::logMsg("Hook enabled: UpdateFlashlightState rva=0x%X (HMD origin/forward for VR eyes)",
         Offsets::kUpdateFlashlightState);
+}
+
+void Hooks::EnsureBmFlashlightHook()
+{
+    if (hkBmFlashlightUpdate.pTarget)
+        return;
+    HMODULE client = GetModuleHandleA("client.dll");
+    if (!client)
+        return;
+    MEMORY_BASIC_INFORMATION mbi{};
+    auto* q = reinterpret_cast<unsigned char*>(client) + Offsets::kBmFlashlightUpdate;
+    static const unsigned char kBmFlashPrologue[] = { 0x53, 0x8B, 0xDC, 0x83, 0xEC, 0x08, 0x83, 0xE4, 0xF0,
+        0x83, 0xC4, 0x04, 0x55, 0x8B, 0x6B, 0x04 };
+    hkBmFlashlightUpdate.pTarget = q;
+    if (!VirtualQuery(q, &mbi, sizeof(mbi)) || !(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+        || memcmp(q, kBmFlashPrologue, sizeof(kBmFlashPrologue)) != 0)
+    {
+        Game::logMsg("BM flashlight update skipped (bytes/rva 0x%X)", Offsets::kBmFlashlightUpdate);
+        Game::noteMissingOffset("BmFlashlightUpdate");
+        return;
+    }
+    if (hkBmFlashlightUpdate.createHook(q, &dBmFlashlightUpdate) == 0
+        && hkBmFlashlightUpdate.enableHook() == 0)
+        Game::logMsg("Hook enabled: BM flashlight update rva=0x%X (light from the right hand)",
+            Offsets::kBmFlashlightUpdate);
+    else
+        Game::logMsg("BM flashlight update hook failed rva=0x%X", Offsets::kBmFlashlightUpdate);
+}
+
+void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, void* player, Vector* fwd, Vector* right, Vector* up)
+{
+    (void)edx;
+    // The game lights from the body's eye point along the eye angles, which
+    // in VR are the gun aim: the beam points with the hand but starts at the
+    // body, so it bends round corners the hand reaches past. Start it at the
+    // right hand instead and cancel the game's sideways/up offset (PosY -10
+    // = shoulder); its forward offset stays so the light clears the gun.
+    Vector p{}, f{}, r{}, u{};
+    bool vr = false;
+    if (pos && fwd && right && up && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
+        && m_VR->m_RightControllerTrackingValid && EngineInGame())
+    {
+        const Vector body = m_VR->m_HasStereoBodyOrigin ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
+        if (body.LengthSqr() > 1.f)
+        {
+            static float s_posY = -10.f, s_posZ = 0.f;
+            static uint64_t s_cvarTick;
+            const uint64_t nowTick = GetTickCount64();
+            if (m_Game && nowTick - s_cvarTick > 1000)
+            {
+                s_cvarTick = nowTick;
+                m_Game->GetConVarFloat("gb_flashlight_PosY", s_posY);
+                m_Game->GetConVarFloat("gb_flashlight_PosZ", s_posZ);
+            }
+            QAngle::AngleVectors(m_VR->GetAimAngles(), &f, &r, &u);
+            const Vector hand = m_VR->GetRightControllerAbsPos(body);
+            if (VectorNormalize(f) > 0.001f && hand.LengthSqr() > 1.f)
+            {
+                p = hand - r * s_posY - u * s_posZ;
+                vr = true;
+                static int s_log;
+                if (s_log < 4)
+                {
+                    Game::logMsg("BM flashlight from hand (%.1f,%.1f,%.1f), game eye (%.1f,%.1f,%.1f)",
+                        hand.x, hand.y, hand.z, pos->x, pos->y, pos->z);
+                    ++s_log;
+                }
+            }
+        }
+    }
+    if (vr)
+        hkBmFlashlightUpdate.fOriginal(ecx, &p, player, &f, &r, &u);
+    else
+        hkBmFlashlightUpdate.fOriginal(ecx, pos, player, fwd, right, up);
 }
 
 void __fastcall Hooks::dUpdateFlashlightState(void* ecx, void* edx, void* flashlightState)

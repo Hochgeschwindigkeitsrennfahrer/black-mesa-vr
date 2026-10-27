@@ -504,6 +504,12 @@ public:
     // client.dll build 25844216 (2026-10-10). 0x11BD80 is mid-function and
     // the detour AVs at client+0x11B6A4 on startup (exit code 1).
     static constexpr int kUpdateFlashlightState = 0x10DDA0; // beta 26234270 (25844216: 0x10DC20)
+    // Black Mesa's own deferred flashlight never goes through the one above.
+    // The player's flashlight think (client 0xAE9F0) calls this with
+    // (pos = EyePosition, player, fwd/right/up = EyeVectors) on the global
+    // light at 0x105E24A0 (ret 0x14); it adds fwd*gb_flashlight_PosX +
+    // right*PosY + up*PosZ (5, -10, 0) and traces back from the eye.
+    static constexpr int kBmFlashlightUpdate = 0x17BAF0; // beta 26234270
 
     // L4D2 leftover referenced by copied sdk.h melee helpers. Unused on Black Mesa.
     struct { int address = 0; } GetMeleeWeaponInfoClient;
