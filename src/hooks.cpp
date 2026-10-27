@@ -24,6 +24,8 @@ static bool AreaPortalComputeViewCallSiteOk(int fn)
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
     Game::logMsg("Areaportal ComputeViewMatrices call site %s", ok ? "ok" : "MISMATCH (hook skipped)");
+    if (!ok)
+        Game::noteMissingOffset("Areaportal ComputeViewMatrices call site");
     return ok;
 }
 
@@ -1971,9 +1973,13 @@ namespace
                 0xF3, 0x0F, 0x10, 0x07, 0x0F, 0x2E, 0x86, 0xD0, 0x02, 0x00, 0x00 };
             s_verified = (memcmp(originCode, kOrigin, sizeof(kOrigin)) == 0
                 && memcmp(anglesCode, kAngles, sizeof(kAngles)) == 0) ? 1 : 0;
-            Game::logMsg("SetAbsOrigin/SetAbsAngles rva=0x%X/0x%X %s",
+            Game::logMsg("SetAbsOrigin/SetAbsAngles rva=0x%X/0x%X %s (origin %02X %02X %02X %02X %02X, angles %02X %02X %02X %02X %02X)",
                 Offsets::kCBaseEntity_SetAbsOrigin, Offsets::kCBaseEntity_SetAbsAngles,
-                s_verified ? "verified" : "bytes mismatch; viewmodel stays on the engine pose");
+                s_verified ? "verified" : "bytes mismatch; viewmodel stays on the engine pose",
+                originCode[0], originCode[1], originCode[2], originCode[3], originCode[4],
+                anglesCode[0], anglesCode[1], anglesCode[2], anglesCode[3], anglesCode[4]);
+            if (!s_verified)
+                Game::noteMissingOffset("SetAbsOrigin/SetAbsAngles");
         }
         if (!s_verified)
             return;
@@ -2363,6 +2369,8 @@ namespace
         }
     }
 
+    bool CodeBytesMatch(const unsigned char* p, const char* hex);   // defined with the weapon hooks below
+
     void PatchGluonImpactParticleDefs()
     {
         if (!Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled)
@@ -2382,8 +2390,20 @@ namespace
             "gluon_beam_end_small_particles_thirdperson",
         };
         using tFind = void*(__thiscall*)(void* thisptr, const char* name);
-        auto* find = reinterpret_cast<tFind>(
-            reinterpret_cast<unsigned char*>(client) + Offsets::kParticleSystemMgr_Find);
+        auto* findCode = reinterpret_cast<unsigned char*>(client) + Offsets::kParticleSystemMgr_Find;
+        // FindParticleSystem: push ebp; mov ebp,esp; push ecx; push esi; mov esi,[ecx+0x8C]. Both RVAs were
+        // stale for several builds and this called into the middle of another function.
+        static bool s_findBad;
+        if (s_findBad)
+            return;
+        if (!CodeBytesMatch(findCode, "558BEC51568BB18C000000"))
+        {
+            Game::logMsg("particle FindParticleSystem skipped (bytes/rva 0x%X)", Offsets::kParticleSystemMgr_Find);
+            Game::noteMissingOffset("particle FindParticleSystem");
+            s_findBad = true;
+            return;
+        }
+        auto* find = reinterpret_cast<tFind>(findCode);
         void* mgr = nullptr;
         __try
         {
@@ -4192,7 +4212,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             }
             if (!m_VR->IsMenuUp()
                 && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible()))
+                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible()))
             {
                 const long long t0 = QpcNow();
                 m_VR->DrawIndependentHandMarkers(
@@ -4254,7 +4274,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             }
             if (!m_VR->IsMenuUp()
                 && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible()))
+                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible()))
             {
                 const long long t0 = QpcNow();
                 m_VR->DrawIndependentHandMarkers(
@@ -5814,6 +5834,7 @@ void Hooks::EnsureServerFlashlightHook()
     {
         Game::logMsg("ImpulseCommands skipped (no m_nImpulse +0xE44 near 0x%X)",
             Offsets::kCBasePlayer_ImpulseCommands);
+        Game::noteMissingOffset("ImpulseCommands");
         hkImpulseCommands.pTarget = p;
         return;
     }
@@ -5840,6 +5861,7 @@ void __fastcall Hooks::dImpulseCommands(void* ecx, void* edx)
 
 void Hooks::EnsureClientFlashlightHook()
 {
+    EnsureBmFlashlightHook();
     if (hkUpdateFlashlightState.pTarget)
         return;
     HMODULE client = GetModuleHandleA("client.dll");
@@ -5852,6 +5874,7 @@ void Hooks::EnsureClientFlashlightHook()
         || memcmp(p, kFlashPrologue, sizeof(kFlashPrologue)) != 0)
     {
         Game::logMsg("UpdateFlashlightState skipped (bytes/rva 0x%X)", Offsets::kUpdateFlashlightState);
+        Game::noteMissingOffset("UpdateFlashlightState");
         hkUpdateFlashlightState.pTarget = p;
         return;
     }
@@ -5863,6 +5886,130 @@ void Hooks::EnsureClientFlashlightHook()
     }
     Game::logMsg("Hook enabled: UpdateFlashlightState rva=0x%X (HMD origin/forward for VR eyes)",
         Offsets::kUpdateFlashlightState);
+}
+
+void Hooks::EnsureBmFlashlightHook()
+{
+    if (hkBmFlashlightUpdate.pTarget)
+        return;
+    HMODULE client = GetModuleHandleA("client.dll");
+    if (!client)
+        return;
+    MEMORY_BASIC_INFORMATION mbi{};
+    auto* q = reinterpret_cast<unsigned char*>(client) + Offsets::kBmFlashlightUpdate;
+    static const unsigned char kBmFlashPrologue[] = { 0x53, 0x8B, 0xDC, 0x83, 0xEC, 0x08, 0x83, 0xE4, 0xF0,
+        0x83, 0xC4, 0x04, 0x55, 0x8B, 0x6B, 0x04 };
+    hkBmFlashlightUpdate.pTarget = q;
+    if (!VirtualQuery(q, &mbi, sizeof(mbi)) || !(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+        || memcmp(q, kBmFlashPrologue, sizeof(kBmFlashPrologue)) != 0)
+    {
+        Game::logMsg("BM flashlight update skipped (bytes/rva 0x%X)", Offsets::kBmFlashlightUpdate);
+        Game::noteMissingOffset("BmFlashlightUpdate");
+        return;
+    }
+    if (hkBmFlashlightUpdate.createHook(q, &dBmFlashlightUpdate) == 0
+        && hkBmFlashlightUpdate.enableHook() == 0)
+        Game::logMsg("Hook enabled: BM flashlight update rva=0x%X (light from the right hand)",
+            Offsets::kBmFlashlightUpdate);
+    else
+        Game::logMsg("BM flashlight update hook failed rva=0x%X", Offsets::kBmFlashlightUpdate);
+}
+
+void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, void* player, Vector* fwd, Vector* right, Vector* up)
+{
+    (void)edx;
+    // The game lights from the body's eye point along the eye angles, which
+    // in VR are the gun aim: the beam points with the hand but starts at the
+    // body, so it bends round corners the hand reaches past. Start it at the
+    // right hand instead. The game adds its shoulder offset (PosY, -28 from
+    // skill.cfg) along its own time-smoothed basis, so subtracting it here
+    // along the current basis left a wobble whenever the hand turned: zero
+    // those cvars instead (not archived). PosX (skill.cfg -5) stays.
+    Vector p{}, f{}, r{}, u{};
+    bool vr = false;
+    static Vector s_lastOffset;
+    static bool s_haveOffset;
+    if (pos && fwd && right && up && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
+        && (m_VR->m_RightControllerTrackingValid || m_VR->m_LeftControllerTrackingValid || s_haveOffset)
+        && EngineInGame())
+    {
+        const Vector body = m_VR->m_HasStereoBodyOrigin ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
+        if (body.LengthSqr() > 1.f)
+        {
+            // skill.cfg sets them (PosY -28) and runs again on every map
+            // load, so check once a second.
+            static uint64_t s_offsetTick;
+            const uint64_t tick = GetTickCount64();
+            if (m_Game && tick - s_offsetTick > 1000)
+            {
+                s_offsetTick = tick;
+                const char* kOffsets[] = { "gb_flashlight_PosY", "gb_flashlight_PosZ",
+                    "gb_flashlight_PosY_Crouch", "gb_flashlight_PosZ_Crouch" };
+                for (const char* name : kOffsets)
+                {
+                    float v = 0.f;
+                    if (m_Game->GetConVarFloat(name, v) && v != 0.f)
+                    {
+                        m_Game->SetConVarFloat(name, 0.f);
+                        Game::logMsg("BM flashlight: %s %.1f -> 0", name, v);
+                    }
+                }
+            }
+            // Left hand (option): its own pointing direction, except while
+            // both hands hold the gun, when it shines along the gun (as the
+            // Lambda1VR torch does).
+            const bool leftHand = bmvr::g_FlashlightLeftHand;
+            QAngle dir = m_VR->GetAimAngles();
+            if (leftHand && !m_VR->TwoHandGripActive())
+            {
+                dir = m_VR->GetLeftControllerAbsAngle();
+                dir.x -= bmvr::g_AimPitchOffset;
+                dir.z = 0.f;
+            }
+            QAngle::AngleVectors(dir, &f, &r, &u);
+            // This runs every game frame (~180/s). Between pose updates the
+            // controller is not flagged valid and ControllerTrackingToWorld
+            // falls back to the head, so the light jumped to the face a few
+            // times a second (flicker). Hold the last good offset instead.
+            const bool poseFresh = (leftHand ? m_VR->m_LeftControllerTrackingValid : m_VR->m_RightControllerTrackingValid)
+                && (m_VR->m_ControllerPoseValid || m_VR->m_StereoFramePoseActive);
+            static bool s_lastLeft;
+            if (leftHand != s_lastLeft)
+            {
+                s_lastLeft = leftHand;
+                s_haveOffset = false;
+                s_lastOffset = Vector{};
+            }
+            Vector hand{};
+            if (poseFresh)
+                hand = leftHand ? m_VR->GetLeftControllerAbsPos(body) : m_VR->GetRightControllerAbsPos(body);
+            // The flag can still flip between this check and the conversion:
+            // a 'hand' on the head view point is that fallback, not a hand.
+            if (poseFresh && (hand - m_VR->GetViewOrigin(body)).LengthSqr() > 1.5f * 1.5f)
+            {
+                s_lastOffset = hand - body;
+                s_haveOffset = true;
+            }
+            else
+                hand = body + s_lastOffset;
+            if (VectorNormalize(f) > 0.001f && hand.LengthSqr() > 1.f)
+            {
+                p = hand;
+                vr = true;
+                static int s_log;
+                if (s_log < 4)
+                {
+                    Game::logMsg("BM flashlight from hand (%.1f,%.1f,%.1f), game eye (%.1f,%.1f,%.1f)",
+                        hand.x, hand.y, hand.z, pos->x, pos->y, pos->z);
+                    ++s_log;
+                }
+            }
+        }
+    }
+    if (vr)
+        hkBmFlashlightUpdate.fOriginal(ecx, &p, player, &f, &r, &u);
+    else
+        hkBmFlashlightUpdate.fOriginal(ecx, pos, player, fwd, right, up);
 }
 
 void __fastcall Hooks::dUpdateFlashlightState(void* ecx, void* edx, void* flashlightState)
@@ -5943,8 +6090,10 @@ namespace
         return i > 0;
     }
 
-    unsigned char* FindPatternInModule(HMODULE mod, const char* hex)
+    // unique: nullptr unless the pattern occurs exactly once (ResolveCode's fallback after a game update).
+    unsigned char* FindPatternInModule(HMODULE mod, const char* hex, bool unique = false)
     {
+        unsigned char* found = nullptr;
         if (!mod || !hex)
             return nullptr;
         const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mod);
@@ -5970,9 +6119,15 @@ namespace
         for (size_t i = 0; i + patLen < imgSize; ++i)
         {
             if (CodeBytesMatch(base + i, hex))
-                return base + i;
+            {
+                if (!unique)
+                    return base + i;
+                if (found)
+                    return nullptr;   // ambiguous: a short prologue that also starts other functions
+                found = base + i;
+            }
         }
-        return nullptr;
+        return found;
     }
 
     unsigned char* ResolveCode(HMODULE mod, int rva, const char* hex)
@@ -5985,7 +6140,7 @@ namespace
             && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
             && CodeBytesMatch(p, hex))
             return p;
-        return FindPatternInModule(mod, hex);
+        return FindPatternInModule(mod, hex, true);
     }
 
     bool InServerDll(const void* p)
@@ -6210,6 +6365,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else if (!hkClientWeaponShootPosition.pTarget)
         {
             Game::logMsg("client Weapon_ShootPosition skipped (bytes/rva 0x%X)", Offsets::kCBasePlayer_Weapon_ShootPosition);
+            Game::noteMissingOffset("client Weapon_ShootPosition");
             hkClientWeaponShootPosition.pTarget = p;
         }
     }
@@ -6229,6 +6385,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("GetAttachment vec skipped (bytes/rva 0x%X)", Offsets::kCBaseAnimating_GetAttachmentVec);
+            Game::noteMissingOffset("GetAttachment vec");
             hkGetAttachmentVec.pTarget = p;
         }
     }
@@ -6248,6 +6405,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("GetAttachment matrix skipped (bytes/rva 0x%X)", Offsets::kCBaseAnimating_GetAttachmentMatrix);
+            Game::noteMissingOffset("GetAttachment matrix");
             hkGetAttachmentMatrix.pTarget = p;
         }
     }
@@ -6269,6 +6427,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("server Weapon_ShootPosition skipped (bytes/rva 0x%X)", Offsets::kCBasePlayer_Weapon_ShootPosition_Server);
+            Game::noteMissingOffset("server Weapon_ShootPosition");
             hkServerWeaponShootPosition.pTarget = p;
         }
     }
@@ -6289,6 +6448,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("server grab hold origin skipped (bytes/rva 0x%X)", Offsets::kCBasePlayer_GrabHoldOrigin_Server);
+            Game::noteMissingOffset("server grab hold origin");
             hkServerGrabHoldOrigin.pTarget = p;
         }
     }
@@ -6308,6 +6468,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("server BM player +0x474 shot origin skipped (bytes/rva 0x%X)", Offsets::kBlackMesaPlayer_ShootSource_Server);
+            Game::noteMissingOffset("server BM player +0x474 shot origin");
             hkServerBmShootSource.pTarget = p;
         }
     }
@@ -6327,6 +6488,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("server grab SetTargetPosition skipped (bytes/rva 0x%X)", Offsets::kCGrabController_SetTargetPosition);
+            Game::noteMissingOffset("server grab SetTargetPosition");
             hkGrabSetTarget.pTarget = p;
         }
     }
@@ -6347,6 +6509,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("server GetShootAngles skipped (bytes/rva 0x%X)", Offsets::kBlackMesaPlayer_GetShootAngles_Server);
+            Game::noteMissingOffset("server GetShootAngles");
             hkGetShootAngles.pTarget = p;
         }
     }
@@ -6367,6 +6530,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         else
         {
             Game::logMsg("%s skipped (bytes/rva 0x%X)", what, rva);
+            Game::noteMissingOffset(what);
             hook.pTarget = p;
         }
     };
@@ -6376,9 +6540,15 @@ void Hooks::EnsureWeaponShootOriginHooks()
         &dGrenadeThrowPosition, "server grenade throw position");
     if (client && !hkClientGetShootAngles.pTarget)
     {
-        // Same GetShootAngles body as server (EyeAngles vtable +0x234, then punch).
-        constexpr const char* kShootAngBytes = "558BEC568BF18B06FF90340200008B5508";
-        auto* p = FindPatternInModule(client, kShootAngBytes);
+        // C_BlackMesaPlayer::GetShootAngles (vtable slot 0x9D): EyeAngles (client vtable +0x26C, not the
+        // server's +0x234) plus punch. C_BasePlayer has an identical copy (0x6C660), so no pattern fallback.
+        constexpr const char* kShootAngBytes = "558BEC568BF18B06FF906C0200008B5508";
+        auto* p = reinterpret_cast<unsigned char*>(client) + Offsets::kC_BlackMesaPlayer_GetShootAngles;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(p, &mbi, sizeof(mbi))
+            || !(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            || !CodeBytesMatch(p, kShootAngBytes))
+            p = nullptr;
         if (p)
         {
             if (hkClientGetShootAngles.createHook(p, &dClientGetShootAngles) == 0
@@ -6390,7 +6560,8 @@ void Hooks::EnsureWeaponShootOriginHooks()
         }
         else
         {
-            Game::logMsg("client GetShootAngles pattern not found");
+            Game::logMsg("client GetShootAngles skipped (bytes/rva 0x%X)", Offsets::kC_BlackMesaPlayer_GetShootAngles);
+            Game::noteMissingOffset("client GetShootAngles");
             hkClientGetShootAngles.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCBasePlayer_Weapon_ShootPosition;
         }
@@ -6479,7 +6650,7 @@ namespace
     // `mov eax,[eax+0x474]; call eax` (AimDebug weaponFire=0 before; tau
     // shots started at the head on stable too).
     constexpr uint32_t kServerWeaponFireOriginReturnRvas[] = {
-        0x34E5D9, 0x48F774, 0x485655, 0x4858DB, 0x48BE05, 0x48D265 };
+        0x34E859, 0x48F9F4, 0x4858D5, 0x485B5B, 0x48C085, 0x48D4E5 }; // beta 26234270: all +0x280
 }
 
 Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out)
@@ -6604,6 +6775,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("TAU Fire02 beam skipped (bytes/rva 0x%X)", Offsets::kCTauBeam_ViewMuzzle);
+            Game::noteMissingOffset("TAU Fire02 beam");
             hkTauBeamView.pTarget = p;
         }
     }
@@ -6621,6 +6793,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("TAU impact glow skipped (bytes/rva 0x%X)", Offsets::kCTauBeam_WorldBeam);
+            Game::noteMissingOffset("TAU impact glow");
             hkTauBeamWorld.pTarget = p;
         }
     }
@@ -6638,6 +6811,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("TAU fire trace skipped (bytes/rva 0x%X)", Offsets::kCTauBeam_FireTrace);
+            Game::noteMissingOffset("TAU fire trace");
             hkTauBeamFireTrace.pTarget = p;
         }
     }
@@ -6655,6 +6829,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("gluon impact trace skipped (bytes/rva 0x%X)", Offsets::kCWeaponGluon_ImpactTrace);
+            Game::noteMissingOffset("gluon impact trace");
             hkGluonImpactTrace.pTarget = p;
         }
     }
@@ -6675,6 +6850,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("gluon beam update skipped (bytes/rva 0x%X)", Offsets::kCWeaponGluon_BeamUpdate);
+            Game::noteMissingOffset("gluon beam update");
             hkGluonBeamUpdate.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCWeaponGluon_BeamUpdate;
         }
@@ -6695,6 +6871,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("gluon beam set skipped (bytes/rva 0x%X)", Offsets::kCGluonBeamFx_SetBeam);
+            Game::noteMissingOffset("gluon beam set");
             hkGluonBeamFxSet.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCGluonBeamFx_SetBeam;
         }
@@ -6716,6 +6893,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("gluon beam draw skipped (bytes/rva 0x%X)", Offsets::kCGluonBeamFx_Draw);
+            Game::noteMissingOffset("gluon beam draw");
             hkGluonBeamFxDraw.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCGluonBeamFx_Draw;
         }
@@ -6737,6 +6915,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         {
             Game::logMsg("particle SetControlPoint skipped (bytes/rva 0x%X)",
                 Offsets::kParticleSetControlPoint);
+            Game::noteMissingOffset("particle SetControlPoint");
             hkParticleSetControlPoint.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kParticleSetControlPoint;
         }
@@ -6758,6 +6937,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         {
             Game::logMsg("particle AddEffect skipped (bytes/rva 0x%X)",
                 Offsets::kParticleMgr_AddEffect);
+            Game::noteMissingOffset("particle AddEffect");
             hkParticleMgrAddEffect.pTarget = p;
         }
     }
@@ -6777,6 +6957,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("RPG laser skipped (bytes/rva 0x%X)", Offsets::kCWeaponRpg_UpdateLaser);
+            Game::noteMissingOffset("RPG laser");
             hkRpgUpdateLaser.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCWeaponRpg_UpdateLaser;
         }
@@ -6798,6 +6979,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("HUD crosshair skipped (bytes/rva 0x%X)", Offsets::kCHudCrosshair_Paint);
+            Game::noteMissingOffset("HUD crosshair");
             hkHudCrosshairPaint.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCHudCrosshair_Paint;
         }
@@ -6819,6 +7001,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("DrawSprite skipped (bytes/rva 0x%X)", Offsets::kCSpriteRenderer_DrawSprite);
+            Game::noteMissingOffset("DrawSprite");
             hkSpriteRendererDraw.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCSpriteRenderer_DrawSprite;
         }
@@ -6840,6 +7023,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("DrawBeam skipped (bytes/rva 0x%X)", Offsets::kCViewRenderBeams_DrawBeam);
+            Game::noteMissingOffset("DrawBeam");
             hkViewRenderBeamsDraw.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCViewRenderBeams_DrawBeam;
         }
@@ -6862,6 +7046,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         {
             Game::logMsg("SpriteRenderableDraw skipped (bytes/rva 0x%X)",
                 Offsets::kCSpriteRenderable_Draw);
+            Game::noteMissingOffset("SpriteRenderableDraw");
             hkSpriteRenderableDraw.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCSpriteRenderable_Draw;
         }
@@ -6883,6 +7068,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("EnvLaserDot draw skipped (bytes/rva 0x%X)", Offsets::kCEnvLaserDot_Draw);
+            Game::noteMissingOffset("EnvLaserDot draw");
             hkEnvLaserDotDraw.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCEnvLaserDot_Draw;
         }
@@ -6904,6 +7090,7 @@ bool Hooks::EnsureWeaponVfxHooks()
         else
         {
             Game::logMsg("sprite quad skipped (bytes/rva 0x%X)", Offsets::kSpriteQuad);
+            Game::noteMissingOffset("sprite quad");
             hkSpriteQuad.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kSpriteQuad;
         }
@@ -7940,7 +8127,7 @@ void bmvr::InstallEarlyFramebufferHook()
         Log("GetScreenSize: engine.dll not loaded yet");
         return;
     }
-    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6D00,
+    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6D30,
         "55 8B EC 8B 0D ? ? ? ? 56 8B 01 FF 90 9C 01 00 00");
     if (screenOff == -1)
     {
@@ -7948,7 +8135,7 @@ void bmvr::InstallEarlyFramebufferHook()
         return;
     }
     if (screenOff == 0)
-        screenOff = 0xA6D00;
+        screenOff = 0xA6D30;
     void* screenTarget = reinterpret_cast<uint8_t*>(eng) + screenOff;
     if (!Hooks::hkGetScreenSize.pTarget)
     {
@@ -7962,14 +8149,14 @@ void bmvr::InstallEarlyFramebufferHook()
     }
     if (!Hooks::hkGetScreenAspectRatio.pTarget)
     {
-        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x101490,
+        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x101560,
             "55 8B EC 8B 0D ? ? ? ? 83 EC 0C 81 F9 ? ? ? ? 75 16 F3 0F 10 0D");
         if (aspectOff == -1)
             Log("GetScreenAspectRatio signature not found");
         else
         {
             if (aspectOff == 0)
-                aspectOff = 0x101490;
+                aspectOff = 0x101560;
             void* aspectTarget = reinterpret_cast<uint8_t*>(eng) + aspectOff;
             if (Hooks::hkGetScreenAspectRatio.createHook(aspectTarget, &Hooks::dGetScreenAspectRatio) != 0
                 || Hooks::hkGetScreenAspectRatio.enableHook() != 0)

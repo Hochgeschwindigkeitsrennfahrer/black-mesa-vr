@@ -74,10 +74,6 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrCrosshair, nullptr },
             { "bmvr_aim_dot", "VR: aim marker as a red laser dot (0 = amber crosshair)",
               Kind::Bool, 0.f, 1.f, &g_VrCrosshairDot, nullptr },
-            { "bmvr_laser_beam", "VR: red laser beam from the gun to where it points",
-              Kind::Bool, 0.f, 1.f, &g_VrLaserBeam, nullptr },
-            { "bmvr_laser_width", "VR: laser beam half width in game units (0.06 = ~3 mm beam)",
-              Kind::Float, 0.01f, 0.5f, nullptr, &g_VrLaserWidth },
             { "bmvr_menu_smooth", "VR: menu pointer smoothing in seconds (lower = more direct)",
               Kind::Float, 0.02f, 0.6f, nullptr, &g_MenuCursorSmoothSec },
         };

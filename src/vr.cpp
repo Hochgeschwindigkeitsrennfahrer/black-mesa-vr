@@ -1636,13 +1636,17 @@ namespace
         return hit;
     }
 
-    void SehActivateInGameVgui(uintptr_t clientBase, void* panel)
+    // modeSite: the signature-resolved g_pClientMode (imm32 holding the global's address), so the global
+    // follows game updates; kClientModeGlobalRva only when the signature did not resolve.
+    void SehActivateInGameVgui(uintptr_t clientBase, uintptr_t modeSite, void* panel)
     {
         if (!clientBase || !panel)
             return;
         __try
         {
-            void* mode = *reinterpret_cast<void**>(clientBase + Offsets::kClientModeGlobalRva);
+            const uintptr_t global = modeSite ? *reinterpret_cast<const uint32_t*>(modeSite)
+                                              : clientBase + Offsets::kClientModeGlobalRva;
+            void* mode = *reinterpret_cast<void**>(global);
             void** vt = SehObjectVTable(mode);
             if (!vt)
                 return;
@@ -4299,6 +4303,7 @@ void VR::ProcessInput()
             buttons |= IN_JUMP;
         // Left trigger is Use. Right trigger is Use only while holstered.
         // Hold to hold a pickup; release pulses a second Use to drop.
+        m_UseFireHeld = (buttons & (IN_ATTACK | IN_ATTACK2)) != 0;
         UpdateUseGrab(buttons, leftUse, !menuOwnsButtons && emptyHands && primaryHeld);
         if (!menuOwnsButtons && PressedDigitalAction(m_ActionReload))
             buttons |= IN_RELOAD;
@@ -4381,8 +4386,10 @@ void VR::ProcessInput()
     const bool resetHeld = PressedDigitalAction(m_ActionResetPosition);
     // Shoulder gestures (HL2VR style): left hand behind the left shoulder +
     // left grip = quick save, right hand behind the right shoulder + right
-    // grip = crowbar. The hand must rest there ~0.25 s first (a buzz says
-    // it is armed), so a fast swing past the shoulder does nothing.
+    // grip = crowbar. The quick-save hand must rest there ~0.25 s first (a
+    // buzz says it is armed), so a fast swing past the shoulder does
+    // nothing; the crowbar arms at once (a buzz on entry), since the grip
+    // squeeze is needed anyway and the wait lost hurried grabs.
     const bool rightShoulder = UpdateShoulderGestures(paused);
     vr::InputDigitalActionData_t flash{};
     static bool s_flashLatched = false;
@@ -5481,6 +5488,8 @@ void VR::ClearUseGrab()
     m_UseDropClassifyUntilMs = 0.0;
     m_UseDropSettleUntilMs = 0.0;
     m_UseDropRetries = 0;
+    m_UseReleaseTick = 0;
+    m_UseDropPulseEndTick = 0;
 }
 
 void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
@@ -5489,6 +5498,9 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
     const double now = QpcNowMs();
     const bool worldToggle = UseEntityIsWorldToggle(m_Game);
     const bool heldProp = UseEntityIsHeldProp(m_Game);
+    // Server usercmds lag the client by a tick or two, so controller calls
+    // within this margin of a release can still be from before it.
+    constexpr uint64_t kGrabLagMs = 50;
     m_GrabUseEntityHeld = heldProp;
     if (heldProp)
         m_GrabHoldingPhysics = true;
@@ -5550,6 +5562,12 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
             return;
         }
         m_UseDropClassifyUntilMs = now + 200.0;
+        m_UseReleaseTick = GetTickCount64();
+        // Decided again from what the controller does after the release: a
+        // second click whose press already dropped the prop must not pulse
+        // (the pulse picked it up again), and a click released before the
+        // controller started still has to drop it.
+        m_GrabHoldingPhysics = false;
     }
     m_UseWasHeld = false;
 
@@ -5560,8 +5578,13 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
             ClearUseGrab();
             return;
         }
+        if (!heldProp && GrabControllerActiveAfter(m_UseReleaseTick + kGrabLagMs))
+            m_GrabHoldingPhysics = true;
         if (heldProp || m_GrabHoldingPhysics)
+        {
+            Game::logMsg("Use release: still carrying, drop pulse %d", m_UseDropRetries + 1);
             startDropPulse();
+        }
         else if (now >= m_UseDropClassifyUntilMs)
         {
             m_UseDropClassifyUntilMs = 0.0;
@@ -5581,14 +5604,16 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
             m_UseDropGapUntilMs = 0.0;
             m_UseDropPulseUntilMs = 0.0;
             m_UseDropSettleUntilMs = now + 220.0;
+            m_UseDropPulseEndTick = GetTickCount64();
         }
         return;
     }
 
     if (m_UseDropSettleUntilMs > 0.0)
     {
-        if (heldProp)
+        if (heldProp || GrabControllerActiveAfter(m_UseDropPulseEndTick + kGrabLagMs))
         {
+            Game::logMsg("Use drop pulse missed, retry %d", m_UseDropRetries + 1);
             startDropPulse();
             if (m_UseDropPulseUntilMs <= 0.0)
                 m_UseDropSettleUntilMs = 0.0;
@@ -5597,8 +5622,7 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
         if (now >= m_UseDropSettleUntilMs)
         {
             m_UseDropSettleUntilMs = 0.0;
-            if (!heldProp)
-                ClearUseGrab();
+            ClearUseGrab();
         }
         return;
     }
@@ -6308,7 +6332,9 @@ void VR::ApplyWorldVguiTriggerClick(CUserCmd* cmd)
     void* panel = SehReadPtrOff(screen, Offsets::kC_VGuiScreen_PanelPtr);
     if (!panel)
         panel = SehReadPtrOff(screen, 0x720);
-    SehActivateInGameVgui(m_Game->m_BaseClient, panel);
+    const uintptr_t modeSite = (m_Game->m_Offsets && m_Game->m_Offsets->g_pClientMode.valid)
+        ? static_cast<uintptr_t>(m_Game->m_Offsets->g_pClientMode.address) : 0;
+    SehActivateInGameVgui(m_Game->m_BaseClient, modeSite, panel);
     SehVguiCursorMoved(m_Game->m_VguiInput, px, py);
 
     if (trigger && !m_WorldVguiTriggerWasDown)
@@ -7709,6 +7735,21 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         return false;
     if (!(m_Fov > 10.f) || !m_HmdOriginLatched)
         return false;
+
+    // Offsets that no longer match the game (a Black Mesa update) only showed in bmvr_log.txt, so
+    // players ran for a session with fixes silently off (2026-10-27). Warn in the headset once in a
+    // map, and again if more go missing later (server.dll hooks resolve after the first map load).
+    const int missingOffsets = Game::missingOffsetCount();
+    if (missingOffsets > m_MissingOffsetsWarned && m_Game && m_Game->m_EngineClient
+        && m_Game->m_EngineClient->IsInGame())
+    {
+        m_MissingOffsetsWarned = missingOffsets;
+        char detail[64];
+        sprintf_s(detail, "%d hook%s missing - Black Mesa updated?", missingOffsets,
+            missingOffsets == 1 ? "" : "s");
+        Game::logMsg("Out-of-date warning shown: %s", detail);
+        ShowToast("VR MOD OUT OF DATE", 10000, detail);
+    }
 
     bool leftOk = false;
     bool rightOk = false;
@@ -9344,7 +9385,7 @@ bool VR::UpdateShoulderGestures(bool paused)
         return PressedDigitalAction(h) ? 1.f : 0.f;
     };
     // Returns true on the grip's press edge while armed.
-    auto step = [&](Zone& z, bool in, float grip, vr::ETrackedControllerRole role) {
+    auto step = [&](Zone& z, bool in, float grip, vr::ETrackedControllerRole role, DWORD dwellMs) {
         const DWORD now = GetTickCount();
         if (!in)
         {
@@ -9355,7 +9396,7 @@ bool VR::UpdateShoulderGestures(bool paused)
         }
         if (z.enteredMs == 0)
             z.enteredMs = now;
-        if (!z.armed && now - z.enteredMs >= 250 && !z.gripDown)
+        if (!z.armed && now - z.enteredMs >= dwellMs && !z.gripDown)
         {
             z.armed = true;
             PulseHandHaptic(role, 1200, 0.3f);
@@ -9374,13 +9415,13 @@ bool VR::UpdateShoulderGestures(bool paused)
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = m_PhysicalRightTrackingValid && !m_TwoHandActive
         && inZone(m_PhysicalRightPosAbs, 1.f);
-    if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand))
+    if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
     {
         m_PendingQuickSave.store(true, std::memory_order_release);
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
         Game::logMsg("Shoulder gesture: quick save");
     }
-    if (step(s_right, rightIn, gripValue(m_ActionFlashlight), vr::TrackedControllerRole_RightHand) && m_Game)
+    if (step(s_right, rightIn, gripValue(m_ActionFlashlight), vr::TrackedControllerRole_RightHand, 0) && m_Game)
     {
         Game::InventoryWeapon inv[32]{};
         const int n = m_Game->CollectInventoryWeapons(inv, 32);
@@ -10487,6 +10528,48 @@ void VR::LogOpenXrPublishRate()
     const uint32_t helperDelta = (haveHelperSubmitted && helperSubmitted >= m_OpenXrHelperSubmittedLast)
         ? (helperSubmitted - m_OpenXrHelperSubmittedLast) : 0;
     RefreshOpenXrHelperConsumed(QpcNowMs());
+    // Uncapped (fps_max 300) the game rendered ~272 stereo pairs/s for the
+    // 90 the headset shows: GPU 99 % busy vs 44 % at fps_max 100 (2026-10-27).
+    // FrameCap 2 (default) = twice the headset rate: always a frame <= half a
+    // refresh old, at a steady age (user: clearly smoothest). 1 = rate + 10
+    // beats against the refresh (newest frame's age cycles 0..10 ms ten
+    // times a second = uneven motion). 0 = leave the game's
+    // value (restores 300 if we changed it). The rate is the helper's
+    // measured submit rate rounded up to a standard rate, only ever raised,
+    // so a stretch where the helper falls behind cannot pull it down. The
+    // live value is read back so a cfg/console change is undone and logged.
+    if (m_Game && haveHelperSubmitted)
+    {
+        const float hz = helperDelta * scale;
+        static int s_nominal, s_applied;
+        const int kRates[] = { 72, 90, 120, 144 };
+        for (int r : kRates)
+        {
+            if (hz >= 60.f && hz <= r * 1.05f)
+            {
+                if (r > s_nominal)
+                    s_nominal = r;
+                break;
+            }
+        }
+        const int mode = static_cast<int>(bmvr::g_FrameCapMode + 0.5f);
+        int want = 0;
+        if (mode == 1 && s_nominal)
+            want = s_nominal + 10;
+        else if (mode == 2 && s_nominal)
+            want = s_nominal * 2;
+        else if (mode == 0 && s_applied)
+            want = 300;
+        float live = 0.f;
+        m_Game->GetConVarFloat("fps_max", live);
+        if (want && static_cast<int>(live + 0.5f) != want)
+        {
+            m_Game->SetConVarFloat("fps_max", static_cast<float>(want));
+            Game::logMsg("fps_max %.0f -> %d (FrameCap %d, headset %.0f Hz measured, %d nominal)",
+                live, want, mode, hz, s_nominal);
+            s_applied = mode == 0 ? 0 : want;
+        }
+    }
     Game::logMsg("OpenXR publish rate present=%.0f/s published=%.0f/s skipStale=%.0f/s skipVsync=%.0f/s skipNoPose=%.0f/s slots=%u copy=%d "
         "deferred=%.0f/s throttled=%.0f/s helperHold=%.0f/s dropped=%.0f/s pending=%u/%u maxPending=%u "
         "paceWait=%.0f/s avg=%.2fms max=%.2fms await=%.0f/s avg=%.2fms max=%.2fms handoffWait=%.0f/s "
@@ -10857,7 +10940,7 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
     IDirect3DSurface9* right = m_D9RightEyeSurface;
     if (!IsMenuUp()
         && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible()))
+            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible() || ToastVisible()))
     {
         DrawIndependentHandMarkers(left, 1, true, true);
         DrawIndependentHandMarkers(right, 2, true, true);

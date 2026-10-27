@@ -138,6 +138,10 @@ public:
 
     static void logMsg(const char* fmt, ...);
     static void errorMsg(const char* msg);
+    // A signature or byte check that no longer matches the game (usually a Black Mesa update), counted
+    // once per name so VR can warn in the headset (ShowToast) instead of only in bmvr_log.txt.
+    static void noteMissingOffset(const char* what);
+    static int missingOffsetCount();
     static bool InstallVertexFormatWarningFilter() { return false; }
     static void UninstallVertexFormatWarningFilter() {}
 };

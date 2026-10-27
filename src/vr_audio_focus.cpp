@@ -31,7 +31,7 @@ namespace
     constexpr DWORD kDsLost = 0x00000002;
     constexpr DWORD kDsPlayLooping = 0x00000001;
     // engine.dll image 0x10000000, Play(0,0,DSBPLAY_LOOPING) of the mix buffer.
-    constexpr uintptr_t kMixPlayInsnRva = 0x5FA43;
+    constexpr uintptr_t kMixPlayInsnRva = 0x5FA73; // beta 26234270 (25844216: 0x5FA43)
 
     struct ComUse
     {

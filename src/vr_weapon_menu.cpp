@@ -1888,6 +1888,7 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
                 m_WeaponMenuLatchBody = body;
                 m_WeaponMenuLatchWorld = center;
                 m_WeaponMenuLatchDelta = m_WeaponMenuLatchWorld - body;
+                m_WeaponMenuLatchHandDelta = hand - body;
                 m_WeaponMenuLatchFwd = menuFwd;
                 m_WeaponMenuLatchRight = yawRight;
                 m_WeaponMenuLatchUp = menuUp;
@@ -2035,19 +2036,19 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
             const Vector trackingBody = MenuPlayerBody(this);
             hand = ControllerTrackingToWorld(trackingBody, m_PhysicalRightPosAbs);
         }
-        const Vector rayStart = hand - m_WeaponMenuFwd * 20.f;
-        const Vector rayDir = m_WeaponMenuFwd;
-        const float planeDenom = rayDir.Dot(m_WeaponMenuFwd);
-        if (fabsf(planeDenom) > 0.0001f)
+        // Hover = the hand's sideways and vertical travel since the menu
+        // opened, mapped 1:1 onto the menu's own right/up. Projecting along
+        // the tilted normal mixed in forward/back travel: an arm raised from
+        // straight ahead also comes back towards the body, which the tilted
+        // plane read as down, so up took noticeably longer than down.
         {
-            const float hitT = (m_WeaponMenuOrigin - rayStart).Dot(m_WeaponMenuFwd) / planeDenom;
-            if (hitT > 0.f && hitT < 120.f)
-            {
-                const Vector hit = rayStart + rayDir * hitT;
-                const Vector rel = hit - m_WeaponMenuOrigin;
-                m_WeaponMenuHandX = rel.Dot(m_WeaponMenuRight);
-                m_WeaponMenuHandY = rel.Dot(m_WeaponMenuUp);
-            }
+            const float yawDelta = m_RotationOffsetY.load(std::memory_order_acquire)
+                - m_WeaponMenuLatchYaw;
+            Vector handDelta = m_WeaponMenuLatchHandDelta;
+            YawAroundZ(handDelta, yawDelta);
+            const Vector d = hand - (MenuPlayerBody(this) + handDelta);
+            m_WeaponMenuHandX = d.Dot(m_WeaponMenuRight);
+            m_WeaponMenuHandY = d.z;
         }
 
         const int prevHover = m_WeaponMenuHover;

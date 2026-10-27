@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <mutex>
+#include <set>
 using tCreateInterface = void*(__cdecl*)(const char* name, int* returnCode);
 
 static HMODULE GetModuleWithRetry(const char* dllname, int maxTries = 1800, int delayMs = 100)
@@ -637,6 +639,9 @@ namespace
         if (!s)
         {
             Game::logMsg("WristHUD RecvProp '%s': string not found", propName);
+            // m_hLaserDot is HL2's RPG prop; BM has no such string in any build, so it is no update sign.
+            if (std::strcmp(propName, "m_hLaserDot") != 0)
+                Game::noteMissingOffset(propName);
             return -1;
         }
         const uintptr_t nameVA = reinterpret_cast<uintptr_t>(s);
@@ -675,21 +680,24 @@ namespace
         if (!s)
         {
             Game::logMsg("WristHUD datamap '%s': string not found", propName);
+            Game::noteMissingOffset(propName);
             return -1;
         }
         const uintptr_t nameVA = reinterpret_cast<uintptr_t>(s);
         int best = -1;
         int hits = 0;
-        for (size_t i = 5; i + 4 < size; i += 1)
+        // i = the name's imm32: 68 <offset> 68 <nameVA> puts the offset at i-5 and the pushes at i-6 / i-1
+        // (it read i-4 behind a test of i-5 and never matched: m_ArmorValue hits=0 on every build).
+        for (size_t i = 6; i + 4 < size; i += 1)
         {
             uintptr_t v = 0;
             memcpy(&v, base + i, sizeof(v));
             if (v != nameVA)
                 continue;
-            if (base[i - 5] != 0x68)
+            if (base[i - 1] != 0x68 || base[i - 6] != 0x68)
                 continue;
             int val = 0;
-            memcpy(&val, base + i - 4, sizeof(val));
+            memcpy(&val, base + i - 5, sizeof(val));
             ++hits;
             if (val < minOff || val > maxOff || (val & 3) != 0)
                 continue;
@@ -758,10 +766,17 @@ void Game::ScanWristHudNetVars()
     // the server SendProp leftover at +0x1374; taking the smallest hit in a wide
     // range landed on that leftover, so zoom never read as 1 and scoped aim
     // stayed on the controller.
-    const int flashlight = FindRecvPropOffsetPlus4(
+    int flashlight = FindRecvPropOffsetPlus4(
         base, imgSize, "m_bFlashlightEnabled", 0x1700, 0x1A00, false, true);
     g_nvZooming = FindRecvPropOffsetPlus4(
         base, imgSize, "m_bZooming", 0x1700, 0x1A00, false, true);
+    // BM builds these two RecvProps in code (push offset; push name; call), so there is no table entry
+    // with the offset after the name (both -1 on betas 25844216 and 26234270: zoom 0x17C8, flashlight
+    // 0x17E8). The datamap scan reads exactly that push pair.
+    if (flashlight < 0)
+        flashlight = FindDatamapFieldOffset(base, imgSize, "m_bFlashlightEnabled", 0x1700, 0x1A00);
+    if (g_nvZooming < 0)
+        g_nvZooming = FindDatamapFieldOffset(base, imgSize, "m_bZooming", 0x1700, 0x1A00);
     if (g_nvZooming < 0 && flashlight > 0)
         g_nvZooming = flashlight - 1;
     g_nvRpgLaserOn = FindRecvPropOffsetPlus4(
@@ -1861,6 +1876,24 @@ void Game::logMsg(const char* fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
     bmvr::Log("%s", buf);
+}
+
+namespace
+{
+    std::mutex g_MissingOffsetsMutex;
+    std::set<std::string> g_MissingOffsets;
+}
+
+void Game::noteMissingOffset(const char* what)
+{
+    std::lock_guard<std::mutex> lock(g_MissingOffsetsMutex);
+    g_MissingOffsets.insert(what ? what : "?");
+}
+
+int Game::missingOffsetCount()
+{
+    std::lock_guard<std::mutex> lock(g_MissingOffsetsMutex);
+    return static_cast<int>(g_MissingOffsets.size());
 }
 
 void Game::errorMsg(const char* msg)

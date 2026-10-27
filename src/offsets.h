@@ -36,8 +36,16 @@ struct Offset
             this->offset = newOffset;
         if (newOffset == -1)
         {
+            // A jump at the old offset = the mod's own early hook (GetScreenAspectRatio, GetBackBufferDimensions),
+            // not a game update: the bytes were there until MinHook replaced them.
+            const auto* at = reinterpret_cast<const unsigned char*>(GetModuleHandleA(this->moduleName.c_str())) + currentOffset;
+            if (!optional && currentOffset > 0 && *at == 0xE9)
+                return;
             if (!optional)
+            {
                 Game::logMsg("Signature not found in %s: %s", this->moduleName.c_str(), this->signature.c_str());
+                Game::noteMissingOffset((this->moduleName + ": " + this->signature).c_str());
+            }
             return;
         }
         this->address = (int)((uintptr_t)GetModuleHandleA(this->moduleName.c_str()) + this->offset);
@@ -51,31 +59,31 @@ public:
     // CBlackMesaViewRender IViewRender vtable slot 6. 3-arg thiscall
     // (CViewSetup&, nClearFlags, whatToDraw), ret 0xC.
     // 0x207730 matches a nearby helper whose callers push floats — not RenderView.
-    Offset RenderView{ "client.dll", 0x201B10,
+    Offset RenderView{ "client.dll", 0x201DB0,
         "55 8B EC 81 EC DC 02 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 8B 5D 08 56" };
 
-    Offset g_pClientMode{ "client.dll", 0x15D3F6,
+    Offset g_pClientMode{ "client.dll", 0x15D576,
         "56 57 8B F9 8B 0D ? ? ? ? 8B 01 FF 50 24", 6 };
 
-    Offset CreateMove{ "client.dll", 0x102410,
+    Offset CreateMove{ "client.dll", 0x102590,
         "55 8B EC E8 ? ? ? ? 8B C8 85 C9 75 06 B0 01 5D C2 08 00" };
 
     // FindNearbyVguiScreen(eye, angles, team). cdecl. Only caller is
     // C_BasePlayer::DetermineVguiInputMode. Hover (C_VGuiScreen::ClientThink)
     // uses EyePosition/EyeAngles; clicks need m_nButtonState at +0x6B4, which
     // DetermineVguiInputMode skips when ISurface::IsCursorVisible is true.
-    Offset FindNearbyVguiScreen{ "client.dll", 0xEE310,
+    Offset FindNearbyVguiScreen{ "client.dll", 0xEE490,
         "53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC B8 00 00 00" };
-    Offset SetVGuiScreenButtonState{ "client.dll", 0xEEC20,
+    Offset SetVGuiScreenButtonState{ "client.dll", 0xEEDA0,
         "55 8B EC 8B 4D 08 85 C9 74 09 8B 45 0C 89 81 B4 06 00 00 5D C3" };
-    Offset IntersectVguiScreenRay{ "client.dll", 0xEE8D0,
+    Offset IntersectVguiScreenRay{ "client.dll", 0xEEA50,
         "55 8B EC 83 EC 48 56 8B F1 8B 06 FF 50 24" };
     static constexpr int kC_VGuiScreen_ButtonState = 0x6B4;
     static constexpr int kC_VGuiScreen_PixelWidth = 0x6A0;
     static constexpr int kC_VGuiScreen_PixelHeight = 0x6A4;
     static constexpr int kC_VGuiScreen_PanelPtr = 0x72C;
     // IClientMode* in client.dll .data. C_VGuiScreen::ClientThink 0xFB7F0.
-    static constexpr int kClientModeGlobalRva = 0x6D5B58;
+    static constexpr int kClientModeGlobalRva = 0x6D6D00; // beta 26234270 (25844216: 0x6D5B58)
     static constexpr int kIClientMode_ActivateInGameVGuiContext = 30;
     // vgui2 VGUI_InputInternal001 as used by ClientThink (no extra GetMouseFocus).
     static constexpr int kVguiVtInternalCursorMoved = 0x108 / 4;
@@ -89,7 +97,7 @@ public:
 
     // Build 25844216 (2026-10-10): C_BlackMesaViewModel vtable slot 230 (0x398).
     // Register allocation changed, so the 25607072 prologue no longer matches.
-    Offset CalcViewModelView{ "client.dll", 0x29BA10,
+    Offset CalcViewModelView{ "client.dll", 0x29CC70,
         "55 8B EC 83 EC 24 53 56 57 8B 7D 08 8B F1 85 FF" };
 
     // Ghidra client.dll image 0x10000000. FUN_1029d930 (CalcViewModelView)
@@ -100,8 +108,8 @@ public:
     // Build 25844216 (2026-10-10): both moved -0xE160 from 25607072. Each
     // compares this+0x294 / this+0x2D0 (ucomiss) before writing; the call
     // site checks those bytes. Field offsets themselves did not move.
-    static constexpr int kCBaseEntity_SetAbsOrigin = 0xA1820;
-    static constexpr int kCBaseEntity_SetAbsAngles = 0xA1700;
+    static constexpr int kCBaseEntity_SetAbsOrigin = 0xA18E0; // beta 26234270 (25844216: 0xA1820)
+    static constexpr int kCBaseEntity_SetAbsAngles = 0xA17C0; // beta 26234270 (25844216: 0xA1700)
     // C_BaseEntity abs origin written by SetAbsOrigin (Ghidra client FUN_100af720).
     static constexpr int kCBaseEntity_AbsOrigin = 0x294;
 
@@ -110,13 +118,13 @@ public:
     // (common/wpn_select.wav at SNDLVL_75dB — a world emit at the player).
     // The weapon wheel plays weapon_*.Draw on the weapon instead, and HUD
     // ticks go through IEngineSound::EmitAmbientSound (2D).
-    static constexpr int kCBaseEntity_EmitSound = 0x1D80D0;
+    static constexpr int kCBaseEntity_EmitSound = 0x1D8250; // beta 26234270 (25844216: 0x1D80D0); mid-function on both, never called
     static constexpr bool kCBaseEntity_EmitSoundVerified = false;
 
     // C_BlackMesaPlayer vtable +0x414. Thunk: call EyePosition (+0x268) and
     // return that vector. Distinct from EyePosition (do not hook +0x268 —
     // that moves the camera). Bytes: 55 8B EC 8B 11 FF 75 08 FF 92 68 02 00 00.
-    static constexpr int kCBasePlayer_Weapon_ShootPosition = 0x6E120;
+    static constexpr int kCBasePlayer_Weapon_ShootPosition = 0x6E1E0; // beta 26234270 (25844216: 0x6E120)
 
     // server.dll CBlackMesaPlayer vtable +0x23C. Same thunk onto EyePosition
     // at +0x230. Bytes: 55 8B EC 8B 11 FF 75 08 FF 92 30 02 00 00.
@@ -133,12 +141,15 @@ public:
     // Beta 25844216: the only thunk at slot +0x474 of the two BM player
     // vtables (0x1067C7D8, 0x107268F0); stable 19042901 had it at 0x47C810.
     // Bytes: 55 8B EC FF 75 08 E8 ?? ?? ?? ?? 8B 45 08 5D C2 04 00.
-    static constexpr int kBlackMesaPlayer_ShootSource_Server = 0x47D1E0;
+    static constexpr int kBlackMesaPlayer_ShootSource_Server = 0x47D460; // beta 26234270 (25844216: 0x47D1E0)
 
     // server.dll CGrabController::SetTargetPosition FUN_10470990.
     // UpdateObject writes the hold point here after 2*radius+24. Bytes:
     // 55 8B EC 8B 45 08 8B D1 D9 00 D9 5A 04. ret 8.
-    static constexpr int kCGrabController_SetTargetPosition = 0x471360;
+    // client.dll C_BlackMesaPlayer::GetShootAngles, vtable slot 0x9D (RTTI .?AVC_BlackMesaPlayer@@),
+    // beta 26234270. Was a server-byte pattern scan that never matched the client.
+    static constexpr int kC_BlackMesaPlayer_GetShootAngles = 0x25AC20;
+    static constexpr int kCGrabController_SetTargetPosition = 0x4715E0; // beta 26234270 (25844216: 0x471360)
 
     // client.dll DT_BasePlayer RecvTable FUN_100b6a00: m_hUseEntity.
     static constexpr int kCBasePlayer_hUseEntity = 0x1344;
@@ -152,7 +163,7 @@ public:
     // runs after the shot, so the recoil term is exactly what walks sustained
     // fire upward. These are server offsets; the client copies the mod already
     // zeroes live at different addresses and only drive the viewmodel.
-    static constexpr int kBlackMesaPlayer_GetShootAngles_Server = 0x47F660;
+    static constexpr int kBlackMesaPlayer_GetShootAngles_Server = 0x47F8E0; // beta 26234270 (25844216: 0x47F660)
 
     // server.dll grenade spawn, cdecl (type, Vector* velocity, AngularImpulse*,
     // CBaseEntity* owner, CBaseEntity* thrower, int mode) -> grenade. Type 1 =
@@ -164,18 +175,18 @@ public:
     // between eye and throw position, else the throw position. The frag
     // passes 0.
     // Bytes: 55 8B EC 8B 45 08 83 EC 30 83 F8 15.
-    static constexpr int kGrenadeCreate_Server = 0x3798A0;
+    static constexpr int kGrenadeCreate_Server = 0x379B20; // beta 26234270 (25844216: 0x3798A0)
     // server.dll throw position, cdecl (grenade, Vector* pos, QAngle* ang,
     // CBaseEntity* owner) -> bool (false = spawn refused, grenade removed):
     // owner EyePosition (+0x230) / EyeAngles (+0x234), an offset, then a
     // trace back to the eye. Bytes: 55 8B EC 81 EC 88 00 00 00.
-    static constexpr int kGrenadeThrowPosition_Server = 0x483060;
+    static constexpr int kGrenadeThrowPosition_Server = 0x4832E0; // beta 26234270 (25844216: 0x483060)
     static constexpr int kBlackMesaPlayer_RecoilPunchAngles_Server = 0x14BC;
 
     // C_BaseAnimating IClientRenderable GetAttachment. `this` is entity+4.
     // Vec: FUN_10097a80 (index, Vector*, QAngle*). Matrix: FUN_100979b0.
-    static constexpr int kCBaseAnimating_GetAttachmentVec = 0x89B80;
-    static constexpr int kCBaseAnimating_GetAttachmentMatrix = 0x89AB0;
+    static constexpr int kCBaseAnimating_GetAttachmentVec = 0x89C40; // beta 26234270 (25844216: 0x89B80)
+    static constexpr int kCBaseAnimating_GetAttachmentMatrix = 0x89B70; // beta 26234270 (25844216: 0x89AB0)
 
     // IClientRenderable (entity+4) vtable: LookupAttachment +0x90, GetAttachment
     // origin/angles +0x98. Ghidra TAU Fire02 path (FUN_10234330).
@@ -188,50 +199,52 @@ public:
     // client.dll CTauBeam first-person Fire02 particle path (FUN_10234330).
     // thiscall, 5 stack args, ret 0x14. Arg1 is six floats: start xyz + end xyz.
     // Unique bytes: 55 8B EC 83 EC 60 80 7D 14 00 8B 55 08 56 57 8B
-    static constexpr int kCTauBeam_ViewMuzzle = 0x227E40;
+    static constexpr int kCTauBeam_ViewMuzzle = 0x228090; // beta 26234270 (25844216: 0x227E40)
 
     // client.dll CTauBeam impact glow (FUN_102346A0). ProgressBeam calls it as
     // (trace.endpos, trace.plane.normal, charge), not (beam start, beam end).
     // Unique bytes: 55 8B EC 83 EC 78 8B 45 08 0F 57 C9 56 57 8B 7D
-    static constexpr int kCTauBeam_WorldBeam = 0x2281B0;
+    static constexpr int kCTauBeam_WorldBeam = 0x228400; // beta 26234270 (25844216: 0x2281B0)
 
     // client.dll CTauBeam fire: AngleVectors(this+0x18) then TraceRay from
     // this+0xC (FUN_102348B0). thiscall, 0 stack args. Unique bytes:
     // 53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC EC 00 00 00
-    static constexpr int kCTauBeam_FireTrace = 0x2283C0;
+    static constexpr int kCTauBeam_FireTrace = 0x228610; // beta 26234270 (25844216: 0x2283C0)
 
     // client.dll C_Weapon_Gluon impact trace (FUN_1029D430). ShootPosition +
     // EyeAngles (+0x274), not GetShootAngles, so the glow sits on the HMD look.
     // thiscall, 2 stack args (player, CGameTrace*), ret 8. Unique bytes:
     // 53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC D8 00 00 00
-    static constexpr int kCWeaponGluon_ImpactTrace = 0x29B4F0;
+    static constexpr int kCWeaponGluon_ImpactTrace = 0x29C750; // beta 26234270 (25844216: 0x29B4F0)
     // client.dll C_Weapon_Gluon first-person beam update (FUN_1029A7D0).
     // thiscall, 0 stack args. Calls impact trace then SetControlPoint(0, end)
     // and C_GluonBeamFx::SetBeam (FUN_1029C960). Unique bytes:
     // 55 8B EC 81 EC D0 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 56 57 8B F9
-    static constexpr int kCWeaponGluon_BeamUpdate = 0x298890;
+    static constexpr int kCWeaponGluon_BeamUpdate = 0x299AF0; // beta 26234270 (25844216: 0x298890)
     // client.dll C_GluonBeamFx::SetBeam (FUN_1029C960). thiscall, 4 stack args
     // (viewmodel, start, mid, end), ret 0x10. Unique bytes:
     // 55 8B EC 8B 45 0C 56 8B F1 C6 46 0C 01
-    static constexpr int kCGluonBeamFx_SetBeam = 0x29AA20;
+    static constexpr int kCGluonBeamFx_SetBeam = 0x29BC80; // beta 26234270 (25844216: 0x29AA20)
     // client.dll C_GluonBeamFx Draw (FUN_1029B290) on IClientRenderable.
     // Start at this+0xC, end at this+0x24. thiscall, 1 stack arg, ret 4.
     // Unique bytes: 53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC 68 05 00 00
-    static constexpr int kCGluonBeamFx_Draw = 0x299350;
+    static constexpr int kCGluonBeamFx_Draw = 0x29A5B0; // beta 26234270 (25844216: 0x299350)
     // client.dll CNewParticleEffect::SetControlPoint (FUN_101A5170).
     // thiscall, 2 stack args (index, Vector*), ret 8.
     // Unique bytes: 55 8B EC 53 8B 5D 0C 57 8B F9 83 BF 54 1B 00 00 FF
-    static constexpr int kParticleSetControlPoint = 0x1976E0;
+    static constexpr int kParticleSetControlPoint = 0x197860; // beta 26234270 (25844216: 0x1976E0)
     // client.dll CParticleMgr::AddEffect (FUN_1019D940). thiscall, 1 stack arg
     // (CNewParticleEffect*), ret 4. If def+0x200 (view model effect) is set,
     // it puts the effect in render group 0xB (viewmodel FOV). Unique bytes:
     // 55 8B EC 8B 41 4C 53 56 8B 75 08
-    static constexpr int kParticleMgr_AddEffect = 0x18FEB0;
-    // client.dll CParticleSystemMgr singleton used as this for FUN_10313390.
-    static constexpr int kParticleSystemMgr = 0x5631CC;
-    static constexpr int kParticleSystemMgr_Find = 0x313390;
-    // Not re-verified on client build 25844216; the old RVAs are mid-function.
-    static constexpr bool kParticleSystemMgrVerified = false;
+    static constexpr int kParticleMgr_AddEffect = 0x190030; // beta 26234270 (25844216: 0x18FEB0)
+    // Both from `mov ecx,[g_pParticleSystemMgr]; push name; call FindParticleSystem` before the
+    // "Attempted to create unknown particle system" warnings (3 sites agree). The old 0x5631CC/0x313390
+    // were stale since an earlier build (no refs / mid-function on 25844216).
+    static constexpr int kParticleSystemMgr = 0x56024C; // beta 26234270
+    static constexpr int kParticleSystemMgr_Find = 0x3101E0; // beta 26234270
+    // Re-verified on 26234270 (PatchGluonImpactParticleDefs also checks Find's prologue at runtime).
+    static constexpr bool kParticleSystemMgrVerified = true;
     static constexpr int kCParticleDef_ViewModelEffect = 0x200;
     static constexpr int kCParticleDef_Name = 0x228;
     static constexpr int kCNewParticleEffect_Def = 0x58;
@@ -242,7 +255,7 @@ public:
     // client.dll gpGlobals (CGlobalVarsBase*). CHudAir FUN_10271c90 subtracts
     // curtime at +0xC from m_AirFinished. Same .data neighborhood as the leaf
     // system pointer.
-    static constexpr int kClientGpGlobalsPtr = 0x54FA04;
+    static constexpr int kClientGpGlobalsPtr = 0x550A04; // beta 26234270, 1195 refs (25844216: 0x54FA04)
     static constexpr int kCGlobalVars_curtime = 0xC;
     // DT_LocalPlayerExclusive (FUN_100b7240): m_nWaterLevel +0x180 (byte),
     // m_AirFinished +0x16e4 (float). WL_Eyes == 3 is fully underwater.
@@ -260,7 +273,7 @@ public:
     // calls weapon vtable +0x5C4. Draws ISurface circles at ScreenWidth/2,
     // ScreenHeight/2 (HMD centre in VR). Extra red geometry if m_bLaserOn.
     // thiscall, 0 stack args.
-    static constexpr int kCWeaponRpg_UpdateLaser = 0x290040;
+    static constexpr int kCWeaponRpg_UpdateLaser = 0x2912A0; // beta 26234270 (25844216: 0x290040)
     // RecvTable DT_Weapon_RPG (FUN_10291d30): m_hHomingGrenade +0xAE0,
     // m_bNeedReload +0xAE4, m_bLaserOn +0xAE5. There is no m_hLaserDot netvar;
     // the visible mark is a separate CEnvLaserDot sprite (CSprite::DrawModel
@@ -270,30 +283,30 @@ public:
     static constexpr int kCWeaponRpg_bLaserOn = 0xAE5;
     // client.dll CHudCrosshair::Paint (FUN_10278460). Calls weapon vtable +0x5C4.
     // thiscall, 0 stack args. Unique bytes: 55 8B EC 51 53 56 8B 35 ? ? ? ? 8B D9
-    static constexpr int kCHudCrosshair_Paint = 0x275E00;
+    static constexpr int kCHudCrosshair_Paint = 0x276D30; // beta 26234270 (25844216: 0x275E00)
     // DT_BaseEntity m_fEffects (FUN_100a4cb0). EF_NODRAW = 0x20.
     static constexpr int kCBaseEntity_fEffects = 0x80;
     static constexpr int kEF_NODRAW = 0x20;
     // client.dll C_SpriteRenderer::DrawSprite (FUN_100f6900). thiscall,
     // 15 stack args, ret 0x3C. ecx is the renderer at CSprite+0x69C.
     // Copies origin from arg3; CEnvLaserDot's origin is the look-trace.
-    static constexpr int kCSpriteRenderer_DrawSprite = 0xE8A00;
+    static constexpr int kCSpriteRenderer_DrawSprite = 0xE8B80; // beta 26234270 (25844216: 0xE8A00)
     // client.dll FUN_102dcbf0. stdcall 8 args, ret 0x20. Alternate sprite
     // draw: origin from IClientRenderable vtable+4, then FUN_100f6b40.
     // Unique bytes: 55 8B EC 83 EC 64 53 8B 5D 08 8B CB 56 8B 03 FF 50 04
-    static constexpr int kCSpriteRenderable_Draw = 0x2DAC70;
+    static constexpr int kCSpriteRenderable_Draw = 0x2DBED0; // beta 26234270 (25844216: 0x2DAC70)
     // client.dll C_EnvLaserDot DrawModel override (FUN_10221fd0). thiscall,
     // 1 stack arg (studio flags), ret 4. Traces from attachment "laser" or
     // owner EyePosition/EyeAngles (+0x268/+0x26c), then FUN_100821a0.
     // Unique bytes (beta 25844216; stable 19042901 had `83 EC A0` at 0x221FD0):
     // 55 8B EC 81 EC A0 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC F7 45 08 00 00 00 4E
-    static constexpr int kCEnvLaserDot_Draw = 0x215AE0;
+    static constexpr int kCEnvLaserDot_Draw = 0x215D30; // beta 26234270 (25844216: 0x215AE0)
     // client.dll camera-facing sprite quad (FUN_100821a0). cdecl, origin* +
     // width/height/color. Unique bytes: 53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04
-    static constexpr int kSpriteQuad = 0x742A0;
+    static constexpr int kSpriteQuad = 0x74360; // beta 26234270 (25844216: 0x742A0)
     // client.dll CViewRenderBeams::DrawBeam (FUN_101f5be0). thiscall, Beam_t*
     // on the stack, ret 4. Unique bytes: 55 8B EC 83 EC 2C A1 ? ? ? ? 33 C5 89 45 FC 89 4D E8
-    static constexpr int kCViewRenderBeams_DrawBeam = 0x1E82B0;
+    static constexpr int kCViewRenderBeams_DrawBeam = 0x1E84A0; // beta 26234270 (25844216: 0x1E82B0)
     static constexpr int kBeam_t_type = 0x30;
     static constexpr int kBeam_t_start = 0x3C;
     static constexpr int kBeam_t_delta = 0xB4;
@@ -301,16 +314,16 @@ public:
 
     // IClientMode slot 32. Reads viewmodel_fov_override then weapon GetViewModelFOV
     // (~54). That is why console fov does not change gun/near scale in VR.
-    Offset GetViewModelFOV{ "client.dll", 0x209EF0,
+    Offset GetViewModelFOV{ "client.dll", 0x20A140,
         "55 8B EC 51 8B 0D ? ? ? ? 81 F9 ? ? ? ? 75 16 F3 0F 10 0D" };
 
-    Offset AdjustEngineViewport{ "client.dll", 0x1023C0,
+    Offset AdjustEngineViewport{ "client.dll", 0x102540,
         "C2 10 00 CC CC CC CC CC CC CC CC CC CC CC CC CC B0 01 C2 08 00" };
 
-    Offset LevelInit{ "client.dll", 0x102B80,
+    Offset LevelInit{ "client.dll", 0x102D00,
         "55 8B EC 83 EC 20 56 8B F1 6A 01 68 ? ? ? ?" };
 
-    Offset LevelShutdown{ "client.dll", 0x102C30,
+    Offset LevelShutdown{ "client.dll", 0x102DB0,
         "55 8B EC 83 EC 20 56 8B F1 B9 ? ? ? ? E8" };
 
     // CModelRender::DrawModelExecute — IModelRender vtable slot 19 (+0x4C).
@@ -318,17 +331,17 @@ public:
     // Do NOT use 0xF6A20: that prologue matches DispInfo_LoadDisplacements'
     // cdecl 5-arg helper (FUN_100f6a20). Hooking it as DME hung load-to-menu
     // (2026-08-18). DrawModelEx (+0x40) calls Setup (+0x48) then this slot.
-    Offset DrawModelExecute{ "engine.dll", 0x114110,
+    Offset DrawModelExecute{ "engine.dll", 0x1141F0,
         "55 8B EC 81 EC 68 03 00 00 A1 ? ? ? ? 33 C5 89 45 FC 8B 45 10 53 8B 5D 0C" };
 
     // engine.dll FindNearest lightcache (LRU walk, sentinel 0x200).
     // mat_queue_mode 2 + GetLightForPoint/studio lighting can cycle +0x1D0
     // next pointers; the engine walk never hits 0x200 and freezes the game
     // thread (verified 2026-09-08, PID 25228, 12-node cycle).
-    Offset LightcacheFindNearest{ "engine.dll", 0x1D1A70,
+    Offset LightcacheFindNearest{ "engine.dll", 0x1D1B50,
         "55 8B EC 83 EC 1C 0F B7 0D ? ? ? ? 33 D2 53 56 BB 00 02 00 00" };
 
-    Offset VGui_Paint{ "engine.dll", 0x23AC00,
+    Offset VGui_Paint{ "engine.dll", 0x23AD00,
         "55 8B EC 83 EC 18 53 8B D9 8B 0D ? ? ? ? FF 15" };
 
     // CMatRenderContext slot 7. RT-stack count moved 0x4C -> 0x58 on the beta.
@@ -429,13 +442,13 @@ public:
     // After load, Source Reset(2560) while we keep a 1576 swapchain left this
     // at 2560 and HUD downsample (client FUN_10267420) used CViewSetup
     // width/height against _rt_Hud created from GetBackBufferDimensions.
-    Offset GetScreenSize{ "engine.dll", 0xA6D00,
+    Offset GetScreenSize{ "engine.dll", 0xA6D30,
         "55 8B EC 8B 0D ? ? ? ? 56 8B 01 FF 90 9C 01 00 00" };
     // IVEngineClient slot 96 (+0x180). client.dll DrawViewModels (FUN_1020a8f0)
     // copies CViewSetup, then overwrites m_flAspectRatio with this (window
     // 16:9) before Push3DView. GetScreenSize is a different function and is
     // not on this path — the primary return is a videomode/config float.
-    Offset GetScreenAspectRatio{ "engine.dll", 0x101490,
+    Offset GetScreenAspectRatio{ "engine.dll", 0x101560,
         "55 8B EC 8B 0D ? ? ? ? 83 EC 0C 81 F9 ? ? ? ? 75 16 F3 0F 10 0D" };
 
     // CViewSetup::ComputeViewMatrices(worldToView, viewToProjection,
@@ -444,16 +457,16 @@ public:
     // 25844216: global engine+0x3F7820, return engine+0x139663; stable
     // 19042901: 0x3F5820 / 0x138DF3); it pairs
     // the result with a centred +-tan(fov/2) window.
-    Offset ComputeViewMatrices{ "engine.dll", 0x100A70,
+    Offset ComputeViewMatrices{ "engine.dll", 0x100B40,
         "55 8B EC 51 56 8B F1 57 F3 0F 10 86 E8 00 00 00 0F 2E 05", 0, true };
-    static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139663;
+    static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
 
-    Offset ProcessUsercmds{ "server.dll", 0x532AC0,
+    Offset ProcessUsercmds{ "server.dll", 0x532D40,
         "55 8B EC B8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 08", 0, true };
 
     // CBasePlayer::ImpulseCommands. Ghidra server.dll FUN_1022dd40.
     // Hooked lazily once server.dll is loaded (not at Offset() time).
-    static constexpr int kCBasePlayer_ImpulseCommands = 0x22DD40;
+    static constexpr int kCBasePlayer_ImpulseCommands = 0x22E420; // betas 25844216 + 26234270 (0x22DD40 was mid-function since an earlier build)
 
     // L4D2 IMaterialSystem dump slots. BM is +7 (FindTexture 77→84,
     // GetRenderContext 96→103). Runtime ResolveMaterialThreadSlots confirms
@@ -490,7 +503,13 @@ public:
     // Pushes the string "CClientShadowMgr::UpdateFlashlightState".
     // client.dll build 25844216 (2026-10-10). 0x11BD80 is mid-function and
     // the detour AVs at client+0x11B6A4 on startup (exit code 1).
-    static constexpr int kUpdateFlashlightState = 0x10DC20;
+    static constexpr int kUpdateFlashlightState = 0x10DDA0; // beta 26234270 (25844216: 0x10DC20)
+    // Black Mesa's own deferred flashlight never goes through the one above.
+    // The player's flashlight think (client 0xAE9F0) calls this with
+    // (pos = EyePosition, player, fwd/right/up = EyeVectors) on the global
+    // light at 0x105E24A0 (ret 0x14); it adds fwd*gb_flashlight_PosX +
+    // right*PosY + up*PosZ (5, -10, 0) and traces back from the eye.
+    static constexpr int kBmFlashlightUpdate = 0x17BAF0; // beta 26234270
 
     // L4D2 leftover referenced by copied sdk.h melee helpers. Unused on Black Mesa.
     struct { int address = 0; } GetMeleeWeaponInfoClient;
