@@ -5947,16 +5947,24 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
             ++s_failBody;
         if (body.LengthSqr() > 1.f)
         {
-            static bool s_offsetsZeroed;
-            if (!s_offsetsZeroed && m_Game)
+            // skill.cfg sets them (PosY -28) and runs again on every map
+            // load, so check once a second.
+            static uint64_t s_offsetTick;
+            const uint64_t tick = GetTickCount64();
+            if (m_Game && tick - s_offsetTick > 1000)
             {
+                s_offsetTick = tick;
                 const char* kOffsets[] = { "gb_flashlight_PosY", "gb_flashlight_PosZ",
                     "gb_flashlight_PosY_Crouch", "gb_flashlight_PosZ_Crouch" };
-                int n = 0;
                 for (const char* name : kOffsets)
-                    n += m_Game->SetConVarFloat(name, 0.f) ? 1 : 0;
-                s_offsetsZeroed = true;
-                Game::logMsg("BM flashlight: shoulder offsets zeroed (%d/4 cvars)", n);
+                {
+                    float v = 0.f;
+                    if (m_Game->GetConVarFloat(name, v) && v != 0.f)
+                    {
+                        m_Game->SetConVarFloat(name, 0.f);
+                        Game::logMsg("BM flashlight: %s %.1f -> 0", name, v);
+                    }
+                }
             }
             QAngle::AngleVectors(m_VR->GetAimAngles(), &f, &r, &u);
             // This runs every game frame (~180/s). Between pose updates the
@@ -5967,13 +5975,19 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
                 && (m_VR->m_ControllerPoseValid || m_VR->m_StereoFramePoseActive);
             Vector hand{};
             if (poseFresh)
-            {
                 hand = m_VR->GetRightControllerAbsPos(body);
+            // The flag can still flip between this check and the conversion:
+            // a 'hand' on the head view point is that fallback, not a hand.
+            if (poseFresh && (hand - m_VR->GetViewOrigin(body)).LengthSqr() > 1.5f * 1.5f)
+            {
                 s_lastOffset = hand - body;
                 s_haveOffset = true;
             }
             else
+            {
+                ++s_failTrack;
                 hand = body + s_lastOffset;
+            }
             if (VectorNormalize(f) > 0.001f && hand.LengthSqr() > 1.f)
             {
                 p = hand;
