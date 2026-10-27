@@ -2279,6 +2279,9 @@ namespace
     public:
         bool InitializeInstance(XrDispatch& xr, XrInstance instance, Logger& log);
         bool InitializeSession(XrSession session, XrSpace appSpace, bool handTrackingEnabled, Logger& log);
+        // XR_EXT_eye_gaze_interaction (PS VR2 via PSVR2Toolkit). Diagnostic
+        // only so far: logs the gaze once a second, nothing consumes it.
+        void SetEyeGazeEnabled(bool enabled) { m_EyeGazeEnabled = enabled; }
         void Shutdown();
         void UpdateFrame(XrTime displayTime, BridgeWriter& bridge, Logger& log);
         uint32_t CurrentControllerFamily() const;
@@ -2377,6 +2380,11 @@ namespace
         XrAction m_HandPoseAction = XR_NULL_HANDLE;
         XrAction m_AimPoseAction = XR_NULL_HANDLE;
         XrAction m_HapticAction = XR_NULL_HANDLE;
+        bool m_EyeGazeEnabled = false;
+        XrAction m_EyeGazeAction = XR_NULL_HANDLE;
+        XrSpace m_EyeGazeSpace = XR_NULL_HANDLE;
+        XrSpace m_ViewSpace = XR_NULL_HANDLE;
+        void LogEyeGaze(XrTime displayTime, Logger& log);
         std::array<XrPath, L4D2VR_OPENXR_HAND_COUNT> m_HandPaths{};
         std::array<XrSpace, L4D2VR_OPENXR_HAND_COUNT> m_HandSpaces{};
         std::array<XrSpace, L4D2VR_OPENXR_HAND_COUNT> m_AimSpaces{};
@@ -4928,6 +4936,24 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         }
 
         SuggestBindings(log);
+        if (m_EyeGazeEnabled)
+        {
+            XrActionCreateInfo gazeInfo{ XR_TYPE_ACTION_CREATE_INFO };
+            std::snprintf(gazeInfo.actionName, XR_MAX_ACTION_NAME_SIZE, "eye_gaze");
+            gazeInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+            std::snprintf(gazeInfo.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "Eye Gaze");
+            if (Succeeded(log, "xrCreateAction(eye_gaze)", xr.xrCreateAction(m_BaseActionSet, &gazeInfo, &m_EyeGazeAction)))
+            {
+                std::vector<XrActionSuggestedBinding> b;
+                AddBinding(b, m_EyeGazeAction, "/user/eyes_ext/input/gaze_ext/pose");
+                XrPath profile = XR_NULL_PATH;
+                if (TryPath("/interaction_profiles/ext/eye_gaze_interaction", profile))
+                {
+                    const XrResult r = SuggestProfileOnce(profile, b);
+                    log.Print("gaze: suggest eye_gaze_interaction binding %s (%d)", XrResultName(r), static_cast<int>(r));
+                }
+            }
+        }
         return true;
     }
 
@@ -5223,6 +5249,19 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 return false;
         }
 
+        if (m_EyeGazeAction != XR_NULL_HANDLE)
+        {
+            XrActionSpaceCreateInfo gazeSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO };
+            gazeSpaceInfo.action = m_EyeGazeAction;
+            gazeSpaceInfo.poseInActionSpace.orientation.w = 1.0f;
+            Succeeded(log, "xrCreateActionSpace(eye_gaze)", m_Xr->xrCreateActionSpace(session, &gazeSpaceInfo, &m_EyeGazeSpace));
+            XrReferenceSpaceCreateInfo viewInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
+            viewInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+            viewInfo.poseInReferenceSpace.orientation.w = 1.0f;
+            if (m_Xr->xrCreateReferenceSpace)
+                Succeeded(log, "xrCreateReferenceSpace(VIEW, gaze)", m_Xr->xrCreateReferenceSpace(session, &viewInfo, &m_ViewSpace));
+        }
+
         const XrActionSet actionSets[] = { m_MainActionSet, m_BaseActionSet };
         XrSessionActionSetsAttachInfo attachInfo{ XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
         attachInfo.countActionSets = ARRAYSIZE(actionSets);
@@ -5328,6 +5367,45 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         }
     }
 
+    void OpenXrInputBridge::LogEyeGaze(XrTime displayTime, Logger& log)
+    {
+        if (m_EyeGazeSpace == XR_NULL_HANDLE || m_ViewSpace == XR_NULL_HANDLE)
+            return;
+        static ULONGLONG s_lastMs;
+        static uint32_t s_frames, s_tracked;
+        ++s_frames;
+        XrActionStateGetInfo getInfo{ XR_TYPE_ACTION_STATE_GET_INFO };
+        getInfo.action = m_EyeGazeAction;
+        XrActionStatePose poseState{ XR_TYPE_ACTION_STATE_POSE };
+        const XrResult stateResult = m_Xr->xrGetActionStatePose(m_Session, &getInfo, &poseState);
+        XrEyeGazeSampleTimeEXT sampleTime{ XR_TYPE_EYE_GAZE_SAMPLE_TIME_EXT };
+        XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
+        location.next = &sampleTime;
+        const XrResult locResult = (XR_SUCCEEDED(stateResult) && poseState.isActive)
+            ? m_Xr->xrLocateSpace(m_EyeGazeSpace, m_ViewSpace, displayTime, &location) : XR_ERROR_VALIDATION_FAILURE;
+        const bool tracked = XR_SUCCEEDED(locResult)
+            && (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) != 0;
+        if (tracked)
+            ++s_tracked;
+        const ULONGLONG now = GetTickCount64();
+        if (now - s_lastMs < 1000)
+            return;
+        s_lastMs = now;
+        // Gaze forward is -Z of the gaze pose; as yaw/pitch relative to the
+        // head view (right/up positive).
+        const XrQuaternionf& q = location.pose.orientation;
+        const float fx = -(2.f * (q.x * q.z + q.w * q.y));
+        const float fy = -(2.f * (q.y * q.z - q.w * q.x));
+        const float fz = -(1.f - 2.f * (q.x * q.x + q.y * q.y));
+        const float yaw = std::atan2(fx, -fz) * 57.29578f;
+        const float pitch = std::atan2(fy, std::sqrt(fx * fx + fz * fz)) * 57.29578f;
+        log.Print("gaze: active=%u tracked=%u/%u frames flags=0x%llx yaw=%+.1f pitch=%+.1f sampleTime=%lld state=%s loc=%s",
+            poseState.isActive ? 1u : 0u, s_tracked, s_frames,
+            static_cast<unsigned long long>(location.locationFlags), yaw, pitch,
+            static_cast<long long>(sampleTime.time), XrResultName(stateResult), XrResultName(locResult));
+        s_frames = s_tracked = 0;
+    }
+
     void OpenXrInputBridge::UpdateFrame(XrTime displayTime, BridgeWriter& bridge, Logger& log)
     {
         if (!m_SessionInitialized || !m_Xr)
@@ -5366,6 +5444,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         SynthesizeControllerFingerCurls(state);
         LocateControllerPoses(displayTime, state, log);
         LocateHandTracking(displayTime, state);
+        LogEyeGaze(displayTime, log);
         state.reserved0 = CurrentControllerFamily();
         static uint32_t s_loggedFamily = ~0u;
         if (state.reserved0 != s_loggedFamily)
@@ -5934,8 +6013,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             bool hasVulkan = false;
             bool hasHandTracking = false;
             bool hasVisibilityMask = false;
+            bool hasEyeGaze = false;
             for (const XrExtensionProperties& extension : extensions)
             {
+                if (std::strcmp(extension.extensionName, XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME) == 0)
+                    hasEyeGaze = true;
                 if (std::strcmp(extension.extensionName, XR_KHR_VULKAN_ENABLE_EXTENSION_NAME) == 0)
                     hasVulkan = true;
                 if (std::strcmp(extension.extensionName, XR_EXT_HAND_TRACKING_EXTENSION_NAME) == 0)
@@ -5971,6 +6053,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 m_Log.Print("%s is not supported by the active runtime", XR_KHR_VISIBILITY_MASK_EXTENSION_NAME);
             }
             AppendInteractionProfileExtensions(extensions, enabledExtensions, m_Log);
+            if (hasEyeGaze)
+                enabledExtensions.push_back(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
+            m_InputBridge.SetEyeGazeEnabled(hasEyeGaze);
+            m_Log.Print("gaze: %s %s by the runtime", XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME,
+                hasEyeGaze ? "offered (enabled)" : "not offered");
 
             XrInstanceCreateInfo createInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
             std::snprintf(createInfo.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "Black Mesa VR");
