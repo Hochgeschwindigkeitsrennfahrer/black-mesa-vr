@@ -8142,6 +8142,26 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 drawHandProxy(toWorld(rightPos), rightAng, D3DCOLOR_XRGB(255, 0, 255), false, m_ActionSkeletonRight);
         }
 
+        // Debug (VR panel): black out one eye, so "which eye shows it?" needs
+        // no winking. Before the panel, which stays visible to switch it off.
+        if (stereoEye > 0 && static_cast<int>(bmvr::g_DebugBlankEye + 0.5f) == stereoEye)
+        {
+            DWORD zOld = 0, blendOld = 0;
+            device->GetRenderState(D3DRS_ZENABLE, &zOld);
+            device->GetRenderState(D3DRS_ALPHABLENDENABLE, &blendOld);
+            device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+            device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+            const float fw = static_cast<float>(w), fh = static_cast<float>(h);
+            const Vert black[4] = { { -0.5f, -0.5f, 0.f, 1.f, D3DCOLOR_XRGB(0, 0, 0) },
+                { fw, -0.5f, 0.f, 1.f, D3DCOLOR_XRGB(0, 0, 0) },
+                { -0.5f, fh, 0.f, 1.f, D3DCOLOR_XRGB(0, 0, 0) },
+                { fw, fh, 0.f, 1.f, D3DCOLOR_XRGB(0, 0, 0) } };
+            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, black, sizeof(Vert));
+            device->SetRenderState(D3DRS_ZENABLE, zOld);
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, blendOld);
+        }
+
         if (SettingsPanelOpen())
             DrawSettingsPanel(device, stereoEye, w, h, eyeOrig, fwd, right, up);
         else if (WeaponMenuOpen())

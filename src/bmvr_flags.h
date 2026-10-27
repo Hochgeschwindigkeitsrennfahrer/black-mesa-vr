@@ -268,6 +268,7 @@ namespace bmvr
     // Fixes, default on (a config key can turn each off):
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
     extern bool g_TwoHandGripToggle;     // support grip latches: squeeze on the gun = on, squeeze again = off
+    extern float g_DebugBlankEye;        // VR panel debug row: 1 = blank the left eye, 2 = the right (not saved)
     extern bool g_PauseMenuColourFromFrame; // pause-menu layer colour from the presented desktop frame (VR repaint stacks windows wrongly)
     extern float g_PauseMenuAlphaPasses; // pause-menu layer: N passes of a -> a + a(1-a), i.e. 1-(1-a)^(2^N); 0 = off
     extern bool g_FlashlightLeftHand;    // flashlight from the left hand (along the gun while two-handed)
