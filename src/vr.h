@@ -1096,11 +1096,6 @@ public:
     bool TwoHandGripActive() const { return m_TwoHandActive; }
     // Live L_Wrist (or L_Hand) world origin from DrawModelExecute bone matrices.
     void NoteViewmodelOffhandWorld(const Vector& worldOrigin);
-    // Muzzle attachment from the drawn viewmodel bones (DrawModelExecute):
-    // where the barrel is on screen this frame, without the game's viewmodel
-    // FOV correction. Sets the gun-local muzzle offset (shot origin) and the
-    // laser beam start.
-    void NoteViewmodelMuzzleDrawn(const Vector& worldOrigin, const Vector& attachmentForward);
     bool TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QAngle& trackingAng) const;
     bool HudOverlayReady() const { return m_HudOverlayReady; }
     void EnsureHudOverlay();
@@ -1284,11 +1279,6 @@ private:
     Vector m_AimBeamLocal{};          // muzzle in the gun model frame (fwd, right, up)
     bool m_AimBeamLocalValid = false;
     std::string m_AimBeamLocalKey;
-    // Last drawn muzzle (NoteViewmodelMuzzleDrawn) and the aim at that moment.
-    Vector m_DrawnMuzzleWorld{};
-    Vector m_DrawnMuzzleAimFwd{};
-    DWORD m_DrawnMuzzleMs = 0;
-    bool DrawnMuzzleFresh() const { return m_DrawnMuzzleMs != 0 && GetTickCount() - m_DrawnMuzzleMs < 250u; }
     float m_AimShootAlong = 0.f;      // shot origin along the aim from the controller
     float m_AimHitDist = 0.f;         // shot origin -> marker
     bool m_HasHevSuit = true;

@@ -5272,10 +5272,6 @@ bool VR::TryGetVrMuzzleWorld(Vector& origin) const
 
 void VR::UpdateMuzzleLocal(const std::string& weaponKey)
 {
-    // The drawn bones (NoteViewmodelMuzzleDrawn) give the exact offset; the
-    // game's attachment below is FOV-distorted and only a fallback.
-    if (DrawnMuzzleFresh() && m_AimBeamLocalKey == weaponKey)
-        return;
     Vector raw{}, vo{}, vf{}, vr{}, vu{};
     if (!TryGetRawMuzzleWorld(raw) || !GunFrameNow(vo, vf, vr, vu))
         return;
@@ -7012,17 +7008,6 @@ bool VR::AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) co
     if (!GunFrameNow(vo, vf, vr, vu))
         return false;
     beamStart = vo + vf * m_AimBeamLocal.x + vr * m_AimBeamLocal.y + vu * m_AimBeamLocal.z;
-    {
-        // The muzzle as drawn in this frame and the aim at that moment:
-        // rebuilding from the live pose here put the beam start a pose
-        // update away from the barrel while the gun moved.
-        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-        if (bmvr::g_VrShootFromMuzzle && DrawnMuzzleFresh())
-        {
-            beamStart = m_DrawnMuzzleWorld;
-            f = m_DrawnMuzzleAimFwd;
-        }
-    }
     if (bmvr::g_VrShootFromMuzzle && m_AimBeamLocalValid)
     {
         // Shot = muzzle along the aim: dot and beam on that one line.
@@ -9471,41 +9456,6 @@ bool VR::ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const
     if (m_VmClass.offhandPistol)
         return std::fabs(gy) > 0.3f || gx > 0.3f;
     return gx > 0.5f;
-}
-
-void VR::NoteViewmodelMuzzleDrawn(const Vector& worldOrigin, const Vector& attachmentForward)
-{
-    (void)attachmentForward;   // logged below; the barrel direction is a later step
-    if (!m_ControllerPoseValid || worldOrigin.LengthSqr() <= 1.f)
-        return;
-    std::string key;
-    {
-        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-        key = m_VmClass.numpadKey;
-    }
-    // GunFrameNow / AimFrameNow read the same pose DrawModelExecute just
-    // placed the gun with, so this local offset is exact for this frame.
-    Vector vo{}, vf{}, vr{}, vu{};
-    Vector pivot{}, f{}, r{}, u{};
-    if (!GunFrameNow(vo, vf, vr, vu) || !AimFrameNow(pivot, f, r, u))
-        return;
-    const Vector d = worldOrigin - vo;
-    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    const bool fresh = !m_AimBeamLocalValid || m_AimBeamLocalKey != key;
-    m_AimBeamLocal = Vector(d.Dot(vf), d.Dot(vr), d.Dot(vu));
-    m_AimBeamLocalKey = key;
-    m_AimBeamLocalValid = true;
-    m_DrawnMuzzleWorld = worldOrigin;
-    m_DrawnMuzzleAimFwd = f;
-    m_DrawnMuzzleMs = GetTickCount();
-    if (fresh)
-    {
-        Vector af = attachmentForward;
-        const float barrelDeg = (VectorNormalize(af) > 0.01f)
-            ? acosf(std::clamp(af.Dot(vf), -1.f, 1.f)) * 57.29578f : -1.f;
-        Game::logMsg("Muzzle from drawn bones %s local=(%.2f,%.2f,%.2f) attachment-fwd vs model-fwd %.1fdeg",
-            key.c_str(), m_AimBeamLocal.x, m_AimBeamLocal.y, m_AimBeamLocal.z, barrelDeg);
-    }
 }
 
 void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin)
