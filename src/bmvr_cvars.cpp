@@ -68,7 +68,7 @@ namespace bmvr
               Kind::Float, 15.f, 90.f, nullptr, &g_SnapTurnAngle },
             { "bmvr_turn_speed", "VR: smooth turn speed",
               Kind::Float, 0.05f, 1.f, nullptr, &g_TurnSpeed },
-            { "bmvr_recenter_yaw", "VR: recenter (R3) also resets the turn direction",
+            { "bmvr_recenter_yaw", "VR: recenter (VR settings panel) also resets the turn direction",
               Kind::Bool, 0.f, 1.f, &g_RecenterResetsYaw, nullptr },
             { "bmvr_aim_marker", "VR: mark where the gun points",
               Kind::Bool, 0.f, 1.f, &g_VrCrosshair, nullptr },

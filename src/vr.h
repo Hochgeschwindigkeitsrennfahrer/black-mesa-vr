@@ -219,10 +219,29 @@ public:
     bool m_OffCenterActive = false;
     float m_OffCenterAspect = 1.f;
     float m_OffCenterFrac[2][4]{};
-    // stereoEye 1 = left, 2 = right (0 / mono: false).
-    bool OffCenterForEye(int stereoEye, const float*& frac) const;
-    // Union-frustum NDC -> this eye's NDC: ndc' = ndc * s + o.
+    // Runtime per-eye tangents {left, right, down, up} (both modes).
+    float m_EyeTan[2][4]{};
+    bool m_EyeTanValid = false;
+    // Per-eye rendered rectangle in tangent space {L, R, D, U}, unscoped
+    // (stereoEye 1 = left, 2 = right): the runtime eye with OffCenterEyes,
+    // else the symmetric frustum (tan(m_Fov / 2), vertical from rtAspect, 0 =
+    // the eye RT's aspect). The left eye's right edge is pushed out by
+    // LeftEyeCullPad so its culling also covers the right eye's view.
+    bool EyeRenderRect(int stereoEye, float rect[4], float rtAspect = 0.f) const;
+    // True when the eye's rectangle is not the symmetric frustum (render it
+    // off-centre, submit its explicit FOV).
+    bool EyeRenderIsCustom(int stereoEye) const;
+    float LeftEyeCullPadTan() const;
+    float EyeRtAspect() const;
+    // CViewSetup for a custom eye: centred fov/aspect holding the rectangle
+    // (scope-aware) and the 0..1 sub-rectangle {left, right, bottom, top}.
+    bool EyeOffCenterView(int stereoEye, float& fovDeg, float& aspect, float frac[4]) const;
+    // Horizontal fov / aspect the engine renders this eye with.
+    float EyeRenderFov(int stereoEye) const;
+    bool EyeRenderAspect(int stereoEye, float& aspect) const;
+    // Overlay reference-frustum NDC -> this eye's NDC: ndc' = ndc * s + o.
     bool OffCenterNdc(int stereoEye, float& sx, float& ox, float& sy, float& oy) const;
+    bool AnyEyeOffCenter() const { return EyeRenderIsCustom(1) || EyeRenderIsCustom(2); }
     // l/r/d/u = tangents of each eye's left/right/down/up half-angles.
     void SetupOffCenter(const float leftEye[4], const float rightEye[4]);
     float m_Fov = 90.f;
@@ -691,11 +710,43 @@ public:
     QAngle GetLeftControllerAbsAngle() const;
     QAngle GetAimAngles() const;
     QAngle GetUseAimAngles() const;
+    // Angles from the engine eye (m_SetupOrigin, where the server's +use
+    // trace starts) to the point the use hand's ray hits within reach. The
+    // hand's own angles from the eye miss a button the hand points at from
+    // hip height by the eye-hand offset.
+    QAngle GetUseAimAnglesFromEye() const;
+    // True on a ladder (MOVETYPE_LADDER; onLadder) or with the stick
+    // deflected within 48 units of a func_useableladder's mount line. moveBits = IN_FORWARD/BACK/
+    // MOVELEFT/MOVERIGHT from the stick at 0.2 deflection (head frame):
+    // LadderMove climbs only on those bits, which gameplay sets past 0.5, so
+    // a gentle walk-in mounted the ladder and then hung there.
+    bool LadderMode(int& moveBits, bool& onLadder) const;
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover
     // left-hand Use latch. Only a live physics hold redirects those.
     bool UseGrabRedirectsFire() const { return m_GrabLatched && m_GrabUseEntityHeld; }
+    // The game's +use trace (eye along the usercmd angles) runs on the press
+    // tick, so the angles follow the pressing hand for the first 0.3 s of a
+    // press; otherwise the left trigger picks up what the gun points at and
+    // holds it in the left hand. Not for the whole hold: Use held on train
+    // controls or a charger would turn the gun's shots to the left hand.
+    bool UseAimFollowsGrabHand() const
+    {
+        return UseGrabRedirectsFire()
+            || (m_GrabLatched && m_UseWasHeld && GetTickCount64() - m_UsePressTick < 300);
+    }
+    // The server grab controller sets its target every tick while the player
+    // carries something (Hooks::dGrabSetTarget). The client's m_hUseEntity
+    // read never sees BM pickups, so this is what tells a carried prop (drop
+    // it with a second Use on release) from train controls, buttons and
+    // chargers (leave them alone).
+    void NoteGrabControllerActive() { m_GrabControllerSeenTick.store(GetTickCount64(), std::memory_order_release); }
+    bool GrabControllerRecentlyActive() const
+    {
+        const uint64_t t = m_GrabControllerSeenTick.load(std::memory_order_acquire);
+        return t != 0 && GetTickCount64() - t < 250;
+    }
     bool GrabHandTrackingValid() const
     {
         if (!m_GrabLatched)
@@ -858,7 +909,11 @@ public:
     // InternalMousePressed(MOUSE_LEFT=0). Trigger is otherwise only IN_ATTACK.
     void ApplyWorldVguiTriggerClick(CUserCmd* cmd);
     bool WorldVguiSuppressAttack() const { return m_WorldVguiSuppressAttack; }
+    // VR pointer in screen coordinates while it hit a menu in the last
+    // 250 ms (Hooks::dGetCursorPos).
     bool TryGetMenuCursorScreen(POINT& out) const;
+    // The pointer hit the menu panel in the last 250 ms.
+    bool MenuPointerLive() const;
     // Menu / settings-panel trigger click: full pull to click, half release
     // to re-arm (a resting finger reads 0.6-0.7 on the PS VR2 Sense).
     static constexpr float kMenuTriggerPress = 0.9f;
@@ -915,6 +970,10 @@ public:
     void NoteHudPainted() { m_HudPaintedThisFrame.store(true, std::memory_order_release); }
     bool HudPaintedThisFrame() const { return m_HudPaintedThisFrame.load(std::memory_order_acquire); }
     void UpdateCrowbarMelee();
+    // Hand throw: sampled every input frame; read by the server grenade hooks.
+    void SampleThrowHand();
+    bool TryGetThrowVelocity(Vector& out);
+    bool TryGetThrowOrigin(Vector& out);
     // HL2VR physical crowbar (vr_crowbar.mdl on the hand, tip-velocity hits).
     static bool IsCrowbarWeaponModel(const char* model);
     bool IsCrowbarEquipped() const;
@@ -1122,6 +1181,8 @@ private:
         bool rightOk, const Vector& rightOrigin, const QAngle& rightAng,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
     void RefreshActiveWeaponModel();
+    void ToggleEmptyHands();
+    void Recenter(const char* why);
     void RefreshHeldWeaponState();
     void ApplyViewmodelBasisOffsets();
     void ApplyTwoHandWeaponAim();
@@ -1129,6 +1190,7 @@ private:
     bool UpdateShoulderGestures(bool paused);
     bool ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const;
     bool m_TwoHandActive = false;
+    bool m_TwoHandGripWasDown = false;   // TwoHandGripToggle press edge
     bool m_OffhandGripBoneValid = false;
     float m_OffhandGripGx = 0.f;
     float m_OffhandGripGy = 0.f;
@@ -1193,6 +1255,18 @@ private:
     QAngle m_MeleeBladeAngles{};
     bool m_MeleeBladeAnglesValid = false;
     Vector m_CrowbarPrevTipLocal{};
+    // Hand throw (vr_crowbar.cpp): right-hand positions relative to the body,
+    // unrotated by the view yaw, so walking and turning add nothing.
+    struct ThrowSample { double t; Vector local; };
+    // One sample per Present: 512 keeps the release window (up to 1 s back)
+    // even at ~400 fps.
+    static constexpr int kThrowSamples = 512;
+    double m_ThrowReleaseT = 0.0;               // trigger let go (IN_ATTACK 1 -> 0)
+    bool m_ThrowAttackHeld = false;
+    ThrowSample m_ThrowSamples[kThrowSamples]{};
+    int m_ThrowSampleNext = 0;
+    Vector m_ThrowHandWorld{};
+    bool m_ThrowHandValid = false;
     DWORD m_CrowbarLastMotionCheckMs = 0;
     DWORD m_CrowbarNextAttackMs = 0;
     DWORD m_CrowbarNextSwingSoundMs = 0;
@@ -1243,6 +1317,7 @@ private:
     bool m_OpenXrHudOverlayPublished = false;
     std::atomic<bool> m_HudPaintedThisFrame{ false };
     bool m_MenuTriggerWasDown = false;
+    bool m_MenuTriggerLatch = false;   // MenuTriggerClickHeld state, menu and gameplay
     bool m_MenuCursorValid = false;
     bool m_MenuCursorSmoothValid = false;
     float m_MenuCursorSmoothX = 0.f;
@@ -1251,6 +1326,8 @@ private:
     int m_MenuCursorY = 0;
     double m_MenuCursorSmoothMs = 0.0;
     bool m_MenuPointerLastValid = false;
+    // Pointer moving (last change past the dead zone < 0.2 s ago): no dead zone.
+    double m_MenuPointerMoveMs = 0.0;
     float m_MenuPointerLastPos[3]{};
     float m_MenuPointerLastDir[3]{};
     bool m_MenuPanelPoseValid = false;
@@ -1260,7 +1337,31 @@ private:
     Vector m_MenuPanelRight{};
     Vector m_MenuPanelUp{};
     HWND m_MenuCursorHwnd = nullptr;
+public:
+    // dGetCursorPos answers with the VR pointer / the real cursor (click log).
+    std::atomic<long> m_CursorHookHits{ 0 };
+    std::atomic<long> m_CursorHookPass{ 0 };
+    std::atomic<long> m_CursorHookHitsSec{ 0 };
+    std::atomic<long> m_CursorHookPassSec{ 0 };
+    std::atomic<bool> m_MenuPanelUpForCursor{ false };
+private:
     DWORD m_MenuCursorLiveMs = 0;   // last frame the VR pointer hit the menu
+    // Click point (after the rewind) the GetCursorPos hook reports until
+    // m_MenuClickHoldUntilMs, so VGUI's press/release see where we clicked.
+    static constexpr DWORD kMenuClickHoldMs = 150;
+    std::atomic<DWORD> m_MenuClickHoldUntilMs{ 0 };
+    // Screen points for the GetCursorPos hook, packed x/y so one atomic load
+    // never mixes two frames.
+    std::atomic<uint64_t> m_MenuCursorScreen{ 0 };
+    std::atomic<uint64_t> m_MenuClickHoldScreen{ 0 };
+    static uint64_t PackScreenPoint(const POINT& p)
+    {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(p.x)) << 32) | static_cast<uint32_t>(p.y);
+    }
+    static POINT UnpackScreenPoint(uint64_t v)
+    {
+        return POINT{ static_cast<LONG>(static_cast<int32_t>(v >> 32)), static_cast<LONG>(static_cast<int32_t>(v & 0xffffffffu)) };
+    }
     bool m_WorldVguiTriggerWasDown = false;
     bool m_WorldVguiSuppressAttack = false;
     bool m_WeaponMenuOpen = false;
@@ -1279,6 +1380,8 @@ private:
     double m_UseDropGapUntilMs = 0.0;
     double m_UseDropPulseUntilMs = 0.0;
     double m_UseHeldSinceMs = 0.0;
+    uint64_t m_UsePressTick = 0;
+    std::atomic<uint64_t> m_GrabControllerSeenTick{ 0 };
     double m_UseDropClassifyUntilMs = 0.0;
     double m_UseDropSettleUntilMs = 0.0;
     int m_UseDropRetries = 0;

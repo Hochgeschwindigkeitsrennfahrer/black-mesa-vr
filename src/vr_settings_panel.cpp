@@ -37,7 +37,7 @@ namespace
     constexpr int kPlusX0 = 880, kPlusX1 = 970;
     constexpr int kPillX0 = 790, kPillX1 = 970;
 
-    enum class RowKind { Section, Toggle, Number, Close };
+    enum class RowKind { Section, Toggle, Number, Button, Close };
 
     struct Row
     {
@@ -60,14 +60,25 @@ namespace
             { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
             { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
+            { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
+            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
+            { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
             { "TURNING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Snap turning", RowKind::Toggle, "SnapTurning", &bmvr::g_SnapTurning, nullptr, 0, 0, 0, nullptr },
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
             { "Smooth turn speed", RowKind::Number, "TurnSpeed", nullptr, &bmvr::g_TurnSpeed, 0.05f, 0.05f, 1.f, "%.2f" },
-            { "Recenter resets turning", RowKind::Toggle, "RecenterResetsYaw", &bmvr::g_RecenterResetsYaw, nullptr, 0, 0, 0, nullptr },
             { "MOVEMENT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Crouch only while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
             { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
+            { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Recenter resets turning", RowKind::Toggle, "RecenterResetsYaw", &bmvr::g_RecenterResetsYaw, nullptr, 0, 0, 0, nullptr },
+            { "MENU", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
+            { "Menu size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
+            { "Menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
+            { "Pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
         return rows;
@@ -297,6 +308,12 @@ namespace
                 c.text("Close", 0, y0, c.w, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
                 continue;
             }
+            if (r.kind == RowKind::Button)
+            {
+                c.fill(c.w / 2 - 180, y0 + 8, c.w / 2 + 180, y1 - 8, hover ? kBtnHover : kBtn);
+                c.text(r.label, 0, y0, c.w, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
+                continue;
+            }
             c.text(r.label, 40, y0, kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
             if (r.kind == RowKind::Toggle)
             {
@@ -514,6 +531,11 @@ void VR::UpdateSettingsPanel()
         return;
     case RowKind::Close:
         CloseSettingsPanel("close row");
+        return;
+    case RowKind::Button:
+        // Only button: recenter (was a right-stick tap, now hands/weapon).
+        Recenter("settings panel");
+        CloseSettingsPanel("recenter");
         return;
     case RowKind::Toggle:
         if (r.b)

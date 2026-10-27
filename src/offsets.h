@@ -153,6 +153,23 @@ public:
     // fire upward. These are server offsets; the client copies the mod already
     // zeroes live at different addresses and only drive the viewmodel.
     static constexpr int kBlackMesaPlayer_GetShootAngles_Server = 0x47F660;
+
+    // server.dll grenade spawn, cdecl (type, Vector* velocity, AngularImpulse*,
+    // CBaseEntity* owner, CBaseEntity* thrower, int mode) -> grenade. Type 1 =
+    // frag: CWeapon_Frag's throw (FUN_10487250, vtable 0x10729204) builds
+    // forward*speed + up*lift + 0.x * player velocity from GetShootAngles and
+    // calls this. It places the grenade via kGrenadeThrowPosition_Server, then
+    // DispatchSpawn, then the grenade's SetVelocity (vtable +0x3B4).
+    // mode: 0 = origin at owner EyePosition (vtable +0x230), 1 = halfway
+    // between eye and throw position, else the throw position. The frag
+    // passes 0.
+    // Bytes: 55 8B EC 8B 45 08 83 EC 30 83 F8 15.
+    static constexpr int kGrenadeCreate_Server = 0x3798A0;
+    // server.dll throw position, cdecl (grenade, Vector* pos, QAngle* ang,
+    // CBaseEntity* owner) -> bool (false = spawn refused, grenade removed):
+    // owner EyePosition (+0x230) / EyeAngles (+0x234), an offset, then a
+    // trace back to the eye. Bytes: 55 8B EC 81 EC 88 00 00 00.
+    static constexpr int kGrenadeThrowPosition_Server = 0x483060;
     static constexpr int kBlackMesaPlayer_RecoilPunchAngles_Server = 0x14BC;
 
     // C_BaseAnimating IClientRenderable GetAttachment. `this` is entity+4.
@@ -230,6 +247,13 @@ public:
     // DT_LocalPlayerExclusive (FUN_100b7240): m_nWaterLevel +0x180 (byte),
     // m_AirFinished +0x16e4 (float). WL_Eyes == 3 is fully underwater.
     static constexpr int kCBasePlayer_nWaterLevel = 0x180;
+    // client.dll C_BaseEntity prediction datamap m_MoveType (FIELD_CHARACTER),
+    // one byte; MOVETYPE_LADDER = 9.
+    static constexpr int kCBaseEntity_MoveType = 0x17C;
+    // client.dll DT_FuncLadder (HL2 func_useableladder): player mount points,
+    // relative to the ladder's origin (func_ladder.cpp Spawn subtracts it).
+    static constexpr int kCFuncLadder_MountTop = 0x6C0;
+    static constexpr int kCFuncLadder_MountBottom = 0x6CC;
     static constexpr int kCBasePlayer_AirFinished = 0x16e4;
 
     // client.dll C_Weapon_RPG laser update (FUN_10291F80). CHudCrosshair Paint

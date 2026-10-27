@@ -727,6 +727,22 @@ void L4D2VR_PublishOpenXrGameRenderPose(const L4D2VROpenXrPoseDesc& pose)
     state->heartbeatTickMs = GetTickCount64();
 }
 
+void L4D2VR_PublishOpenXrMenuQuad(const L4D2VROpenXrMenuQuadDesc& menu)
+{
+    std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+    L4D2VROpenXrBridgeState* state = g_OpenXrBridgeState;
+    if (!state)
+        return;
+    const L4D2VROpenXrMenuQuadDesc& cur = state->menuQuad;
+    if (state->menuQuadGeneration != 0
+        && cur.distanceMeters == menu.distanceMeters && cur.widthMeters == menu.widthMeters
+        && cur.offsetYMeters == menu.offsetYMeters && cur.contentScale == menu.contentScale)
+        return;
+    L4D2VR_SeqlockBegin(state->menuQuadGeneration);
+    state->menuQuad = menu;
+    L4D2VR_SeqlockEnd(state->menuQuadGeneration);
+}
+
 void L4D2VR_PublishOpenXrHapticRequest(uint32_t handIndex, float durationSeconds, float frequency, float amplitude)
 {
     if (handIndex >= L4D2VR_OPENXR_HAND_COUNT)

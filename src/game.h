@@ -88,6 +88,12 @@ public:
     bool LocalPlayerZooming();
     // -1 if the netvar is missing/retired, otherwise 0 or 1.
     int LocalPlayerZoomFlag();
+    // MOVETYPE_* of the local player (9 = ladder), -1 when unavailable.
+    int LocalPlayerMoveType();
+    bool LocalPlayerAbsOrigin(Vector& out);
+    // World-space bottom/top mount points of the map's func_useableladders
+    // (CFuncLadder; entity list rescanned at most once a second).
+    int CollectLadders(Vector* bottoms, Vector* tops, int maxLadders);
     int RpgLaserOnOffset() const;
     int RpgLaserDotOffset() const;
     C_BaseEntity* FindEntityByNetworkNameContains(const char* token);

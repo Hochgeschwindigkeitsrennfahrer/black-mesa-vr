@@ -29,10 +29,16 @@ static bool AreaPortalComputeViewCallSiteOk(int fn)
 
 // Offset of addr inside server.dll (0 if outside/unknown). AimDebug and the
 // shot-origin caller whitelist identify call sites by return address.
+// dServerBmShootSource calls this on every player +0x474 call, so the module
+// base is looked up once (GetModuleHandleA takes the loader lock; costly
+// under Wine). server.dll stays loaded for the whole map, and is looked up
+// again if it was not loaded yet.
 static uint32_t ServerRva(uintptr_t addr)
 {
-    const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll"));
-    return base && addr > base ? static_cast<uint32_t>(addr - base) : 0;
+    static uintptr_t s_base = 0;
+    if (!s_base)
+        s_base = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll"));
+    return s_base && addr > s_base ? static_cast<uint32_t>(addr - s_base) : 0;
 }
 #include "sigscanner.h"
 #include "in_buttons.h"
@@ -252,6 +258,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkLevelShutdown, "LevelShutdown");
     enableIfReady(hkCalcViewModelView, "CalcViewModelView");
     enableIfReady(hkGetViewModelFOV, "GetViewModelFOV");
+    enableIfReady(hkGetCursorPos, "GetCursorPos");
     enableIfReady(hkEndFrame, "EndFrame");
     enableIfReady(hkTraceRay, "TraceRay");
 }
@@ -279,9 +286,12 @@ int Hooks::initSourceHooks()
         hkCalcViewModelView.createHook((LPVOID)o.CalcViewModelView.address, &dCalcViewModelView);
     if (o.GetViewModelFOV.valid)
         hkGetViewModelFOV.createHook((LPVOID)o.GetViewModelFOV.address, &dGetViewModelFOV);
-    // VGUI reads the menu cursor back with GetCursorPos. Under Wine our
+    // VGUI reads the menu cursor back with GetCursorPos (vgui::Button fires on
+    // release only if the cursor is still over it). Under Wine our
     // SetCursorPos only moves the pointer while the game window has focus,
     // so unfocused the menu hovered/clicked at the real desktop mouse.
+    // Re-enabled 2026-10-17: the phantom clicks that got it switched off in
+    // 4d77b7f came from Steam Input, not from this hook.
     if (HMODULE user32 = GetModuleHandleA("user32.dll"))
         hkGetCursorPos.createHook((LPVOID)GetProcAddress(user32, "GetCursorPos"), &dGetCursorPos);
     if (o.AdjustEngineViewport.valid)
@@ -312,8 +322,9 @@ int Hooks::initSourceHooks()
         hkGetScreenSize.createHook((LPVOID)o.GetScreenSize.address, &dGetScreenSize);
     if (o.GetScreenAspectRatio.valid && !hkGetScreenAspectRatio.pTarget)
         hkGetScreenAspectRatio.createHook((LPVOID)o.GetScreenAspectRatio.address, &dGetScreenAspectRatio);
-    // OffCenterEyes only: the areaportal pass must see the centred union view.
-    if (bmvr::g_OffCenterEyes && o.ComputeViewMatrices.valid && !hkComputeViewMatrices.pTarget
+    // Off-centre eyes only (OffCenterEyes, LeftEyeCullPad): the areaportal
+    // pass must see the centred union view.
+    if ((bmvr::g_OffCenterEyes || bmvr::g_LeftEyeCullPad > 0.f) && o.ComputeViewMatrices.valid && !hkComputeViewMatrices.pTarget
         && AreaPortalComputeViewCallSiteOk(o.ComputeViewMatrices.address))
         hkComputeViewMatrices.createHook((LPVOID)o.ComputeViewMatrices.address, &dComputeViewMatrices);
     if (o.CreateNamedRTEx.valid)
@@ -1407,6 +1418,59 @@ namespace
         if (world.LengthSqr() <= 1.f)
             return;
         Hooks::m_VR->NoteViewmodelOffhandWorld(world);
+    }
+
+    // Frag grenade: the grenade is its own root bone (GrenadeSpawn, pins are
+    // its children) and the pin-pull/throw animations swing it across the
+    // view while the hidden arms do the work. In VR the hand holds still, so
+    // keep GrenadeSpawn where it sits in idle (entity-relative pose recorded
+    // during idle1/idle2) and let only the pins move. Returns the extra delta
+    // to apply to every bone before the rigid move, or false for none.
+    bool GrenadeHoldCorrection(unsigned char* hdr, const void* bones, int nBones,
+        const float entity[3][4], float out[3][4])
+    {
+        static unsigned char* s_hdr = nullptr;
+        static int s_bone = -1;
+        static bool s_haveAnchor = false;
+        static float s_anchor[3][4];
+        if (hdr != s_hdr)
+        {
+            s_hdr = hdr;
+            s_bone = FindStudioBoneIndex(hdr, "GrenadeSpawn");
+            s_haveAnchor = false;
+        }
+        if (s_bone < 0 || s_bone >= nBones || !Hooks::m_Game)
+            return false;
+        void* vm = Hooks::m_Game->GetViewModelEntity();
+        int seq = -1;
+        float cur[3][4];
+        __try
+        {
+            if (vm)
+                seq = *reinterpret_cast<int*>(static_cast<char*>(vm) + kViewmodelSequence);
+            std::memcpy(cur, static_cast<const float*>(bones) + s_bone * 12, sizeof(cur));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        const char* label = seq >= 0 ? StudioSequenceLabel(hdr, seq) : nullptr;
+        float entityInv[3][4];
+        InvertMatrix3x4TR(entity, entityInv);
+        if (label && (_stricmp(label, "idle1") == 0 || _stricmp(label, "idle2") == 0))
+        {
+            MulMatrix3x4(entityInv, cur, s_anchor);
+            s_haveAnchor = true;
+            return false;
+        }
+        if (!s_haveAnchor)
+            return false;
+        // out = entity * anchor * cur^-1: moves GrenadeSpawn back onto its idle pose.
+        float want[3][4], curInv[3][4];
+        MulMatrix3x4(entity, s_anchor, want);
+        InvertMatrix3x4TR(cur, curInv);
+        MulMatrix3x4(want, curInv, out);
+        return true;
     }
 
     bool SehCopyAndFixViewmodelMatrices(float* dst, const void* src, int count,
@@ -2805,15 +2869,19 @@ namespace
         const float eyeFov = vr->WorldRenderFov();
         view.fov = eyeFov;
         view.fovViewmodel = eyeFov;
-        // OffCenterEyes: render only this eye's part of the union frustum.
-        // The engine builds it (ComputeViewMatrices, MatrixBuildPerspective-
+        // Off-centre eye (OffCenterEyes, and/or the left eye widened to the
+        // right by LeftEyeCullPad): render exactly this eye's rectangle. The
+        // engine builds it (ComputeViewMatrices, MatrixBuildPerspective-
         // OffCenterX) from fov + aspect + the 0..1 sub-rectangle; culling and
-        // deferred lights follow the matrices (flat test 2026-10-11). The
+        // deferred lights follow the matrices (flat test 2026-10-11; widened
+        // left eye fixed the far-right prop pop-in, HMD 2026-10-17). The
         // copy in DrawViewModels keeps the sub-rectangle.
-        const float* frac = nullptr;
-        if (vr->OffCenterForEye(stereoEye, frac))
+        float ocFov = 0.f, ocAspect = 0.f, frac[4];
+        if (vr->EyeOffCenterView(stereoEye, ocFov, ocAspect, frac))
         {
-            view.m_flAspectRatio = vr->m_OffCenterAspect;
+            view.fov = ocFov;
+            view.fovViewmodel = ocFov;
+            view.m_flAspectRatio = ocAspect;
             view.m_bOffCenter = true;
             view.m_flOffCenterLeft = frac[0];
             view.m_flOffCenterRight = frac[1];
@@ -3605,6 +3673,13 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     CurrentViewScope curView(setup);
     if (!hkRenderView.fOriginal)
         return;
+    // Trace frames count top-level RenderViews (BM skips the EndFrame hook);
+    // the trigger sets frames + 1 so the frame it lands in is not counted.
+    if (bmvr::g_PassTraceFrames > 0 && g_RenderViewNest == 1)
+        --bmvr::g_PassTraceFrames;
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: RenderView nest=%d eye=%d %dx%d draw=0x%x clear=0x%x", g_RenderViewNest,
+            m_VR ? m_VR->m_StereoEye : -1, setup.width, setup.height, whatToDraw, nClearFlags);
 
     if (g_RenderViewNest > 1)
     {
@@ -4305,6 +4380,42 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     // Yaw actually written to cmd->viewangles this tick. Movement is expressed
     // relative to viewangles, so the stick-to-usercmd conversion below has to
     // use the same yaw or strafing skews whenever the aim source changes.
+    // Black Mesa's ladders are HL2 func_useableladders (CHL2GameMovement::
+    // LadderMove / FullLadderMove, SDK hl_gamemovement.cpp). There the view
+    // direction decides everything: stick forward climbs up unless looking
+    // > ~17 degrees down, stick back climbs the opposite way of the view,
+    // the auto-dismount at either end needs an info_ladder_dismount within
+    // 60 degrees of the full 3D view direction, and jump leaves along the
+    // view. Ladder mode therefore sends the head's angles, except:
+    //  - stick back = IN_FORWARD with the view turned round and 45 degrees
+    //    down: always climbs down, and at the bottom the dismount behind the
+    //    player is 'in front' of that view, so it steps off backwards;
+    //  - jump = along the stick (head frame) or the view, stick zeroed so
+    //    HL2 does not flip it; positive forwardmove is held off for 0.5 s so
+    //    the auto-mount cone does not grab the ladder straight back.
+    // Firing keeps the gun's angles and the stock behaviour.
+    static ULONGLONG s_ladderJumpUntil = 0;
+    int ladderBits = 0;
+    bool onLadder = false;
+    const ULONGLONG ladderNow = GetTickCount64();
+    const bool afterLadderJump = ladderNow < s_ladderJumpUntil;
+    const bool ladderMode = m_VR && m_VR->m_IsVREnabled && cmd->command_number
+        && m_VR->IsGameplayEligible() && !afterLadderJump
+        && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0
+        && m_VR->LadderMode(ladderBits, onLadder);
+    const bool ladderJump = ladderMode && onLadder && (m_VR->HeldButtons() & IN_JUMP) != 0;
+    const bool ladderBack = ladderMode && onLadder && !ladderJump && (ladderBits & IN_BACK) != 0;
+    if (ladderJump)
+        s_ladderJumpUntil = ladderNow + 500;
+    if (ladderBack)
+        ladderBits = IN_FORWARD;   // side bits would be mirrored in the turned view
+    auto applyLadderButtons = [&]() {
+        if (!ladderMode)
+            return;
+        if (ladderBack)
+            cmd->buttons &= ~(IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
+        cmd->buttons |= ladderBits;
+    };
     QAngle appliedAim{};
     bool haveAppliedAim = false;
     auto applyControllerAim = [&]() {
@@ -4330,9 +4441,44 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         // Pickup follow uses the grab hand. Weapon fire / flashlight must not:
         // leftover left-Use latch used to keep viewangles and shoot origin on
         // that hand after a door, button, or charger.
-        if (m_VR->UseGrabRedirectsFire() && m_VR->GrabHandTrackingValid())
+        if (m_VR->UseAimFollowsGrabHand() && m_VR->GrabHandTrackingValid())
         {
-            apply(m_VR->GetUseAimAngles());
+            apply(m_VR->UseGrabRedirectsFire() ? m_VR->GetUseAimAngles() : m_VR->GetUseAimAnglesFromEye());
+            return;
+        }
+        // Ladder mode (see above where ladderMode is computed).
+        if (ladderMode)
+        {
+            const Vector hmdVa = m_VR->GetViewAngle();
+            float pitch = hmdVa.x;
+            if (pitch > 180.f)
+                pitch -= 360.f;
+            float yaw = hmdVa.y;
+            if (ladderJump)
+            {
+                // Along the stick (head frame), or the view with the stick
+                // centred. The turned-round view jumped backwards for a
+                // player looking at where they wanted to go.
+                pitch = -10.f;   // facing up a little adds the jump's +50 z
+                const float f = m_VR->m_WalkForward.load(std::memory_order_acquire);
+                const float sd = m_VR->m_WalkSide.load(std::memory_order_acquire);
+                if (f * f + sd * sd > 0.2f * 0.2f)
+                    yaw -= atan2f(sd, f) * 180.f / 3.14159265f;   // Source yaw grows to the left
+            }
+            else if (ladderBack)
+            {
+                pitch = 45.f;
+                yaw += 180.f;
+            }
+            static int s_ladderLog;
+            if (s_ladderLog < 24)
+            {
+                Game::logMsg("Ladder aim: %s%s head yaw %.0f pitch %.0f -> yaw %.0f pitch %.0f",
+                    onLadder ? "on" : "near", ladderJump ? " jump" : (ladderBack ? " back" : ""),
+                    hmdVa.y, hmdVa.x, yaw, pitch);
+                ++s_ladderLog;
+            }
+            apply(QAngle(pitch, yaw, 0.f));
             return;
         }
         // Looking down a scope, the crosshair is fixed in the middle of the
@@ -4427,6 +4573,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             cmd->sidemove += analogS;
         }
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+        applyLadderButtons();
+        if (ladderJump)
+        {
+            cmd->forwardmove = 0.f;
+            cmd->sidemove = 0.f;
+        }
+        else if (afterLadderJump && cmd->forwardmove > 0.f)
+            cmd->forwardmove = 0.f;
         const int inv = m_VR->m_PendingInvDelta.exchange(0, std::memory_order_acq_rel);
         if (inv != 0 && m_Game)
         {
@@ -4488,6 +4642,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+    applyLadderButtons();
 
     EnsureServerFlashlightHook();
     EnsureWeaponShootOriginHooks();
@@ -4575,7 +4730,16 @@ BOOL WINAPI Hooks::dGetCursorPos(LPPOINT point)
 {
     // While a VR menu pointer is live, report it; otherwise the real cursor.
     if (point && m_VR && m_VR->TryGetMenuCursorScreen(*point))
+    {
+        m_VR->m_CursorHookHits.fetch_add(1, std::memory_order_relaxed);
+        m_VR->m_CursorHookHitsSec.fetch_add(1, std::memory_order_relaxed);
         return TRUE;
+    }
+    if (m_VR)
+    {
+        m_VR->m_CursorHookPass.fetch_add(1, std::memory_order_relaxed);
+        m_VR->m_CursorHookPassSec.fetch_add(1, std::memory_order_relaxed);
+    }
     return hkGetCursorPos.fOriginal ? hkGetCursorPos.fOriginal(point) : FALSE;
 }
 
@@ -4583,7 +4747,7 @@ float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)
 {
     (void)edx;
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame() && m_VR->m_Fov > 10.f)
-        return m_VR->WorldRenderFov();
+        return m_VR->EyeRenderFov(m_VR->m_StereoEye);
     if (hkGetViewModelFOV.fOriginal)
         return hkGetViewModelFOV.fOriginal(ecx);
     return 54.f;
@@ -4599,7 +4763,10 @@ void __fastcall Hooks::dAdjustEngineViewport(void* ecx, void* edx, int& x, int& 
 void __fastcall Hooks::dViewport(void* ecx, void* edx, int x, int y, int width, int height)
 {
     NoteMatContext(ecx);
+    const int trW = width, trH = height;
     ClampStereoViewport(x, y, width, height);
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: Viewport %dx%d -> %d,%d %dx%d", trW, trH, x, y, width, height);
     if (hkViewport.fOriginal)
         hkViewport.fOriginal(ecx, x, y, width, height);
 }
@@ -4856,11 +5023,24 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
             unsigned char* hdr = ResolveStudioHdr(state);
             const int nBones = StudioHdrNumBones(hdr);
+            const float* boneDelta = rigidPtr;
+            float grenadeDelta[3][4]{};
+            if (rigidPtr && pCustomBoneToWorld && nBones > 0 && modelName
+                && (std::strstr(modelName, "v_grenade") || std::strstr(modelName, "v_Grenade")))
+            {
+                float entity[3][4]{}, hold[3][4]{};
+                BuildMatrix3x4FromOrgAngles(entity, info.origin, info.angles);
+                if (GrenadeHoldCorrection(hdr, pCustomBoneToWorld, nBones, entity, hold))
+                {
+                    MulMatrix3x4(rigidDelta, hold, grenadeDelta);
+                    boneDelta = &grenadeDelta[0][0];
+                }
+            }
             bool usedBones = false;
             if (pCustomBoneToWorld && nBones > 0
                 && SehCopyAndFixViewmodelMatrices(&g_ScaledViewmodelBones[slot][0][0][0], pCustomBoneToWorld,
                     nBones, pivot3, needScale ? scale : 1.f, pivot3, right3, up3, fwd3,
-                    needYFix ? yFix : 1.f, rigidPtr))
+                    needYFix ? yFix : 1.f, boneDelta))
             {
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
@@ -4964,6 +5144,7 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
     NoteMatContext(ecx);
     const char* pushName = SafeTextureName(pTexture);
     const RtNameClass nameClass = ClassifyRtName(pushName);
+    const int trInW = nViewW, trInH = nViewH;
     // Grow world G-buffer viewports before NotePushRt so the stack records
     // 3168, and so a `_rt_gb*` push while flashlight is still parent is not
     // skipped by AuxSceneRtBound().
@@ -5067,6 +5248,15 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
             ++s_pushLog;
         }
     }
+    if (bmvr::g_PassTraceFrames > 0)
+    {
+        int texW = 0, texH = 0;
+        QueryTextureSize(pTexture, texW, texH);
+        Game::logMsg("trace: PushRT %s tex=%dx%d depth=%s vp %dx%d -> %d,%d %dx%d world=%d aux=%d eye=%d",
+            SafeTextureName(pTexture), texW, texH, SafeTextureName(pDepthTexture), trInW, trInH,
+            nViewX, nViewY, nViewW, nViewH, nameClass.world ? 1 : 0, nameClass.aux ? 1 : 0,
+            m_VR ? m_VR->m_StereoEye : -1);
+    }
     if (hkPushRenderTargetAndViewport.fOriginal)
         hkPushRenderTargetAndViewport.fOriginal(ecx, pTexture, pDepthTexture, nViewX, nViewY, nViewW, nViewH);
     if (m_VR && !m_VR->HudPaintActive() && !m_VR->ShouldHwndBlitStereo()
@@ -5082,6 +5272,8 @@ void __fastcall Hooks::dPopRenderTargetAndViewport(void* ecx, void* edx)
         m_VR->BlitEngineHudRtToOverlay();
     if (hkPopRenderTargetAndViewport.fOriginal)
         hkPopRenderTargetAndViewport.fOriginal(ecx);
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: PopRT");
     NotePopRt();
 }
 
@@ -5314,6 +5506,15 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             ++s_seenN;
         }
     }
+    if (bmvr::g_PassTraceFrames > 0)
+    {
+        int rtW = 0, rtH = 0;
+        const char* rtName = "";
+        QueryContextColorRtSize(ecx, rtW, rtH, &rtName);
+        Game::logMsg("trace: DSSR %s dest %d,%d %dx%d -> %d,%d %dx%d src=%dx%d uv=(%.1f,%.1f)-(%.1f,%.1f) rt=%s %dx%d",
+            matName, origX, origY, origW, origH, destX, destY, width, height, srcWidth, srcHeight,
+            srcX0, srcY0, srcX1, srcY1, rtName, rtW, rtH);
+    }
     if (hkDrawScreenSpaceRectangle.fOriginal)
         hkDrawScreenSpaceRectangle.fOriginal(ecx, material, destX, destY, width, height,
             srcX0, srcY0, srcX1, srcY1, srcWidth, srcHeight, clientRenderable, xDice, yDice);
@@ -5508,6 +5709,11 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     else
         clipToBounds(srcRect, expanded, destW, destH, "src-unk");
     clipToBounds(dstRect, expandedDst, destW, destH, "dst");
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: CopyRT -> %s %dx%d from %s %dx%d src=%d,%d %dx%d dst=%d,%d %dx%d grew=%d",
+            SafeTextureName(texture), destW, destH, srcName, srcW, srcH,
+            srcRect ? srcRect->x : -1, srcRect ? srcRect->y : -1, srcRect ? srcRect->width : -1, srcRect ? srcRect->height : -1,
+            dstRect ? dstRect->x : -1, dstRect ? dstRect->y : -1, dstRect ? dstRect->width : -1, dstRect ? dstRect->height : -1, grew);
     if (hkCopyRenderTargetToTextureEx.fOriginal)
         hkCopyRenderTargetToTextureEx.fOriginal(ecx, texture, renderTargetId, srcRect, dstRect);
 }
@@ -6144,6 +6350,30 @@ void Hooks::EnsureWeaponShootOriginHooks()
             hkGetShootAngles.pTarget = p;
         }
     }
+    auto hookServerFn = [&](auto& hook, int rva, const char* bytes, auto detour, const char* what)
+    {
+        if (!server || hook.pTarget)
+            return;
+        auto* p = reinterpret_cast<unsigned char*>(server) + rva;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            && CodeBytesMatch(p, bytes))
+        {
+            if (hook.createHook(p, detour) == 0 && hook.enableHook() == 0)
+                Game::logMsg("Hook enabled: %s rva=0x%X", what, rva);
+            else
+                Game::logMsg("%s hook failed", what);
+        }
+        else
+        {
+            Game::logMsg("%s skipped (bytes/rva 0x%X)", what, rva);
+            hook.pTarget = p;
+        }
+    };
+    hookServerFn(hkGrenadeCreate, Offsets::kGrenadeCreate_Server, "558BEC8B450883EC3083F815",
+        &dGrenadeCreate, "server grenade create");
+    hookServerFn(hkGrenadeThrowPosition, Offsets::kGrenadeThrowPosition_Server, "558BEC81EC88000000",
+        &dGrenadeThrowPosition, "server grenade throw position");
     if (client && !hkClientGetShootAngles.pTarget)
     {
         // Same GetShootAngles body as server (EyeAngles vtable +0x234, then punch).
@@ -6170,7 +6400,8 @@ void Hooks::EnsureWeaponShootOriginHooks()
         && hkClientWeaponShootPosition.pTarget && hkGetAttachmentVec.pTarget
         && hkGetAttachmentMatrix.pTarget && hkServerWeaponShootPosition.pTarget
         && hkServerGrabHoldOrigin.pTarget && hkGrabSetTarget.pTarget
-        && hkGetShootAngles.pTarget && hkClientGetShootAngles.pTarget;
+        && hkGetShootAngles.pTarget && hkClientGetShootAngles.pTarget
+        && hkGrenadeCreate.pTarget && hkGrenadeThrowPosition.pTarget;
 }
 
 void __fastcall Hooks::dGetShootAngles(void* ecx, void* edx, QAngle* out)
@@ -6281,6 +6512,8 @@ Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out
 void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang)
 {
     (void)edx;
+    if (m_VR)
+        m_VR->NoteGrabControllerActive();
     Vector p{};
     QAngle a{};
     if (pos)
@@ -7308,7 +7541,7 @@ void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& hei
     }
 }
 
-// Areaportal culling with OffCenterEyes. The engine's areaportal setup
+// Areaportal culling with off-centre eyes (OffCenterEyes, LeftEyeCullPad). The engine's areaportal setup
 // (engine+0x138CF0) copies the current view, sets its screen window to the
 // centred +-tan(fov/2) of that view (fov/aspect = the union frustum), then
 // projects doorways with the copy's ComputeViewMatrices — which honours
@@ -7323,7 +7556,7 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
     static const uintptr_t s_engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
     const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
     if (ecx && s_engine && ret == s_engine + Offsets::kAreaPortalComputeViewReturnRva
-        && m_VR && m_VR->m_OffCenterActive)
+        && m_VR && m_VR->AnyEyeOffCenter())
     {
         auto* view = static_cast<CViewSetup*>(ecx);
         if (view->m_bOffCenter)
@@ -7365,9 +7598,9 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
                     || m_VR->CachedRt0MatchesEyes()
                     || m_VR->D3dRt0IsEyeSized()))))
     {
-        const float eyeAspect = m_VR->m_OffCenterActive
-            ? m_VR->m_OffCenterAspect
-            : static_cast<float>(m_VR->m_RenderWidth) / static_cast<float>(m_VR->m_RenderHeight);
+        // Off-centre eye: the centred union aspect its sub-rectangle is of.
+        float eyeAspect = static_cast<float>(m_VR->m_RenderWidth) / static_cast<float>(m_VR->m_RenderHeight);
+        m_VR->EyeRenderAspect(m_VR->m_StereoEye, eyeAspect);
         static int s_arLog;
         if (s_arLog < 8)
         {
@@ -7396,8 +7629,18 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     const bool haveFb = bmvr::TryHmdFramebuffer() && bmvr::HaveHmdFramebufferSize(fbW, fbH);
     const bool fullMode = sizeMode == RT_SIZE_FULL_FRAME_BUFFER
         || sizeMode == RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP;
+    // BM's light shafts (god rays, np_gr_quality) draw _rt_lsMask with the
+    // G-buffer depth and copy the scene into _rt_lsScene; PushRT already
+    // treats _rt_ls* as eye-sized world targets. Left at the window size the
+    // mask pass ran with a depth buffer of another size and a viewport larger
+    // than its target, and the composite replaced the eye with the mask:
+    // world gone, black/white plus the source's glow, whenever the source
+    // was in front (bm_c1a3c, 2026-10-25). Grow them with FullFrame. Only
+    // the full-frame-sized ones (all four are RT_SIZE_FULL_FRAME_BUFFER on
+    // this build); a smaller _rt_ls* would otherwise be blown up to the eye.
+    const bool namedLs = name && fullMode && std::strstr(name, "_rt_ls") != nullptr;
     const bool namedFb = name && (std::strstr(name, "_rt_FullFrameFB")
-        || std::strstr(name, "_rt_ResolvedFullFrame"));
+        || std::strstr(name, "_rt_ResolvedFullFrame") || namedLs);
     const bool namedGb = name && std::strstr(name, "_rt_gb")
         && !std::strstr(name, "shadow") && !std::strstr(name, "Shadow")
         && !std::strstr(name, "flashlight") && !std::strstr(name, "Flashlight")
@@ -7601,7 +7844,7 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
                 && std::abs(ah - static_cast<int>(fbH)) < 32)
                 bmvr::EndRisky(L"ff_hmdfit");
         }
-        else if (aw > 0 && namedFb && bmvr::g_FullFrameActualWidth < 640)
+        else if (aw > 0 && namedFb && !namedLs && bmvr::g_FullFrameActualWidth < 640)
         {
             bmvr::g_FullFrameActualWidth = static_cast<uint32_t>(aw);
             bmvr::g_FullFrameActualHeight = static_cast<uint32_t>(ah);
@@ -7735,4 +7978,87 @@ void bmvr::InstallEarlyFramebufferHook()
                 Log("Hook enabled: GetScreenAspectRatio rva=0x%X", aspectOff);
         }
     }
+}
+
+namespace
+{
+    // Set while the server spawns a frag the local VR player threw, so the
+    // throw-position hook (also used by NPC and other grenades) only moves that one.
+    bool g_VrFragSpawn = false;
+}
+
+void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode)
+{
+    constexpr int kGrenadeTypeFrag = 1;
+    if (!hkGrenadeCreate.fOriginal)
+        return nullptr;
+    Vector hand{};
+    if (type != kGrenadeTypeFrag || !bmvr::g_VrHandThrow || !velocity || !m_VR
+        || !ShouldRewriteShootAngles(owner) || !m_VR->TryGetThrowVelocity(hand))
+        return hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, mode);
+
+    // The game added a share of the player's own velocity to its aimed throw;
+    // keep the player's full velocity like Lambda1VR (hand speed is relative
+    // to the body).
+    Vector playerVel{};
+    __try
+    {
+        constexpr int kAbsVelocity = 0x218;   // FUN_10487250 reads +0x218..0x220
+        playerVel = *reinterpret_cast<const Vector*>(static_cast<const char*>(owner) + kAbsVelocity);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+    const Vector before = *velocity;
+    *velocity = hand + playerVel;
+    Game::logMsg("VR frag throw: hand %.0f u/s -> (%.0f,%.0f,%.0f) (game %.0f u/s)",
+        hand.Length(), velocity->x, velocity->y, velocity->z, before.Length());
+    // Mode 0 (the frag's) places the grenade at the owner's EyePosition and
+    // ignores the throw position, 1 at the middle of the two; any other value
+    // uses the throw position, which dGrenadeThrowPosition moves to the hand.
+    constexpr int kSpawnAtThrowPosition = 2;
+    g_VrFragSpawn = true;
+    void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, kSpawnAtThrowPosition);
+    g_VrFragSpawn = false;
+    return grenade;
+}
+
+bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* ang, void* owner)
+{
+    if (!hkGrenadeThrowPosition.fOriginal)
+        return false;
+    const bool ok = hkGrenadeThrowPosition.fOriginal(grenade, pos, ang, owner);
+    Vector hand{};
+    if (!ok || !g_VrFragSpawn || !pos || !m_VR || !m_VR->TryGetThrowOrigin(hand))
+        return ok;
+    // The game's point is a little ahead of the eye after a trace from the
+    // eye; a hand far from it (arm through a wall, stale pose) keeps it.
+    if ((hand - *pos).LengthSqr() > 60.f * 60.f)
+    {
+        Game::logMsg("VR frag throw: hand %.0f units from the game's point, kept the game's", (hand - *pos).Length());
+        return ok;
+    }
+    // The game's point passed its own trace from the eye. A hand reaching
+    // through a wall, a door or a prop must not spawn the grenade on the
+    // other side: trace from the game's point to the hand and keep the
+    // game's point if anything solid is in between. (Server and client run
+    // on the game thread in single player, so the client trace is safe here.)
+    if (m_Game && m_Game->m_EngineTrace)
+    {
+        C_BaseEntity* player = m_Game->GetLocalPlayerEntity();
+        C_BaseEntity* vm = m_Game->GetViewModelEntity();
+        CTraceFilterSkipTwoEntities filter(player, vm, 0);
+        Ray_t ray;
+        ray.Init(*pos, hand);
+        CGameTrace tr{};
+        m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT_HULL, &filter, &tr);
+        if (tr.startsolid || tr.fraction < 1.f)
+        {
+            Game::logMsg("VR frag throw: hand behind geometry (fraction %.2f), kept the game's point", tr.fraction);
+            return ok;
+        }
+    }
+    Game::logMsg("VR frag throw: spawned at the hand, %.0f units from the game's point", (hand - *pos).Length());
+    *pos = hand;
+    return ok;
 }

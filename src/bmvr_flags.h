@@ -267,7 +267,12 @@ namespace bmvr
     extern bool g_VrShootFromMuzzle;
     // Fixes, default on (a config key can turn each off):
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
+    extern bool g_TwoHandGripToggle;     // support grip latches: squeeze on the gun = on, squeeze again = off
+    extern bool g_VrHandThrow;           // frag leaves the hand at the hand's speed (Lambda1VR-style throw)
+    extern float g_ThrowScale;           // hand speed x 2/3 x this, capped at 1000 u/s (Lambda1VR vr_throw_scale)
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
+    // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
+    extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
     // Optional features, default off:
     extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
@@ -294,6 +299,19 @@ namespace bmvr
     // zoomed. Compositor / OpenXR submit keep the real HMD FOV, so the
     // narrower render is magnified in the lenses. 0.28 ≈ 3.5× (HL2 20/75).
     extern float g_ScopeZoomFovScale;
+    // LeftEyeCullPad (default 0.05, 0 = off, max 0.25): the left eye's right
+    // edge is pushed out by this fraction of the half-FOV tangent (off-centre
+    // CViewSetup) and submitted at that FOV (OpenXR explicit tangents, OpenVR
+    // texture bounds). Black Mesa culls props for the right eye with what it
+    // computed for the left eye; the right eye sees ~IPD/z further right, so
+    // near props popped in late at the far right (HMD 2026-10-17; a widened
+    // left eye fixed it). 0.05 covers props from ~0.7 m at 64 mm IPD (PSVR2).
+    // Works with and without OffCenterEyes. Same RT size, so the left eye
+    // loses ~2.5 % horizontal sharpness at 0.05; no extra pixels.
+    extern float g_LeftEyeCullPad;
+    // MenuCursorHook (default true): GetCursorPos reports the VR menu pointer
+    // while it is on a menu panel. false = real cursor (A/B test aid).
+    extern bool g_MenuCursorHook;
     // Exponential smoothing time (seconds) applied to HMD pitch/yaw while
     // scoped. Magnification otherwise turns every micro-movement into shake.
     extern float g_ScopeZoomSmoothSec;
@@ -384,13 +402,17 @@ namespace bmvr
     // 2D GameUI in the HMD: fraction of the full-width letterbox (1 = glued to
     // the view). ~0.70 is a closer monitor; lower = farther / smaller.
     extern float g_MenuPanelScale;
-    // HL2VR hlvr_menu_forward / overlay width, in metres. Defaults match the
-    // OpenXR helper 2D quad (0.65 m × 1.05 m, 2026-09-03). Do not copy
-    // HL2VR's 150 Source-unit (~3.8 m) distance — that was too far here.
+    // HL2VR hlvr_menu_forward / overlay width, in metres (main menu quad and
+    // pause overlay; the game publishes them to the OpenXR helper, bridge v16).
+    // 1.4 m × 1.6 m (~60°) since 2026-10-26: 0.65 m × 1.05 m (~78°, 2026-09-03)
+    // felt too close and made pointer lag obvious next to the hand. Do not
+    // copy HL2VR's 150 Source-unit (~3.8 m) distance — too far here. VR
+    // settings panel: MENU section.
     extern float g_MenuForwardMeters;
     extern float g_MenuWidthMeters;
     extern float g_MenuHeightOffsetMeters;
-    // Seconds of low-pass on the VR menu pointer (hand tremor).
+    // Seconds of low-pass on the VR menu pointer (hand tremor). 0.05 since
+    // 2026-10-26 (0.18 dragged behind slow aiming).
     extern float g_MenuCursorSmoothSec;
 
     bool TryHudOverlay();

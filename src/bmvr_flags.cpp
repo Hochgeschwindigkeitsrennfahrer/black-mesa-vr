@@ -108,7 +108,11 @@ namespace bmvr
     bool g_VrShotOriginFix = true;
     bool g_VrShootFromMuzzle = true;
     bool g_TwoHandHoldWhileGrip = true;
+    bool g_TwoHandGripToggle = false;
+    bool g_VrHandThrow = true;
+    float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
+    int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = false;
@@ -119,6 +123,8 @@ namespace bmvr
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
+    float g_LeftEyeCullPad = 0.05f;
+    bool g_MenuCursorHook = true;
     float g_ScopeZoomSmoothSec = 0.16f;
     float g_VrHandsPoseRotX = 0.f;
     float g_VrHandsPoseRotY = 180.f;
@@ -182,10 +188,10 @@ namespace bmvr
     float g_HudDistance = 1.05f;
     float g_HudSize = 0.70f;
     float g_MenuPanelScale = 0.70f;
-    float g_MenuForwardMeters = 0.65f;
-    float g_MenuWidthMeters = 1.05f;
+    float g_MenuForwardMeters = 1.4f;
+    float g_MenuWidthMeters = 1.6f;
     float g_MenuHeightOffsetMeters = -0.02f;
-    float g_MenuCursorSmoothSec = 0.18f;
+    float g_MenuCursorSmoothSec = 0.05f;
 
     static HMODULE g_Module = nullptr;
     static std::mutex g_LogMutex;
@@ -594,6 +600,12 @@ namespace bmvr
                 g_ShoulderGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SettingsTriangleHold") == 0)
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "TwoHandGripToggle") == 0)
+                g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrHandThrow") == 0)
+                g_VrHandThrow = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ThrowScale") == 0)
+                g_ThrowScale = static_cast<float>(atof(val));
             else if (std::strcmp(n, "TwoHandHoldWhileGrip") == 0)
                 g_TwoHandHoldWhileGrip = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSkipMotionBlur") == 0)
@@ -615,6 +627,14 @@ namespace bmvr
                 g_ScopeUsesHmdAim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ScopeZoomFovScale") == 0)
                 g_ScopeZoomFovScale = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "MenuCursorHook") == 0)
+                g_MenuCursorHook = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "LeftEyeCullPad") == 0)
+            {
+                const float s = static_cast<float>(atof(val));
+                if (s >= 0.f && s <= 0.25f)
+                    g_LeftEyeCullPad = s;
+            }
             else if (std::strcmp(n, "ScopeZoomSmoothSec") == 0)
                 g_ScopeZoomSmoothSec = static_cast<float>(atof(val));
             else if (std::strcmp(n, "VrHandsPoseRotationOffset") == 0)

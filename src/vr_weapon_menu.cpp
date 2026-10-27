@@ -1754,6 +1754,51 @@ bool VR::WeaponMenuStickHeld() const
     return PressedDigitalAction(m_ActionResetPosition);
 }
 
+void VR::Recenter(const char* why)
+{
+    m_HmdOriginLatched = false;
+    m_MenuPanelPoseValid = false;
+    ++m_MenuOverlayEpoch;
+    if (bmvr::g_RecenterResetsYaw)
+        m_RotationOffsetY.store(0.f, std::memory_order_release);
+    Game::logMsg("Recenter (%s)%s", why, bmvr::g_RecenterResetsYaw ? " + yaw" : "");
+}
+
+// Right-stick tap (HL2VR style): bare hands <-> the weapon held before.
+// Holstering never changes the game's active weapon, so going back only
+// re-selects when that weapon changed meanwhile (e.g. a pickup).
+void VR::ToggleEmptyHands()
+{
+    if (!m_EmptyHands)
+    {
+        Game::InventoryWeapon inv[kMaxMenuSlots]{};
+        const int n = m_Game->CollectInventoryWeapons(inv, kMaxMenuSlots);
+        if (n <= 0)
+            return;
+        C_BaseEntity* active = m_Game->GetActiveWeaponEntity();
+        for (int i = 0; i < n; ++i)
+        {
+            if (m_Game->GetClientEntity(inv[i].entityIndex) != active)
+                continue;
+            m_WeaponMenuPrevEntity = inv[i].entityIndex;
+            m_WeaponMenuPrevKind = KindFromNames(inv[i].modelName, inv[i].networkName);
+            break;
+        }
+        m_EmptyHands = true;
+        Game::logMsg("Right-stick tap: hands");
+    }
+    else
+    {
+        m_EmptyHands = false;
+        const int prev = m_WeaponMenuPrevEntity;
+        if (prev > 0 && m_Game->GetClientEntity(prev) != m_Game->GetActiveWeaponEntity())
+            m_PendingWeaponSelect.store(prev, std::memory_order_release);
+        Game::logMsg("Right-stick tap: weapon entity=%d", prev);
+    }
+    // No menu sound: the quick swap never opens the weapon menu.
+    PulseHandHaptic(vr::TrackedControllerRole_RightHand, 900, 0.35f);
+}
+
 void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 {
     (void)deltaMs;
@@ -1808,19 +1853,44 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
 
                 const Vector body = MenuPlayerBody(this);
                 Vector hand{};
+                Vector eye{};
                 {
                     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
                     hand = ControllerTrackingToWorld(body, m_PhysicalRightPosAbs);
+                    eye = ControllerTrackingToWorld(body, m_HmdPosAbs);
                 }
 
                 // HL2VR OpenWeaponSelection: screen centre at
                 // PrimaryHandOrigin() + yaw-forward * 4, vertical plane.
+                // Opened low (hand down by the hip), an upright plane is seen
+                // edge-on: tilt it back about its horizontal axis to face the
+                // eye, by the angle the eye looks down at it (max 60 degrees).
+                Vector menuFwd = yawFwd;
+                Vector menuUp = worldUp;
+                {
+                    const Vector toCenter = hand + yawFwd * kMenuHandForwardHu - eye;
+                    const float flat = sqrtf(toCenter.x * toCenter.x + toCenter.y * toCenter.y);
+                    constexpr float kMaxTiltRad = 60.f * 3.14159265f / 180.f;
+                    float tilt = (flat > 1.f) ? atan2f(-toCenter.z, flat) : 0.f;
+                    if (tilt > kMaxTiltRad)
+                        tilt = kMaxTiltRad;
+                    if (tilt > 0.f)
+                    {
+                        const float c = cosf(tilt), sn = sinf(tilt);
+                        menuFwd = yawFwd * c - worldUp * sn;   // normal along the line of sight
+                        menuUp = worldUp * c + yawFwd * sn;    // top leans away
+                    }
+                }
+                // Centre on the hand's line along the (tilted) normal: hover
+                // projects the hand along it, so an offset centre put the hand
+                // on the slot below (the crowbar) at open.
+                const Vector center = hand + menuFwd * kMenuHandForwardHu;
                 m_WeaponMenuLatchBody = body;
-                m_WeaponMenuLatchWorld = hand + yawFwd * kMenuHandForwardHu;
+                m_WeaponMenuLatchWorld = center;
                 m_WeaponMenuLatchDelta = m_WeaponMenuLatchWorld - body;
-                m_WeaponMenuLatchFwd = yawFwd;
+                m_WeaponMenuLatchFwd = menuFwd;
                 m_WeaponMenuLatchRight = yawRight;
-                m_WeaponMenuLatchUp = worldUp;
+                m_WeaponMenuLatchUp = menuUp;
                 m_WeaponMenuLatchYaw = m_RotationOffsetY.load(std::memory_order_acquire);
                 m_WeaponMenuLatched = true;
             }
@@ -2037,12 +2107,7 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
         else if (m_WeaponMenuOpenedThisHold)
             QueueWeaponMenuSound(kWeaponSoundSelect, 0, 0);
         else if ((now - m_WeaponMenuClickStartMs) < kMenuHoldMs)
-        {
-            m_HmdOriginLatched = false;
-            if (bmvr::g_RecenterResetsYaw)
-                m_RotationOffsetY.store(0.f, std::memory_order_release);
-            Game::logMsg("Right-stick tap: recenter");
-        }
+            ToggleEmptyHands();
         m_WeaponMenuOpen = false;
         m_WeaponMenuClickHeld = false;
         m_WeaponMenuOpenedThisHold = false;
