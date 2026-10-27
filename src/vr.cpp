@@ -14,6 +14,7 @@
 #include "vr_hud_icons.h"
 #include "openxr_helper_bridge.h"
 
+#include <d3dcompiler.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -12497,11 +12498,89 @@ void VR::FinishPauseHudExtraPaint(IMatRenderContext* ctx)
 // the alpha channel only, blended DESTALPHA/INVDESTALPHA with source alpha
 // 1, gives a + a(1-a) = 1-(1-a)^2: 0 and 1 stay, 0.64 -> 0.87. One pass
 // was still too see-through (user), so it repeats: 3 passes = 1-(1-a)^8.
+//
+// Stacked dialogs (Video -> Advanced over the options window) paint colour
+// but leave the alpha of the window below them (user: the passes changed the
+// options window, not the Advanced one). So first alpha = max(a, 8 * max(rgb))
+// from a copy of the layer: anything a dialog painted, even dark grey, turns
+// opaque; untouched pixels (cleared 0,0,0,0) stay transparent.
+static IDirect3DPixelShader9* PauseAlphaFromColourShader(IDirect3DDevice9* device)
+{
+    static IDirect3DDevice9* s_device;
+    static IDirect3DPixelShader9* s_ps;
+    static bool s_failed;
+    if (s_device == device && (s_ps || s_failed))
+        return s_ps;
+    s_device = device;
+    s_ps = nullptr;
+    s_failed = true;
+    HMODULE dll = LoadLibraryA("d3dcompiler_47.dll");
+    if (!dll)
+        dll = LoadLibraryA("d3dcompiler_43.dll");
+    auto compile = dll ? reinterpret_cast<pD3DCompile>(GetProcAddress(dll, "D3DCompile")) : nullptr;
+    if (!compile)
+    {
+        Game::logMsg("Pause alpha: D3DCompile missing");
+        return nullptr;
+    }
+    static const char kSrc[] =
+        "sampler2D s : register(s0);\n"
+        "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+        "  float4 c = tex2D(s, uv);\n"
+        "  float m = max(c.r, max(c.g, c.b));\n"
+        "  return float4(0, 0, 0, saturate(max(c.a, m * 8.0)));\n"
+        "}\n";
+    ID3DBlob* code = nullptr;
+    ID3DBlob* err = nullptr;
+    if (SUCCEEDED(compile(kSrc, sizeof(kSrc) - 1, "pause_alpha.hlsl", nullptr, nullptr, "main", "ps_2_0", 0, 0, &code, &err)) && code)
+    {
+        if (SUCCEEDED(device->CreatePixelShader(static_cast<const DWORD*>(code->GetBufferPointer()), &s_ps)))
+            s_failed = false;
+    }
+    else
+        Game::logMsg("Pause alpha: shader compile failed: %s", err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
+    if (code) code->Release();
+    if (err) err->Release();
+    Game::logMsg("Pause alpha: alpha-from-colour shader %s", s_ps ? "ready" : "unavailable");
+    return s_ps;
+}
+
+static IDirect3DTexture9* PauseLayerCopy(IDirect3DDevice9* device, const D3DSURFACE_DESC& desc)
+{
+    static IDirect3DDevice9* s_device;
+    static IDirect3DTexture9* s_tex;
+    static UINT s_w, s_h;
+    static D3DFORMAT s_fmt;
+    if (s_tex && s_device == device && s_w == desc.Width && s_h == desc.Height && s_fmt == desc.Format)
+        return s_tex;
+    if (s_tex && s_device == device)
+        s_tex->Release();
+    s_tex = nullptr;
+    s_device = device;
+    s_w = desc.Width;
+    s_h = desc.Height;
+    s_fmt = desc.Format;
+    if (FAILED(device->CreateTexture(desc.Width, desc.Height, 1, D3DUSAGE_RENDERTARGET, desc.Format,
+        D3DPOOL_DEFAULT, &s_tex, nullptr)))
+        s_tex = nullptr;
+    return s_tex;
+}
+
 static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf, int passes)
 {
     D3DSURFACE_DESC desc{};
     if (!device || !surf || FAILED(surf->GetDesc(&desc)))
         return;
+    IDirect3DPixelShader9* fromColour = PauseAlphaFromColourShader(device);
+    IDirect3DTexture9* copy = fromColour ? PauseLayerCopy(device, desc) : nullptr;
+    IDirect3DSurface9* copySurf = nullptr;
+    if (copy && FAILED(copy->GetSurfaceLevel(0, &copySurf)))
+        copySurf = nullptr;
+    if (copySurf && FAILED(device->StretchRect(surf, nullptr, copySurf, nullptr, D3DTEXF_POINT)))
+    {
+        copySurf->Release();
+        copySurf = nullptr;
+    }
     IDirect3DStateBlock9* saved = nullptr;
     if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
         return;
@@ -12542,10 +12621,33 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         const D3DCOLOR white = D3DCOLOR_ARGB(255, 255, 255, 255);
         const V quad[4] = { { -0.5f, -0.5f, 0.f, 1.f, white }, { w, -0.5f, 0.f, 1.f, white },
             { -0.5f, h, 0.f, 1.f, white }, { w, h, 0.f, 1.f, white } };
+        if (copySurf)
+        {
+            struct VT { float x, y, z, rhw; float u, v; };
+            const VT tq[4] = { { -0.5f, -0.5f, 0.f, 1.f, 0.f, 0.f }, { w, -0.5f, 0.f, 1.f, 1.f, 0.f },
+                { -0.5f, h, 0.f, 1.f, 0.f, 1.f }, { w, h, 0.f, 1.f, 1.f, 1.f } };
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+            device->SetTexture(0, copy);
+            device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+            device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+            device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+            device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+            device->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
+            device->SetPixelShader(fromColour);
+            device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tq, sizeof(VT));
+            device->SetPixelShader(nullptr);
+            device->SetTexture(0, nullptr);
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+            copySurf->Release();
+        }
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         for (int i = 0; i < passes; ++i)
             device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(V));
     }
+    else if (copySurf)
+        copySurf->Release();
     saved->Apply();
     saved->Release();
     if (prevRt)
