@@ -1855,6 +1855,41 @@ private:
     std::atomic<int> m_refs{ 0 };
 };
 
+// Runs on the material thread right before the gun draw it was queued with.
+class AimBeamFrameFunctor : public CFunctor
+{
+public:
+    AimBeamFrameFunctor(VR* vr, const AimBeamFrame& frame)
+        : m_vr(vr)
+        , m_frame(frame)
+    {
+    }
+
+    int AddRef() override
+    {
+        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    int Release() override
+    {
+        const int n = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (n == 0)
+            delete this;
+        return n;
+    }
+
+    void operator()() override
+    {
+        if (m_vr)
+            m_vr->SetAimBeamDrawn(m_frame);
+    }
+
+private:
+    VR* m_vr;
+    AimBeamFrame m_frame;
+    std::atomic<int> m_refs{ 0 };
+};
+
 class McPauseHudFunctor : public CFunctor
 {
 public:
@@ -7012,18 +7047,21 @@ bool VR::AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) co
     if (!GunFrameNow(vo, vf, vr, vu))
         return false;
     beamStart = vo + vf * m_AimBeamLocal.x + vr * m_AimBeamLocal.y + vu * m_AimBeamLocal.z;
+    AimBeamFrame drawn{};
     {
-        // The muzzle as drawn in this frame and the aim at that moment:
-        // rebuilding from the live pose here put the beam start a pose
-        // update away from the barrel while the gun moved.
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-        if (bmvr::g_VrShootFromMuzzle && DrawnMuzzleFresh())
-        {
-            beamStart = m_DrawnMuzzleWorld;
-            f = m_DrawnMuzzleAimFwd;
-        }
+        drawn = m_AimBeamDrawn;
     }
-    if (bmvr::g_VrShootFromMuzzle && m_AimBeamLocalValid)
+    if (bmvr::g_VrShootFromMuzzle && drawn.ms != 0 && GetTickCount() - drawn.ms < 250u)
+    {
+        // The muzzle as drawn in the frame being composited and the aim of
+        // that frame: rebuilding from the live pose here put the beam start
+        // a pose update away from the barrel while the gun moved.
+        beamStart = drawn.muzzle;
+        dot = beamStart + drawn.fwd * drawn.hitDist;
+        beamEnd = drawn.hit ? dot : beamStart + drawn.fwd * 1024.f;
+    }
+    else if (bmvr::g_VrShootFromMuzzle && m_AimBeamLocalValid)
     {
         // Shot = muzzle along the aim: dot and beam on that one line.
         dot = beamStart + f * m_AimHitDist;
@@ -9490,14 +9528,35 @@ void VR::NoteViewmodelMuzzleDrawn(const Vector& worldOrigin, const Vector& attac
     if (!GunFrameNow(vo, vf, vr, vu) || !AimFrameNow(pivot, f, r, u))
         return;
     const Vector d = worldOrigin - vo;
-    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    const bool fresh = !m_AimBeamLocalValid || m_AimBeamLocalKey != key;
-    m_AimBeamLocal = Vector(d.Dot(vf), d.Dot(vr), d.Dot(vu));
-    m_AimBeamLocalKey = key;
-    m_AimBeamLocalValid = true;
-    m_DrawnMuzzleWorld = worldOrigin;
-    m_DrawnMuzzleAimFwd = f;
-    m_DrawnMuzzleMs = GetTickCount();
+    AimBeamFrame frame{};
+    bool fresh = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        fresh = !m_AimBeamLocalValid || m_AimBeamLocalKey != key;
+        m_AimBeamLocal = Vector(d.Dot(vf), d.Dot(vr), d.Dot(vu));
+        m_AimBeamLocalKey = key;
+        m_AimBeamLocalValid = true;
+        m_DrawnMuzzleMs = GetTickCount();
+        frame.muzzle = worldOrigin;
+        frame.fwd = f;
+        frame.hitDist = m_AimHitDist;
+        frame.hit = m_AimBeamHit;
+        frame.ms = m_DrawnMuzzleMs;
+    }
+    // Outside the lock: a full call queue makes this thread wait for the
+    // material thread, which takes the lock in SetAimBeamDrawn.
+    bool queued = false;
+    if (m_Game && m_Game->GetMatQueueMode() != 0)
+    {
+        auto* functor = new (std::nothrow) AimBeamFrameFunctor(this, frame);
+        if (functor)
+        {
+            functor->AddRef();
+            queued = QueueMcMatFunctor(functor, "QueueAimBeamFrame");
+        }
+    }
+    if (!queued)
+        SetAimBeamDrawn(frame);
     if (fresh)
     {
         Vector af = attachmentForward;
@@ -9506,6 +9565,12 @@ void VR::NoteViewmodelMuzzleDrawn(const Vector& worldOrigin, const Vector& attac
         Game::logMsg("Muzzle from drawn bones %s local=(%.2f,%.2f,%.2f) attachment-fwd vs model-fwd %.1fdeg",
             key.c_str(), m_AimBeamLocal.x, m_AimBeamLocal.y, m_AimBeamLocal.z, barrelDeg);
     }
+}
+
+void VR::SetAimBeamDrawn(const AimBeamFrame& frame)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    m_AimBeamDrawn = frame;
 }
 
 void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin)
