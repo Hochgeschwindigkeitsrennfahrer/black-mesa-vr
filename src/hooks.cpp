@@ -7994,14 +7994,14 @@ void bmvr::InstallEarlyFramebufferHook()
     }
     if (!Hooks::hkGetScreenAspectRatio.pTarget)
     {
-        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x101490,
+        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x101560,
             "55 8B EC 8B 0D ? ? ? ? 83 EC 0C 81 F9 ? ? ? ? 75 16 F3 0F 10 0D");
         if (aspectOff == -1)
             Log("GetScreenAspectRatio signature not found");
         else
         {
             if (aspectOff == 0)
-                aspectOff = 0x101490;
+                aspectOff = 0x101560;
             void* aspectTarget = reinterpret_cast<uint8_t*>(eng) + aspectOff;
             if (Hooks::hkGetScreenAspectRatio.createHook(aspectTarget, &Hooks::dGetScreenAspectRatio) != 0
                 || Hooks::hkGetScreenAspectRatio.enableHook() != 0)
