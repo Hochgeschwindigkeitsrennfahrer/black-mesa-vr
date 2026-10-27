@@ -5921,8 +5921,15 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
     // The game lights from the body's eye point along the eye angles, which
     // in VR are the gun aim: the beam points with the hand but starts at the
     // body, so it bends round corners the hand reaches past. Start it at the
-    // right hand instead and cancel the game's sideways/up offset (PosY -10
-    // = shoulder); its forward offset stays so the light clears the gun.
+    // right hand instead. The game adds its shoulder offset (PosY -10) along
+    // its own time-smoothed basis, so subtracting it here along the current
+    // basis left a wobble whenever the hand turned: zero those cvars instead
+    // (not archived, back to the defaults on restart). PosX (5 forward) stays.
+    static int s_calls, s_fallback;
+    static float s_maxJump;
+    static Vector s_lastHand;
+    static uint64_t s_statTick;
+    ++s_calls;
     Vector p{}, f{}, r{}, u{};
     bool vr = false;
     if (pos && fwd && right && up && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
@@ -5931,21 +5938,27 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
         const Vector body = m_VR->m_HasStereoBodyOrigin ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
         if (body.LengthSqr() > 1.f)
         {
-            static float s_posY = -10.f, s_posZ = 0.f;
-            static uint64_t s_cvarTick;
-            const uint64_t nowTick = GetTickCount64();
-            if (m_Game && nowTick - s_cvarTick > 1000)
+            static bool s_offsetsZeroed;
+            if (!s_offsetsZeroed && m_Game)
             {
-                s_cvarTick = nowTick;
-                m_Game->GetConVarFloat("gb_flashlight_PosY", s_posY);
-                m_Game->GetConVarFloat("gb_flashlight_PosZ", s_posZ);
+                const char* kOffsets[] = { "gb_flashlight_PosY", "gb_flashlight_PosZ",
+                    "gb_flashlight_PosY_Crouch", "gb_flashlight_PosZ_Crouch" };
+                int n = 0;
+                for (const char* name : kOffsets)
+                    n += m_Game->SetConVarFloat(name, 0.f) ? 1 : 0;
+                s_offsetsZeroed = true;
+                Game::logMsg("BM flashlight: shoulder offsets zeroed (%d/4 cvars)", n);
             }
             QAngle::AngleVectors(m_VR->GetAimAngles(), &f, &r, &u);
             const Vector hand = m_VR->GetRightControllerAbsPos(body);
             if (VectorNormalize(f) > 0.001f && hand.LengthSqr() > 1.f)
             {
-                p = hand - r * s_posY - u * s_posZ;
+                p = hand;
                 vr = true;
+                const float jump = (hand - s_lastHand).Length();
+                if (s_lastHand.LengthSqr() > 1.f && jump > s_maxJump)
+                    s_maxJump = jump;
+                s_lastHand = hand;
                 static int s_log;
                 if (s_log < 4)
                 {
@@ -5955,6 +5968,18 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
                 }
             }
         }
+    }
+    if (!vr)
+        ++s_fallback;
+    const uint64_t nowTick = GetTickCount64();
+    if (nowTick - s_statTick >= 5000)
+    {
+        if (s_statTick)
+            Game::logMsg("BM flashlight 5s: calls=%d fallback=%d maxHandJump=%.1f thread=%lu",
+                s_calls, s_fallback, s_maxJump, GetCurrentThreadId());
+        s_statTick = nowTick;
+        s_calls = s_fallback = 0;
+        s_maxJump = 0.f;
     }
     if (vr)
         hkBmFlashlightUpdate.fOriginal(ecx, &p, player, &f, &r, &u);
