@@ -28,9 +28,9 @@ namespace
     constexpr int kHeaderPx = 96;
     constexpr int kRowPx = 64;
     constexpr int kSectionPx = 48;
-    constexpr float kPanelWidthHu = 20.f;      // ~51 cm
-    constexpr float kPanelDistanceHu = 24.f;   // ~61 cm in front of the eyes
-    constexpr float kPanelDropHu = 3.f;        // a little below eye height
+    constexpr float kPanelWidthHu = 36.f;      // ~91 cm (same angular size as 51 cm at 61 cm)
+    constexpr float kPanelDistanceHu = 44.f;   // ~1.12 m in front of the eyes, near the game menu
+    constexpr float kPanelDropHu = 5.5f;       // a little below eye height
     // Zones in texture pixels.
     constexpr int kMinusX0 = 600, kMinusX1 = 690;
     constexpr int kValueX0 = 690, kValueX1 = 880;
@@ -57,8 +57,6 @@ namespace
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
             { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
             { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
-            { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
-            { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
             { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
