@@ -12566,76 +12566,6 @@ static IDirect3DTexture9* PauseLayerCopy(IDirect3DDevice9* device, const D3DSURF
     return s_tex;
 }
 
-// Diagnostic (2026-10-27): which steps of the pause-layer path run, and what
-// alpha the layer really holds. Logged once a second while paused.
-namespace pausediag
-{
-    std::atomic<int> beginOk, beginFail, endCalls, endBound, stampCalls, fixCalls, fixDescFail, transfers;
-    std::atomic<int> paintCalls, paintSkipWant, paintSkipApp, paintSkipDone, paintSkipReady, paintQueued, paintDirect;
-    // Bounding box of the painted pixels from the last readback (x0 > x1 = none).
-    int boxX0 = 1, boxY0 = 1, boxX1 = 0, boxY1 = 0;
-    // Alpha of painted pixels (any rgb > 8/255): quarters 0-.25-.5-.75-1, plus unpainted pixels with alpha.
-    void Histogram(IDirect3DDevice9* device, IDirect3DSurface9* surf, const D3DSURFACE_DESC& desc, const char* tag, bool log, bool box)
-    {
-        static IDirect3DSurface9* s_sys;
-        static UINT s_w, s_h;
-        if (!s_sys || s_w != desc.Width || s_h != desc.Height)
-        {
-            if (s_sys)
-                s_sys->Release();
-            s_sys = nullptr;
-            if (FAILED(device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &s_sys, nullptr)))
-            {
-                Game::logMsg("pausediag %s: sysmem surface failed fmt=%d", tag, (int)desc.Format);
-                return;
-            }
-            s_w = desc.Width;
-            s_h = desc.Height;
-        }
-        if (FAILED(device->GetRenderTargetData(surf, s_sys)))
-        {
-            Game::logMsg("pausediag %s: GetRenderTargetData failed", tag);
-            return;
-        }
-        D3DLOCKED_RECT lr{};
-        if (FAILED(s_sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
-            return;
-        int q[4] = {}, painted = 0, alphaOnly = 0;
-        int bx0 = static_cast<int>(desc.Width), by0 = static_cast<int>(desc.Height), bx1 = -1, by1 = -1;
-        for (UINT y = 0; y < desc.Height; y += 2)
-        {
-            const uint32_t* row = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(lr.pBits) + y * lr.Pitch);
-            for (UINT x = 0; x < desc.Width; x += 2)
-            {
-                const uint32_t p = row[x];
-                const int a = (p >> 24) & 0xFF, r = (p >> 16) & 0xFF, g = (p >> 8) & 0xFF, b = p & 0xFF;
-                if (r > 8 || g > 8 || b > 8)
-                {
-                    ++painted;
-                    bx0 = (std::min)(bx0, static_cast<int>(x));
-                    bx1 = (std::max)(bx1, static_cast<int>(x));
-                    by0 = (std::min)(by0, static_cast<int>(y));
-                    by1 = (std::max)(by1, static_cast<int>(y));
-                    ++q[(std::min)(3, a / 64)];
-                }
-                else if (a > 8)
-                    ++alphaOnly;
-            }
-        }
-        s_sys->UnlockRect();
-        if (box)
-        {
-            boxX0 = bx0 - 6;
-            boxY0 = by0 - 6;
-            boxX1 = bx1 + 8;
-            boxY1 = by1 + 8;
-        }
-        if (log)
-            Game::logMsg("pausediag %s: painted=%d alpha<.25=%d .25-.5=%d .5-.75=%d >=.75=%d  unpaintedWithAlpha=%d box=%d,%d-%d,%d (fmt %d, %ux%u)",
-                tag, painted, q[0], q[1], q[2], q[3], alphaOnly, bx0, by0, bx1, by1, (int)desc.Format, desc.Width, desc.Height);
-    }
-}
-
 // The VR layer is a second VGUI paint, and in it the windows come out in
 // the wrong order: the Options window lands over Video -> Advanced, so both
 // windows' contents show mixed ("see-through"; VR View capture 2026-10-27).
@@ -12751,24 +12681,9 @@ static void PauseLayerColourFromBackbuffer(IDirect3DDevice9* device, IDirect3DSu
 
 static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf, int passes)
 {
-    ++pausediag::fixCalls;
     D3DSURFACE_DESC desc{};
     if (!device || !surf || FAILED(surf->GetDesc(&desc)))
-    {
-        ++pausediag::fixDescFail;
         return;
-    }
-    // The box readback runs 4x a second; the histogram is logged once a second.
-    static ULONGLONG s_histMs, s_logMs;
-    const bool hist = bmvr::g_PauseMenuOpaqueBox && GetTickCount64() - s_histMs >= 250;
-    const bool histLog = hist && GetTickCount64() - s_logMs >= 1000;
-    if (hist)
-    {
-        s_histMs = GetTickCount64();
-        if (histLog)
-            s_logMs = s_histMs;
-        pausediag::Histogram(device, surf, desc, "before", histLog, true);
-    }
     IDirect3DPixelShader9* fromColour = PauseAlphaFromColourShader(device);
     IDirect3DTexture9* copy = fromColour ? PauseLayerCopy(device, desc) : nullptr;
     IDirect3DSurface9* copySurf = nullptr;
@@ -12843,22 +12758,6 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         for (int i = 0; i < passes; ++i)
             device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(V));
-        // Dialog backgrounds that sample the screen behind them (Video ->
-        // Advanced) paint nothing into this layer: black, alpha 0 (pausediag:
-        // opening it barely raised the painted count). Make the box around
-        // everything painted opaque; the frozen world behind the menu is not
-        // needed there.
-        if (bmvr::g_PauseMenuOpaqueBox && pausediag::boxX1 > pausediag::boxX0 && pausediag::boxY1 > pausediag::boxY0)
-        {
-            const float bx0 = static_cast<float>((std::max)(0, pausediag::boxX0)) - 0.5f;
-            const float by0 = static_cast<float>((std::max)(0, pausediag::boxY0)) - 0.5f;
-            const float bx1 = static_cast<float>((std::min)(static_cast<int>(desc.Width), pausediag::boxX1)) - 0.5f;
-            const float by1 = static_cast<float>((std::min)(static_cast<int>(desc.Height), pausediag::boxY1)) - 0.5f;
-            const V box[4] = { { bx0, by0, 0.f, 1.f, white }, { bx1, by0, 0.f, 1.f, white },
-                { bx0, by1, 0.f, 1.f, white }, { bx1, by1, 0.f, 1.f, white } };
-            device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, box, sizeof(V));
-        }
     }
     else if (copySurf)
         copySurf->Release();
@@ -12872,13 +12771,10 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
     device->SetDepthStencilSurface(prevDs);
     if (prevDs)
         prevDs->Release();
-    if (histLog)
-        pausediag::Histogram(device, surf, desc, "after", true, false);
 }
 
 void VR::StampPauseOverlayCursor()
 {
-    ++pausediag::stampCalls;
     if (!g_D3DVR9 || !m_D9HUDSurface)
         return;
     IDirect3DDevice9* device = nullptr;
@@ -12902,12 +12798,10 @@ void VR::McPauseHudBeginOnMatThread()
     m_HudPaintedThisFrame.store(false, std::memory_order_release);
     if (!BindPauseHudForExtraPaint())
     {
-        ++pausediag::beginFail;
         SetHudPaintActive(false);
         g_McPauseHudBound.store(false, std::memory_order_release);
         return;
     }
-    ++pausediag::beginOk;
     IMatRenderContext* ctx = nullptr;
     if (m_Game && m_Game->m_MaterialSystem)
         ctx = SehGetRenderContext(m_Game->m_MaterialSystem);
@@ -12922,7 +12816,6 @@ void VR::McPauseHudEndOnMatThread()
     IMatRenderContext* ctx = nullptr;
     if (m_Game && m_Game->m_MaterialSystem)
         ctx = SehGetRenderContext(m_Game->m_MaterialSystem);
-    ++pausediag::endCalls;
     FinishPauseHudExtraPaint(ctx);
     if (ctx)
         SehReleaseMatContext(ctx);
@@ -12930,10 +12823,7 @@ void VR::McPauseHudEndOnMatThread()
     // paint. Done at Present instead (other thread) it raced the next
     // frame's clear and repaint: flicker (2026-10-27).
     if (g_McPauseHudBound.load(std::memory_order_acquire))
-    {
-        ++pausediag::endBound;
         StampPauseOverlayCursor();
-    }
     UnbindPauseHudAfterExtraPaint();
     SetHudPaintActive(false);
     if (g_McPauseHudBound.exchange(false, std::memory_order_acq_rel))
@@ -13758,27 +13648,8 @@ void VR::SubmitVRTextures()
             }
             if (WantPauseWorldOverlay() && m_HudOverlayReady && m_D9HUDSurface)
             {
-                {
-                    static ULONGLONG s_diagMs;
-                    if (GetTickCount64() - s_diagMs >= 1000)
-                    {
-                        s_diagMs = GetTickCount64();
-                        Game::logMsg("pausediag 1s: paint=%d skip(want/app/done/ready)=%d/%d/%d/%d queued=%d direct=%d",
-                            pausediag::paintCalls.exchange(0), pausediag::paintSkipWant.exchange(0),
-                            pausediag::paintSkipApp.exchange(0), pausediag::paintSkipDone.exchange(0),
-                            pausediag::paintSkipReady.exchange(0), pausediag::paintQueued.exchange(0),
-                            pausediag::paintDirect.exchange(0));
-                        Game::logMsg("pausediag 1s: beginOk=%d beginFail=%d end=%d endBound=%d stamp=%d fix=%d fixDescFail=%d transfers=%d painted=%d mc=%d",
-                            pausediag::beginOk.exchange(0), pausediag::beginFail.exchange(0),
-                            pausediag::endCalls.exchange(0), pausediag::endBound.exchange(0),
-                            pausediag::stampCalls.exchange(0), pausediag::fixCalls.exchange(0),
-                            pausediag::fixDescFail.exchange(0), pausediag::transfers.exchange(0),
-                            HudPaintedThisFrame() ? 1 : 0, McPipelineEnabled() ? 1 : 0);
-                    }
-                }
                 if (HudPaintedThisFrame())
                 {
-                    ++pausediag::transfers;
                     if (SUCCEEDED(SehTransferSurfaceNoWait(m_D9HUDSurface)))
                     {
                         FillSharedTexture(m_D9HUDSurface, m_VKHUD);
