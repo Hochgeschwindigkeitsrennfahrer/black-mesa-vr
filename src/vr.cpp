@@ -12490,6 +12490,72 @@ void VR::FinishPauseHudExtraPaint(IMatRenderContext* ctx)
     m_PauseHudAlphaOverridden = false;
 }
 
+// VGUI paints the pause layer with SRCALPHA/INVSRCALPHA on all four
+// channels, so the layer's alpha ends up a*a (+ the layers below scaled by
+// 1-a): a 0.8 dialog lands at 0.64 and SteamVR shows the world through it,
+// worst for the stacked Video -> Advanced modal (2026-10-27). One quad over
+// the alpha channel only, blended DESTALPHA/INVDESTALPHA with source alpha
+// 1, gives a + a(1-a) = 1-(1-a)^2: 0 and 1 stay, 0.64 -> 0.87.
+static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf)
+{
+    D3DSURFACE_DESC desc{};
+    if (!device || !surf || FAILED(surf->GetDesc(&desc)))
+        return;
+    IDirect3DStateBlock9* saved = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
+        return;
+    IDirect3DSurface9* prevRt = nullptr;
+    IDirect3DSurface9* prevDs = nullptr;
+    device->GetRenderTarget(0, &prevRt);
+    device->GetDepthStencilSurface(&prevDs);
+    if (SUCCEEDED(device->SetRenderTarget(0, surf)))
+    {
+        device->SetDepthStencilSurface(nullptr);
+        D3DVIEWPORT9 vp{ 0, 0, desc.Width, desc.Height, 0.f, 1.f };
+        device->SetViewport(&vp);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetTexture(0, nullptr);
+        device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+        device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+        device->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+        device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_DESTALPHA);
+        device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVDESTALPHA);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_ALPHA);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        struct V { float x, y, z, rhw; D3DCOLOR c; };
+        const float w = static_cast<float>(desc.Width) - 0.5f, h = static_cast<float>(desc.Height) - 0.5f;
+        const D3DCOLOR white = D3DCOLOR_ARGB(255, 255, 255, 255);
+        const V quad[4] = { { -0.5f, -0.5f, 0.f, 1.f, white }, { w, -0.5f, 0.f, 1.f, white },
+            { -0.5f, h, 0.f, 1.f, white }, { w, h, 0.f, 1.f, white } };
+        device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(V));
+    }
+    saved->Apply();
+    saved->Release();
+    if (prevRt)
+    {
+        device->SetRenderTarget(0, prevRt);
+        prevRt->Release();
+    }
+    device->SetDepthStencilSurface(prevDs);
+    if (prevDs)
+        prevDs->Release();
+}
+
 void VR::StampPauseOverlayCursor()
 {
     if (!g_D3DVR9 || !m_D9HUDSurface)
@@ -12497,6 +12563,8 @@ void VR::StampPauseOverlayCursor()
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
         return;
+    if (bmvr::g_PauseMenuAlphaFix)
+        FixPauseLayerAlpha(device, m_D9HUDSurface);
     DrawMenuCursorOnSurface(device, m_D9HUDSurface);
     device->Release();
 }
