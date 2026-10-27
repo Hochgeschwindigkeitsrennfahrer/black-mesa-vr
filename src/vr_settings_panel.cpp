@@ -28,9 +28,9 @@ namespace
     constexpr int kHeaderPx = 96;
     constexpr int kRowPx = 64;
     constexpr int kSectionPx = 48;
-    constexpr float kPanelWidthHu = 36.f;      // ~91 cm (same angular size as 51 cm at 61 cm)
-    constexpr float kPanelDistanceHu = 44.f;   // ~1.12 m in front of the eyes, near the game menu
-    constexpr float kPanelDropHu = 5.5f;       // a little below eye height
+    constexpr float kPanelWidthHu = 20.f;      // ~51 cm; the panel is ~1.6x taller than wide
+    constexpr float kPanelDistanceHu = 44.f;   // ~1.12 m in front of the eyes: about +-20 deg tall, near the game menu
+    constexpr float kPanelDropHu = 3.f;        // a little below eye height
     // Zones in texture pixels.
     constexpr int kMinusX0 = 600, kMinusX1 = 690;
     constexpr int kValueX0 = 690, kValueX1 = 880;
