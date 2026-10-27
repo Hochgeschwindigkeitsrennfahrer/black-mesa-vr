@@ -12735,7 +12735,7 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         // opening it barely raised the painted count). Make the box around
         // everything painted opaque; the frozen world behind the menu is not
         // needed there.
-        if (pausediag::boxX1 > pausediag::boxX0 && pausediag::boxY1 > pausediag::boxY0)
+        if (bmvr::g_PauseMenuOpaqueBox && pausediag::boxX1 > pausediag::boxX0 && pausediag::boxY1 > pausediag::boxY0)
         {
             const float bx0 = static_cast<float>((std::max)(0, pausediag::boxX0)) - 0.5f;
             const float by0 = static_cast<float>((std::max)(0, pausediag::boxY0)) - 0.5f;

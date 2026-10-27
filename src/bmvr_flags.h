@@ -268,6 +268,7 @@ namespace bmvr
     // Fixes, default on (a config key can turn each off):
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
     extern bool g_TwoHandGripToggle;     // support grip latches: squeeze on the gun = on, squeeze again = off
+    extern bool g_PauseMenuOpaqueBox;    // pause-menu layer: opaque box around everything painted (user: ugly, off)
     extern float g_PauseMenuAlphaPasses; // pause-menu layer: N passes of a -> a + a(1-a), i.e. 1-(1-a)^(2^N); 0 = off
     extern bool g_FlashlightLeftHand;    // flashlight from the left hand (along the gun while two-handed)
     extern float g_FrameCapMode;         // fps_max: 0 = game's own, 1 = headset rate + 10, 2 = 2x headset rate
