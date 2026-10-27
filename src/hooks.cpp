@@ -54,6 +54,11 @@ static uint32_t ServerRva(uintptr_t addr)
 #include <cstring>
 #include <mutex>
 
+namespace pausediag
+{
+    extern std::atomic<int> paintCalls, paintSkipWant, paintSkipApp, paintSkipDone, paintSkipReady, paintQueued, paintDirect;
+}
+
 namespace
 {
     void** SehMaterialSystemVTable(IMaterialSystem* mat)
@@ -3590,19 +3595,32 @@ namespace
         VR* vr = Hooks::m_VR;
         if (!vr || !Hooks::hkVgui_Paint.fOriginal)
             return;
+        ++pausediag::paintCalls;
         // Extra paint is engine VGUI only. Forcing UIPANELS|CURSOR during
         // in-game GameUI copies menu chrome onto a cleared-transparent overlay.
         // HEV HUD is client DRAWHUD, not this path.
         if (!vr->WantPauseWorldOverlay())
+        {
+            ++pausediag::paintSkipWant;
             return;
+        }
         if (!vr->AppActivated())
+        {
+            ++pausediag::paintSkipApp;
             return;
+        }
         if (vr->HudPaintedThisFrame())
+        {
+            ++pausediag::paintSkipDone;
             return;
+        }
 
         vr->EnsureHudOverlay();
         if (!vr->HudOverlayReady() || !vr->m_D9HUDSurface)
+        {
+            ++pausediag::paintSkipReady;
             return;
+        }
 
         UINT tw = 0, th = 0;
         if (!vr->HudOverlayPixelSize(tw, th))
@@ -3614,6 +3632,7 @@ namespace
         bool queued = false;
         if (mc)
             queued = vr->QueueMcPauseHudBegin();
+        ++(queued ? pausediag::paintQueued : pausediag::paintDirect);
         if (!queued)
         {
             if (!vr->BindPauseHudForExtraPaint())
