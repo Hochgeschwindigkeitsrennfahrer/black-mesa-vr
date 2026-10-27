@@ -12636,6 +12636,119 @@ namespace pausediag
     }
 }
 
+// The VR layer is a second VGUI paint, and in it the windows come out in
+// the wrong order: the Options window lands over Video -> Advanced, so both
+// windows' contents show mixed ("see-through"; VR View capture 2026-10-27).
+// The desktop frame the game is presenting has the right order and look,
+// with nothing but black around the menu while paused. Take the colour from
+// it and keep the layer's alpha (where any window is).
+static void PauseLayerColourFromBackbuffer(IDirect3DDevice9* device, IDirect3DSurface9* surf)
+{
+    D3DSURFACE_DESC desc{};
+    if (!device || !surf || FAILED(surf->GetDesc(&desc)))
+        return;
+    IDirect3DSurface9* bb = nullptr;
+    if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
+        return;
+    D3DSURFACE_DESC bbDesc{};
+    IDirect3DTexture9* copy = nullptr;
+    IDirect3DSurface9* copySurf = nullptr;
+    if (SUCCEEDED(bb->GetDesc(&bbDesc)))
+    {
+        static IDirect3DDevice9* s_device;
+        static IDirect3DTexture9* s_tex;
+        static UINT s_w, s_h;
+        if (!s_tex || s_device != device || s_w != bbDesc.Width || s_h != bbDesc.Height)
+        {
+            if (s_tex && s_device == device)
+                s_tex->Release();
+            s_tex = nullptr;
+            s_device = device;
+            s_w = bbDesc.Width;
+            s_h = bbDesc.Height;
+            device->CreateTexture(bbDesc.Width, bbDesc.Height, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
+                D3DPOOL_DEFAULT, &s_tex, nullptr);
+        }
+        copy = s_tex;
+    }
+    if (copy && SUCCEEDED(copy->GetSurfaceLevel(0, &copySurf))
+        && FAILED(device->StretchRect(bb, nullptr, copySurf, nullptr, D3DTEXF_POINT)))
+    {
+        copySurf->Release();
+        copySurf = nullptr;
+    }
+    bb->Release();
+    if (!copySurf)
+    {
+        static int s_fail;
+        if (s_fail++ < 3)
+            Game::logMsg("Pause layer: backbuffer copy failed (bb %ux%u, layer %ux%u)", bbDesc.Width, bbDesc.Height, desc.Width, desc.Height);
+        return;
+    }
+    IDirect3DStateBlock9* saved = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
+    {
+        copySurf->Release();
+        return;
+    }
+    IDirect3DSurface9* prevRt = nullptr;
+    IDirect3DSurface9* prevDs = nullptr;
+    device->GetRenderTarget(0, &prevRt);
+    device->GetDepthStencilSurface(&prevDs);
+    if (SUCCEEDED(device->SetRenderTarget(0, surf)))
+    {
+        device->SetDepthStencilSurface(nullptr);
+        D3DVIEWPORT9 vp{ 0, 0, desc.Width, desc.Height, 0.f, 1.f };
+        device->SetViewport(&vp);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+        device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+        device->SetTexture(0, copy);
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        struct VT { float x, y, z, rhw; float u, v; };
+        const float w = static_cast<float>(desc.Width) - 0.5f, h = static_cast<float>(desc.Height) - 0.5f;
+        const VT tq[4] = { { -0.5f, -0.5f, 0.f, 1.f, 0.f, 0.f }, { w, -0.5f, 0.f, 1.f, 1.f, 0.f },
+            { -0.5f, h, 0.f, 1.f, 0.f, 1.f }, { w, h, 0.f, 1.f, 1.f, 1.f } };
+        device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tq, sizeof(VT));
+    }
+    saved->Apply();
+    saved->Release();
+    if (prevRt)
+    {
+        device->SetRenderTarget(0, prevRt);
+        prevRt->Release();
+    }
+    device->SetDepthStencilSurface(prevDs);
+    if (prevDs)
+        prevDs->Release();
+    copySurf->Release();
+    static int s_ok;
+    if (s_ok++ < 2)
+        Game::logMsg("Pause layer: colour from the presented frame %ux%u -> layer %ux%u", bbDesc.Width, bbDesc.Height, desc.Width, desc.Height);
+}
+
 static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf, int passes)
 {
     ++pausediag::fixCalls;
@@ -12647,7 +12760,7 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
     }
     // The box readback runs 4x a second; the histogram is logged once a second.
     static ULONGLONG s_histMs, s_logMs;
-    const bool hist = GetTickCount64() - s_histMs >= 250;
+    const bool hist = bmvr::g_PauseMenuOpaqueBox && GetTickCount64() - s_histMs >= 250;
     const bool histLog = hist && GetTickCount64() - s_logMs >= 1000;
     if (hist)
     {
@@ -12771,6 +12884,8 @@ void VR::StampPauseOverlayCursor()
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
         return;
+    if (bmvr::g_PauseMenuColourFromFrame)
+        PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
     const int alphaPasses = static_cast<int>(bmvr::g_PauseMenuAlphaPasses + 0.5f);
     if (alphaPasses > 0)
         FixPauseLayerAlpha(device, m_D9HUDSurface, alphaPasses > 6 ? 6 : alphaPasses);
