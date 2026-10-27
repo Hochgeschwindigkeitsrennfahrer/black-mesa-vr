@@ -10530,7 +10530,10 @@ void VR::LogOpenXrPublishRate()
     RefreshOpenXrHelperConsumed(QpcNowMs());
     // Uncapped (fps_max 300) the game rendered ~272 stereo pairs/s for the
     // 90 the headset shows: GPU 99 % busy vs 44 % at fps_max 100 (2026-10-27).
-    // FrameCap 1 = headset rate + 10, 2 = twice it, 0 = leave the game's
+    // FrameCap 2 (default) = twice the headset rate: always a frame <= half a
+    // refresh old, at a steady age (user: clearly smoothest). 1 = rate + 10
+    // beats against the refresh (newest frame's age cycles 0..10 ms ten
+    // times a second = uneven motion). 0 = leave the game's
     // value (restores 300 if we changed it). The rate is the helper's
     // measured submit rate rounded up to a standard rate, only ever raised,
     // so a stretch where the helper falls behind cannot pull it down. The

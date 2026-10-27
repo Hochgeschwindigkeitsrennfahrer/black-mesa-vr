@@ -110,7 +110,7 @@ namespace bmvr
     bool g_TwoHandHoldWhileGrip = true;
     bool g_TwoHandGripToggle = false;
     bool g_FlashlightLeftHand = false;
-    float g_FrameCapMode = 1.f;
+    float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;
     float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
