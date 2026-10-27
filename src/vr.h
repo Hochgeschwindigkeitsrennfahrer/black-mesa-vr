@@ -1415,6 +1415,7 @@ private:
     Vector m_WeaponMenuLatchBody{};
     Vector m_WeaponMenuLatchWorld{};
     Vector m_WeaponMenuLatchDelta{};
+    Vector m_WeaponMenuLatchHandDelta{};
     Vector m_WeaponMenuLatchFwd{};
     Vector m_WeaponMenuLatchRight{};
     Vector m_WeaponMenuLatchUp{};
