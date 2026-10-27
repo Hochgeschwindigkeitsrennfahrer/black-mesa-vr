@@ -10530,28 +10530,41 @@ void VR::LogOpenXrPublishRate()
     RefreshOpenXrHelperConsumed(QpcNowMs());
     // Uncapped (fps_max 300) the game rendered ~272 stereo pairs/s for the
     // 90 the headset shows: GPU 99 % busy vs 44 % at fps_max 100 (2026-10-27).
-    // Cap at the headset rate + 10, from the helper's measured submit rate
-    // rounded up to a standard rate; only ever raised, so a stretch where
-    // the helper falls behind cannot pull it down.
-    if (bmvr::g_AutoFpsMax && m_Game && haveHelperSubmitted)
+    // FrameCap 1 = headset rate + 10, 2 = twice it, 0 = leave the game's
+    // value (restores 300 if we changed it). The rate is the helper's
+    // measured submit rate rounded up to a standard rate, only ever raised,
+    // so a stretch where the helper falls behind cannot pull it down. The
+    // live value is read back so a cfg/console change is undone and logged.
+    if (m_Game && haveHelperSubmitted)
     {
         const float hz = helperDelta * scale;
-        static int s_cap;
+        static int s_nominal, s_applied;
         const int kRates[] = { 72, 90, 120, 144 };
-        int nominal = 0;
         for (int r : kRates)
         {
-            if (hz <= r * 1.05f)
+            if (hz >= 60.f && hz <= r * 1.05f)
             {
-                nominal = r;
+                if (r > s_nominal)
+                    s_nominal = r;
                 break;
             }
         }
-        if (hz >= 60.f && nominal > 0 && nominal + 10 > s_cap)
+        const int mode = static_cast<int>(bmvr::g_FrameCapMode + 0.5f);
+        int want = 0;
+        if (mode == 1 && s_nominal)
+            want = s_nominal + 10;
+        else if (mode == 2 && s_nominal)
+            want = s_nominal * 2;
+        else if (mode == 0 && s_applied)
+            want = 300;
+        float live = 0.f;
+        m_Game->GetConVarFloat("fps_max", live);
+        if (want && static_cast<int>(live + 0.5f) != want)
         {
-            s_cap = nominal + 10;
-            m_Game->SetConVarFloat("fps_max", static_cast<float>(s_cap));
-            Game::logMsg("fps_max %d (headset %.0f Hz measured, %d nominal)", s_cap, hz, nominal);
+            m_Game->SetConVarFloat("fps_max", static_cast<float>(want));
+            Game::logMsg("fps_max %.0f -> %d (FrameCap %d, headset %.0f Hz measured, %d nominal)",
+                live, want, mode, hz, s_nominal);
+            s_applied = mode == 0 ? 0 : want;
         }
     }
     Game::logMsg("OpenXR publish rate present=%.0f/s published=%.0f/s skipStale=%.0f/s skipVsync=%.0f/s skipNoPose=%.0f/s slots=%u copy=%d "

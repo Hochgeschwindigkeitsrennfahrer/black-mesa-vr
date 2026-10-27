@@ -110,7 +110,7 @@ namespace bmvr
     bool g_TwoHandHoldWhileGrip = true;
     bool g_TwoHandGripToggle = false;
     bool g_FlashlightLeftHand = false;
-    bool g_AutoFpsMax = true;
+    float g_FrameCapMode = 1.f;
     bool g_VrHandThrow = true;
     float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
@@ -606,8 +606,8 @@ namespace bmvr
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlashlightLeftHand") == 0)
                 g_FlashlightLeftHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "AutoFpsMax") == 0)
-                g_AutoFpsMax = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "FrameCap") == 0)
+                g_FrameCapMode = static_cast<float>(atof(val));
             else if (std::strcmp(n, "VrHandThrow") == 0)
                 g_VrHandThrow = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ThrowScale") == 0)

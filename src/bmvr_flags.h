@@ -269,7 +269,7 @@ namespace bmvr
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
     extern bool g_TwoHandGripToggle;     // support grip latches: squeeze on the gun = on, squeeze again = off
     extern bool g_FlashlightLeftHand;    // flashlight from the left hand (along the gun while two-handed)
-    extern bool g_AutoFpsMax;            // fps_max = headset rate + 10 (uncapped rendered ~3 pairs per shown one)
+    extern float g_FrameCapMode;         // fps_max: 0 = game's own, 1 = headset rate + 10, 2 = 2x headset rate
     extern bool g_VrHandThrow;           // frag leaves the hand at the hand's speed (Lambda1VR-style throw)
     extern float g_ThrowScale;           // hand speed x 2/3 x this, capped at 1000 u/s (Lambda1VR vr_throw_scale)
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
