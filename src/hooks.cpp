@@ -5936,8 +5936,10 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
     if (m_VR && !m_VR->IsGameplayEligible()) ++s_failElig;
     if (m_VR && !m_VR->m_RightControllerTrackingValid) ++s_failTrack;
     if (!EngineInGame()) ++s_failIngame;
+    static Vector s_lastOffset;
+    static bool s_haveOffset;
     if (pos && fwd && right && up && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
-        && m_VR->m_RightControllerTrackingValid && EngineInGame())
+        && (m_VR->m_RightControllerTrackingValid || s_haveOffset) && EngineInGame())
     {
         const bool stereoBody = m_VR->m_HasStereoBodyOrigin;
         const Vector body = stereoBody ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
@@ -5957,7 +5959,21 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
                 Game::logMsg("BM flashlight: shoulder offsets zeroed (%d/4 cvars)", n);
             }
             QAngle::AngleVectors(m_VR->GetAimAngles(), &f, &r, &u);
-            const Vector hand = m_VR->GetRightControllerAbsPos(body);
+            // This runs every game frame (~180/s). Between pose updates the
+            // controller is not flagged valid and ControllerTrackingToWorld
+            // falls back to the head, so the light jumped to the face a few
+            // times a second (flicker). Hold the last good offset instead.
+            const bool poseFresh = m_VR->m_RightControllerTrackingValid
+                && (m_VR->m_ControllerPoseValid || m_VR->m_StereoFramePoseActive);
+            Vector hand{};
+            if (poseFresh)
+            {
+                hand = m_VR->GetRightControllerAbsPos(body);
+                s_lastOffset = hand - body;
+                s_haveOffset = true;
+            }
+            else
+                hand = body + s_lastOffset;
             if (VectorNormalize(f) > 0.001f && hand.LengthSqr() > 1.f)
             {
                 p = hand;
