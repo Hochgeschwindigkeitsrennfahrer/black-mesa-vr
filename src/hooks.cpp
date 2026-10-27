@@ -3674,6 +3674,7 @@ namespace
             if (!vr->QueueMcPauseHudEnd())
             {
                 vr->FinishPauseHudExtraPaint(scope.ctx);
+                vr->StampPauseOverlayCursor();
                 vr->UnbindPauseHudAfterExtraPaint();
                 vr->NoteHudPainted();
             }
@@ -3682,6 +3683,7 @@ namespace
         {
             vr->FinishPauseHudExtraPaint(scope.ctx);
             vr->UnbindPauseHudAfterExtraPaint();
+            vr->StampPauseOverlayCursor();
             vr->NoteHudPainted();
         }
         vr->SetHudPaintActive(false);
