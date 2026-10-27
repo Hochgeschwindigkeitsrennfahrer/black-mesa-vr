@@ -45,16 +45,6 @@ struct SharedTextureHolder
     uint32_t m_SharedHandleValid = 0;
 };
 
-// Drawn muzzle + aim of one frame (laser beam start/direction, dot distance).
-struct AimBeamFrame
-{
-    Vector muzzle{};
-    Vector fwd{};
-    float hitDist = 0.0f;
-    bool hit = false;
-    DWORD ms = 0;
-};
-
 struct D3DAimLineOverlayEyeState
 {
     bool valid = false;
@@ -1140,7 +1130,6 @@ public:
 private:
     friend class Hl2vrAwaitFrameFunctor;
     friend class McPauseHudFunctor;
-    friend class AimBeamFrameFunctor;
     void MatAwaitFrame(uint64_t frameId);
     void SyncFrameGetPoses(uint64_t frameId);
     bool QueueMatAwaitFrame(uint64_t frameId);
@@ -1295,14 +1284,11 @@ private:
     Vector m_AimBeamLocal{};          // muzzle in the gun model frame (fwd, right, up)
     bool m_AimBeamLocalValid = false;
     std::string m_AimBeamLocalKey;
-    // Last drawn muzzle (NoteViewmodelMuzzleDrawn, main thread).
+    // Last drawn muzzle (NoteViewmodelMuzzleDrawn) and the aim at that moment.
+    Vector m_DrawnMuzzleWorld{};
+    Vector m_DrawnMuzzleAimFwd{};
     DWORD m_DrawnMuzzleMs = 0;
     bool DrawnMuzzleFresh() const { return m_DrawnMuzzleMs != 0 && GetTickCount() - m_DrawnMuzzleMs < 250u; }
-    // Beam of the frame whose draws are executing: with mat_queue_mode 2 it
-    // travels through the material call queue next to the gun's draw, so the
-    // overlay (material thread) never pairs it with another frame's gun.
-    AimBeamFrame m_AimBeamDrawn{};
-    void SetAimBeamDrawn(const AimBeamFrame& frame);
     float m_AimShootAlong = 0.f;      // shot origin along the aim from the controller
     float m_AimHitDist = 0.f;         // shot origin -> marker
     bool m_HasHevSuit = true;
