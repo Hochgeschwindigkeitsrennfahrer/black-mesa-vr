@@ -10528,6 +10528,32 @@ void VR::LogOpenXrPublishRate()
     const uint32_t helperDelta = (haveHelperSubmitted && helperSubmitted >= m_OpenXrHelperSubmittedLast)
         ? (helperSubmitted - m_OpenXrHelperSubmittedLast) : 0;
     RefreshOpenXrHelperConsumed(QpcNowMs());
+    // Uncapped (fps_max 300) the game rendered ~272 stereo pairs/s for the
+    // 90 the headset shows: GPU 99 % busy vs 44 % at fps_max 100 (2026-10-27).
+    // Cap at the headset rate + 10, from the helper's measured submit rate
+    // rounded up to a standard rate; only ever raised, so a stretch where
+    // the helper falls behind cannot pull it down.
+    if (bmvr::g_AutoFpsMax && m_Game && haveHelperSubmitted)
+    {
+        const float hz = helperDelta * scale;
+        static int s_cap;
+        const int kRates[] = { 72, 90, 120, 144 };
+        int nominal = 0;
+        for (int r : kRates)
+        {
+            if (hz <= r * 1.05f)
+            {
+                nominal = r;
+                break;
+            }
+        }
+        if (hz >= 60.f && nominal > 0 && nominal + 10 > s_cap)
+        {
+            s_cap = nominal + 10;
+            m_Game->SetConVarFloat("fps_max", static_cast<float>(s_cap));
+            Game::logMsg("fps_max %d (headset %.0f Hz measured, %d nominal)", s_cap, hz, nominal);
+        }
+    }
     Game::logMsg("OpenXR publish rate present=%.0f/s published=%.0f/s skipStale=%.0f/s skipVsync=%.0f/s skipNoPose=%.0f/s slots=%u copy=%d "
         "deferred=%.0f/s throttled=%.0f/s helperHold=%.0f/s dropped=%.0f/s pending=%u/%u maxPending=%u "
         "paceWait=%.0f/s avg=%.2fms max=%.2fms await=%.0f/s avg=%.2fms max=%.2fms handoffWait=%.0f/s "

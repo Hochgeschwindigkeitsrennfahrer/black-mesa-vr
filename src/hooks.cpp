@@ -5930,7 +5930,8 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
     static Vector s_lastOffset;
     static bool s_haveOffset;
     if (pos && fwd && right && up && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
-        && (m_VR->m_RightControllerTrackingValid || s_haveOffset) && EngineInGame())
+        && (m_VR->m_RightControllerTrackingValid || m_VR->m_LeftControllerTrackingValid || s_haveOffset)
+        && EngineInGame())
     {
         const Vector body = m_VR->m_HasStereoBodyOrigin ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
         if (body.LengthSqr() > 1.f)
@@ -5954,16 +5955,34 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
                     }
                 }
             }
-            QAngle::AngleVectors(m_VR->GetAimAngles(), &f, &r, &u);
+            // Left hand (option): its own pointing direction, except while
+            // both hands hold the gun, when it shines along the gun (as the
+            // Lambda1VR torch does).
+            const bool leftHand = bmvr::g_FlashlightLeftHand;
+            QAngle dir = m_VR->GetAimAngles();
+            if (leftHand && !m_VR->TwoHandGripActive())
+            {
+                dir = m_VR->GetLeftControllerAbsAngle();
+                dir.x -= bmvr::g_AimPitchOffset;
+                dir.z = 0.f;
+            }
+            QAngle::AngleVectors(dir, &f, &r, &u);
             // This runs every game frame (~180/s). Between pose updates the
             // controller is not flagged valid and ControllerTrackingToWorld
             // falls back to the head, so the light jumped to the face a few
             // times a second (flicker). Hold the last good offset instead.
-            const bool poseFresh = m_VR->m_RightControllerTrackingValid
+            const bool poseFresh = (leftHand ? m_VR->m_LeftControllerTrackingValid : m_VR->m_RightControllerTrackingValid)
                 && (m_VR->m_ControllerPoseValid || m_VR->m_StereoFramePoseActive);
+            static bool s_lastLeft;
+            if (leftHand != s_lastLeft)
+            {
+                s_lastLeft = leftHand;
+                s_haveOffset = false;
+                s_lastOffset = Vector{};
+            }
             Vector hand{};
             if (poseFresh)
-                hand = m_VR->GetRightControllerAbsPos(body);
+                hand = leftHand ? m_VR->GetLeftControllerAbsPos(body) : m_VR->GetRightControllerAbsPos(body);
             // The flag can still flip between this check and the conversion:
             // a 'hand' on the head view point is that fallback, not a hand.
             if (poseFresh && (hand - m_VR->GetViewOrigin(body)).LengthSqr() > 1.5f * 1.5f)
