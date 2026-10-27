@@ -60,10 +60,10 @@ Blue Shift session. The weapon wheel and wrist HUD use Calhoun blue instead of
 HEV amber.
 
 
-## Huge thanks wormslayer for HL2VR & to my testers for their patience and help:
+## Huge thanks wormslayer for HL2VR & to my testers and contributors for their patience and help:
 
+marnovdm for quality of life features and polish + beta support (https://github.com/marnovdm)
 TheRealBubble
-
 SilentVortiguant - [Check out his youtube](https://www.youtube.com/@SilentVortigauntVR).
 
 yakupagagaming
