@@ -12495,8 +12495,9 @@ void VR::FinishPauseHudExtraPaint(IMatRenderContext* ctx)
 // 1-a): a 0.8 dialog lands at 0.64 and SteamVR shows the world through it,
 // worst for the stacked Video -> Advanced modal (2026-10-27). One quad over
 // the alpha channel only, blended DESTALPHA/INVDESTALPHA with source alpha
-// 1, gives a + a(1-a) = 1-(1-a)^2: 0 and 1 stay, 0.64 -> 0.87.
-static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf)
+// 1, gives a + a(1-a) = 1-(1-a)^2: 0 and 1 stay, 0.64 -> 0.87. One pass
+// was still too see-through (user), so it repeats: 3 passes = 1-(1-a)^8.
+static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf, int passes)
 {
     D3DSURFACE_DESC desc{};
     if (!device || !surf || FAILED(surf->GetDesc(&desc)))
@@ -12542,7 +12543,8 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         const V quad[4] = { { -0.5f, -0.5f, 0.f, 1.f, white }, { w, -0.5f, 0.f, 1.f, white },
             { -0.5f, h, 0.f, 1.f, white }, { w, h, 0.f, 1.f, white } };
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(V));
+        for (int i = 0; i < passes; ++i)
+            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(V));
     }
     saved->Apply();
     saved->Release();
@@ -12563,8 +12565,9 @@ void VR::StampPauseOverlayCursor()
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
         return;
-    if (bmvr::g_PauseMenuAlphaFix)
-        FixPauseLayerAlpha(device, m_D9HUDSurface);
+    const int alphaPasses = static_cast<int>(bmvr::g_PauseMenuAlphaPasses + 0.5f);
+    if (alphaPasses > 0)
+        FixPauseLayerAlpha(device, m_D9HUDSurface, alphaPasses > 6 ? 6 : alphaPasses);
     DrawMenuCursorOnSurface(device, m_D9HUDSurface);
     device->Release();
 }

@@ -110,7 +110,7 @@ namespace bmvr
     bool g_TwoHandHoldWhileGrip = true;
     bool g_TwoHandGripToggle = false;
     bool g_FlashlightLeftHand = false;
-    bool g_PauseMenuAlphaFix = true;
+    float g_PauseMenuAlphaPasses = 3.f;
     float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;
     float g_ThrowScale = 3.75f;
@@ -605,8 +605,8 @@ namespace bmvr
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "PauseMenuAlphaFix") == 0)
-                g_PauseMenuAlphaFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "PauseMenuAlphaPasses") == 0)
+                g_PauseMenuAlphaPasses = static_cast<float>(atof(val));
             else if (std::strcmp(n, "FlashlightLeftHand") == 0)
                 g_FlashlightLeftHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FrameCap") == 0)
