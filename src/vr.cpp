@@ -12812,10 +12812,7 @@ void VR::McPauseHudEndOnMatThread()
     if (ctx)
         SehReleaseMatContext(ctx);
     if (g_McPauseHudBound.load(std::memory_order_acquire))
-    {
         ++pausediag::endBound;
-        StampPauseOverlayCursor();
-    }
     UnbindPauseHudAfterExtraPaint();
     SetHudPaintActive(false);
     if (g_McPauseHudBound.exchange(false, std::memory_order_acq_rel))
@@ -13661,6 +13658,11 @@ void VR::SubmitVRTextures()
                 if (HudPaintedThisFrame())
                 {
                     ++pausediag::transfers;
+                    // Alpha fix + pointer here, right before the hand-over:
+                    // stacked dialogs (Video -> Advanced) were painted into
+                    // the layer after the end-of-paint functor, so they missed
+                    // the fix and its opaque box (2026-10-27).
+                    StampPauseOverlayCursor();
                     if (SUCCEEDED(SehTransferSurfaceNoWait(m_D9HUDSurface)))
                     {
                         FillSharedTexture(m_D9HUDSurface, m_VKHUD);
