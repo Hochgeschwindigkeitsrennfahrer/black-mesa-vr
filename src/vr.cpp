@@ -4386,8 +4386,10 @@ void VR::ProcessInput()
     const bool resetHeld = PressedDigitalAction(m_ActionResetPosition);
     // Shoulder gestures (HL2VR style): left hand behind the left shoulder +
     // left grip = quick save, right hand behind the right shoulder + right
-    // grip = crowbar. The hand must rest there ~0.25 s first (a buzz says
-    // it is armed), so a fast swing past the shoulder does nothing.
+    // grip = crowbar. The quick-save hand must rest there ~0.25 s first (a
+    // buzz says it is armed), so a fast swing past the shoulder does
+    // nothing; the crowbar arms at once (a buzz on entry), since the grip
+    // squeeze is needed anyway and the wait lost hurried grabs.
     const bool rightShoulder = UpdateShoulderGestures(paused);
     vr::InputDigitalActionData_t flash{};
     static bool s_flashLatched = false;
@@ -9383,7 +9385,7 @@ bool VR::UpdateShoulderGestures(bool paused)
         return PressedDigitalAction(h) ? 1.f : 0.f;
     };
     // Returns true on the grip's press edge while armed.
-    auto step = [&](Zone& z, bool in, float grip, vr::ETrackedControllerRole role) {
+    auto step = [&](Zone& z, bool in, float grip, vr::ETrackedControllerRole role, DWORD dwellMs) {
         const DWORD now = GetTickCount();
         if (!in)
         {
@@ -9394,7 +9396,7 @@ bool VR::UpdateShoulderGestures(bool paused)
         }
         if (z.enteredMs == 0)
             z.enteredMs = now;
-        if (!z.armed && now - z.enteredMs >= 250 && !z.gripDown)
+        if (!z.armed && now - z.enteredMs >= dwellMs && !z.gripDown)
         {
             z.armed = true;
             PulseHandHaptic(role, 1200, 0.3f);
@@ -9413,13 +9415,13 @@ bool VR::UpdateShoulderGestures(bool paused)
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = m_PhysicalRightTrackingValid && !m_TwoHandActive
         && inZone(m_PhysicalRightPosAbs, 1.f);
-    if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand))
+    if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
     {
         m_PendingQuickSave.store(true, std::memory_order_release);
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
         Game::logMsg("Shoulder gesture: quick save");
     }
-    if (step(s_right, rightIn, gripValue(m_ActionFlashlight), vr::TrackedControllerRole_RightHand) && m_Game)
+    if (step(s_right, rightIn, gripValue(m_ActionFlashlight), vr::TrackedControllerRole_RightHand, 0) && m_Game)
     {
         Game::InventoryWeapon inv[32]{};
         const int n = m_Game->CollectInventoryWeapons(inv, 32);
