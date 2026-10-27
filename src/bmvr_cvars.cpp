@@ -31,7 +31,6 @@ namespace bmvr
         constexpr size_t kCloneBytes = 0x58;
         constexpr size_t kObjBytes = 0x80;
         constexpr int kStrCap = 64;
-        constexpr int FCVAR_ARCHIVE = 1 << 7;
         // ICvar (VEngineCvar004 on BM): RegisterConCommand.
         constexpr int kICvarRegisterConCommand = 9;
         // ConCommandBase::GetName: slot 6 (2013 layout), 4 on 2007 builds
@@ -201,41 +200,6 @@ namespace bmvr
             return nullptr;
         }
 
-        // config.cfg is executed before this DLL can register anything, so
-        // the engine reported our saved lines as unknown commands. Apply them.
-        void ReplayConfigCfg()
-        {
-            wchar_t exe[MAX_PATH]{};
-            GetModuleFileNameW(nullptr, exe, MAX_PATH);
-            std::wstring path(exe);
-            const size_t slash = path.find_last_of(L"\\/");
-            if (slash == std::wstring::npos)
-                return;
-            path.resize(slash + 1);
-            path += L"bms\\cfg\\config.cfg";
-            FILE* f = _wfopen(path.c_str(), L"rb");
-            if (!f)
-                return;
-            char line[256];
-            int applied = 0;
-            while (std::fgets(line, sizeof(line), f))
-            {
-                for (VrCvar& c : g_Cvars)
-                {
-                    const size_t n = std::strlen(c.name);
-                    if (std::strncmp(line, c.name, n) != 0 || (line[n] != ' ' && line[n] != '\t'))
-                        continue;
-                    const char* v = line + n;
-                    while (*v == ' ' || *v == '\t' || *v == '"')
-                        ++v;
-                    WriteValue(c, static_cast<float>(std::atof(v)));
-                    ++applied;
-                }
-            }
-            std::fclose(f);
-            Game::logMsg("VR cvars: %d value(s) restored from config.cfg", applied);
-        }
-
         Reg RegisterAll(Game* game)
         {
             void* icvar = game->m_Cvar;
@@ -258,7 +222,10 @@ namespace bmvr
                 Field<uint32_t>(o, 0x08) = 0;                    // m_bRegistered (+pad)
                 Field<const char*>(o, 0x0C) = c.name;
                 Field<const char*>(o, 0x10) = c.help;
-                Field<int>(o, 0x14) = FCVAR_ARCHIVE;
+                // Not archived: VR/config.txt (the VR settings panel) is the one
+                // place these are stored. Archived, config.cfg overrode the panel
+                // at every start and kept stale values (2026-10-27).
+                Field<int>(o, 0x14) = 0;
                 Field<void*>(o, 0x1C) = o;                       // m_pParent
                 FormatValue(c, CurrentDefault(c), c.def, kStrCap);
                 Field<const char*>(o, 0x20) = c.def;
@@ -309,18 +276,27 @@ namespace bmvr
                 return;
             }
             g_Registered = true;
-            ReplayConfigCfg();
-            // config.cfg values were replayed into the cvars: apply them once.
             for (VrCvar& c : g_Cvars)
-                c.lastSeen = CurrentDefault(c) - 12345.f;
+            {
+                WriteValue(c, CurrentDefault(c));
+                c.lastSeen = ReadValue(c);
+            }
         }
-        // Only a cvar that changed (console, config.cfg) writes its flag, so
-        // the in-VR settings panel's changes are not overwritten every frame.
+        // A console change writes its flag; a panel change (flag moved, cvar
+        // still at the last seen value) is mirrored into the cvar.
         for (VrCvar& c : g_Cvars)
         {
             float v = ReadValue(c);
             if (v == c.lastSeen)
+            {
+                const float flag = CurrentDefault(c);
+                if (flag != v)
+                {
+                    WriteValue(c, flag);
+                    c.lastSeen = ReadValue(c);
+                }
                 continue;
+            }
             c.lastSeen = v;
             if (!(v >= c.minVal))
                 v = c.minVal;
