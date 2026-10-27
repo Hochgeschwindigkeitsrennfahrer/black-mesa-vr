@@ -1973,9 +1973,11 @@ namespace
                 0xF3, 0x0F, 0x10, 0x07, 0x0F, 0x2E, 0x86, 0xD0, 0x02, 0x00, 0x00 };
             s_verified = (memcmp(originCode, kOrigin, sizeof(kOrigin)) == 0
                 && memcmp(anglesCode, kAngles, sizeof(kAngles)) == 0) ? 1 : 0;
-            Game::logMsg("SetAbsOrigin/SetAbsAngles rva=0x%X/0x%X %s",
+            Game::logMsg("SetAbsOrigin/SetAbsAngles rva=0x%X/0x%X %s (origin %02X %02X %02X %02X %02X, angles %02X %02X %02X %02X %02X)",
                 Offsets::kCBaseEntity_SetAbsOrigin, Offsets::kCBaseEntity_SetAbsAngles,
-                s_verified ? "verified" : "bytes mismatch; viewmodel stays on the engine pose");
+                s_verified ? "verified" : "bytes mismatch; viewmodel stays on the engine pose",
+                originCode[0], originCode[1], originCode[2], originCode[3], originCode[4],
+                anglesCode[0], anglesCode[1], anglesCode[2], anglesCode[3], anglesCode[4]);
             if (!s_verified)
                 Game::noteMissingOffset("SetAbsOrigin/SetAbsAngles");
         }
@@ -2367,6 +2369,8 @@ namespace
         }
     }
 
+    bool CodeBytesMatch(const unsigned char* p, const char* hex);   // defined with the weapon hooks below
+
     void PatchGluonImpactParticleDefs()
     {
         if (!Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled)
@@ -2386,8 +2390,20 @@ namespace
             "gluon_beam_end_small_particles_thirdperson",
         };
         using tFind = void*(__thiscall*)(void* thisptr, const char* name);
-        auto* find = reinterpret_cast<tFind>(
-            reinterpret_cast<unsigned char*>(client) + Offsets::kParticleSystemMgr_Find);
+        auto* findCode = reinterpret_cast<unsigned char*>(client) + Offsets::kParticleSystemMgr_Find;
+        // FindParticleSystem: push ebp; mov ebp,esp; push ecx; push esi; mov esi,[ecx+0x8C]. Both RVAs were
+        // stale for several builds and this called into the middle of another function.
+        static bool s_findBad;
+        if (s_findBad)
+            return;
+        if (!CodeBytesMatch(findCode, "558BEC51568BB18C000000"))
+        {
+            Game::logMsg("particle FindParticleSystem skipped (bytes/rva 0x%X)", Offsets::kParticleSystemMgr_Find);
+            Game::noteMissingOffset("particle FindParticleSystem");
+            s_findBad = true;
+            return;
+        }
+        auto* find = reinterpret_cast<tFind>(findCode);
         void* mgr = nullptr;
         __try
         {
@@ -5949,8 +5965,10 @@ namespace
         return i > 0;
     }
 
-    unsigned char* FindPatternInModule(HMODULE mod, const char* hex)
+    // unique: nullptr unless the pattern occurs exactly once (ResolveCode's fallback after a game update).
+    unsigned char* FindPatternInModule(HMODULE mod, const char* hex, bool unique = false)
     {
+        unsigned char* found = nullptr;
         if (!mod || !hex)
             return nullptr;
         const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mod);
@@ -5976,9 +5994,15 @@ namespace
         for (size_t i = 0; i + patLen < imgSize; ++i)
         {
             if (CodeBytesMatch(base + i, hex))
-                return base + i;
+            {
+                if (!unique)
+                    return base + i;
+                if (found)
+                    return nullptr;   // ambiguous: a short prologue that also starts other functions
+                found = base + i;
+            }
         }
-        return nullptr;
+        return found;
     }
 
     unsigned char* ResolveCode(HMODULE mod, int rva, const char* hex)
@@ -5991,7 +6015,7 @@ namespace
             && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
             && CodeBytesMatch(p, hex))
             return p;
-        return FindPatternInModule(mod, hex);
+        return FindPatternInModule(mod, hex, true);
     }
 
     bool InServerDll(const void* p)
@@ -6391,9 +6415,15 @@ void Hooks::EnsureWeaponShootOriginHooks()
         &dGrenadeThrowPosition, "server grenade throw position");
     if (client && !hkClientGetShootAngles.pTarget)
     {
-        // Same GetShootAngles body as server (EyeAngles vtable +0x234, then punch).
-        constexpr const char* kShootAngBytes = "558BEC568BF18B06FF90340200008B5508";
-        auto* p = FindPatternInModule(client, kShootAngBytes);
+        // C_BlackMesaPlayer::GetShootAngles (vtable slot 0x9D): EyeAngles (client vtable +0x26C, not the
+        // server's +0x234) plus punch. C_BasePlayer has an identical copy (0x6C660), so no pattern fallback.
+        constexpr const char* kShootAngBytes = "558BEC568BF18B06FF906C0200008B5508";
+        auto* p = reinterpret_cast<unsigned char*>(client) + Offsets::kC_BlackMesaPlayer_GetShootAngles;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(p, &mbi, sizeof(mbi))
+            || !(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            || !CodeBytesMatch(p, kShootAngBytes))
+            p = nullptr;
         if (p)
         {
             if (hkClientGetShootAngles.createHook(p, &dClientGetShootAngles) == 0
@@ -6405,7 +6435,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
         }
         else
         {
-            Game::logMsg("client GetShootAngles pattern not found");
+            Game::logMsg("client GetShootAngles skipped (bytes/rva 0x%X)", Offsets::kC_BlackMesaPlayer_GetShootAngles);
             Game::noteMissingOffset("client GetShootAngles");
             hkClientGetShootAngles.pTarget = reinterpret_cast<unsigned char*>(client)
                 + Offsets::kCBasePlayer_Weapon_ShootPosition;
@@ -6495,7 +6525,7 @@ namespace
     // `mov eax,[eax+0x474]; call eax` (AimDebug weaponFire=0 before; tau
     // shots started at the head on stable too).
     constexpr uint32_t kServerWeaponFireOriginReturnRvas[] = {
-        0x34E5D9, 0x48F774, 0x485655, 0x4858DB, 0x48BE05, 0x48D265 };
+        0x34E859, 0x48F9F4, 0x4858D5, 0x485B5B, 0x48C085, 0x48D4E5 }; // beta 26234270: all +0x280
 }
 
 Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out)
@@ -7972,7 +8002,7 @@ void bmvr::InstallEarlyFramebufferHook()
         Log("GetScreenSize: engine.dll not loaded yet");
         return;
     }
-    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6D00,
+    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6D30,
         "55 8B EC 8B 0D ? ? ? ? 56 8B 01 FF 90 9C 01 00 00");
     if (screenOff == -1)
     {
@@ -7980,7 +8010,7 @@ void bmvr::InstallEarlyFramebufferHook()
         return;
     }
     if (screenOff == 0)
-        screenOff = 0xA6D00;
+        screenOff = 0xA6D30;
     void* screenTarget = reinterpret_cast<uint8_t*>(eng) + screenOff;
     if (!Hooks::hkGetScreenSize.pTarget)
     {

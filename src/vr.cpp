@@ -1636,13 +1636,17 @@ namespace
         return hit;
     }
 
-    void SehActivateInGameVgui(uintptr_t clientBase, void* panel)
+    // modeSite: the signature-resolved g_pClientMode (imm32 holding the global's address), so the global
+    // follows game updates; kClientModeGlobalRva only when the signature did not resolve.
+    void SehActivateInGameVgui(uintptr_t clientBase, uintptr_t modeSite, void* panel)
     {
         if (!clientBase || !panel)
             return;
         __try
         {
-            void* mode = *reinterpret_cast<void**>(clientBase + Offsets::kClientModeGlobalRva);
+            const uintptr_t global = modeSite ? *reinterpret_cast<const uint32_t*>(modeSite)
+                                              : clientBase + Offsets::kClientModeGlobalRva;
+            void* mode = *reinterpret_cast<void**>(global);
             void** vt = SehObjectVTable(mode);
             if (!vt)
                 return;
@@ -6308,7 +6312,9 @@ void VR::ApplyWorldVguiTriggerClick(CUserCmd* cmd)
     void* panel = SehReadPtrOff(screen, Offsets::kC_VGuiScreen_PanelPtr);
     if (!panel)
         panel = SehReadPtrOff(screen, 0x720);
-    SehActivateInGameVgui(m_Game->m_BaseClient, panel);
+    const uintptr_t modeSite = (m_Game->m_Offsets && m_Game->m_Offsets->g_pClientMode.valid)
+        ? static_cast<uintptr_t>(m_Game->m_Offsets->g_pClientMode.address) : 0;
+    SehActivateInGameVgui(m_Game->m_BaseClient, modeSite, panel);
     SehVguiCursorMoved(m_Game->m_VguiInput, px, py);
 
     if (trigger && !m_WorldVguiTriggerWasDown)
