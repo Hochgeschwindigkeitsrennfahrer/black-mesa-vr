@@ -423,6 +423,7 @@ int Hooks::initSourceHooks()
     (void)&dTraceRay;
 
     EnsureClientFlashlightHook();
+    EnsureFogColorPatch();
     EnsureWeaponShootOriginHooks();
 
     return 1;
@@ -4676,6 +4677,7 @@ void __fastcall Hooks::dLevelInit(void* ecx, void* edx, const char* newmap)
     (void)edx;
     EnsureServerFlashlightHook();
     EnsureClientFlashlightHook();
+    EnsureFogColorPatch();
     EnsureWeaponShootOriginHooks();
     if (m_VR)
     {
@@ -5886,6 +5888,72 @@ void Hooks::EnsureClientFlashlightHook()
     }
     Game::logMsg("Hook enabled: UpdateFlashlightState rva=0x%X (HMD origin/forward for VR eyes)",
         Offsets::kUpdateFlashlightState);
+}
+
+// Redirects the two fog-colour EyeVectors calls to dFogEyeVectors, so the
+// fogblend colour follows the headset like the picture does, not the gun
+// (or, while L2 is held, the left hand): moving a hand up/down changed the
+// brightness of the distant scene.
+void Hooks::EnsureFogColorPatch()
+{
+    static bool s_done;
+    if (s_done)
+        return;
+    HMODULE client = GetModuleHandleA("client.dll");
+    if (!client)
+        return;
+    s_done = true;
+    const uintptr_t base = reinterpret_cast<uintptr_t>(client);
+    const uintptr_t target = base + Offsets::kEyeVectors;
+    static const unsigned char kEyeVectorsPrologue[] = { 0x55, 0x8B, 0xEC, 0x56, 0x57, 0x8B, 0xF9 };
+    const int sites[] = { Offsets::kFogColorEyeVectorsCall, Offsets::kSkyFogColorEyeVectorsCall };
+    int patched = 0;
+    for (int rva : sites)
+    {
+        auto* call = reinterpret_cast<unsigned char*>(base + rva);
+        bool ok = false;
+        __try
+        {
+            ok = memcmp(reinterpret_cast<const void*>(target), kEyeVectorsPrologue, sizeof(kEyeVectorsPrologue)) == 0
+                && call[-1] == 0x50 && call[0] == 0xE8
+                && reinterpret_cast<uintptr_t>(call) + 5 + *reinterpret_cast<const int32_t*>(call + 1) == target;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+        if (!ok)
+        {
+            Game::logMsg("Fog colour EyeVectors call skipped (bytes/rva 0x%X)", rva);
+            Game::noteMissingOffset("Fog colour EyeVectors call");
+            continue;
+        }
+        DWORD oldProt = 0, tmp = 0;
+        if (!VirtualProtect(call + 1, 4, PAGE_EXECUTE_READWRITE, &oldProt))
+            continue;
+        *reinterpret_cast<int32_t*>(call + 1) = static_cast<int32_t>(
+            reinterpret_cast<uintptr_t>(&dFogEyeVectors) - (reinterpret_cast<uintptr_t>(call) + 5));
+        VirtualProtect(call + 1, 4, oldProt, &tmp);
+        FlushInstructionCache(GetCurrentProcess(), call, 5);
+        ++patched;
+    }
+    Game::logMsg("Fog colour follows the headset: %d/2 call sites patched", patched);
+}
+
+void __fastcall Hooks::dFogEyeVectors(void* ecx, void* edx, Vector* fwd, Vector* right, Vector* up)
+{
+    (void)edx;
+    if (fwd && !right && !up && m_VR && m_VR->m_IsVREnabled && m_VR->m_HmdPoseValid)
+    {
+        const Vector a = m_VR->GetViewAngle();
+        const float p = a.x * 3.14159265f / 180.f;
+        const float y = a.y * 3.14159265f / 180.f;
+        fwd->x = cosf(p) * cosf(y);
+        fwd->y = cosf(p) * sinf(y);
+        fwd->z = -sinf(p);
+        return;
+    }
+    using EyeVectorsFn = void(__thiscall*)(void*, Vector*, Vector*, Vector*);
+    static const auto s_eyeVectors = reinterpret_cast<EyeVectorsFn>(
+        reinterpret_cast<uintptr_t>(GetModuleHandleA("client.dll")) + Offsets::kEyeVectors);
+    s_eyeVectors(ecx, fwd, right, up);
 }
 
 void Hooks::EnsureBmFlashlightHook()

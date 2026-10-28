@@ -266,6 +266,8 @@ public:
     static void EnsureServerFlashlightHook();
     static void EnsureClientFlashlightHook();
     static void EnsureBmFlashlightHook();
+    static void EnsureFogColorPatch();
+    static void __fastcall dFogEyeVectors(void* ecx, void* edx, Vector* fwd, Vector* right, Vector* up);
     static void EnsureWeaponShootOriginHooks();
     // Returns true once every VFX hook target is resolved (installed or skipped).
     static bool EnsureWeaponVfxHooks();

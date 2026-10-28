@@ -510,6 +510,14 @@ public:
     // light at 0x105E24A0 (ret 0x14); it adds fwd*gb_flashlight_PosX +
     // right*PosY + up*PosZ (5, -10, 0) and traces back from the eye.
     static constexpr int kBmFlashlightUpdate = 0x17BAF0; // beta 26234270
+    // Fog colour blending (env_fog_controller fogblend 1) lerps between the
+    // two fog colours by C_BasePlayer::EyeVectors (client 0x6C540, thiscall,
+    // ret 0xC) = the usercmd angles, which in VR are the gun or Use-hand aim.
+    // E8 call sites inside GetFogColor (0x1FF8A0) and GetSkyboxFogColor
+    // (0x2001C0), both preceded by `mov ecx, reg; push eax`.
+    static constexpr int kEyeVectors = 0x6C540; // beta 26234270
+    static constexpr int kFogColorEyeVectorsCall = 0x1FF9B0; // beta 26234270
+    static constexpr int kSkyFogColorEyeVectorsCall = 0x200266; // beta 26234270
 
     // L4D2 leftover referenced by copied sdk.h melee helpers. Unused on Black Mesa.
     struct { int address = 0; } GetMeleeWeaponInfoClient;
