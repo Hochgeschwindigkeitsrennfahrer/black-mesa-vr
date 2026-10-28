@@ -10530,6 +10530,66 @@ void VR::TickOpenXrHelperWatchdog()
     bmvr::SetOpenXrHelperSession(true);
 }
 
+// Uncapped (fps_max 300) the game rendered ~272 stereo pairs/s for the 90
+// the headset shows: GPU 99 % busy vs 44 % at fps_max 100 (2026-10-27).
+// FrameCap 2 (default) = twice the headset rate: always a frame <= half a
+// refresh old, at a steady age (user: clearly smoothest). 1 = rate + 10 beats
+// against the refresh (newest frame's age cycles 0..10 ms ten times a second
+// = uneven motion). 0 = leave the game's value (restores 300 if we changed
+// it). The live value is read back so a cfg/console change is undone and
+// logged. Runs on the Present path (VR::Update), where the OpenXR cap has
+// set fps_max since 2026-10-27.
+void VR::ApplyFrameCap(int nominalHz, float sourceHz, const char* source)
+{
+    if (!m_Game)
+        return;
+    const int mode = static_cast<int>(bmvr::g_FrameCapMode + 0.5f);
+    int want = 0;
+    if (mode == 1 && nominalHz)
+        want = nominalHz + 10;
+    else if (mode == 2 && nominalHz)
+        want = nominalHz * 2;
+    else if (mode == 0 && m_FrameCapApplied)
+        want = 300;
+    float live = 0.f;
+    m_Game->GetConVarFloat("fps_max", live);
+    if (want && static_cast<int>(live + 0.5f) != want)
+    {
+        m_Game->SetConVarFloat("fps_max", static_cast<float>(want));
+        Game::logMsg("fps_max %.0f -> %d (FrameCap %d, headset %.1f Hz %s, %d nominal)",
+            live, want, mode, sourceHz, source ? source : "?", nominalHz);
+        m_FrameCapApplied = mode == 0 ? 0 : want;
+    }
+}
+
+// OpenVR backend: the HMD reports its refresh rate (Prop_DisplayFrequency_Float,
+// e.g. 89.99 / 119.88 on the PS VR2), so no measuring as on OpenXR. Checked
+// every 5 s: a FrameCap change from the panel applies without a restart.
+void VR::TickOpenVrFrameCap()
+{
+    if (m_RuntimeBackend != VrRuntimeBackend::OpenVR || !m_System)
+        return;
+    static DWORD s_lastMs = 0;
+    const DWORD nowMs = GetTickCount();
+    if (s_lastMs != 0 && nowMs - s_lastMs < 5000)
+        return;
+    s_lastMs = nowMs ? nowMs : 1;
+    vr::ETrackedPropertyError err = vr::TrackedProp_Success;
+    const float hz = m_System->GetFloatTrackedDeviceProperty(
+        vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_DisplayFrequency_Float, &err);
+    if (err != vr::TrackedProp_Success || !(hz >= 60.f && hz <= 240.f))
+    {
+        static bool s_logged;
+        if (!s_logged)
+        {
+            Game::logMsg("FrameCap: HMD display frequency unavailable (err %d, %.1f)", (int)err, hz);
+            s_logged = true;
+        }
+        return;
+    }
+    ApplyFrameCap(static_cast<int>(hz + 0.5f), hz, "reported");
+}
+
 void VR::LogOpenXrPublishRate()
 {
     const uint32_t now = GetTickCount();
@@ -10549,20 +10609,13 @@ void VR::LogOpenXrPublishRate()
     const uint32_t helperDelta = (haveHelperSubmitted && helperSubmitted >= m_OpenXrHelperSubmittedLast)
         ? (helperSubmitted - m_OpenXrHelperSubmittedLast) : 0;
     RefreshOpenXrHelperConsumed(QpcNowMs());
-    // Uncapped (fps_max 300) the game rendered ~272 stereo pairs/s for the
-    // 90 the headset shows: GPU 99 % busy vs 44 % at fps_max 100 (2026-10-27).
-    // FrameCap 2 (default) = twice the headset rate: always a frame <= half a
-    // refresh old, at a steady age (user: clearly smoothest). 1 = rate + 10
-    // beats against the refresh (newest frame's age cycles 0..10 ms ten
-    // times a second = uneven motion). 0 = leave the game's
-    // value (restores 300 if we changed it). The rate is the helper's
-    // measured submit rate rounded up to a standard rate, only ever raised,
-    // so a stretch where the helper falls behind cannot pull it down. The
-    // live value is read back so a cfg/console change is undone and logged.
+    // The rate is the helper's measured submit rate rounded up to a standard
+    // rate, only ever raised, so a stretch where the helper falls behind
+    // cannot pull it down.
     if (m_Game && haveHelperSubmitted)
     {
         const float hz = helperDelta * scale;
-        static int s_nominal, s_applied;
+        static int s_nominal;
         const int kRates[] = { 72, 90, 120, 144 };
         for (int r : kRates)
         {
@@ -10573,23 +10626,7 @@ void VR::LogOpenXrPublishRate()
                 break;
             }
         }
-        const int mode = static_cast<int>(bmvr::g_FrameCapMode + 0.5f);
-        int want = 0;
-        if (mode == 1 && s_nominal)
-            want = s_nominal + 10;
-        else if (mode == 2 && s_nominal)
-            want = s_nominal * 2;
-        else if (mode == 0 && s_applied)
-            want = 300;
-        float live = 0.f;
-        m_Game->GetConVarFloat("fps_max", live);
-        if (want && static_cast<int>(live + 0.5f) != want)
-        {
-            m_Game->SetConVarFloat("fps_max", static_cast<float>(want));
-            Game::logMsg("fps_max %.0f -> %d (FrameCap %d, headset %.0f Hz measured, %d nominal)",
-                live, want, mode, hz, s_nominal);
-            s_applied = mode == 0 ? 0 : want;
-        }
+        ApplyFrameCap(s_nominal, hz, "measured");
     }
     Game::logMsg("OpenXR publish rate present=%.0f/s published=%.0f/s skipStale=%.0f/s skipVsync=%.0f/s skipNoPose=%.0f/s slots=%u copy=%d "
         "deferred=%.0f/s throttled=%.0f/s helperHold=%.0f/s dropped=%.0f/s pending=%u/%u maxPending=%u "
@@ -14279,6 +14316,7 @@ void VR::Update()
         ConsumeOpenXrTracking();
 
     TickCompositorFocus();
+    TickOpenVrFrameCap();
 
     // QoL cvars go through ICvar from RenderView (game thread). FindVar/SetValue
     // from this Present/DXVK path crashed ~13s after init (2026-08-26).

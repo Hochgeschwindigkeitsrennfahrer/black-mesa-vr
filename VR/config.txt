@@ -95,10 +95,12 @@ MenuCursorSmoothSec=0.05
 # changes several of these live and writes them back here. They are also
 # bmvr_* console cvars.
 
+# Hand behind the shoulder + grip: left = quick save (hold the hand there
+# ~0.25 s until a light buzz, then grip; GAME SAVED shown), right = crowbar
+# (grip right away). Also in the VR settings panel (SHOULDER GESTURES).
+ShoulderGestures=true
+
 # Optional features, off by default:
-# Hand behind the shoulder ~0.25 s (light buzz), then grip: left = quick save
-# (GAME SAVED shown), right = crowbar.
-ShoulderGestures=false
 # Hold Triangle/Y 0.6 s = VR settings panel; a tap pauses on release.
 SettingsTriangleHold=false
 # The VR settings panel pauses the game while it is open.

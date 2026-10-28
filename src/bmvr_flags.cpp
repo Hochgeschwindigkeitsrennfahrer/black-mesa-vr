@@ -120,7 +120,7 @@ namespace bmvr
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.
-    bool g_ShoulderGestures = false;
+    bool g_ShoulderGestures = true;
     bool g_SettingsTriangleHold = false;
     bool g_CrouchStickHold = false;
     bool g_SprintToggle = false;

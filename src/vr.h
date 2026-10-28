@@ -693,6 +693,9 @@ public:
     void BeginStereoFramePose();
     void EndStereoFramePose();
     void LogOpenXrPublishRate();
+    void ApplyFrameCap(int nominalHz, float sourceHz, const char* source);
+    void TickOpenVrFrameCap();
+    int m_FrameCapApplied = 0;
     void TickOpenXrHelperWatchdog();
     void LogOpenXrPublishSetupFailure(const char* stage, uint32_t eye, uint32_t slot, unsigned hr);
     bool EnsureOpenXrPublishTextures(IDirect3DDevice9* device, UINT w, UINT h);
