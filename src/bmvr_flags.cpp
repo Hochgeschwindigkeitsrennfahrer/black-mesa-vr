@@ -78,7 +78,7 @@ namespace bmvr
     float g_HeightOffset = 0.f;
     bool g_AutoMatQueueMode = false;
     bool g_MulticoreMode = true;
-    uint32_t g_Msaa = 4;
+    uint32_t g_Msaa = 0; // >= 2 switches FXAA off and only reaches the lighting buffers
     bool g_MsaaAllowed = true;
     bool g_Haptics = true;
     bool g_HideCrosshair = true;

@@ -2,7 +2,7 @@
 # Player settings only. Other behavior uses the built-in defaults.
 
 # Multiplier on the runtime's recommended per-eye size. 1.0 = recommended.
-# 0.75 if the GPU is bound. Above 1.0 is extra supersampling.
+# 0.75 if the GPU is bound. Above 1.0 is extra supersampling (sharper, costs GPU).
 RenderScale=1.0
 
 # true: the world renders at the eye size.
@@ -46,7 +46,10 @@ IPDScale=1.0
 HeightOffset=0.0
 
 # Scene MSAA. 0 / 2 / 4 / 8 / 16. Restart after editing. Not the video menu.
-Msaa=4
+# 0 = off (recommended): at 2 or more the mod switches the game's FXAA off,
+# and this MSAA only reaches the lighting buffers, so edges get little or no
+# anti-aliasing. With 0, pick FXAA in the video options.
+Msaa=0
 
 # Render each eye's own (asymmetric) HMD frustum instead of one symmetric
 # frustum that covers both eyes. On asymmetric HMDs (PSVR2: 61.5 deg out,
@@ -58,15 +61,9 @@ OffCenterEyes=false
 Haptics=true
 HideCrosshair=true
 VrCrosshair=false
-# Aim marker as a red laser dot instead of the amber ticks, and/or a thin red
-# beam from the gun to where it points. Both follow the shot (tilt and
-# GunPitchOffset included); guns only. Also in the VR settings panel.
+# Aim marker as a red laser dot instead of the amber ticks. Follows the shot
+# (tilt and GunPitchOffset included); guns only. Also in the VR settings panel.
 VrCrosshairDot=false
-VrLaserBeam=false
-# Beam half width in game units (1 unit ~ 2.5 cm); 0.06 = ~3 mm beam.
-VrLaserWidth=0.06
-# Beam start along the barrel in game units (+ = further out, 1 unit ~ 2.5 cm).
-VrLaserStartForward=0
 DisableViewBob=true
 LeftHanded=false
 
