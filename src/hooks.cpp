@@ -6334,6 +6334,34 @@ namespace
 
     Vector* RewriteShootOriginImpl(void* player, Vector* out, tWeaponShootPosition original, bool grabHold);
 
+    // A muzzle pushed through bulletproof glass, a wall or a door must not
+    // fire from the other side (the player could shoot soldiers who could not
+    // hit back). Trace from the game's own origin (the body's eye) to the
+    // muzzle; anything bullet-solid in between keeps the game's origin, so the
+    // shot hits that instead. (Server and client run on the game thread in
+    // single player, so the client trace is safe here.)
+    bool MuzzleBehindGeometry(const Vector& eye, const Vector& muzzle)
+    {
+        if (!Hooks::m_Game || !Hooks::m_Game->m_EngineTrace)
+            return false;
+        C_BaseEntity* local = Hooks::m_Game->GetLocalPlayerEntity();
+        C_BaseEntity* vm = Hooks::m_Game->GetViewModelEntity();
+        CTraceFilterSkipTwoEntities filter(local, vm, 0);
+        Ray_t ray;
+        ray.Init(eye, muzzle);
+        CGameTrace tr{};
+        Hooks::m_Game->m_EngineTrace->TraceRay(ray, CONTENTS_SOLID | CONTENTS_MOVEABLE | CONTENTS_WINDOW, &filter, &tr);
+        if (!(tr.startsolid || tr.fraction < 1.f))
+            return false;
+        static int s_log;
+        if (s_log < 16)
+        {
+            Game::logMsg("Shot origin: muzzle behind geometry (fraction %.2f), fired from the body", tr.fraction);
+            ++s_log;
+        }
+        return true;
+    }
+
     Vector* RewriteShootOrigin(void* player, Vector* out, tWeaponShootPosition original, bool grabHold, bool server)
     {
         Vector* r = RewriteShootOriginImpl(player, out, original, grabHold);
@@ -6389,7 +6417,8 @@ namespace
         }
         if (Hooks::m_VR->UseGrabRedirectsFire() && Hooks::m_VR->TryGetVrUseOrigin(muzzle))
         {
-            *out = muzzle;
+            if (!MuzzleBehindGeometry(*out, muzzle))
+                *out = muzzle;
             return out;
         }
         if (Hooks::m_VR->ScopeZoomActive())
@@ -6403,7 +6432,8 @@ namespace
                 muzzle.x, muzzle.y, muzzle.z, out->x, out->y, out->z);
             ++s_log;
         }
-        *out = muzzle;
+        if (!MuzzleBehindGeometry(*out, muzzle))
+            *out = muzzle;
         return out;
     }
 }
