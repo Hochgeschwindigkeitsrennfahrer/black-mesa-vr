@@ -342,6 +342,8 @@ int Hooks::initSourceHooks()
         hkClientUpdatePvsNotifiers.createHook((LPVOID)o.ClientUpdatePvsNotifiers.address, &dClientUpdatePvsNotifiers);
         hkClientPvsNotifierCheck.createHook((LPVOID)o.ClientPvsNotifierCheck.address, &dClientPvsNotifierCheck);
     }
+    else if (!o.ClientUpdatePvsNotifiers.valid || !o.ClientPvsNotifierCheck.valid)
+        Game::noteMissingOffset("Client PVS notifier check (MulticoreMode shadow flicker fix)");
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
