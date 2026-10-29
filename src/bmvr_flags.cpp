@@ -117,6 +117,7 @@ namespace bmvr
     bool g_VrHandThrow = true;
     float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
+    bool g_StereoEnginePost = true;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.
@@ -632,6 +633,8 @@ namespace bmvr
                 g_TwoHandHoldWhileGrip = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSkipMotionBlur") == 0)
                 g_VrSkipMotionBlur = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "StereoEnginePost") == 0)
+                g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SprintAimedPose") == 0)
                 g_SprintAimedPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MirrorBothEyes") == 0)

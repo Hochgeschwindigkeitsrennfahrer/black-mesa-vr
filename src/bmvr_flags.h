@@ -276,6 +276,7 @@ namespace bmvr
     extern bool g_VrHandThrow;           // frag leaves the hand at the hand's speed (Lambda1VR-style throw)
     extern float g_ThrowScale;           // hand speed x 2/3 x this, capped at 1000 u/s (Lambda1VR vr_throw_scale)
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
+    extern bool g_StereoEnginePost;      // run engine_post (tonemap / colour correction / FXAA) on eyes, bloom zeroed
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose

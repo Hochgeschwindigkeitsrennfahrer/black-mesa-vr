@@ -53,6 +53,7 @@ static uint32_t ServerRva(uintptr_t addr)
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -3508,6 +3509,221 @@ namespace
             || std::strstr(name, "blur_combine") != nullptr;
     }
 
+    // engine_post* is the final LDR composite (bloom add, tonemap, colour
+    // correction, FXAA). With g_StereoEnginePost it runs on the eyes with its
+    // bloom var zeroed; the rest of the bloom chain stays skipped.
+    bool EnginePostMaterial(const char* name)
+    {
+        if (!name || !name[0])
+            return false;
+        if (std::strstr(name, "hud") || std::strstr(name, "Hud") || std::strstr(name, "HUD"))
+            return false;
+        return std::strstr(name, "engine_post") != nullptr;
+    }
+
+    // IMaterialVar: slot 1 GetName, slot 3 SetFloatValue (Source 2013 /
+    // CS:GO imaterialvar.h). m_VecVal[0] at +0xC after vptr, m_pStringVal,
+    // m_intVal is what the inline GetFloatValue returns.
+    using tMatVarGetName = const char*(__thiscall*)(void*);
+    using tMatVarSetFloat = void(__thiscall*)(void*, float);
+
+    const char* SafeMatVarName(void* var)
+    {
+        const char* name = nullptr;
+        __try
+        {
+            name = reinterpret_cast<tMatVarGetName>((*reinterpret_cast<void***>(var))[1])(var);
+            if (name)
+                (void)*reinterpret_cast<const volatile char*>(name);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            name = nullptr;
+        }
+        return name ? name : "";
+    }
+
+    bool SafeMatVarGetFloat(void* var, float& out)
+    {
+        __try
+        {
+            out = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(var) + 0xC);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        return std::isfinite(out) && out >= 0.f && out <= 1000.f;
+    }
+
+    bool SafeMatVarSetFloat(void* var, float value)
+    {
+        __try
+        {
+            reinterpret_cast<tMatVarSetFloat>((*reinterpret_cast<void***>(var))[3])(var, value);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    void* SafeShaderParamAt(void** params, int index)
+    {
+        void* p = nullptr;
+        __try
+        {
+            p = params[index];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            p = nullptr;
+        }
+        return p;
+    }
+
+    void* SafeFindMaterialVar(IMaterial* material, const char* name)
+    {
+        void* var = nullptr;
+        bool found = false;
+        __try
+        {
+            var = material->FindVar(name, &found, false);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            var = nullptr;
+        }
+        return found ? var : nullptr;
+    }
+
+    bool LooksLikeBloomAmountVar(const char* name)
+    {
+        if (!name || !name[0])
+            return false;
+        char lower[64];
+        size_t i = 0;
+        for (; name[i] && i + 1 < sizeof(lower); ++i)
+            lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
+        lower[i] = 0;
+        if (!std::strstr(lower, "bloom"))
+            return false;
+        // $bloomtexture / bloom enable combos are not the strength.
+        return !std::strstr(lower, "tex") && !std::strstr(lower, "enable")
+            && !std::strstr(lower, "sampler");
+    }
+
+    // Bloom-amount var of an engine_post material: a known name through
+    // FindVar (IMaterial slot 11), else the first shader param named *bloom*
+    // that is not a texture or combo. The param walk uses the later
+    // ShaderParamCount / GetShaderParams slots, so it only runs as the
+    // fallback, and logs every param name so the pick can be checked.
+    void* FindEnginePostBloomVar(IMaterial* material, const char* matName)
+    {
+        static const char* const kNames[] = {
+            "$bloomamount", "$bloomscale", "$bloom_amount", "$bloomstrength", "$bloomamt" };
+        for (const char* name : kNames)
+        {
+            if (void* var = SafeFindMaterialVar(material, name))
+                return var;
+        }
+        void* var = nullptr;
+        int count = 0;
+        void** params = nullptr;
+        __try
+        {
+            count = material->ShaderParamCount();
+            params = material->GetShaderParams();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            count = 0;
+            params = nullptr;
+        }
+        if (count < 0 || count > 256 || !params)
+            count = 0;
+        char list[768];
+        size_t used = 0;
+        list[0] = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            void* p = SafeShaderParamAt(params, i);
+            if (!p)
+                continue;
+            const char* name = SafeMatVarName(p);
+            if (!var && LooksLikeBloomAmountVar(name))
+                var = p;
+            const int n = std::snprintf(list + used, sizeof(list) - used, "%s%s", used ? " " : "", name);
+            if (n > 0 && used + static_cast<size_t>(n) < sizeof(list))
+                used += static_cast<size_t>(n);
+        }
+        static int s_paramLog;
+        if (s_paramLog < 4)
+        {
+            Game::logMsg("DSSR engine_post params %s (%d): %s", matName, count, list);
+            ++s_paramLog;
+        }
+        return var;
+    }
+
+    // Eye-pass bloom var zeroed and not yet restored. The DSSR quad can sit in
+    // the buffered dynamic mesh after the call returns, and the shader reads
+    // the var when that batch flushes. Restore only after a render target
+    // change or EndFrame, which flush it (Source 2013 shaderapidx8
+    // SetRenderTargetEx). thread_local: the restore must run on the thread
+    // that drew (render thread under mat_queue_mode 2).
+    thread_local void* g_EnginePostBloomVar = nullptr;
+    thread_local float g_EnginePostBloomValue = 0.f;
+
+    void RestoreEnginePostBloom()
+    {
+        if (!g_EnginePostBloomVar)
+            return;
+        SafeMatVarSetFloat(g_EnginePostBloomVar, g_EnginePostBloomValue);
+        g_EnginePostBloomVar = nullptr;
+    }
+
+    void ZeroEnginePostBloomForEye(IMaterial* material, const char* matName, int destW, int destH)
+    {
+        static IMaterial* s_mat;
+        static void* s_var;
+        static int s_log;
+        if (material != s_mat)
+        {
+            s_mat = material;
+            s_var = material ? FindEnginePostBloomVar(material, matName) : nullptr;
+        }
+        void* var = s_var;
+        float orig = 0.f;
+        bool set = false;
+        if (var)
+        {
+            if (g_EnginePostBloomVar == var)
+            {
+                // Second eye before a flush point: keep the real value.
+                orig = g_EnginePostBloomValue;
+                set = SafeMatVarSetFloat(var, 0.f);
+            }
+            else
+            {
+                RestoreEnginePostBloom();
+                if (SafeMatVarGetFloat(var, orig) && SafeMatVarSetFloat(var, 0.f))
+                {
+                    g_EnginePostBloomVar = var;
+                    g_EnginePostBloomValue = orig;
+                    set = true;
+                }
+            }
+        }
+        if (s_log < 8)
+        {
+            Game::logMsg("DSSR engine_post on eye %s dest=%dx%d bloomVar=%s set=%d orig=%.3f",
+                matName, destW, destH, var ? SafeMatVarName(var) : "none", set ? 1 : 0, orig);
+            ++s_log;
+        }
+    }
+
     bool QueryTextureSize(ITexture* texture, int& w, int& h)
     {
         w = 0;
@@ -5201,6 +5417,7 @@ void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
     (void)edx;
     if (hkEndFrame.fOriginal)
         hkEndFrame.fOriginal(ecx);
+    RestoreEnginePostBloom();
     if (!m_VR)
         return;
     m_VR->m_PresentSpikeEndFrameThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
@@ -5333,6 +5550,7 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
     }
     if (hkPushRenderTargetAndViewport.fOriginal)
         hkPushRenderTargetAndViewport.fOriginal(ecx, pTexture, pDepthTexture, nViewX, nViewY, nViewW, nViewH);
+    RestoreEnginePostBloom();
     if (m_VR && !m_VR->HudPaintActive() && !m_VR->ShouldHwndBlitStereo()
         && nViewW > 0 && nViewH > 0
         && static_cast<UINT>(nViewW) == m_VR->m_RenderWidth
@@ -5346,6 +5564,7 @@ void __fastcall Hooks::dPopRenderTargetAndViewport(void* ecx, void* edx)
         m_VR->BlitEngineHudRtToOverlay();
     if (hkPopRenderTargetAndViewport.fOriginal)
         hkPopRenderTargetAndViewport.fOriginal(ecx);
+    RestoreEnginePostBloom();
     g_BmvrD3dDrawTrace = 0;
     if (bmvr::g_PassTraceFrames > 0)
         Game::logMsg("trace: PopRT");
@@ -5402,9 +5621,11 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
         }
         return;
     }
-    if (StereoBloomMaterial(matName) && Hooks::m_VR
-        && Hooks::m_VR->StereoWorldPassActive()
-        && (bmvr::OffscreenWorldMatchesEyes() || Hooks::m_VR->ShouldHwndBlitStereo()))
+    const bool stereoEyePost = Hooks::m_VR && Hooks::m_VR->StereoWorldPassActive()
+        && (bmvr::OffscreenWorldMatchesEyes() || Hooks::m_VR->ShouldHwndBlitStereo());
+    const bool eyeEnginePost = stereoEyePost && bmvr::g_StereoEnginePost
+        && EnginePostMaterial(matName);
+    if (StereoBloomMaterial(matName) && stereoEyePost && !eyeEnginePost)
     {
         static int s_skipBloom;
         if (s_skipBloom < 12)
@@ -5415,6 +5636,8 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
         }
         return;
     }
+    if (eyeEnginePost)
+        ZeroEnginePostBloomForEye(material, matName, width, height);
     int expanded = 0;
     // Underwater overlay is screenspace water_warp from _rt_poweroftwofb.
     // GetScreenSize eye-lie can leave dest at 1024 (or HWND 16:9) on the
