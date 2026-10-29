@@ -306,7 +306,7 @@ namespace bmvr
     // zoomed. Compositor / OpenXR submit keep the real HMD FOV, so the
     // narrower render is magnified in the lenses. 0.28 ≈ 3.5× (HL2 20/75).
     extern float g_ScopeZoomFovScale;
-    // LeftEyeCullPad (default 0.05, 0 = off, max 0.25): the left eye's right
+    // LeftEyeCullPad (default 0 = off since 2026-10-30, max 0.25): the left eye's right
     // edge is pushed out by this fraction of the half-FOV tangent (off-centre
     // CViewSetup) and submitted at that FOV (OpenXR explicit tangents, OpenVR
     // texture bounds). Black Mesa culls props for the right eye with what it
@@ -315,6 +315,10 @@ namespace bmvr
     // left eye fixed it). 0.05 covers props from ~0.7 m at 64 mm IPD (PSVR2).
     // Works with and without OffCenterEyes. Same RT size, so the left eye
     // loses ~2.5 % horizontal sharpness at 0.05; no extra pixels.
+    // The late props were the occlusion tracker reusing the first eye's
+    // results (OcclusionTrackerPerEye fixes that at the source), so the pad is
+    // off by default: it also made the left eye off-centre with OffCenterEyes
+    // off, which exposed off-centre bugs (mirror views) on default settings.
     extern float g_LeftEyeCullPad;
     // MenuCursorHook (default true): GetCursorPos reports the VR menu pointer
     // while it is on a menu panel. false = real cursor (A/B test aid).
