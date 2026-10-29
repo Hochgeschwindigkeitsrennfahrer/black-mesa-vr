@@ -4276,6 +4276,24 @@ void VR::ProcessInput()
             PulseHandHaptic(vr::TrackedControllerRole_RightHand, 2500, 0.85f);
     }
 
+    {
+        const int flags = (!paused && m_Game) ? m_Game->LocalPlayerFlags() : -1;
+        const bool onTrain = flags >= 0 && (flags & (1 << 4)) != 0;
+        if (onTrain != m_OnTrainControls)
+        {
+            static int s_trainLog;
+            if (s_trainLog < 40)
+            {
+                const uint32_t held = m_HeldButtons.load(std::memory_order_acquire);
+                Game::logMsg("Train controls %s: flags 0x%X (on ground %d), last buttons use %d fwd %d back %d left %d right %d jump %d",
+                    onTrain ? "taken" : "released", flags < 0 ? 0 : flags, flags >= 0 ? (flags & 1) : -1,
+                    (held & IN_USE) ? 1 : 0, (held & IN_FORWARD) ? 1 : 0, (held & IN_BACK) ? 1 : 0,
+                    (held & IN_MOVELEFT) ? 1 : 0, (held & IN_MOVERIGHT) ? 1 : 0, (held & IN_JUMP) ? 1 : 0);
+                ++s_trainLog;
+            }
+            m_OnTrainControls = onTrain;
+        }
+    }
     uint32_t buttons = 0;
     if (!paused && !MenuGameplayBlocked())
     {
@@ -4363,9 +4381,12 @@ void VR::ProcessInput()
             buttons |= IN_FORWARD;
         else if (ny < -0.5f)
             buttons |= IN_BACK;
-        if (nx > 0.5f)
+        // On train controls a sideways bit lets go of them: only a clear
+        // sideways push counts there, not a stick held slightly off forward.
+        const float sideThreshold = (m_OnTrainControls && (nx * nx < 0.85f * 0.85f || nx * nx < ny * ny)) ? 2.f : 0.5f;
+        if (nx > sideThreshold)
             buttons |= IN_MOVERIGHT;
-        else if (nx < -0.5f)
+        else if (nx < -sideThreshold)
             buttons |= IN_MOVELEFT;
     }
     m_HeldButtons.store(buttons, std::memory_order_release);
@@ -5509,6 +5530,19 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
     auto startDropPulse = [&]() {
         if (m_UseDropRetries >= 3)
             return;
+        // A second Use lets go of train controls; nothing is carried there.
+        if (m_OnTrainControls)
+        {
+            static int s_trainPulseLog;
+            if (s_trainPulseLog < 8)
+            {
+                Game::logMsg("Use release on train controls: no drop pulse");
+                ++s_trainPulseLog;
+            }
+            m_UseDropClassifyUntilMs = 0.0;
+            m_GrabHoldingPhysics = false;
+            return;
+        }
         ++m_UseDropRetries;
         m_UseDropClassifyUntilMs = 0.0;
         m_UseDropSettleUntilMs = 0.0;

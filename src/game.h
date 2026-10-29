@@ -90,6 +90,7 @@ public:
     int LocalPlayerZoomFlag();
     // MOVETYPE_* of the local player (9 = ladder), -1 when unavailable.
     int LocalPlayerMoveType();
+    int LocalPlayerFlags();
     bool LocalPlayerAbsOrigin(Vector& out);
     // World-space bottom/top mount points of the map's func_useableladders
     // (CFuncLadder; entity list rescanned at most once a second).

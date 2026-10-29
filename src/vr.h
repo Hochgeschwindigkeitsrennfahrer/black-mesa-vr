@@ -1386,6 +1386,11 @@ private:
     bool m_EmptyHands = false;
     // Pickup stays on the hand that pressed Use until drop. Vanilla is a
     // Use-toggle, so release has to pulse a second press to drop.
+    // Local player has FL_ONTRAIN (driving a func_tracktrain from its controls).
+    // The game lets go of the controls on a second Use, any IN_MOVELEFT/RIGHT
+    // or leaving the ground, so the mod must not send a drop pulse or a
+    // sideways bit from a slightly tilted stick meanwhile.
+    bool m_OnTrainControls = false;
     bool m_GrabLatched = false;
     bool m_GrabHandLeft = false;
     bool m_LastGrabHandLeft = true;
