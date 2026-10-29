@@ -3,6 +3,9 @@
 #include "sdk.h"
 #include "vr.h"
 #include "offsets.h"
+
+// Diagnostic: DXVK logs every draw while this is set (BM deferred-light pass in a pass trace).
+extern "C" volatile int g_BmvrD3dDrawTrace = 0;
 #include "bmvr_flags.h"
 #include <intrin.h>
 
@@ -246,6 +249,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkGetScreenSize, "GetScreenSize");
     enableIfReady(hkGetScreenAspectRatio, "GetScreenAspectRatio");
     enableIfReady(hkComputeViewMatrices, "ComputeViewMatrices");
+    enableIfReady(hkNewRendererUpdatePerCamera, "NewRendererUpdatePerCamera");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -329,6 +333,8 @@ int Hooks::initSourceHooks()
     if ((bmvr::g_OffCenterEyes || bmvr::g_LeftEyeCullPad > 0.f) && o.ComputeViewMatrices.valid && !hkComputeViewMatrices.pTarget
         && AreaPortalComputeViewCallSiteOk(o.ComputeViewMatrices.address))
         hkComputeViewMatrices.createHook((LPVOID)o.ComputeViewMatrices.address, &dComputeViewMatrices);
+    if (o.NewRendererUpdatePerCamera.valid && !hkNewRendererUpdatePerCamera.pTarget)
+        hkNewRendererUpdatePerCamera.createHook((LPVOID)o.NewRendererUpdatePerCamera.address, &dNewRendererUpdatePerCamera);
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
@@ -5278,6 +5284,8 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
             SafeTextureName(pTexture), texW, texH, SafeTextureName(pDepthTexture), trInW, trInH,
             nViewX, nViewY, nViewW, nViewH, nameClass.world ? 1 : 0, nameClass.aux ? 1 : 0,
             m_VR ? m_VR->m_StereoEye : -1);
+        if (std::strcmp(SafeTextureName(pTexture), "_rt_gblightdiff") == 0)
+            g_BmvrD3dDrawTrace = 1;
     }
     if (hkPushRenderTargetAndViewport.fOriginal)
         hkPushRenderTargetAndViewport.fOriginal(ecx, pTexture, pDepthTexture, nViewX, nViewY, nViewW, nViewH);
@@ -5294,6 +5302,7 @@ void __fastcall Hooks::dPopRenderTargetAndViewport(void* ecx, void* edx)
         m_VR->BlitEngineHudRtToOverlay();
     if (hkPopRenderTargetAndViewport.fOriginal)
         hkPopRenderTargetAndViewport.fOriginal(ecx);
+    g_BmvrD3dDrawTrace = 0;
     if (bmvr::g_PassTraceFrames > 0)
         Game::logMsg("trace: PopRT");
     NotePopRt();
@@ -7857,6 +7866,26 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
         }
     }
     hkComputeViewMatrices.fOriginal(ecx, worldToView, viewToProjection, worldToProjection);
+}
+
+// Diagnostic: which views BM's deferred-light update sees (light culling
+// under off-centre eyes, 2026-10-29). Logs only while a pass trace runs.
+void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a1, void* view, bool secondary, void* a4)
+{
+    (void)edx;
+    if (bmvr::g_PassTraceFrames > 0 && view)
+    {
+        const auto* v = static_cast<const CViewSetup*>(view);
+        Game::logMsg("trace: DefLights UpdatePerCamera ret=client+0x%X sec=%d modEye=%d viewEye=%d %dx%d fov=%.2f aspect=%.4f "
+            "offc=%d L=%.4f R=%.4f B=%.4f T=%.4f origin=(%.2f,%.2f,%.2f) ang=(%.2f,%.2f,%.2f) view=%p",
+            static_cast<unsigned>(reinterpret_cast<uintptr_t>(_ReturnAddress())
+                - reinterpret_cast<uintptr_t>(GetModuleHandleA("client.dll"))),
+            secondary ? 1 : 0, m_VR ? m_VR->m_StereoEye : -1, v->m_eStereoEye, v->width, v->height, v->fov,
+            v->m_flAspectRatio, v->m_bOffCenter ? 1 : 0, v->m_flOffCenterLeft, v->m_flOffCenterRight,
+            v->m_flOffCenterBottom, v->m_flOffCenterTop, v->origin.x, v->origin.y, v->origin.z,
+            v->angles.x, v->angles.y, v->angles.z, view);
+    }
+    hkNewRendererUpdatePerCamera.fOriginal(ecx, a1, view, secondary, a4);
 }
 
 float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)

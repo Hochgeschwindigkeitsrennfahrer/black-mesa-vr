@@ -58,7 +58,13 @@ namespace {
 
 }
 
+// BMVR diagnostic: set by hooks.cpp while a pass trace is inside BM's
+// deferred-light pass (_rt_gblightdiff); every draw is logged.
+extern "C" volatile int g_BmvrD3dDrawTrace;
+namespace bmvr { void Log(const char* fmt, ...); }
+
 namespace dxvk {
+
 
     namespace {
 
@@ -4391,6 +4397,25 @@ namespace dxvk {
     if (unlikely(!PrimitiveCount))
       return D3D_OK;
 
+    if (unlikely(g_BmvrD3dDrawTrace)) {
+      const auto& rs = m_state.renderStates;
+      const RECT& sc = m_state.scissorRect;
+      bmvr::Log("trace: d3d %s prim=%u count=%u scissor=%u (%ld,%ld)-(%ld,%ld) stencil=%u ref=%u func=%u z=%u zfunc=%u zwrite=%u cull=%u blend=%u ps=%p vs=%p",
+        "Draw", unsigned(PrimitiveType), unsigned(PrimitiveCount), unsigned(rs[D3DRS_SCISSORTESTENABLE]),
+        long(sc.left), long(sc.top), long(sc.right), long(sc.bottom), unsigned(rs[D3DRS_STENCILENABLE]),
+        unsigned(rs[D3DRS_STENCILREF]), unsigned(rs[D3DRS_STENCILFUNC]), unsigned(rs[D3DRS_ZENABLE]),
+        unsigned(rs[D3DRS_ZFUNC]), unsigned(rs[D3DRS_ZWRITEENABLE]), unsigned(rs[D3DRS_CULLMODE]),
+        unsigned(rs[D3DRS_ALPHABLENDENABLE]), (void*)m_state.pixelShader.ptr(), (void*)m_state.vertexShader.ptr());
+      for (uint32_t r = 0; r < 64; r++) {
+        const float* v = m_state.vsConsts->fConsts[r].data;
+        const float* q = m_state.psConsts->fConsts[r < 32 ? r : 0].data;
+        if (r < 32)
+          bmvr::Log("trace: d3d   c%-2u vs %10.4f %10.4f %10.4f %10.4f | ps %10.4f %10.4f %10.4f %10.4f", r, v[0], v[1], v[2], v[3], q[0], q[1], q[2], q[3]);
+        else
+          bmvr::Log("trace: d3d   c%-2u vs %10.4f %10.4f %10.4f %10.4f", r, v[0], v[1], v[2], v[3]);
+      }
+    }
+
     bool dynamicSysmemVBOs;
     uint32_t firstIndex     = 0;
     int32_t baseVertexIndex = 0;
@@ -4444,6 +4469,25 @@ namespace dxvk {
 
     if (unlikely(!PrimitiveCount || !NumVertices))
       return D3D_OK;
+
+    if (unlikely(g_BmvrD3dDrawTrace)) {
+      const auto& rs = m_state.renderStates;
+      const RECT& sc = m_state.scissorRect;
+      bmvr::Log("trace: d3d %s prim=%u count=%u scissor=%u (%ld,%ld)-(%ld,%ld) stencil=%u ref=%u func=%u z=%u zfunc=%u zwrite=%u cull=%u blend=%u ps=%p vs=%p",
+        "DrawIndexed", unsigned(PrimitiveType), unsigned(PrimitiveCount), unsigned(rs[D3DRS_SCISSORTESTENABLE]),
+        long(sc.left), long(sc.top), long(sc.right), long(sc.bottom), unsigned(rs[D3DRS_STENCILENABLE]),
+        unsigned(rs[D3DRS_STENCILREF]), unsigned(rs[D3DRS_STENCILFUNC]), unsigned(rs[D3DRS_ZENABLE]),
+        unsigned(rs[D3DRS_ZFUNC]), unsigned(rs[D3DRS_ZWRITEENABLE]), unsigned(rs[D3DRS_CULLMODE]),
+        unsigned(rs[D3DRS_ALPHABLENDENABLE]), (void*)m_state.pixelShader.ptr(), (void*)m_state.vertexShader.ptr());
+      for (uint32_t r = 0; r < 64; r++) {
+        const float* v = m_state.vsConsts->fConsts[r].data;
+        const float* q = m_state.psConsts->fConsts[r < 32 ? r : 0].data;
+        if (r < 32)
+          bmvr::Log("trace: d3d   c%-2u vs %10.4f %10.4f %10.4f %10.4f | ps %10.4f %10.4f %10.4f %10.4f", r, v[0], v[1], v[2], v[3], q[0], q[1], q[2], q[3]);
+        else
+          bmvr::Log("trace: d3d   c%-2u vs %10.4f %10.4f %10.4f %10.4f", r, v[0], v[1], v[2], v[3]);
+      }
+    }
 
     bool dynamicSysmemVBOs;
     bool dynamicSysmemIBO;

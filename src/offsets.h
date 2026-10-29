@@ -459,6 +459,12 @@ public:
     // the result with a centred +-tan(fov/2) window.
     Offset ComputeViewMatrices{ "engine.dll", 0x100B40,
         "55 8B EC 51 56 8B F1 57 F3 0F 10 86 E8 00 00 00 0F 2E 05", 0, true };
+    // CNewRenderer::UpdatePerCamera(?, CViewSetup* view, bool secondary, ?),
+    // thiscall on the global renderer, ret 0x10: per-view deferred-light
+    // update (frustum from the view's ComputeViewMatrices). Diagnostic hook
+    // only (logs while a pass trace runs). Beta 26234270.
+    Offset NewRendererUpdatePerCamera{ "client.dll", 0x1870D0,
+        "55 8B EC 81 EC D4 01 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 8B 5D 0C 56 8B F1", 0, true };
     static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,
