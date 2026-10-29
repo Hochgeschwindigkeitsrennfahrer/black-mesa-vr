@@ -7929,7 +7929,9 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
     // camera below the surface, negate the pitch and turn the roll by 180 degrees. A 180-degree roll
     // also turns the eye's off-centre sub-window to the opposite side, so the mirror rendered the
     // wrong part of the field and the floor read it back offset, moving with the head (lobby floor in
-    // bm_c1a0a, right eye worst, 2026-10-29). Give such views the window rotated along with the camera.
+    // bm_c1a0a, right eye worst, 2026-10-29). Pitch negated + roll 180 makes the mirror image the eye
+    // image flipped left-right only (checked numerically, also with head roll), so mirror the window
+    // horizontally; top and bottom stay.
     if (ecx)
     {
         const auto* view = static_cast<const CViewSetup*>(ecx);
@@ -7941,12 +7943,10 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
             CViewSetup mirrored = *view;
             mirrored.m_flOffCenterLeft = 1.f - view->m_flOffCenterRight;
             mirrored.m_flOffCenterRight = 1.f - view->m_flOffCenterLeft;
-            mirrored.m_flOffCenterBottom = 1.f - view->m_flOffCenterTop;
-            mirrored.m_flOffCenterTop = 1.f - view->m_flOffCenterBottom;
             static int s_log;
             if (s_log < 4)
             {
-                Game::logMsg("Mirror view: off-centre window turned with the 180-degree roll L/R %.3f/%.3f -> %.3f/%.3f (%dx%d)",
+                Game::logMsg("Mirror view: off-centre window mirrored left-right L/R %.3f/%.3f -> %.3f/%.3f (%dx%d)",
                     view->m_flOffCenterLeft, view->m_flOffCenterRight, mirrored.m_flOffCenterLeft,
                     mirrored.m_flOffCenterRight, view->width, view->height);
                 ++s_log;
