@@ -53,20 +53,42 @@ When on, in `dDrawScreenSpaceRectangle` during a stereo eye pass:
 
 - `engine_post*` (not HUD) is drawn instead of skipped.
 - `lumcompare` / `downsample*` / `blurfilter*` / `blur_combine*` stay skipped.
-- Before the draw, the material's bloom-amount var is set to 0 so the stale `_rt_Small*FB*` contents add nothing. Lookup: `FindVar` for `$bloomamount`, `$bloomscale`, `$bloom_amount`, `$bloomstrength`, `$bloomamt`; if none exists, walk `GetShaderParams` and take the first `*bloom*` param that is not a texture / enable / sampler. The walk logs every param name: `DSSR engine_post params <mat> (<n>): ...`.
+- Before the draw, the material's bloom var is zeroed so the stale `_rt_Small*FB*` contents add nothing (lookup below).
 - The original value is restored after the next render-target change (`PushRenderTargetAndViewport` / `PopRenderTargetAndViewport`) or `EndFrame` on the same thread. The DSSR quad can stay in the buffered dynamic mesh after the call returns, and the shader reads the var when that batch flushes; Source 2013 `SetRenderTargetEx` flushes buffered primitives. Restoring right after the DSSR call could let the bloom value back in.
+- On a 1x eye RT (context RT == eye size), viewport and dest are pinned to `0,0 eyeW×eyeH` for the draw, and the src uv is widened to the whole `_rt_FullFrameFB` when the engine reports it eye-sized (±32). The previous viewport is restored right after the call. An mc ring RT is logged and left alone.
 
-Own log line, first 8 calls, separate from the bloom-skip counter:
+### Headless A/B on 9a0994e (user, 2026-10-29)
+
+`bm_c1a0a` lobby, MulticoreMode on, window 1280×640, eye 1152×1184:
+
+- `engine_post_nxtgen` ran on the eyes, but its output was **squeezed into the top 640/1184 rows** (full width, bottom black). First call `dest=1280x640`, later `dest=1152x1184`: dest was already eye-sized, so the window-height part is the context viewport. Fixed by the viewport/dest pin above (next run: check `pinned=1` and the `vp=` before values).
+- `DSSR engine_post params dev/engine_post_nxtgen (0):` — `ShaderParamCount` / `GetShaderParams` (sdk.h slots) return nothing on this build, and no bloom var was found (`bloomVar=none set=0`). Those slots are no longer called.
+
+### Bloom var discovery (second pass)
+
+1. `FindVar` (IMaterial slot 11) probes `$basetexture`, `$fbtexture`, `$aaenable` (to prove the slot works), then `$bloomamount`, `$bloomscale`, `$bloom_amount`, `$bloomstrength`, `$bloomamt`, `$bloom`, then `$bloomenable`, `$bloom_enable`. A hit counts only if the returned var's `GetName` matches the name asked for.
+2. Param scan, reads only: FindVar returns the shared dummy var even on a miss, which gives the `CMaterialVar` vtable. The first 0x200 bytes of the material object are scanned for a pointer to the longest run of pointers whose objects carry that vtable — the material's param array. Every name is logged.
+3. Pick order: known float name → scanned `*bloom*` float param (not texture / enable / sampler) → `$bloomenable`-style bool, zeroed with `SetIntValue` (slot 4) and restored the same way.
+
+Log lines (first 4 materials):
 
 ```
-DSSR engine_post on eye dev/engine_post_nxtgen dest=WxH bloomVar=$bloomamount set=1 orig=0.xxx
+DSSR engine_post vars dev/engine_post_nxtgen varVt=<ptr> FindVar: $basetexture=1 $fbtexture=0 ... $bloomamount=0 ...
+DSSR engine_post params dev/engine_post_nxtgen (<n> scanned): $basetexture $fbtexture ...
 ```
 
-`bloomVar=none set=0` means no bloom var was found: FXAA / tonemap still come back, but the bloom ghosts may too. Paste the `engine_post params` line so the right var name can be added.
+FindVar codes: `1` found and the name matches, `2` found but the var reports a different name (slot or layout mismatch), `0` not found. If `$basetexture` is not `1`, FindVar itself is wrong on this build. If the scan finds 0 params, paste the `varVt` value; the bloom name can also be taken from `client.dll` strings near `DoEnginePostProcessing` (`$bloom*` literals it sets on the material).
+
+Eye line (first 8 calls, own counter):
+
+```
+DSSR engine_post on eye dev/engine_post_nxtgen bloomVar=<name|none> set=<0|1> orig=<v> rt=WxH vp=x,y WxH pinned=<0|1> dest ... -> ... src=WxH uv=(..)-(..) -> (..)-(..)
+```
 
 ### Assumptions to verify at runtime
 
-- `IMaterialVar` slot 1 = `GetName`, slot 3 = `SetFloatValue`, float value at `+0xC` (Source 2013 / CS:GO `imaterialvar.h`). Calls are under SEH; a nonsensical `orig` (outside 0–1000) leaves the var untouched (`set=0`).
+- `IMaterialVar` slot 1 = `GetName`, slot 3 = `SetFloatValue`, slot 4 = `SetIntValue`; `m_intVal` at `+0x8`, `m_VecVal[0]` at `+0xC` (Source 2013 / CS:GO `imaterialvar.h`). Calls are under SEH; an implausible original (float outside 0–1000, bool not 0/1) leaves the var untouched (`set=0`).
+- The viewport restore right after the DSSR call assumes a viewport change flushes the buffered quad first (same assumption as the existing `EyeRtPush` / `SehViewport` draws). If `pinned=1` and the squeeze persists, that assumption is wrong for this path.
 - Under `mat_queue_mode 2` this hook runs on the render thread. If BM routes material-var writes through queued temp storage, the zero may not take effect (ghosts return with `set=1`). Compare single-core vs multicore.
 - If no render-target change follows the eye `engine_post` draw on that thread before the desktop draws `engine_post`, the desktop may lose bloom for that frame.
 
