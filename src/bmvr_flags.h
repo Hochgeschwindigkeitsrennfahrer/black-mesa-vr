@@ -326,6 +326,13 @@ namespace bmvr
     // RightEyeFirst (default false, test aid, MulticoreMode only): record the
     // right eye's RenderView before the left one.
     extern bool g_RightEyeFirst;
+    // OcclusionTrackerPerEye (default true): Black Mesa's occlusion tracker
+    // (r_occlusion_tracker_enabled) keys its results by view id, and both
+    // eyes render as the same main view, so objects hidden from the first
+    // eye were culled in the second too (pop-in at the far right and behind
+    // doorways). The right eye's views get their own id, so they get their
+    // own queries against their own depth. false = stock (A/B aid).
+    extern bool g_OcclusionTrackerPerEye;
     // Exponential smoothing time (seconds) applied to HMD pitch/yaw while
     // scoped. Magnification otherwise turns every micro-movement into shake.
     extern float g_ScopeZoomSmoothSec;

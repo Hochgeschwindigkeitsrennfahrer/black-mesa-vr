@@ -476,6 +476,12 @@ public:
     // (client ragdolls/props drop their projected shadow). Beta 26234270.
     Offset ClientPvsNotifierCheck{ "client.dll", 0xF4020,
         "55 8B EC 51 56 8B 35 ? ? ? ? 8B CE 8B 06 FF 50 70 8B 0D ? ? ? ? 89 4D FC 0F B7 81 7C 00 03 00", 0, true };
+    // Black Mesa's COcclusionTracker::BeginView(short viewId, int, const float* plane, bool),
+    // thiscall on the global tracker (client+0x6E6780), ret 0x10. The tracker keys its GPU
+    // occlusion results by (viewId, object), so both stereo eyes (same main view id) shared
+    // one result per object, queried against the first eye's depth. Beta 26234270.
+    Offset OcclusionTrackerBeginView{ "client.dll", 0x253E50,
+        "55 8B EC 56 8B F1 80 7E 04 00 74 ? A1 ? ? ? ? B9 ? ? ? ? FF 50 2C 85 C0 74 ? 8A 45 14 88 46 06 66 8B 45 08 66 89 46", 0, true };
     static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,

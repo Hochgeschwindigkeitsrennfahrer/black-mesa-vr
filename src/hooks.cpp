@@ -252,6 +252,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkNewRendererUpdatePerCamera, "NewRendererUpdatePerCamera");
     enableIfReady(hkClientUpdatePvsNotifiers, "ClientUpdatePvsNotifiers");
     enableIfReady(hkClientPvsNotifierCheck, "ClientPvsNotifierCheck");
+    enableIfReady(hkOcclusionBeginView, "OcclusionTrackerBeginView");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -344,6 +345,10 @@ int Hooks::initSourceHooks()
     }
     else if (!o.ClientUpdatePvsNotifiers.valid || !o.ClientPvsNotifierCheck.valid)
         Game::noteMissingOffset("Client PVS notifier check (MulticoreMode shadow flicker fix)");
+    if (bmvr::g_OcclusionTrackerPerEye && o.OcclusionTrackerBeginView.valid && !hkOcclusionBeginView.pTarget)
+        hkOcclusionBeginView.createHook((LPVOID)o.OcclusionTrackerBeginView.address, &dOcclusionBeginView);
+    else if (bmvr::g_OcclusionTrackerPerEye && !o.OcclusionTrackerBeginView.valid)
+        Game::noteMissingOffset("Occlusion tracker BeginView (per-eye occlusion culling)");
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
@@ -7930,6 +7935,32 @@ void __cdecl Hooks::dClientPvsNotifierCheck()
     if (skip)
         return;
     hkClientPvsNotifierCheck.fOriginal();
+}
+
+// Black Mesa's occlusion tracker (r_occlusion_tracker_enabled) keys its GPU occlusion results
+// by (view id, object). Both eyes render as the same main view, so the right eye used results
+// queried against the left eye's depth: objects only the right eye could see (far right edge,
+// through doorways at another angle) stayed culled until the left eye saw them (2026-10-29,
+// headset: r_occlusion_tracker_enabled 0 removed all of it; the eye-order test moved it to the
+// other side). The right eye's views get their own id, so EndView queries them against the
+// right eye's depth. Shadow views (3, 4) do not depend on the eye and keep one shared id; 3 is
+// also special-cased inside the tracker's visibility test.
+void __fastcall Hooks::dOcclusionBeginView(void* ecx, void* edx, int viewId, int a2, const float* plane, bool a4)
+{
+    (void)edx;
+    constexpr int kRightEyeViewIdOffset = 0x100;
+    const int id = viewId & 0xFFFF;
+    if (m_VR && m_VR->m_StereoEye == 2 && id != 0xFFFF && id != 3 && id != 4 && id < kRightEyeViewIdOffset)
+    {
+        static int s_log;
+        if (s_log < 4)
+        {
+            Game::logMsg("Occlusion tracker: right-eye view id %d -> %d", id, id + kRightEyeViewIdOffset);
+            ++s_log;
+        }
+        viewId = (viewId & ~0xFFFF) | (id + kRightEyeViewIdOffset);
+    }
+    hkOcclusionBeginView.fOriginal(ecx, viewId, a2, plane, a4);
 }
 
 void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a1, void* view, bool secondary, void* a4)
