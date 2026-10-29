@@ -250,6 +250,8 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkGetScreenAspectRatio, "GetScreenAspectRatio");
     enableIfReady(hkComputeViewMatrices, "ComputeViewMatrices");
     enableIfReady(hkNewRendererUpdatePerCamera, "NewRendererUpdatePerCamera");
+    enableIfReady(hkClientUpdatePvsNotifiers, "ClientUpdatePvsNotifiers");
+    enableIfReady(hkClientPvsNotifierCheck, "ClientPvsNotifierCheck");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -335,6 +337,11 @@ int Hooks::initSourceHooks()
         hkComputeViewMatrices.createHook((LPVOID)o.ComputeViewMatrices.address, &dComputeViewMatrices);
     if (o.NewRendererUpdatePerCamera.valid && !hkNewRendererUpdatePerCamera.pTarget)
         hkNewRendererUpdatePerCamera.createHook((LPVOID)o.NewRendererUpdatePerCamera.address, &dNewRendererUpdatePerCamera);
+    if (o.ClientUpdatePvsNotifiers.valid && o.ClientPvsNotifierCheck.valid && !hkClientPvsNotifierCheck.pTarget)
+    {
+        hkClientUpdatePvsNotifiers.createHook((LPVOID)o.ClientUpdatePvsNotifiers.address, &dClientUpdatePvsNotifiers);
+        hkClientPvsNotifierCheck.createHook((LPVOID)o.ClientPvsNotifierCheck.address, &dClientPvsNotifierCheck);
+    }
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
@@ -3963,6 +3970,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                         setup.width, setup.height, setup.m_flAspectRatio);
                     ++s_mcSkipDup;
                 }
+                m_SkippedViewSinceCheck = true;
                 return;
             }
             // Leftover policy: gbmatch + gb_leftskip skips the 16:9 desktop
@@ -3991,6 +3999,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                         setup.width, setup.height);
                     ++s_skipDup;
                 }
+                m_SkippedViewSinceCheck = true;
                 return;
             }
             static int s_auxLog;
@@ -7870,6 +7879,29 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
 
 // Diagnostic: which views BM's deferred-light update sees (light culling
 // under off-centre eyes, 2026-10-29). Logs only while a pass trace runs.
+// Black Mesa marks client PVS notifiers (client ragdolls, props) from each
+// view's BuildWorldRenderLists and, at FRAME_RENDER_END, tells every notifier
+// not marked since the last check that it left the PVS: its projected shadow
+// is destroyed and rebuilt a frame later. With MulticoreMode the leftover main
+// view after a stereo pair is skipped, so that frame has no view at all and
+// every shadow flickered off. A frame without a view says nothing about
+// visibility: keep the previous state.
+void __cdecl Hooks::dClientUpdatePvsNotifiers()
+{
+    m_PvsSeenSinceCheck = true;
+    hkClientUpdatePvsNotifiers.fOriginal();
+}
+
+void __cdecl Hooks::dClientPvsNotifierCheck()
+{
+    const bool skip = m_SkippedViewSinceCheck && !m_PvsSeenSinceCheck;
+    m_SkippedViewSinceCheck = false;
+    m_PvsSeenSinceCheck = false;
+    if (skip)
+        return;
+    hkClientPvsNotifierCheck.fOriginal();
+}
+
 void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a1, void* view, bool secondary, void* a4)
 {
     (void)edx;

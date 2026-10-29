@@ -465,6 +465,17 @@ public:
     // only (logs while a pass trace runs). Beta 26234270.
     Offset NewRendererUpdatePerCamera{ "client.dll", 0x1870D0,
         "55 8B EC 81 EC D4 01 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 8B 5D 0C 56 8B F1", 0, true };
+    // Client UpdatePVSNotifiers (no args): marks client-side PVS notifiers
+    // (ragdolls, client props) seen when the renderable is in the current
+    // view's PVS. BuildWorldRenderLists calls it per view; FRAME_RENDER_END
+    // treats unmarked notifiers as having left the PVS. Beta 26234270.
+    Offset ClientUpdatePvsNotifiers{ "client.dll", 0xF3F80,
+        "53 8B 1D ? ? ? ? 0F B7 83 7C 00 03 00 3D FF FF 00 00 74 ? 56 57 EB", 0, true };
+    // Client FRAME_RENDER_END PVS check (no args): a notifier marked in-PVS
+    // but not seen since the last check gets OnPVSStatusChanged(false)
+    // (client ragdolls/props drop their projected shadow). Beta 26234270.
+    Offset ClientPvsNotifierCheck{ "client.dll", 0xF4020,
+        "55 8B EC 51 56 8B 35 ? ? ? ? 8B CE 8B 06 FF 50 70 8B 0D ? ? ? ? 89 4D FC 0F B7 81 7C 00 03 00", 0, true };
     static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,
