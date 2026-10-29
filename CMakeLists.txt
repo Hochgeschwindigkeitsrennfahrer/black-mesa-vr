@@ -53,6 +53,16 @@ set(BMVR_SOURCES
 )
 
 add_library(d3d9 SHARED ${DXVK_SOURCES} ${BMVR_SOURCES})
+
+# Release name + commit for the log header (src/dllmain.cpp).
+set(BMVR_VERSION_H "${CMAKE_CURRENT_BINARY_DIR}/generated/bmvr_version.h")
+add_custom_target(bmvr_version
+  COMMAND "${CMAKE_COMMAND}" -DSRC=${ROOT} -DOUT=${BMVR_VERSION_H} -P "${ROOT}/cmake/bmvr_version.cmake"
+  BYPRODUCTS "${BMVR_VERSION_H}"
+  COMMENT "BMVR version header"
+  VERBATIM
+)
+add_dependencies(d3d9 bmvr_version)
 set_target_properties(d3d9 PROPERTIES
   OUTPUT_NAME "d3d9"
   PREFIX ""
@@ -70,6 +80,7 @@ target_compile_definitions(d3d9 PRIVATE
 )
 
 target_include_directories(d3d9 PRIVATE
+  "${CMAKE_CURRENT_BINARY_DIR}/generated"
   "${ROOT}"
   "${ROOT}/src"
   "${ROOT}/src/sdk"

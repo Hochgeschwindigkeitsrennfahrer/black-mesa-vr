@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include "game.h"
 #include "bmvr_flags.h"
+#include "bmvr_version.h"
 #include <cstdint>
 #include <cstring>
 
@@ -190,6 +191,9 @@ static DWORD WINAPI InitBMVR(LPVOID param)
         return 0;
     }
 
+    // First log line: lets a shared bmvr_log.txt name the exact build.
+    bmvr::Log("Black Mesa VR %s (commit %s %s, built %s %s)",
+        BMVR_RELEASE, BMVR_COMMIT, BMVR_COMMIT_DATE, __DATE__, __TIME__);
     bmvr::InitFromDisk();
     char path[MAX_PATH]{};
     GetModuleFileNameA(static_cast<HMODULE>(param), path, MAX_PATH);
