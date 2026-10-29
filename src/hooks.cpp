@@ -7893,6 +7893,22 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
     (void)edx;
     static const uintptr_t s_engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
     const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    // Pass trace: every view's projection inputs (mirror/water views vs the eye passes).
+    if (bmvr::g_PassTraceFrames > 0 && ecx)
+    {
+        const auto* v = static_cast<const CViewSetup*>(ecx);
+        static const uintptr_t s_client = reinterpret_cast<uintptr_t>(GetModuleHandleA("client.dll"));
+        const bool inEngine = s_engine && ret >= s_engine && ret < s_engine + 0x800000;
+        const bool inClient = s_client && ret >= s_client && ret < s_client + 0x800000;
+        Game::logMsg("trace: ComputeViewMatrices ret=%s+0x%X eye=%d %dx%d fov=%.2f aspect=%.4f offc=%d L=%.4f R=%.4f B=%.4f T=%.4f "
+            "origin=(%.1f,%.1f,%.1f) ang=(%.1f,%.1f,%.1f) zNear=%.2f",
+            inEngine ? "engine" : (inClient ? "client" : "?"),
+            static_cast<unsigned>(ret - (inEngine ? s_engine : (inClient ? s_client : 0))),
+            m_VR ? m_VR->m_StereoEye : -1, v->width, v->height, v->fov, v->m_flAspectRatio,
+            v->m_bOffCenter ? 1 : 0, v->m_flOffCenterLeft, v->m_flOffCenterRight, v->m_flOffCenterBottom,
+            v->m_flOffCenterTop, v->origin.x, v->origin.y, v->origin.z, v->angles.x, v->angles.y, v->angles.z,
+            v->zNear);
+    }
     if (ecx && s_engine && ret == s_engine + Offsets::kAreaPortalComputeViewReturnRva
         && m_VR && m_VR->AnyEyeOffCenter())
     {
@@ -7907,6 +7923,36 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
                     view->fov, view->m_flAspectRatio);
                 ++s_log;
             }
+        }
+    }
+    // Mirror views (water and reflective floors, _rt_WaterReflection) copy the eye's view, put the
+    // camera below the surface, negate the pitch and turn the roll by 180 degrees. A 180-degree roll
+    // also turns the eye's off-centre sub-window to the opposite side, so the mirror rendered the
+    // wrong part of the field and the floor read it back offset, moving with the head (lobby floor in
+    // bm_c1a0a, right eye worst, 2026-10-29). Give such views the window rotated along with the camera.
+    if (ecx)
+    {
+        const auto* view = static_cast<const CViewSetup*>(ecx);
+        float roll = std::fmod(view->angles.z, 360.f);
+        if (roll > 180.f) roll -= 360.f;
+        if (roll < -180.f) roll += 360.f;
+        if (view->m_bOffCenter && std::fabs(roll) > 90.f)
+        {
+            CViewSetup mirrored = *view;
+            mirrored.m_flOffCenterLeft = 1.f - view->m_flOffCenterRight;
+            mirrored.m_flOffCenterRight = 1.f - view->m_flOffCenterLeft;
+            mirrored.m_flOffCenterBottom = 1.f - view->m_flOffCenterTop;
+            mirrored.m_flOffCenterTop = 1.f - view->m_flOffCenterBottom;
+            static int s_log;
+            if (s_log < 4)
+            {
+                Game::logMsg("Mirror view: off-centre window turned with the 180-degree roll L/R %.3f/%.3f -> %.3f/%.3f (%dx%d)",
+                    view->m_flOffCenterLeft, view->m_flOffCenterRight, mirrored.m_flOffCenterLeft,
+                    mirrored.m_flOffCenterRight, view->width, view->height);
+                ++s_log;
+            }
+            hkComputeViewMatrices.fOriginal(&mirrored, worldToView, viewToProjection, worldToProjection);
+            return;
         }
     }
     hkComputeViewMatrices.fOriginal(ecx, worldToView, viewToProjection, worldToProjection);
