@@ -100,5 +100,12 @@ ShoulderGestures=true
 # Optional features, off by default:
 # Hold Triangle/Y 0.6 s = VR settings panel; a tap pauses on release.
 SettingsTriangleHold=false
+# Weapon menu: VR gear slot below the crowbar (opens the VR settings panel).
+# false hides it, but only while SettingsTriangleHold=true (else the panel
+# could not be opened at all).
+WeaponMenuSettingsGear=true
+# Weapon menu opened low (hand by the hip) tilts back to face the eye
+# (max 60 degrees); false = always upright.
+WeaponMenuTilt=true
 # The VR settings panel pauses the game while it is open.
 VrSettingsPause=true

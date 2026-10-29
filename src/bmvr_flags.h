@@ -282,6 +282,8 @@ namespace bmvr
     // Optional features, default off:
     extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
     extern bool g_SettingsTriangleHold;  // Triangle/Y hold opens the VR settings panel, tap pauses on release
+    extern bool g_WeaponMenuSettingsGear; // VR gear slot in the weapon menu (always shown without SettingsTriangleHold)
+    extern bool g_WeaponMenuTilt;        // weapon menu opened low tilts back to face the eye
     // CrouchStickHold=true: right stick down crouches only while held
     // (default false = each push toggles crouch).
     extern bool g_CrouchStickHold;

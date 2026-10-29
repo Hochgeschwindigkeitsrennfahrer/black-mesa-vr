@@ -1871,7 +1871,7 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
                     const Vector toCenter = hand + yawFwd * kMenuHandForwardHu - eye;
                     const float flat = sqrtf(toCenter.x * toCenter.x + toCenter.y * toCenter.y);
                     constexpr float kMaxTiltRad = 60.f * 3.14159265f / 180.f;
-                    float tilt = (flat > 1.f) ? atan2f(-toCenter.z, flat) : 0.f;
+                    float tilt = (bmvr::g_WeaponMenuTilt && flat > 1.f) ? atan2f(-toCenter.z, flat) : 0.f;
                     if (tilt > kMaxTiltRad)
                         tilt = kMaxTiltRad;
                     if (tilt > 0.f)
@@ -2015,7 +2015,9 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
         };
         packInto(kWeaponHex, static_cast<int>(sizeof(kWeaponHex) / sizeof(kWeaponHex[0])));
         // VR settings: one cell below the crowbar, outside the weapon brick.
-        if (placed < kMaxMenuSlots && take(0, -2))
+        // Hidden only when the Triangle/Y hold can still open the panel.
+        const bool showGear = bmvr::g_WeaponMenuSettingsGear || !bmvr::g_SettingsTriangleHold;
+        if (showGear && placed < kMaxMenuSlots && take(0, -2))
         {
             WeaponMenuSlot& gear = m_WeaponMenuSlots[placed];
             OffsetToPlane(0, -2, gear.planeX, gear.planeY);

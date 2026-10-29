@@ -122,6 +122,8 @@ namespace bmvr
     // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = true;
     bool g_SettingsTriangleHold = false;
+    bool g_WeaponMenuSettingsGear = true;
+    bool g_WeaponMenuTilt = true;
     bool g_CrouchStickHold = false;
     bool g_SprintToggle = false;
     bool g_VrSettingsPause = true;
@@ -605,6 +607,10 @@ namespace bmvr
                 g_ShoulderGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SettingsTriangleHold") == 0)
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "WeaponMenuSettingsGear") == 0)
+                g_WeaponMenuSettingsGear = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "WeaponMenuTilt") == 0)
+                g_WeaponMenuTilt = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PauseMenuColourFromFrame") == 0)
