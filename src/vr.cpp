@@ -3471,11 +3471,11 @@ namespace
     }
 }
 
-void VR::MaybeDebugDumpPublished(uint32_t slot)
+void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose)
 {
-    // Test aid only: the trigger file is polled on the publish path, so
-    // players' builds skip it (headless tests set BMVR_TESTDIR).
-    if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime)
+    // Test aid: the trigger file is polled on the publish path, so players'
+    // builds skip it (headless tests set BMVR_TESTDIR; DebugDumps=true opts in).
+    if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime && !bmvr::g_DebugDumps)
         return;
     static DWORD s_lastCheck = 0;
     const DWORD now = GetTickCount();
@@ -3510,6 +3510,17 @@ void VR::MaybeDebugDumpPublished(uint32_t slot)
     if (!g_D3DVR9 || FAILED(g_D3DVR9->GetD3DDevice(&dev)) || !dev)
         return;
     const std::string base = bmvr::VrFilePath(name);
+    // Pose of the pair being dumped, so a headless run can be put there.
+    Game::logMsg("debug dump %s: setup origin %.2f %.2f %.2f, hmd abs %.2f %.2f %.2f ang %.2f %.2f %.2f, "
+        "stereo frame hmd %.2f %.2f %.2f ang %.2f %.2f %.2f",
+        name, m_SetupOrigin.x, m_SetupOrigin.y, m_SetupOrigin.z,
+        m_HmdPosAbs.x, m_HmdPosAbs.y, m_HmdPosAbs.z, m_HmdAngAbs.x, m_HmdAngAbs.y, m_HmdAngAbs.z,
+        m_StereoFrameHmdPosAbs.x, m_StereoFrameHmdPosAbs.y, m_StereoFrameHmdPosAbs.z,
+        m_StereoFrameAngles.x, m_StereoFrameAngles.y, m_StereoFrameAngles.z);
+    if (pose && pose->valid)
+        Game::logMsg("debug dump %s: tracking pos %.4f %.4f %.4f quat %.4f %.4f %.4f %.4f", name,
+            pose->position[0], pose->position[1], pose->position[2],
+            pose->orientation[0], pose->orientation[1], pose->orientation[2], pose->orientation[3]);
     if (slot < kOpenXrPublishSlots)
     {
         DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[0][slot], base + "-left.bmp", step);
@@ -3523,7 +3534,7 @@ void VR::MaybeDebugDumpPublished(uint32_t slot)
 
 void VR::PublishOpenXrPair(uint32_t slot, const OpenXrPendingPublish& pend)
 {
-    MaybeDebugDumpPublished(slot);
+    MaybeDebugDumpPublished(slot, pend.havePose ? &pend.pose : nullptr);
     if (pend.havePose)
     {
         L4D2VR_PublishOpenXrGameRenderPose(pend.pose);

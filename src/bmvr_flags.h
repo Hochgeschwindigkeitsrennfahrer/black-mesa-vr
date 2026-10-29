@@ -319,6 +319,13 @@ namespace bmvr
     // MenuCursorHook (default true): GetCursorPos reports the VR menu pointer
     // while it is on a menu panel. false = real cursor (A/B test aid).
     extern bool g_MenuCursorHook;
+    // DebugDumps (default false): poll VR/dump.txt and VR/trace.txt in a
+    // normal session too (else headless tests only), so a headset session
+    // can write full uncropped eye images plus the head pose of that frame.
+    extern bool g_DebugDumps;
+    // RightEyeFirst (default false, test aid, MulticoreMode only): record the
+    // right eye's RenderView before the left one.
+    extern bool g_RightEyeFirst;
     // Exponential smoothing time (seconds) applied to HMD pitch/yaw while
     // scoped. Magnification otherwise turns every micro-movement into shake.
     extern float g_ScopeZoomSmoothSec;

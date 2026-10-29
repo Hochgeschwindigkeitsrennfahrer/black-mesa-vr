@@ -4170,6 +4170,33 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         m_VR->m_StereoBodyOrigin = setup.origin;
         m_VR->m_HasStereoBodyOrigin = true;
         StereoCostBegin();
+        // RightEyeFirst (test aid, MulticoreMode only): same two passes, right
+        // eye recorded first, to see whether culling follows the first view.
+        const bool rightFirst = mc && bmvr::g_RightEyeFirst;
+        if (rightFirst)
+        {
+            static int s_rfLog;
+            if (s_rfLog < 2)
+            {
+                Game::logMsg("RightEyeFirst: right eye RenderView before left");
+                ++s_rfLog;
+            }
+            const int eyeDraw = whatToDraw & ~kRenderViewDrawHud;
+            g_Cost.eye = 2;
+            m_VR->m_StereoEye = 2;
+            m_VR->QueueMcEyeBind(2, false);
+            long long t0 = QpcNow();
+            callOriginal(rightEyeView, nClearFlags, eyeDraw);
+            g_Cost.rightTicks += QpcNow() - t0;
+            g_Cost.eye = 1;
+            m_VR->m_StereoEye = 1;
+            m_VR->QueueMcEyeBind(1, true);
+            t0 = QpcNow();
+            callOriginal(leftEyeView, nClearFlags, eyeDraw);
+            g_Cost.leftTicks += QpcNow() - t0;
+        }
+        else
+        {
         g_Cost.eye = 1;
         m_VR->m_StereoEye = 1;
         if (!mc)
@@ -4301,6 +4328,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             }
         }
         } // !mc right post-RV
+        } // !rightFirst
         m_VR->m_StereoEye = 0;
         if (mc)
         {

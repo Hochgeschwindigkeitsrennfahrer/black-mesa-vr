@@ -191,7 +191,7 @@ public:
     // Test aid: when <VR dir>\dump.txt exists, writes the eye pair being
     // published and the HUD/menu overlay surface to <VR dir>\<name>-*.bmp
     // (name = first word of dump.txt) and deletes dump.txt.
-    void MaybeDebugDumpPublished(uint32_t slot);
+    void MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose);
 
     vr::IVRSystem* m_System = nullptr;
     vr::IVRInput* m_Input = nullptr;
