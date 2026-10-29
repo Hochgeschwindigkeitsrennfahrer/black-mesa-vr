@@ -5960,9 +5960,46 @@ void VR::FlushPendingQuit()
         m_Game->ClientCmd("quit");
 }
 
+// bmvr.cfg used to rely on an "exec bmvr" line in bms\cfg\autoexec.cfg, which
+// Black Mesa ships and replaces on game updates (2026-10-27): the VR settings
+// silently stopped applying. Run the configs from here once per game start
+// (after autoexec/config.cfg, so they win), and warn in the headset if the
+// file is gone. bmvr_local.cfg is an optional per-player override file.
+void VR::ExecVrConfigsOnce()
+{
+    if (m_VrConfigsExecuted || !m_Game || !m_Game->m_EngineClient)
+        return;
+    m_VrConfigsExecuted = true;
+    wchar_t exe[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring cfgDir(exe);
+    const size_t slash = cfgDir.find_last_of(L"\\/");
+    cfgDir = (slash == std::wstring::npos ? std::wstring(L".") : cfgDir.substr(0, slash)) + L"\\bms\\cfg\\";
+    auto exists = [&](const wchar_t* name) {
+        const DWORD attr = GetFileAttributesW((cfgDir + name).c_str());
+        return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+    };
+    if (exists(L"bmvr.cfg"))
+    {
+        const bool ok = m_Game->ClientCmd_Unrestricted("exec bmvr");
+        Game::logMsg("VR config: exec bmvr ok=%d", ok ? 1 : 0);
+    }
+    else
+    {
+        Game::logMsg("VR config: bms\\cfg\\bmvr.cfg missing");
+        ShowToast("VR CONFIG MISSING", 10000, "bms\\cfg\\bmvr.cfg - reinstall the mod");
+    }
+    if (exists(L"bmvr_local.cfg"))
+    {
+        const bool ok = m_Game->ClientCmd_Unrestricted("exec bmvr_local");
+        Game::logMsg("VR config: exec bmvr_local ok=%d", ok ? 1 : 0);
+    }
+}
+
 void VR::FlushPendingGameUi()
 {
     FlushPendingQuit();
+    ExecVrConfigsOnce();
     if (bmvr::g_FakeRuntime && m_Game)
     {
         char cmd[512];

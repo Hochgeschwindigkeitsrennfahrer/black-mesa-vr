@@ -1055,6 +1055,8 @@ public:
     char m_ToastDetail[64]{};
     DWORD m_ToastUntilMs = 0;
     int m_MissingOffsetsWarned = 0;   // Game::missingOffsetCount() at the last "out of date" toast
+    bool m_VrConfigsExecuted = false; // bmvr.cfg / bmvr_local.cfg run once per game start
+    void ExecVrConfigsOnce();
     void UpdateSettingsPanel();
     void DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);

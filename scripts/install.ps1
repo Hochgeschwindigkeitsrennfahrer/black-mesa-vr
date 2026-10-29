@@ -237,18 +237,7 @@ if (-not (Test-Path $CfgGame)) { throw "Missing $CfgGame" }
 $BmvrCfgSrc = Join-Path $VrSrc "bmvr.cfg"
 $BmvrCfgDst = Join-Path $CfgGame "bmvr.cfg"
 Copy-Item -Force $BmvrCfgSrc $BmvrCfgDst
-Write-Host "Installed $BmvrCfgDst (crosshair off, engine_no_focus_sleep 0)"
-$Autoexec = Join-Path $CfgGame "autoexec.cfg"
-if (Test-Path $Autoexec) {
-  $autoText = Get-Content -LiteralPath $Autoexec -Raw
-  if ($autoText -notmatch '(?m)^\s*exec\s+bmvr') {
-    Add-Content -LiteralPath $Autoexec -Value "`r`nexec bmvr`r`n"
-    Write-Host "Appended 'exec bmvr' to $Autoexec"
-  }
-} else {
-  Set-Content -LiteralPath $Autoexec -Value "exec bmvr`r`n" -Encoding ASCII
-  Write-Host "Created $Autoexec"
-}
+Write-Host "Installed $BmvrCfgDst (the VR mod runs it at game start; no autoexec.cfg line needed)"
 
 # Stock dxvk.conf sets deviceLossOnFocusLoss=True and overrides our built-in
 # bms.exe profile (False). Steam verify restores the stock file.

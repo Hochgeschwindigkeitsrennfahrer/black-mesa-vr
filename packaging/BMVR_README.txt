@@ -34,13 +34,12 @@ This zip also includes:
   Black Mesa\VR\hands\            HEV glove meshes
   Black Mesa\VR\weapon_wheel\     HL2VR radial-menu textures
   Black Mesa\VR\openxr_helper64\  L4D2VR x64 OpenXR helper (if built)
-  Black Mesa\bms\cfg\bmvr.cfg     crosshair off; do not sleep when the window loses focus
+  Black Mesa\bms\cfg\bmvr.cfg     crosshair, aim assist and motion blur off; do not sleep
+                                  when the window loses focus
 
-If bms\cfg\autoexec.cfg exists, add this line (once):
-
-  exec bmvr
-
-If it does not exist, create it with that single line.
+The VR mod runs bmvr.cfg by itself at every game start; nothing to add to
+autoexec.cfg (game updates replace that file). For your own console settings,
+create bms\cfg\bmvr_local.cfg; the mod runs it right after bmvr.cfg.
 
 
 2) Steam launch options
