@@ -70,7 +70,8 @@ Commits in question: 73de657 (per-eye occlusion tracker ids, `OcclusionTrackerPe
 - User (2026-10-31): happens on physical lean **and** stick-walking, in both eyes.
 - **Not the bulletproof-glass change (58d54df).** It only adds a `TraceRay` from the body's eye to the muzzle inside the shoot-position rewrite, and only when a shot is fired. It does not touch the view, the player hull or movement. `dTraceRay` is a pure pass-through.
 - **No camera-vs-wall handling exists.** The view is the body origin + the HMD offset from the recenter point (uncoupled 6DoF). Nothing traces from the body to the eye or keeps the eye out of walls. The player hull stops the body about 16 units from a wall. If the head is more than about 9 units (≈23 cm) from the recenter point towards the wall, the 7-unit near plane is inside it, whether you lean or stick-walk.
-- **Next tests (user):**
+- **User (2026-10-31): explained by not recentering after walking around with the game paused** (passthrough, desk, back). Added `AutoRecenterOnResume` (default true; VR panel VIEW row "Recenter after pause menu"; cvar `bmvr_recenter_on_resume`). Closing GameUI in a map re-latches the head position only. The stick-turn direction is kept regardless of "Recenter resets turning". Log: `Recenter position (pause menu closed)`. Not compiled or tested yet.
+- Earlier test list, kept for reference:
   1. Recenter while standing at your normal spot, then stick-walk straight into a wall. If the see-through is gone, it is the head offset (long-standing, not a regression). Fix: push the eye back to the body with a hull trace, or move the body with the head.
   2. `OcclusionTrackerPerEye=false` — does it change anything?
 

@@ -6041,11 +6041,14 @@ void VR::FlushPendingGameUi()
     }
     if (ok)
     {
+        const bool wasVisible = m_GameUiVisible;
         m_GameUiVisible = (op == 1);
         if (op == 1)
             m_GameUiActivateMs = GetTickCount();
         else
             m_GameUiActivateMs = 0;
+        if (op == 2 && wasVisible)
+            NoteGameUiDismissed();
     }
 }
 
@@ -6118,6 +6121,18 @@ void VR::SyncGameUiFromEngine()
     Game::logMsg("GameUI dismissed (engine hide)");
     Game::logMsg("GameUI dismissed follow-up overlay=%d pause=%d",
         Want2dMenuPanel() ? 1 : 0, WantPauseWorldOverlay() ? 1 : 0);
+    NoteGameUiDismissed();
+}
+
+void VR::NoteGameUiDismissed()
+{
+    // In a map only: the main menu and load screens have no head origin to
+    // fix, and the latch itself waits for gameplay.
+    if (!bmvr::g_AutoRecenterOnResume || !m_GameplayEligible)
+        return;
+    if (!m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+        return;
+    RecenterPosition("pause menu closed");
 }
 
 void VR::NoteAppActivated(bool activated)

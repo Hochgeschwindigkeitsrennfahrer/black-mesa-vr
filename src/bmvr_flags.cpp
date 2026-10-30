@@ -86,6 +86,7 @@ namespace bmvr
     bool g_DisableViewBob = true;
     bool g_LeftHanded = false;
     bool g_RecenterResetsYaw = true;
+    bool g_AutoRecenterOnResume = true;
     bool g_HideLocalPlayerModel = true;
     bool g_HideViewmodelArms = true;
     bool g_VrHandsGlovesEnabled = true;
@@ -565,6 +566,8 @@ namespace bmvr
                 g_LeftHanded = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RecenterResetsYaw") == 0)
                 g_RecenterResetsYaw = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "AutoRecenterOnResume") == 0)
+                g_AutoRecenterOnResume = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "HideLocalPlayerModel") == 0)
                 g_HideLocalPlayerModel = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "HideViewmodelArms") == 0)

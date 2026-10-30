@@ -200,6 +200,10 @@ namespace bmvr
     extern bool g_DisableViewBob;
     extern bool g_LeftHanded;
     extern bool g_RecenterResetsYaw;
+    // AutoRecenterOnResume (default true): closing the pause menu (GameUI) in
+    // a map recenters the head position (not the turn direction), so a walk
+    // away from the play spot while paused does not leave the eye in walls.
+    extern bool g_AutoRecenterOnResume;
     extern bool g_HideLocalPlayerModel;
     // Hybrid VR hands: hide FP `arms` bodypart by zeroing studiohdr nummeshes
     // (not MATERIAL_VAR_NO_DRAW). Opposite of L4D2VR NativeViewmodelHandsOnly.

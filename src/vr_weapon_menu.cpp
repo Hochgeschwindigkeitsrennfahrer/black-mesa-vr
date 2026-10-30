@@ -1764,6 +1764,15 @@ void VR::Recenter(const char* why)
     Game::logMsg("Recenter (%s)%s", why, bmvr::g_RecenterResetsYaw ? " + yaw" : "");
 }
 
+void VR::RecenterPosition(const char* why)
+{
+    // The next tracking update re-latches the HMD origin (position only;
+    // the latched angles are never applied), so the eye lands back on the
+    // body. Stick-turn yaw and the menu panel stay as they are.
+    m_HmdOriginLatched = false;
+    Game::logMsg("Recenter position (%s)", why);
+}
+
 // Right-stick tap (HL2VR style): bare hands <-> the weapon held before.
 // Holstering never changes the game's active weapon, so going back only
 // re-selects when that weapon changed meanwhile (e.g. a pickup).

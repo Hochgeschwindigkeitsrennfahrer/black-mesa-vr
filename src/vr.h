@@ -968,6 +968,8 @@ public:
     bool WantPauseWorldOverlay() const;
     bool EngineGameUiVisible() const;
     void SyncGameUiFromEngine();
+    // GameUI went away (engine hide or our gameui_hide): AutoRecenterOnResume.
+    void NoteGameUiDismissed();
     bool Want2dMenuPanel() const;
     bool WantMenuPanelLatch() const;
     void GetMenuOverlayMetrics(float& distM, float& widthM, float& yOffM) const;
@@ -1206,6 +1208,8 @@ private:
     void RefreshActiveWeaponModel();
     void ToggleEmptyHands();
     void Recenter(const char* why);
+    // Head position only (turn direction kept): AutoRecenterOnResume.
+    void RecenterPosition(const char* why);
     void RefreshHeldWeaponState();
     void ApplyViewmodelBasisOffsets();
     void ApplyTwoHandWeaponAim();
