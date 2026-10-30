@@ -285,14 +285,15 @@ namespace bmvr
     // shrink by one factor when RenderScale asks for more. MulticoreMode also
     // caps the height at 5456 (ring = 3 eye heights, DXVK max 16384).
     extern uint32_t g_MaxEyeSize;
-    // ReflectionRtScale (default 0 = engine 1024x1024; 0.25..1 = fraction of
-    // the eye size): grow _rt_Water*, *Reflect*/*Refract* and _rt_PowerOfTwoFB.
-    // Experiment for mirrored floors / refract glass at 1024 (2026-10-30).
+    // ReflectionRtScale (default 0.5; 0 = engine 1024x1024; 0.25..1 = fraction
+    // of the eye size): grow _rt_Water*, *Reflect*/*Refract* and _rt_PowerOfTwoFB.
+    // At 1024 mirrored floors / refract glass shimmered at the edges; 0.5 fixes
+    // that at an acceptable cost in the headset (2026-10-30).
     extern float g_ReflectionRtScale;
     // Size the reflection set was grown to (0 = not grown). Set by the
     // CreateNamedRT hook; read by the viewport/scissor/clear/constant hooks.
     extern int g_ReflectionRtW;
-    // GpuPassTiming (default false; also on while ReflectionRtScale > 0): log
+    // GpuPassTiming (default false): log
     // GPU ms per frame for eye-sized RTs, the reflection set and refract
     // copies, per eye, every ~5 s (D3D timestamp queries, no stalls).
     extern bool g_GpuPassTiming;

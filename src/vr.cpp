@@ -406,7 +406,7 @@ namespace
 
     bool GpuTimerEnabled()
     {
-        return !g_GpuTimer.failed && (bmvr::g_GpuPassTiming || bmvr::g_ReflectionRtScale > 0.f);
+        return !g_GpuTimer.failed && bmvr::g_GpuPassTiming;
     }
 
     bool GpuTimerThreadOk()

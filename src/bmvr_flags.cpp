@@ -120,7 +120,7 @@ namespace bmvr
     bool g_VrSkipMotionBlur = true;
     bool g_StereoEnginePost = true;
     uint32_t g_MaxEyeSize = 4096;
-    float g_ReflectionRtScale = 0.f;
+    float g_ReflectionRtScale = 0.5f;
     int g_ReflectionRtW = 0;
     bool g_GpuPassTiming = false;
     int g_ReflectionRtH = 0;

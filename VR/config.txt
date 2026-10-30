@@ -17,6 +17,11 @@ MaxEyeSize=4096
 # shimmer). Empty = the big image goes to the runtime, which scales it.
 OpenXRHelperDownsample=
 
+# Water and mirror-floor reflections as a fraction of the eye size (default
+# 0.5). 0 = the engine's fixed 1024x1024, which shimmers at floor and wall
+# edges at headset resolution. Costs GPU in rooms with big reflective floors.
+ReflectionRtScale=0.5
+
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
 WorldRenderAtEyeSize=true
