@@ -5811,8 +5811,24 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
     }
     const bool stereoEyePost = Hooks::m_VR && Hooks::m_VR->StereoWorldPassActive()
         && (bmvr::OffscreenWorldMatchesEyes() || Hooks::m_VR->ShouldHwndBlitStereo());
-    const bool eyeEnginePost = stereoEyePost && bmvr::g_StereoEnginePost
+    // Gameplay only (non-background LevelInit and IsInGame, same gate as the
+    // menu engine_post uv fix below). Load screens and menu maps keep the old
+    // skip: the src-rect remap zoomed the load screen into its top-left
+    // (user, 2026-10-30).
+    const bool enginePostMat = stereoEyePost && bmvr::g_StereoEnginePost
         && EnginePostMaterial(matName);
+    const bool eyeEnginePost = enginePostMat && Hooks::m_VR->IsGameplayEligible() && EngineInGame();
+    if (enginePostMat && !eyeEnginePost)
+    {
+        static int s_gatedPost;
+        if (s_gatedPost < 4)
+        {
+            Game::logMsg("DSSR engine_post not gameplay, skipped %s dest=%d,%d %dx%d src=%dx%d uv=(%.1f,%.1f)-(%.1f,%.1f) eligible=%d inGame=%d",
+                matName, destX, destY, width, height, srcWidth, srcHeight, srcX0, srcY0, srcX1, srcY1,
+                Hooks::m_VR->IsGameplayEligible() ? 1 : 0, EngineInGame() ? 1 : 0);
+            ++s_gatedPost;
+        }
+    }
     if (StereoBloomMaterial(matName) && stereoEyePost && !eyeEnginePost)
     {
         static int s_skipBloom;

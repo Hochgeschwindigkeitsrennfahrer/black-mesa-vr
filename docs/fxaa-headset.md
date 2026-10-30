@@ -51,7 +51,7 @@ Keep skipping the bloom-only steps (`lumcompare` / `downsample` / `blurfilter` /
 
 When on, in `dDrawScreenSpaceRectangle` during a stereo eye pass:
 
-- `engine_post*` (not HUD) is drawn instead of skipped.
+- `engine_post*` (not HUD) is drawn instead of skipped — **gameplay only** (`IsGameplayEligible()` from a non-background LevelInit **and** `IsInGame()`). Load screens and menu maps keep the old skip; those calls log `DSSR engine_post not gameplay, skipped ...` (first 4).
 - `lumcompare` / `downsample*` / `blurfilter*` / `blur_combine*` stay skipped.
 - Before the draw, the material's bloom var is zeroed so the stale `_rt_Small*FB*` contents add nothing (lookup below).
 - The original value is restored after the next render-target change (`PushRenderTargetAndViewport` / `PopRenderTargetAndViewport`) or `EndFrame` on the same thread. The DSSR quad can stay in the buffered dynamic mesh after the call returns, and the shader reads the var when that batch flushes; Source 2013 `SetRenderTargetEx` flushes buffered primitives. Restoring right after the DSSR call could let the bloom value back in.
@@ -94,6 +94,11 @@ Same setup. Still squeezed into the top 54 %. Eye line: `rt=0x0 vp=0,0 1152x1184
 - Bloom: `$bloomenable=2` and `$aaenable=2` — FindVar finds them, but slot 1 of the var does not return the name, so the `$bloomenable` fallback was rejected (`bloomVar=none`). That fits the CS:GO `IMaterialVar` layout (`IsTextureValueInternalEnvCubemap` inserted at slot 1, so `GetName` 2, `SetFloatValue` 4, `SetIntValue` 5). Now: FindVar's found flag is trusted; the `GetName` slot is detected (1 or 2, both side-effect-free const getters in either layout) on the first found var and logged as `IMaterialVar layout: GetName slot N (...)`; the setters follow it. If neither slot returns the name, `m_intVal` (+0x8) and `m_VecVal[0]` (+0xC) are written directly instead of guessing a setter slot. `$bloomenable` is zeroed with `SetIntValue(0)` and restored the same way.
 
 Expected next eye line: `bloomVar=$bloomenable set=1 orig=1.000 varSlot=2 ... uv=(0.0,-0.5)-(287.0,295.0) -> (0.0,-0.5)-(319.0,158.5)`. `varSlot=0` means the direct-write fallback was used.
+
+### HMD on 0db7d66 (user, 2026-10-30)
+
+- FXAA visibly better, but only marginally; walls/floors still strongly aliased (in-game anisotropic 16x already on). Likely texture/specular shimmer, which post-FXAA cannot fix; render resolution matters more (user's existing `VR/config.txt` had no `WorldRenderAtEyeSize` key, so the code default `false` applied: window-sized world stretched into the eyes).
+- Load screen looked zoomed (top-left of the image). The eye `engine_post` path was not gated on gameplay, and the src-rect remap undid BM's deliberate FullFrame/window uv stretch on the load screen. Fixed by the gameplay gate above; not yet re-tested.
 
 ### Assumptions to verify at runtime
 
