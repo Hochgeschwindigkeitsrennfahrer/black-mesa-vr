@@ -285,6 +285,10 @@ namespace bmvr
     // shrink by one factor when RenderScale asks for more. MulticoreMode also
     // caps the height at 5456 (ring = 3 eye heights, DXVK max 16384).
     extern uint32_t g_MaxEyeSize;
+    // ReflectionRtScale (default 0 = engine 1024x1024; 0.25..1 = fraction of
+    // the eye size): grow _rt_Water*, *Reflect*/*Refract* and _rt_PowerOfTwoFB.
+    // Experiment for mirrored floors / refract glass at 1024 (2026-10-30).
+    extern float g_ReflectionRtScale;
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose

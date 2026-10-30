@@ -136,3 +136,26 @@ Limits checked:
 - VRAM rough estimate at 5456²: ring ≈ 0.7 GB (8-bit) to 1.4 GB (16F), eye RTs + 4 publish slots per eye ≈ 1 GB, helper swapchains ≈ 0.7 GB, G-buffers 1–2.5 GB. Fits 16 GB.
 
 Test: `MaxEyeSize=5120` (or 5456) in `VR/config.txt`, RenderScale e.g. 1.75 (2884×1.75 = 5047, 2940×1.75 = 5145 → about 5024×5120 with the cap at 5120). Check `Eye RT`, `MC ring ready`, `Eye N swapchain ... ->`, and that the world renders.
+
+## 8. Follow-up tests (user REPORT.md, 2026-10-30 afternoon)
+
+- `dxvk.conf` (`d3d9.samplerAnisotropy = 16`, `d3d9.samplerLodBias = 0.5`): **no change**. Texture filtering is not the shimmer source.
+- `MaxEyeSize=5456`, RenderScale 1.75: eye 5056×5152, `MC ring ready 10128x15456`, helper swapchains followed, world rendered. Distant and close floor/wall shimmer **unchanged** with ~1.6× the pixels of 1.39, so not plain resolution aliasing. Perf 62–75 fps, ~20 % reprojected. After ~5 min **bms.exe exited with code 1**, no fault entry. Most likely 32-bit address-space exhaustion: bms.exe is 32-bit and DXVK keeps mappings/staging for those RTs in the process; the ring alone is ~0.6 GB at that size. Treat MaxEyeSize above ~4096 with MulticoreMode as unsafe until a `PROTON_LOG=1` run says otherwise. User is back on 1.39.
+
+### Mirrored floors and refract glass are 1024×1024 renders (likely cause of the "resolution-proof" stair-steps)
+
+The log shows `_rt_waterreflection`, `_rt_waterrefraction` and `_rt_poweroftwofb` all at **1024×1024**, while the eye is 3472–5056 px. All three are deliberately excluded from the eye-size grow (`skipGrow` in `dCreateNamedRTEx`).
+
+- **Lobby floor (`floor-and-wall-aa-issues.png`):** the shiny floor is the water-type mirror (bc7cf79). Its reflection of the baseboard and carpet edge is rendered into the 1024² reflection RT and magnified 3–5× → regular stair-steps that shimmer as the reflection view moves. No RenderScale or FXAA change can touch it, which matches the report exactly.
+- **Door glass (`door-glass-reflection-wrong-res.jpg`):** wired glass is a refract material sampling `_rt_PowerOfTwoFB`. The eye is copied into the 1024² texture (`CopyRTEx refract stretch drop srcRect 0,0 3472x3536 into dest 1024x1024`), so at best it is a 3.4× blow-up. The visibly wrong *region* (magnified crop) is not explained yet; likely the source RT of that copy is not the plain eye at that moment.
+- The "do not grow Water/Refract RTs" rule in RUNTIME.md has no verified failure for these names on this path. The verified failure was growing `_rt_Small*FB*` (zoom/warp). The related real risk is the reflection-view viewport: `ClampStereoViewport` skips square sub-eye viewports so a 1024 reflection view is not expanded and stamped as a view-locked world.
+
+**Confirm first (console, no restart):** in the `bm_c1a0a` lobby, `r_WaterDrawReflection 0`. If the floor stair-steps disappear (the floor stops mirroring), it is the reflection RT. Set it back to `1` afterwards.
+
+**Experiment (done, not compiled or tested):** `ReflectionRtScale` (code default 0 = engine 1024²; 0.25–1 = fraction of the eye size, not in the shipped config). It grows `_rt_Water*`, `*Reflect*` / `*Refract*` and `_rt_PowerOfTwoFB` to that fraction of the eye at creation (restart needed). `_rt_Camera` stays. Log: `CreateNamedRT ... reflection grow ... LITERAL (ReflectionRtScale ...)`. Try `0.5` first: the reflection is a second scene render per eye, so 1.0 costs real GPU time. Check the lobby floor, the door glass, Xen/coast water, and that no view-locked image appears in mirrors or water.
+
+### Still open
+
+- Distant shimmer that is not on mirrors/glass: the user's proposed motionless test (headset on a table facing a shimmering wall) is the right next step. If it still shimmers when nothing moves, something changes per frame in the render.
+- Load screens: compare on experimental-beta 6cc0009.
+- Light flicker: per-eye pixel-visibility ids (Ghidra), §7.

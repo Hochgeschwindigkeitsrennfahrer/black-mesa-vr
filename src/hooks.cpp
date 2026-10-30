@@ -50,6 +50,7 @@ static uint32_t ServerRva(uintptr_t addr)
 #include "trace.h"
 #include "texture.h"
 #include <Windows.h>
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -8611,6 +8612,33 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
         growH = gbH;
     }
     bool wantGrow = wantGrowFb || wantGrowGb;
+    // ReflectionRtScale (default 0 = engine size): the water reflection /
+    // refraction RTs and _rt_PowerOfTwoFB (refract materials, e.g. wired
+    // glass) stay 1024x1024 while the eye is 3472-5056 px, so mirrored floors
+    // and glass are a 3-5x blow-up of a small render: stair-stepped edges
+    // that no RenderScale or FXAA changes (bm_c1a0a lobby floor, bm_c2a2b door
+    // glass, 2026-10-30). Opt-in experiment: earlier reflection-viewport bugs
+    // stamped a view-locked world into these RTs, and the reflection is a
+    // second scene render per eye. _rt_Camera (monitor cameras) stays.
+    const bool reflectRt = name && bmvr::g_ReflectionRtScale > 0.f
+        && (std::strstr(name, "Water") || std::strstr(name, "water")
+            || std::strstr(name, "Reflect") || std::strstr(name, "Refract")
+            || std::strstr(name, "PowerOfTwo"));
+    uint32_t reflEyeW = 0, reflEyeH = 0;
+    if (reflectRt && bmvr::ComputeOffscreenEyeSize(reflEyeW, reflEyeH))
+    {
+        const float scale = std::min(1.f, bmvr::g_ReflectionRtScale);
+        const int rw = static_cast<int>(static_cast<float>(reflEyeW) * scale) & ~15;
+        const int rh = static_cast<int>(static_cast<float>(reflEyeH) * scale) & ~15;
+        if (rw > w && rh > h && rw >= 256 && rh >= 256)
+        {
+            Game::logMsg("CreateNamedRT %s reflection grow %dx%d mode=%d -> %dx%d LITERAL (ReflectionRtScale %.2f of eye %ux%u)",
+                name, w, h, sizeMode, rw, rh, scale, reflEyeW, reflEyeH);
+            w = rw;
+            h = rh;
+            sizeMode = RT_SIZE_LITERAL;
+        }
+    }
     const int oldW = w;
     const int oldH = h;
     if (wantGrow && oldW >= 640 && oldH >= 360

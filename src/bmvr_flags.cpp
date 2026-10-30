@@ -120,6 +120,7 @@ namespace bmvr
     bool g_VrSkipMotionBlur = true;
     bool g_StereoEnginePost = true;
     uint32_t g_MaxEyeSize = 4096;
+    float g_ReflectionRtScale = 0.f;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.
@@ -639,6 +640,11 @@ namespace bmvr
                 g_VrSkipMotionBlur = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "StereoEnginePost") == 0)
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ReflectionRtScale") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                g_ReflectionRtScale = (v > 0.f && v <= 1.f) ? v : 0.f;
+            }
             else if (std::strcmp(n, "MaxEyeSize") == 0)
             {
                 const int v = atoi(val);
