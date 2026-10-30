@@ -89,3 +89,50 @@ Commits in question: 73de657 (per-eye occlusion tracker ids, `OcclusionTrackerPe
 4. Lights: `r_dopixelvisibility 0`, `r_pixelvisibility_partial 0`, `OffCenterEyes=false`; say which part flickers.
 5. Walls: `OcclusionTrackerPerEye=false`; lean vs stick; one eye or both.
 6. `dxvk.conf` AF / LOD bias result.
+
+## 7. Headset test of ed7c349 (user REPORT.md, 2026-10-30)
+
+Sessions: RenderScale 1.2 (eye 3472×3536) and 1.39 (eye 4016×4096). PSVR2 recommended 2884×2940 after resetting SteamVR resolution.
+
+| Item | Result / analysis |
+| --- | --- |
+| Helper 1:1 path | Active (swapchain recreated at source size, `fit=fill`). Shimmer still there, maybe slightly better. **Helper resample ruled out** as the shimmer source. |
+| FXAA | Toggle visible in the HMD, on is better. User now runs stronger `mat_fxaa_subpixel_Q 1.0`, `mat_fxaa_edge_threshold_Q 0.063`, `mat_fxaa_edge_threshold_min_Q 0.0312` (+ `_C`): somewhat better, not fixed. |
+| Load screens | Still clipped (top-left of the logo text, no background). **Not the eye `engine_post` path**: the log shows both load-time calls skipped by the gate (`engine_post not gameplay, skipped ... inGame=0`), and in this setup the src rect already matched (`uv ... -> unchanged`), so the remap never changed anything. Next: check the same load screen on experimental-beta 6cc0009 (pre-branch) to see whether it is a regression at all. |
+| Pause menu background on the desktop | Not shown; unknown whether it ever was. Not investigated. |
+| Recenter after pause | Works (`Recenter position (pause menu closed)`). |
+| MC copy | 28 179 queued, 9 queue fails, 46 Present fallbacks in 27 min: the fallback is negligible. Closed. |
+| Light flicker | `r_dopixelvisibility 0` or `r_pixelvisibility_partial 0` each stop it (and remove the glows). **Cause: the glow pixel-visibility queries.** See below. |
+| Bloom ghosts `bm_c1a0a` | Not tested yet. |
+
+### Light flicker: per-eye pixel-visibility queries (plan, needs Ghidra)
+
+Source 2013 `pixelvisibility.cpp`: `PixelVisibility_FractionVisible` → `CPixelVisibilitySystem::GetFractionVisible` → `FindQueryForView(set, CurrentViewID())`. Each glow keeps one query per **view id**. Both stereo eyes render as `VIEW_MAIN`, so they share one query per light: each eye re-issues it against its own depth and reads the other eye's result. Partially occluded or far (few pixels) glows then flip every frame — the same class of bug as the occlusion tracker before 73de657.
+
+Fix along the 73de657 pattern: during the right eye's views, offset the view id **only where pixel visibility uses it** (not the global `g_CurrentViewID`, which much else reads). Ghidra work on Steam BM beta 26234270 `client.dll`:
+
+1. `PixelVisibility_EndCurrentView` thunk is known: `client+0xE3B00` (`MOV ECX,g_PixelVisibilitySystem; JMP EndView`), `PixelVisibility_EndScene` `client+0xE3B10` (`research/hl2vr/optimization.md` §14).
+2. From `EndView` find `CPixelVisibilitySystem::FindQueryForView(CPixelVisSet*, int viewID)` / `AllocQuery` and the place that reads `CurrentViewID()` for pixel vis (`GetFractionVisible`, `EndView`).
+3. Hook whichever function takes the view id as an argument (or the small `CurrentViewID` read inside it) and add the right-eye offset for `VIEW_MAIN`-class ids, as `dOcclusionBeginView` does.
+
+The old `hl2vr_pixelvis` (skip `EndCurrentView` on the second eye) is a different, performance-only change and stays off.
+
+### New bugs (not investigated)
+
+1. Monitor-cluster shadow drawn above the screens (main-menu background map).
+2. Left-eye flashlight shadow updates choppily; right eye smooth (MulticoreMode on). Lead: the flashlight shadow-depth render runs once per frame tied to one view; check the order of shadow-depth renders against the two eye passes, and whether our flashlight-state hooks (`dUpdateFlashlightState`, `dBmFlashlightUpdate`) update the pose after the left eye already rendered.
+
+### Eye size cap (done in this pass, not compiled or tested)
+
+`ComputeOffscreenEyeSize` now shrinks both axes by **one factor** when RenderScale asks for more than the cap (aspect kept), and the cap is the tunable `MaxEyeSize` (code default 4096 = unchanged behaviour, 2048..8192, not in the shipped config). Log: `Eye size WxH capped to WxH (MaxEyeSize N...)`.
+
+Limits checked:
+
+- DXVK d3d9 caps: `MaxTextureDimension = 16384` (`third_party/l4d2vr/dxvk_new/src/d3d9/d3d9_caps.h`).
+- **MulticoreMode ring = 2×3 eyes** (`MC ring ready 6960x10608 (2x3 +16 gutter)` at eye 3472×3536; `McRingHeight() = 3 * h`). So with MulticoreMode the height is also capped at 5456 (16384 / 3, 16-aligned). This, not the eye RT itself, is the practical ceiling.
+- Helper: swapchains follow the source size within the runtime's `maxImageRect`; a larger source keeps the recommended swapchain (fill blit) and logs `stays ... outside ...`.
+- Other `4096` checks in `vr.cpp` (`KnownWindowWidth/Height`, HUD overlay) are about the desktop window, not the eye.
+- Not verified: Black Mesa's own RT allocation above 4096 (`_rt_FullFrameFB*`, `_rt_gb*`, small FB). Source reads the max texture size from the device caps (16384 here), so no hard 4096 limit is expected, but only a run will tell. The old "near the 2544 first-stereo crash" warning belongs to the retired HMD-framebuffer path.
+- VRAM rough estimate at 5456²: ring ≈ 0.7 GB (8-bit) to 1.4 GB (16F), eye RTs + 4 publish slots per eye ≈ 1 GB, helper swapchains ≈ 0.7 GB, G-buffers 1–2.5 GB. Fits 16 GB.
+
+Test: `MaxEyeSize=5120` (or 5456) in `VR/config.txt`, RenderScale e.g. 1.75 (2884×1.75 = 5047, 2940×1.75 = 5145 → about 5024×5120 with the cap at 5120). Check `Eye RT`, `MC ring ready`, `Eye N swapchain ... ->`, and that the world renders.

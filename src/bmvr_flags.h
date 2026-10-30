@@ -281,6 +281,10 @@ namespace bmvr
     extern float g_ThrowScale;           // hand speed x 2/3 x this, capped at 1000 u/s (Lambda1VR vr_throw_scale)
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
     extern bool g_StereoEnginePost;      // run engine_post (tonemap / colour correction / FXAA) on eyes, bloom zeroed
+    // MaxEyeSize (default 4096, 2048..8192): largest eye RT side. Both axes
+    // shrink by one factor when RenderScale asks for more. MulticoreMode also
+    // caps the height at 5456 (ring = 3 eye heights, DXVK max 16384).
+    extern uint32_t g_MaxEyeSize;
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose

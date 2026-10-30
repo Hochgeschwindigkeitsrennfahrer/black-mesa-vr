@@ -119,6 +119,7 @@ namespace bmvr
     float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
     bool g_StereoEnginePost = true;
+    uint32_t g_MaxEyeSize = 4096;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.
@@ -638,6 +639,11 @@ namespace bmvr
                 g_VrSkipMotionBlur = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "StereoEnginePost") == 0)
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MaxEyeSize") == 0)
+            {
+                const int v = atoi(val);
+                g_MaxEyeSize = static_cast<uint32_t>(v < 2048 ? 2048 : (v > 8192 ? 8192 : v)) & ~15u;
+            }
             else if (std::strcmp(n, "SprintAimedPose") == 0)
                 g_SprintAimedPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MirrorBothEyes") == 0)
@@ -2141,12 +2147,41 @@ namespace bmvr
         float s = g_RenderScale;
         if (!(s > 0.24f && s < 4.f))
             s = 1.f;
-        uint32_t w = (static_cast<uint32_t>(static_cast<float>(recW) * s + 0.5f) + 15u) & ~15u;
-        uint32_t h = (static_cast<uint32_t>(static_cast<float>(recH) * s + 0.5f) + 15u) & ~15u;
-        if (w > 4096)
-            w = 4096;
-        if (h > 4096)
-            h = 4096;
+        // One factor for both axes. Clamping each axis on its own changed the
+        // eye aspect once one side hit the cap (PSVR2 recommended 2884x2940
+        // clamped only the height above RenderScale 1.39). DXVK's texture
+        // limit is 16384; the MulticoreMode ring stacks three eye heights
+        // (McRingHeight = 3 * h), so h <= 5456 there.
+        const float cap = static_cast<float>(g_MaxEyeSize);
+        const float capH = g_MulticoreMode ? std::min(cap, 5456.f) : cap;
+        const float fw = static_cast<float>(recW) * s;
+        const float fh = static_cast<float>(recH) * s;
+        const float fit = std::min(1.f, std::min(cap / fw, capH / fh));
+        uint32_t w = 0;
+        uint32_t h = 0;
+        if (fit < 1.f)
+        {
+            w = static_cast<uint32_t>(fw * fit) & ~15u;
+            h = static_cast<uint32_t>(fh * fit) & ~15u;
+        }
+        else
+        {
+            w = (static_cast<uint32_t>(fw + 0.5f) + 15u) & ~15u;
+            h = (static_cast<uint32_t>(fh + 0.5f) + 15u) & ~15u;
+            if (w > static_cast<uint32_t>(cap))
+                w = static_cast<uint32_t>(cap) & ~15u;
+            if (h > static_cast<uint32_t>(capH))
+                h = static_cast<uint32_t>(capH) & ~15u;
+        }
+        static uint32_t s_loggedW, s_loggedH;
+        if (fit < 1.f && (s_loggedW != w || s_loggedH != h))
+        {
+            s_loggedW = w;
+            s_loggedH = h;
+            Log("Eye size %ux%u capped to %ux%u (MaxEyeSize %u%s; aspect kept)",
+                static_cast<uint32_t>(fw + 0.5f), static_cast<uint32_t>(fh + 0.5f), w, h, g_MaxEyeSize,
+                g_MulticoreMode ? ", MulticoreMode ring height 5456" : "");
+        }
         if (w < 640)
             w = (recW + 15u) & ~15u;
         if (h < 360)
