@@ -65,10 +65,12 @@ Commits in question: 73de657 (per-eye occlusion tracker ids, `OcclusionTrackerPe
 - Extra objects drawn are still depth-tested against the wall, so per-eye occlusion alone cannot make a wall transparent.
 - Possible link: before 73de657, objects behind a wall that only the right eye's queries would have shown stayed culled. When the camera gets into a wall (head leaning past the player hull with a 7-unit near plane), more of what is behind it is now drawn, so the same clipping is far more noticeable.
 - Unknown: whether the tracker's per-view state is sized for ids ≥ 0x100. An out-of-range id would be a real bug; needs Ghidra on the tracker's per-view storage.
+- User (2026-10-31): happens on physical lean **and** stick-walking, in both eyes.
+- **Not the bulletproof-glass change (58d54df).** It only adds a `TraceRay` from the body's eye to the muzzle inside the shoot-position rewrite, and only when a shot is fired. It does not touch the view, the player hull or movement. `dTraceRay` is a pure pass-through.
+- **No camera-vs-wall handling exists.** The view is the body origin + the HMD offset from the recenter point (uncoupled 6DoF). Nothing traces from the body to the eye or keeps the eye out of walls. The player hull stops the body about 16 units from a wall. If the head is more than about 9 units (≈23 cm) from the recenter point towards the wall, the 7-unit near plane is inside it, whether you lean or stick-walk.
 - **Next tests (user):**
-  1. `OcclusionTrackerPerEye=false` — does it still happen?
-  2. Physical lean towards the wall vs stick-walking into it.
-  3. One eye or both (VR panel DEBUG blank-eye row).
+  1. Recenter while standing at your normal spot, then stick-walk straight into a wall. If the see-through is gone, it is the head offset (long-standing, not a regression). Fix: push the eye back to the body with a hull trace, or move the body with the head.
+  2. `OcclusionTrackerPerEye=false` — does it change anything?
 
 ## 5. Other open items
 
