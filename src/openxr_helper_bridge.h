@@ -21,6 +21,9 @@ struct OpenXrHelperLaunchConfig
     // Eye swapchains at the game eye size (1:1 copy, only the runtime
     // resamples) when the game supplies the FOV. false = recommended size.
     bool swapchainAtSourceSize = true;
+    // OpenXRHelperDownsample=box: the helper box-filters the eye down to the
+    // recommended swapchain size (wins over swapchainAtSourceSize). off = default.
+    bool downsampleBox = false;
     bool useGameRenderPoseForProjection = true;
     int forceMonoProjectionEye = -1;
     int forceMonoProjectionView = -1;

@@ -159,3 +159,24 @@ The log shows `_rt_waterreflection`, `_rt_waterrefraction` and `_rt_poweroftwofb
 - Distant shimmer that is not on mirrors/glass: the user's proposed motionless test (headset on a table facing a shimmering wall) is the right next step. If it still shimmers when nothing moves, something changes per frame in the render.
 - Load screens: compare on experimental-beta 6cc0009.
 - Light flicker: per-eye pixel-visibility ids (Ghidra), §7.
+
+## 9. Helper box downsample (OpenXRHelperDownsample)
+
+Since bae6915 the helper submits the eye 1:1 at the game eye size (e.g. 4016×4096 at RenderScale 1.39, recommended 2884×2940), and SteamVR's distortion pass does the whole downscale to the panel. If that pass is a single bilinear tap without mips, most supersampled pixels never contribute, which would fit "RenderScale 1.75 barely helps".
+
+`OpenXRHelperDownsample=box` (default `off`, not in the shipped config): the eye swapchain stays at the recommended size and the eye blit uses `shaders/blit_box.frag`. Each output pixel averages `ceil(footprint)²` bilinear taps spread over its source footprint (up to 8×8), in linear light, so every source pixel contributes. The runtime's distortion resample is then close to its normal ratio. Box wins over `OpenXRHelperSwapchainAtSourceSize`. Overlays (menu/HUD) keep the plain blit. Needs the sRGB shader blit path (the PSVR2 log uses it: swapchain format 50).
+
+Logs (helper):
+
+- `OpenXR eye downsample: box (recommended-size swapchain)` / `off`
+- `Box downsample blit pipeline=1 flipPipeline=1`
+- `Eye N scale path: box downsample source 4016x4096 -> swapchain 2884x2940` (or `1:1 copy` / `single-tap resample`), on every change.
+
+Status: implemented; shader compiled with glslangValidator 15.1 and passes `spirv-val`; C++ not compiled here; not headset-tested.
+
+**Test plan (user):** RenderScale 1.39, two launches, same spots (lobby walls/floor, distant cabinets/wiring):
+
+1. `OpenXRHelperDownsample=off` (current 1:1 path): helper log `Eye 0 scale path: 1:1 copy source 4016x4096 -> swapchain 4016x4096`.
+2. `OpenXRHelperDownsample=box`: `Eye 0 scale path: box downsample source 4016x4096 -> swapchain 2884x2940`.
+
+Compare the shimmer and the GPU cost (SteamVR frame timing GPU ms, `OpenXR publish rate` / `paceWait`). The box pass reads ~16 M source pixels per eye in 4 taps per output pixel, so expect a fraction of a millisecond. The runtime then composites a smaller swapchain, which can win some of that back.

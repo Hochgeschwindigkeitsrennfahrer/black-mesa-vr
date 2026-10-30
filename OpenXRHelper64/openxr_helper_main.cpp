@@ -136,6 +136,9 @@ namespace
         // Eye swapchains at the game eye size (1:1 copy) when the game
         // supplies the FOV. false = runtime recommended size (resampled).
         bool swapchainAtSourceSize = true;
+        // Eye blit does a box-filtered downscale to the recommended swapchain
+        // size (wins over swapchainAtSourceSize). Default off (A/B).
+        bool downsampleBox = false;
         bool useGameRenderPoseForProjection = false;
         int forceMonoProjectionEye = -1;
         int forceMonoProjectionView = -1;
@@ -813,6 +816,10 @@ namespace
                 if (ParseUintArg(value, enabled))
                     options.gameRendersRuntimeFov = enabled != 0;
             }
+            else if (const wchar_t* value = needsValue(L"--downsample"))
+            {
+                options.downsampleBox = _wcsicmp(value, L"box") == 0 || _wcsicmp(value, L"1") == 0;
+            }
             else if (const wchar_t* value = needsValue(L"--swapchain-at-source-size"))
             {
                 uint32_t enabled = 0;
@@ -1330,6 +1337,10 @@ namespace
 
     constexpr char kOpenXrBlitFragSpvBase64[] =
         "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";
+    // shaders/blit_box.frag (glslangValidator -V): filtered downscale for
+    // OpenXRHelperDownsample=box. Same descriptor / push-constant interface.
+    constexpr char kOpenXrBlitBoxFragSpvBase64[] =
+        "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";
 
     struct VulkanDispatch
     {
@@ -7022,6 +7033,24 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             const VkResult flipResult = m_Vk.vkCreateGraphicsPipelines(
                 m_VkDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_BlitPipelineFlipY);
 
+            // Box-downsample variants (eye blits with OpenXRHelperDownsample=box).
+            // Optional: on failure the eye blit keeps the plain pipeline.
+            VkShaderModule boxShader = CreateShaderModuleFromBase64(kOpenXrBlitBoxFragSpvBase64, "blit box fragment");
+            if (boxShader != VK_NULL_HANDLE)
+            {
+                stages[1].module = boxShader;
+                stages[0].module = vertexShader;
+                if (m_Vk.vkCreateGraphicsPipelines(m_VkDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_BlitPipelineBox) != VK_SUCCESS)
+                    m_BlitPipelineBox = VK_NULL_HANDLE;
+                stages[0].module = vertexFlipShader;
+                if (m_Vk.vkCreateGraphicsPipelines(m_VkDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_BlitPipelineBoxFlipY) != VK_SUCCESS)
+                    m_BlitPipelineBoxFlipY = VK_NULL_HANDLE;
+                m_Vk.vkDestroyShaderModule(m_VkDevice, boxShader, nullptr);
+            }
+            m_Log.Print("Box downsample blit pipeline=%u flipPipeline=%u",
+                m_BlitPipelineBox != VK_NULL_HANDLE ? 1u : 0u,
+                m_BlitPipelineBoxFlipY != VK_NULL_HANDLE ? 1u : 0u);
+
             m_Vk.vkDestroyShaderModule(m_VkDevice, fragmentShader, nullptr);
             m_Vk.vkDestroyShaderModule(m_VkDevice, vertexFlipShader, nullptr);
             m_Vk.vkDestroyShaderModule(m_VkDevice, vertexShader, nullptr);
@@ -8719,7 +8748,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             m_Vk.vkCmdPipelineBarrier(m_CommandBuffer, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         }
 
-        bool CmdRenderShaderBlitWithDescriptor(VulkanEyeSwapchain& target, uint32_t imageIndex, const VulkanGameEyeTexture& source, VkDescriptorSet descriptorSet, bool containFit, bool flipY)
+        bool CmdRenderShaderBlitWithDescriptor(VulkanEyeSwapchain& target, uint32_t imageIndex, const VulkanGameEyeTexture& source, VkDescriptorSet descriptorSet, bool containFit, bool flipY,
+            bool box = false)
         {
             if (!m_UseShaderBlit ||
                 imageIndex >= target.framebuffers.size() ||
@@ -8764,10 +8794,10 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             scissor.extent = { static_cast<uint32_t>(dest.w), static_cast<uint32_t>(dest.h) };
             m_Vk.vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
 
-            m_Vk.vkCmdBindPipeline(
-                m_CommandBuffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                (flipY && m_BlitPipelineFlipY != VK_NULL_HANDLE) ? m_BlitPipelineFlipY : m_BlitPipeline);
+            VkPipeline pipeline = (flipY && m_BlitPipelineFlipY != VK_NULL_HANDLE) ? m_BlitPipelineFlipY : m_BlitPipeline;
+            if (box && m_BlitPipelineBox != VK_NULL_HANDLE)
+                pipeline = (flipY && m_BlitPipelineBoxFlipY != VK_NULL_HANDLE) ? m_BlitPipelineBoxFlipY : m_BlitPipelineBox;
+            m_Vk.vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             m_Vk.vkCmdBindDescriptorSets(
                 m_CommandBuffer,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -8800,7 +8830,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         {
             if (eyeIndex >= L4D2VR_OPENXR_EYE_COUNT)
                 return false;
-            return CmdRenderShaderBlitWithDescriptor(eye, imageIndex, source, m_BlitDescriptorSets[eyeIndex], containFit, m_FlipSubmitY);
+            return CmdRenderShaderBlitWithDescriptor(eye, imageIndex, source, m_BlitDescriptorSets[eyeIndex], containFit, m_FlipSubmitY,
+                m_DownsampleBox);
         }
 
         bool CmdRenderOverlayShaderBlit(uint32_t overlayIndex, VulkanEyeSwapchain& swapchain, uint32_t imageIndex, const VulkanGameEyeTexture& source)
@@ -8939,7 +8970,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         // recommended size comes back.
         void MatchEyeSwapchainToSource(uint32_t eyeIndex)
         {
-            if (!m_SwapchainAtSourceSize || !m_Bridge.HasState() || eyeIndex >= m_Eyes.size()
+            // Box downsample keeps the recommended size: the helper does the
+            // filtered downscale, the runtime's distortion pass stays ~1:1.
+            if (m_DownsampleBox || !m_SwapchainAtSourceSize || !m_Bridge.HasState() || eyeIndex >= m_Eyes.size()
                 || eyeIndex >= m_ViewConfigs.size() || m_EyeSwapchainAcquired[eyeIndex])
                 return;
             const VulkanGameEyeTexture& source = m_GameEyes[eyeIndex];
@@ -9107,6 +9140,27 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                         cropProjection ? 1u : 0u,
                         (flipY && useShaderBlit && m_BlitPipelineFlipY != VK_NULL_HANDLE) ? 1u : 0u,
                         containFit ? "contain" : "fill");
+                }
+                {
+                    // Which scaling path this eye uses, logged on every change:
+                    // box downsample to the recommended size, 1:1 at the game
+                    // eye size, or a plain single-tap resample.
+                    uint32_t srcW = 0;
+                    uint32_t srcH = 0;
+                    BoundedSourcePixels(blitSource.width, blitSource.height, blitSource.uMin, blitSource.vMin, blitSource.uMax, blitSource.vMax, srcW, srcH);
+                    const bool boxActive = m_DownsampleBox && useShaderBlit && m_BlitPipelineBox != VK_NULL_HANDLE;
+                    const char* path = boxActive ? "box downsample"
+                        : (srcW == eye.width && srcH == eye.height) ? "1:1 copy"
+                        : "single-tap resample";
+                    static uint32_t s_pathKey[L4D2VR_OPENXR_EYE_COUNT][5] = {};
+                    const uint32_t key[5] = { srcW, srcH, eye.width, eye.height, boxActive ? 2u : 1u };
+                    if (eyeIndex < L4D2VR_OPENXR_EYE_COUNT && std::memcmp(s_pathKey[eyeIndex], key, sizeof(key)) != 0)
+                    {
+                        std::memcpy(s_pathKey[eyeIndex], key, sizeof(key));
+                        m_Log.Print("Eye %u scale path: %s source %ux%u -> swapchain %ux%u%s",
+                            eyeIndex, path, srcW, srcH, eye.width, eye.height,
+                            (m_DownsampleBox && !boxActive) ? " (box requested but needs the sRGB shader path / pipeline)" : "");
+                    }
                 }
                 {
                     static uint32_t s_eyeBlitLogBudget = 48;
@@ -9410,6 +9464,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         {
             m_GameRendersRuntimeFov = options.gameRendersRuntimeFov;
             m_SwapchainAtSourceSize = options.swapchainAtSourceSize;
+            m_DownsampleBox = options.downsampleBox;
             const ULONGLONG startTicks = GetTickCount64();
             uint32_t submittedFrames = 0;
             bool shouldExit = false;
@@ -10434,6 +10489,10 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             }
             if (m_BlitPipeline != VK_NULL_HANDLE && m_Vk.vkDestroyPipeline)
                 m_Vk.vkDestroyPipeline(m_VkDevice, m_BlitPipeline, nullptr);
+            if (m_BlitPipelineBox != VK_NULL_HANDLE && m_Vk.vkDestroyPipeline)
+                m_Vk.vkDestroyPipeline(m_VkDevice, m_BlitPipelineBox, nullptr);
+            if (m_BlitPipelineBoxFlipY != VK_NULL_HANDLE && m_Vk.vkDestroyPipeline)
+                m_Vk.vkDestroyPipeline(m_VkDevice, m_BlitPipelineBoxFlipY, nullptr);
             if (m_BlitPipelineFlipY != VK_NULL_HANDLE && m_Vk.vkDestroyPipeline)
                 m_Vk.vkDestroyPipeline(m_VkDevice, m_BlitPipelineFlipY, nullptr);
             if (m_BlitPipelineLayout != VK_NULL_HANDLE && m_Vk.vkDestroyPipelineLayout)
@@ -10526,6 +10585,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         VkPipelineLayout m_BlitPipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_BlitPipeline = VK_NULL_HANDLE;
         VkPipeline m_BlitPipelineFlipY = VK_NULL_HANDLE;
+        VkPipeline m_BlitPipelineBox = VK_NULL_HANDLE;
+        VkPipeline m_BlitPipelineBoxFlipY = VK_NULL_HANDLE;
+        bool m_DownsampleBox = false;
         std::array<VkDescriptorSet, kBlitDescriptorSetCount> m_BlitDescriptorSets{};
         HANDLE m_ParentProcess = nullptr;
         std::vector<XrViewConfigurationView> m_ViewConfigs;
@@ -10572,6 +10634,7 @@ int wmain(int argc, wchar_t** argv)
     log.Print("OpenXR symmetric projection FOV submit: %s", options.useSymmetricProjectionFov ? "enabled" : "disabled");
     log.Print("OpenXR game renders runtime per-eye FOV (off-centre): %s", options.gameRendersRuntimeFov ? "yes" : "no");
     log.Print("OpenXR eye swapchain at game eye size: %s", options.swapchainAtSourceSize ? "enabled" : "disabled");
+    log.Print("OpenXR eye downsample: %s", options.downsampleBox ? "box (recommended-size swapchain)" : "off");
     log.Print("OpenXR game render pose projection submit: %s", options.useGameRenderPoseForProjection ? "enabled" : "disabled");
     log.Print(
         "OpenXR force mono projection eye: %s(%d)",
