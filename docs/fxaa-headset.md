@@ -55,7 +55,7 @@ When on, in `dDrawScreenSpaceRectangle` during a stereo eye pass:
 - `lumcompare` / `downsample*` / `blurfilter*` / `blur_combine*` stay skipped.
 - Before the draw, the material's bloom var is zeroed so the stale `_rt_Small*FB*` contents add nothing (lookup below).
 - The original value is restored after the next render-target change (`PushRenderTargetAndViewport` / `PopRenderTargetAndViewport`) or `EndFrame` on the same thread. The DSSR quad can stay in the buffered dynamic mesh after the call returns, and the shader reads the var when that batch flushes; Source 2013 `SetRenderTargetEx` flushes buffered primitives. Restoring right after the DSSR call could let the bloom value back in.
-- On a 1x eye RT (context RT == eye size), viewport and dest are pinned to `0,0 eyeW×eyeH` for the draw, and the src uv is widened to the whole `_rt_FullFrameFB` when the engine reports it eye-sized (±32). The previous viewport is restored right after the call. An mc ring RT is logged and left alone.
+- Src rect: whenever dest covers the eye, the src rect is mapped onto the whole src texture (`u1 = u0 + srcW - 1`, `v1 = v0 + srcH - 1`, engine half-texel origin kept). On a 1x eye RT (context RT == eye size) the viewport and dest are also pinned to `0,0 eyeW×eyeH` if they are not already, and the previous viewport is restored right after the call.
 
 ### Headless A/B on 9a0994e (user, 2026-10-29)
 
@@ -85,10 +85,20 @@ Eye line (first 8 calls, own counter):
 DSSR engine_post on eye dev/engine_post_nxtgen bloomVar=<name|none> set=<0|1> orig=<v> rt=WxH vp=x,y WxH pinned=<0|1> dest ... -> ... src=WxH uv=(..)-(..) -> (..)-(..)
 ```
 
+### Headless on 2f9e816 (user, 2026-10-30)
+
+Same setup. Still squeezed into the top 54 %. Eye line: `rt=0x0 vp=0,0 1152x1184 pinned=0 dest 0,0 1152x1184 src=320x160 uv=(0,-0.5)-(287,295)` unchanged.
+
+- Viewport and dest were already the eye; the earlier viewport diagnosis was wrong. The cause is the **src rect**: the src texture is the window/4 small FB (320×160 for 1280×640), but the engine sizes the rect from the eye (287×295 = 1152/4 × 1184/4). v runs to 295.5/160 = 1.84, and the composite (which samples `_rt_FullFrameFB` through the same texcoords) lands in the top 1/1.84. The pin never fired because the context RT reads back as `0x0`, not a 1× eye RT.
+- Fix: map the rect onto the full src texture (above) whenever dest covers the eye, independent of the RT check. Not growing `_rt_Small*FB*`: that zoomed and warped the picture (`RUNTIME.md`, 2026-09-03).
+- Bloom: `$bloomenable=2` and `$aaenable=2` — FindVar finds them, but slot 1 of the var does not return the name, so the `$bloomenable` fallback was rejected (`bloomVar=none`). That fits the CS:GO `IMaterialVar` layout (`IsTextureValueInternalEnvCubemap` inserted at slot 1, so `GetName` 2, `SetFloatValue` 4, `SetIntValue` 5). Now: FindVar's found flag is trusted; the `GetName` slot is detected (1 or 2, both side-effect-free const getters in either layout) on the first found var and logged as `IMaterialVar layout: GetName slot N (...)`; the setters follow it. If neither slot returns the name, `m_intVal` (+0x8) and `m_VecVal[0]` (+0xC) are written directly instead of guessing a setter slot. `$bloomenable` is zeroed with `SetIntValue(0)` and restored the same way.
+
+Expected next eye line: `bloomVar=$bloomenable set=1 orig=1.000 varSlot=2 ... uv=(0.0,-0.5)-(287.0,295.0) -> (0.0,-0.5)-(319.0,158.5)`. `varSlot=0` means the direct-write fallback was used.
+
 ### Assumptions to verify at runtime
 
-- `IMaterialVar` slot 1 = `GetName`, slot 3 = `SetFloatValue`, slot 4 = `SetIntValue`; `m_intVal` at `+0x8`, `m_VecVal[0]` at `+0xC` (Source 2013 / CS:GO `imaterialvar.h`). Calls are under SEH; an implausible original (float outside 0–1000, bool not 0/1) leaves the var untouched (`set=0`).
-- The viewport restore right after the DSSR call assumes a viewport change flushes the buffered quad first (same assumption as the existing `EyeRtPush` / `SehViewport` draws). If `pinned=1` and the squeeze persists, that assumption is wrong for this path.
+- `IMaterialVar` setters at `GetName` slot + 2 / + 3 (true for both Source 2013 and CS:GO); `m_intVal` at `+0x8`, `m_VecVal[0]` at `+0xC`. Calls are under SEH; an implausible original (float outside 0–1000, bool not 0/1) leaves the var untouched (`set=0`).
+- `$bloomenable` may be a static shader combo rather than dynamic state. If so, changing it per draw has no effect until the material's snapshots are rebuilt (ghosts return with `set=1`); the fix would then be a bloom-amount constant or clearing the bloom source RT instead.
 - Under `mat_queue_mode 2` this hook runs on the render thread. If BM routes material-var writes through queued temp storage, the zero may not take effect (ghosts return with `set=1`). Compare single-core vs multicore.
 - If no render-target change follows the eye `engine_post` draw on that thread before the desktop draws `engine_post`, the desktop may lose bloom for that frame.
 

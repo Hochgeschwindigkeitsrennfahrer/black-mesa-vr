@@ -3521,20 +3521,41 @@ namespace
         return std::strstr(name, "engine_post") != nullptr;
     }
 
-    // IMaterialVar (Source 2013 / CS:GO imaterialvar.h): slot 1 GetName,
-    // slot 3 SetFloatValue, slot 4 SetIntValue. Data after the vptr:
-    // m_pStringVal +0x4, m_intVal +0x8, m_VecVal +0xC (what the inline
-    // GetIntValue / GetFloatValue return).
+    // IMaterialVar vtable differs by branch. Source 2013: 1 GetName,
+    // 2 GetNameAsSymbol, 3 SetFloatValue, 4 SetIntValue. CS:GO inserts
+    // IsTextureValueInternalEnvCubemap at 1, so GetName is 2 and the setters
+    // 4 / 5. Steam BM: FindVar finds $bloomenable / $aaenable but slot 1
+    // does not return the name (headless bm_c1a0a, 2026-10-30). The name slot
+    // is detected on a var FindVar found, and the setters follow it. Data
+    // after the vptr is the same in both: m_pStringVal +0x4, m_intVal +0x8,
+    // m_VecVal +0xC (what the inline GetIntValue / GetFloatValue return).
     using tMatVarGetName = const char*(__thiscall*)(void*);
     using tMatVarSetFloat = void(__thiscall*)(void*, float);
     using tMatVarSetInt = void(__thiscall*)(void*, int);
 
-    const char* SafeMatVarName(void* var)
+    int g_MatVarNameSlot = 0; // 0 = not detected yet
+
+    char LowerAscii(char c)
+    {
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+
+    bool NameEqualsI(const char* a, const char* b)
+    {
+        for (; *a && *b; ++a, ++b)
+        {
+            if (LowerAscii(*a) != LowerAscii(*b))
+                return false;
+        }
+        return *a == *b;
+    }
+
+    const char* SafeMatVarNameAt(void* var, int slot)
     {
         const char* name = nullptr;
         __try
         {
-            name = reinterpret_cast<tMatVarGetName>((*reinterpret_cast<void***>(var))[1])(var);
+            name = reinterpret_cast<tMatVarGetName>((*reinterpret_cast<void***>(var))[slot])(var);
             if (name)
                 (void)*reinterpret_cast<const volatile char*>(name);
         }
@@ -3543,6 +3564,29 @@ namespace
             name = nullptr;
         }
         return name ? name : "";
+    }
+
+    const char* SafeMatVarName(void* var)
+    {
+        return g_MatVarNameSlot ? SafeMatVarNameAt(var, g_MatVarNameSlot) : "?";
+    }
+
+    // Both candidate slots are const getters in either layout, so probing
+    // them has no side effects.
+    void DetectMatVarLayout(void* var, const char* expected)
+    {
+        if (g_MatVarNameSlot || !var)
+            return;
+        for (int slot = 1; slot <= 2; ++slot)
+        {
+            if (NameEqualsI(SafeMatVarNameAt(var, slot), expected))
+            {
+                g_MatVarNameSlot = slot;
+                Game::logMsg("IMaterialVar layout: GetName slot %d (%s), SetFloatValue %d, SetIntValue %d",
+                    slot, slot == 1 ? "Source 2013" : "CS:GO", slot + 2, slot + 3);
+                return;
+            }
+        }
     }
 
     bool SafeMatVarGetFloat(void* var, float& out)
@@ -3571,11 +3615,22 @@ namespace
         return out == 0 || out == 1;
     }
 
+    // Without a detected layout, write m_intVal and m_VecVal[0] directly
+    // (both inline getters read those) instead of guessing a setter slot.
     bool SafeMatVarSetFloat(void* var, float value)
     {
         __try
         {
-            reinterpret_cast<tMatVarSetFloat>((*reinterpret_cast<void***>(var))[3])(var, value);
+            if (g_MatVarNameSlot)
+            {
+                reinterpret_cast<tMatVarSetFloat>((*reinterpret_cast<void***>(var))[g_MatVarNameSlot + 2])(var, value);
+            }
+            else
+            {
+                uint8_t* p = reinterpret_cast<uint8_t*>(var);
+                *reinterpret_cast<float*>(p + 0xC) = value;
+                *reinterpret_cast<int*>(p + 0x8) = static_cast<int>(value);
+            }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -3588,7 +3643,16 @@ namespace
     {
         __try
         {
-            reinterpret_cast<tMatVarSetInt>((*reinterpret_cast<void***>(var))[4])(var, value);
+            if (g_MatVarNameSlot)
+            {
+                reinterpret_cast<tMatVarSetInt>((*reinterpret_cast<void***>(var))[g_MatVarNameSlot + 3])(var, value);
+            }
+            else
+            {
+                uint8_t* p = reinterpret_cast<uint8_t*>(var);
+                *reinterpret_cast<int*>(p + 0x8) = value;
+                *reinterpret_cast<float*>(p + 0xC) = static_cast<float>(value);
+            }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -3662,21 +3726,6 @@ namespace
         return best;
     }
 
-    char LowerAscii(char c)
-    {
-        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-
-    bool NameEqualsI(const char* a, const char* b)
-    {
-        for (; *a && *b; ++a, ++b)
-        {
-            if (LowerAscii(*a) != LowerAscii(*b))
-                return false;
-        }
-        return *a == *b;
-    }
-
     bool LooksLikeBloomAmountVar(const char* name)
     {
         if (!name || !name[0])
@@ -3696,6 +3745,7 @@ namespace
     struct EnginePostBloomVar
     {
         void* var = nullptr;
+        const char* name = "none";
         bool isInt = false; // $bloomenable-style bool: zero it with SetIntValue
     };
 
@@ -3719,9 +3769,14 @@ namespace
             void* v = SafeFindMaterialVar(material, name, hit);
             if (v && !varVtable)
                 varVtable = SafeReadPtr(v);
-            const bool ok = v && hit && NameEqualsI(SafeMatVarName(v), name);
+            // FindVar's found flag is trusted; the name check only reports
+            // whether the IMaterialVar layout was detected.
+            if (v && hit)
+                DetectMatVarLayout(v, name);
+            const bool ok = v && hit;
+            const bool named = ok && NameEqualsI(SafeMatVarName(v), name);
             const int n = std::snprintf(found + used, sizeof(found) - used, "%s%s=%d",
-                used ? " " : "", name, ok ? 1 : (hit ? 2 : 0));
+                used ? " " : "", name, named ? 1 : (ok ? 2 : 0));
             if (n > 0 && used + static_cast<size_t>(n) < sizeof(found))
                 used += static_cast<size_t>(n);
             return ok ? v : nullptr;
@@ -3732,14 +3787,21 @@ namespace
         {
             void* v = probe(name);
             if (v && !out.var)
+            {
                 out.var = v;
+                out.name = name;
+            }
         }
         void* enableVar = nullptr;
+        const char* enableName = "none";
         for (const char* name : kEnableNames)
         {
             void* v = probe(name);
             if (v && !enableVar)
+            {
                 enableVar = v;
+                enableName = name;
+            }
         }
         void** params = nullptr;
         const int count = ScanMaterialParams(material, varVtable, params);
@@ -3751,9 +3813,15 @@ namespace
             void* v = SafeReadPtr(params + i);
             const char* name = SafeMatVarName(v);
             if (!out.var && LooksLikeBloomAmountVar(name))
+            {
                 out.var = v;
+                out.name = name;
+            }
             if (!enableVar && std::strstr(name, "bloom") && std::strstr(name, "enable"))
+            {
                 enableVar = v;
+                enableName = name;
+            }
             const int n = std::snprintf(list + listUsed, sizeof(list) - listUsed, "%s%s",
                 listUsed ? " " : "", name);
             if (n > 0 && listUsed + static_cast<size_t>(n) < sizeof(list))
@@ -3762,13 +3830,14 @@ namespace
         if (!out.var && enableVar)
         {
             out.var = enableVar;
+            out.name = enableName;
             out.isInt = true;
         }
         static int s_paramLog;
         if (s_paramLog < 4)
         {
-            // FindVar: 1 = found and the var reports that name, 2 = found but
-            // the name differs (slot or layout mismatch), 0 = not found.
+            // FindVar: 1 = found and GetName (detected slot) agrees, 2 = found
+            // but no GetName slot returned the name, 0 = not found.
             Game::logMsg("DSSR engine_post vars %s varVt=%p FindVar: %s", matName, varVtable, found);
             Game::logMsg("DSSR engine_post params %s (%d scanned): %s", matName, count, list);
             ++s_paramLog;
@@ -3809,7 +3878,7 @@ namespace
             s_mat = material;
             s_var = material ? FindEnginePostBloomVar(material, matName) : EnginePostBloomVar{};
         }
-        varName = s_var.var ? SafeMatVarName(s_var.var) : "none";
+        varName = s_var.name;
         origOut = 0.f;
         void* var = s_var.var;
         if (!var)
@@ -5930,12 +5999,14 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             matName, origX, origY, origW, origH, destX, destY, width, height, srcWidth, srcHeight,
             srcX0, srcY0, srcX1, srcY1, rtName, rtW, rtH);
     }
-    // engine_post on an eye. The context viewport is still the window here
-    // (1280x640 on a 1152x1184 eye RT, headless bm_c1a0a, MulticoreMode,
-    // 2026-10-29): with dest already eye-sized the composite landed squeezed
-    // into the top 640 rows. Pin viewport and dest to the eye for this draw
-    // and sample the whole eye-sized _rt_FullFrameFB. Only on a 1x eye RT;
-    // an mc ring RT is logged and left alone.
+    // engine_post on an eye. Its src texture is the window/4 small FB
+    // (320x160 for 1280x640), but the engine sizes the src rect from the eye
+    // (287x295 for 1152x1184), so v ran to 1.84 and the composite, which also
+    // samples _rt_FullFrameFB through those texcoords, landed in the top 54 %
+    // (headless bm_c1a0a, MulticoreMode, 2026-10-30). Map the rect onto the
+    // whole src texture whenever dest covers the eye. Growing _rt_Small*FB*
+    // instead zoomed and warped the picture (RUNTIME.md, 2026-09-03).
+    // If the context viewport is not the eye on a 1x eye RT, pin it too.
     int vpX = 0, vpY = 0, vpW = 0, vpH = 0;
     bool vpPinned = false;
     if (eyeEnginePost)
@@ -5960,20 +6031,25 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             destY = 0;
             width = eyeW;
             height = eyeH;
-            if (std::abs(srcWidth - eyeW) <= 32 && std::abs(srcHeight - eyeH) <= 32)
-            {
-                srcX0 = 0.f;
-                srcY0 = 0.f;
-                srcX1 = static_cast<float>(srcWidth) - 1.f;
-                srcY1 = static_cast<float>(srcHeight) - 1.f;
-            }
+        }
+        // Keep the engine's half-texel origin (v0 = -0.5); only the extent
+        // changes.
+        const bool destIsEye = destX == 0 && destY == 0 && width == eyeW && height == eyeH;
+        const float extU = srcX1 - srcX0 + 1.f;
+        const float extV = srcY1 - srcY0 + 1.f;
+        if (destIsEye && srcWidth > 0 && srcHeight > 0
+            && (std::fabs(extU - static_cast<float>(srcWidth)) > 2.f
+                || std::fabs(extV - static_cast<float>(srcHeight)) > 2.f))
+        {
+            srcX1 = srcX0 + static_cast<float>(srcWidth) - 1.f;
+            srcY1 = srcY0 + static_cast<float>(srcHeight) - 1.f;
         }
         static int s_eyePostLog;
         if (s_eyePostLog < 8)
         {
-            Game::logMsg("DSSR engine_post on eye %s bloomVar=%s set=%d orig=%.3f rt=%dx%d vp=%d,%d %dx%d pinned=%d "
+            Game::logMsg("DSSR engine_post on eye %s bloomVar=%s set=%d orig=%.3f varSlot=%d rt=%dx%d vp=%d,%d %dx%d pinned=%d "
                 "dest %d,%d %dx%d -> %d,%d %dx%d src=%dx%d uv=(%.1f,%.1f)-(%.1f,%.1f) -> (%.1f,%.1f)-(%.1f,%.1f)",
-                matName, varName, bloomSet ? 1 : 0, bloomOrig, rtW, rtH, vpX, vpY, vpW, vpH, vpPinned ? 1 : 0,
+                matName, varName, bloomSet ? 1 : 0, bloomOrig, g_MatVarNameSlot, rtW, rtH, vpX, vpY, vpW, vpH, vpPinned ? 1 : 0,
                 inDestX, inDestY, inDestW, inDestH, destX, destY, width, height, srcWidth, srcHeight,
                 inU0, inV0, inU1, inV1, srcX0, srcY0, srcX1, srcY1);
             ++s_eyePostLog;
