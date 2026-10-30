@@ -365,6 +365,265 @@ namespace
         return false;
     }
 
+    // GPU pass timing (GpuPassTiming, also on while ReflectionRtScale > 0).
+    // D3DQUERYTYPE_TIMESTAMP spans between RT0 changes, classified by the
+    // bound RT0 (eye-sized, or the grown reflection set) and the eye being
+    // drawn, plus refract copies (StretchRect into a reflection-sized RT).
+    // Read back a few Presents later without D3DGETDATA_FLUSH, so nothing
+    // stalls. D3D thread only (the render thread under MulticoreMode).
+    enum GpuSpanKind { kSpanNone = -1, kSpanEye = 0, kSpanRefl = 1, kSpanCopy = 2, kSpanKinds = 3 };
+    struct GpuSpan
+    {
+        IDirect3DQuery9* begin;
+        IDirect3DQuery9* end;
+        int kind;
+        int eye;
+    };
+    constexpr int kGpuFrames = 6;
+    constexpr size_t kGpuMaxSpans = 96;
+    struct GpuPassTimer
+    {
+        std::vector<IDirect3DQuery9*> pool;
+        std::vector<GpuSpan> frames[kGpuFrames];
+        IDirect3DQuery9* frameEnd[kGpuFrames] = {};
+        int write = 0;
+        IDirect3DQuery9* openBegin = nullptr;
+        int openKind = kSpanNone;
+        int openEye = 0;
+        IDirect3DQuery9* freqQuery = nullptr;
+        UINT64 freq = 0;
+        UINT64 lastFrameEndTs = 0;
+        double sumMs[kSpanKinds][3] = {};
+        double frameMs = 0.0;
+        int frameIntervals = 0;
+        int resolved = 0;
+        int dropped = 0;
+        DWORD lastLogMs = 0;
+        DWORD threadId = 0;
+        bool failed = false;
+    };
+    GpuPassTimer g_GpuTimer;
+
+    bool GpuTimerEnabled()
+    {
+        return !g_GpuTimer.failed && (bmvr::g_GpuPassTiming || bmvr::g_ReflectionRtScale > 0.f);
+    }
+
+    bool GpuTimerThreadOk()
+    {
+        const DWORD tid = GetCurrentThreadId();
+        if (g_GpuTimer.threadId == 0)
+            g_GpuTimer.threadId = tid;
+        return g_GpuTimer.threadId == tid;
+    }
+
+    IDirect3DQuery9* GpuTimerQuery(IDirect3DDevice9* device)
+    {
+        if (!g_GpuTimer.pool.empty())
+        {
+            IDirect3DQuery9* q = g_GpuTimer.pool.back();
+            g_GpuTimer.pool.pop_back();
+            return q;
+        }
+        IDirect3DQuery9* q = nullptr;
+        if (FAILED(device->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &q)) || !q)
+        {
+            g_GpuTimer.failed = true;
+            Game::logMsg("GPU pass timing off: D3DQUERYTYPE_TIMESTAMP not available");
+            return nullptr;
+        }
+        return q;
+    }
+
+    void GpuTimerRecycle(IDirect3DQuery9*& q)
+    {
+        if (q)
+            g_GpuTimer.pool.push_back(q);
+        q = nullptr;
+    }
+
+    IDirect3DQuery9* GpuTimerStamp(IDirect3DDevice9* device)
+    {
+        IDirect3DQuery9* q = GpuTimerQuery(device);
+        if (q)
+            q->Issue(D3DISSUE_END);
+        return q;
+    }
+
+    // Close the open span and open one of `kind` (kSpanNone = just close).
+    void GpuTimerSwitch(IDirect3DDevice9* device, int kind, int eye)
+    {
+        GpuPassTimer& t = g_GpuTimer;
+        if (kind == t.openKind && eye == t.openEye && (kind == kSpanNone || t.openBegin))
+            return;
+        if (t.openBegin)
+        {
+            IDirect3DQuery9* end = GpuTimerStamp(device);
+            std::vector<GpuSpan>& spans = t.frames[t.write];
+            if (end && spans.size() < kGpuMaxSpans)
+                spans.push_back(GpuSpan{ t.openBegin, end, t.openKind, t.openEye });
+            else
+            {
+                GpuTimerRecycle(t.openBegin);
+                GpuTimerRecycle(end);
+                ++t.dropped;
+            }
+            t.openBegin = nullptr;
+        }
+        t.openKind = kind;
+        t.openEye = eye;
+        if (kind != kSpanNone)
+            t.openBegin = GpuTimerStamp(device);
+    }
+
+    int GpuTimerEye(VR* vr)
+    {
+        int eye = g_McPlayEye != 0 ? g_McPlayEye : (vr ? vr->m_StereoEye : 0);
+        return (eye == 1 || eye == 2) ? eye : 0;
+    }
+
+    int GpuTimerKindForRt0(VR* vr, UINT w, UINT h)
+    {
+        if (!vr || !vr->StereoWorldPassActive() || vr->HudPaintActive() || vr->m_CaptureReentry)
+            return kSpanNone;
+        if (bmvr::g_ReflectionRtW > 0 && static_cast<int>(w) == bmvr::g_ReflectionRtW
+            && static_cast<int>(h) == bmvr::g_ReflectionRtH
+            && !(w == vr->m_RenderWidth && h == vr->m_RenderHeight))
+            return kSpanRefl;
+        if (w == vr->m_RenderWidth && h == vr->m_RenderHeight)
+            return kSpanEye;
+        return kSpanNone;
+    }
+
+    // Called after RT0 changes (SetRenderTarget index 0).
+    void GpuTimerOnRt0(IDirect3DDevice9* device, VR* vr, UINT w, UINT h)
+    {
+        if (!device || !GpuTimerEnabled() || !GpuTimerThreadOk())
+            return;
+        GpuTimerSwitch(device, GpuTimerKindForRt0(vr, w, h), GpuTimerEye(vr));
+    }
+
+    bool GpuTimerRead(IDirect3DQuery9* q, UINT64& out)
+    {
+        return q && q->GetData(&out, sizeof(out), 0) == S_OK;
+    }
+
+    // Called before Present: closes the frame and resolves the oldest one.
+    void GpuTimerOnPresent(IDirect3DDevice9* device, VR* vr)
+    {
+        if (!device || !GpuTimerEnabled() || !GpuTimerThreadOk())
+            return;
+        GpuPassTimer& t = g_GpuTimer;
+        const int resumeKind = t.openKind;
+        const int resumeEye = t.openEye;
+        GpuTimerSwitch(device, kSpanNone, 0);
+        if (!t.freqQuery)
+        {
+            if (SUCCEEDED(device->CreateQuery(D3DQUERYTYPE_TIMESTAMPFREQ, &t.freqQuery)) && t.freqQuery)
+                t.freqQuery->Issue(D3DISSUE_END);
+            else
+            {
+                t.failed = true;
+                Game::logMsg("GPU pass timing off: D3DQUERYTYPE_TIMESTAMPFREQ not available");
+                return;
+            }
+        }
+        if (t.freq == 0)
+            GpuTimerRead(t.freqQuery, t.freq);
+        t.frameEnd[t.write] = GpuTimerStamp(device);
+        t.write = (t.write + 1) % kGpuFrames;
+        // The slot about to be reused is kGpuFrames - 1 Presents old.
+        std::vector<GpuSpan>& old = t.frames[t.write];
+        IDirect3DQuery9*& oldEnd = t.frameEnd[t.write];
+        bool ready = t.freq != 0;
+        double frameSpan[kSpanKinds][3] = {};
+        for (GpuSpan& sp : old)
+        {
+            UINT64 a = 0, b = 0;
+            if (ready && GpuTimerRead(sp.begin, a) && GpuTimerRead(sp.end, b) && b >= a)
+                frameSpan[sp.kind][sp.eye] += static_cast<double>(b - a) * 1000.0 / static_cast<double>(t.freq);
+            else
+                ready = false;
+            GpuTimerRecycle(sp.begin);
+            GpuTimerRecycle(sp.end);
+        }
+        old.clear();
+        UINT64 endTs = 0;
+        const bool haveEnd = ready && GpuTimerRead(oldEnd, endTs);
+        GpuTimerRecycle(oldEnd);
+        if (ready && haveEnd)
+        {
+            for (int k = 0; k < kSpanKinds; ++k)
+                for (int e = 0; e < 3; ++e)
+                    t.sumMs[k][e] += frameSpan[k][e];
+            if (t.lastFrameEndTs != 0 && endTs > t.lastFrameEndTs)
+            {
+                t.frameMs += static_cast<double>(endTs - t.lastFrameEndTs) * 1000.0 / static_cast<double>(t.freq);
+                ++t.frameIntervals;
+            }
+            t.lastFrameEndTs = endTs;
+            ++t.resolved;
+        }
+        else
+        {
+            t.lastFrameEndTs = 0;
+            ++t.dropped;
+        }
+        const DWORD now = GetTickCount();
+        if (t.lastLogMs == 0)
+            t.lastLogMs = now;
+        if (now - t.lastLogMs >= 5000 && t.resolved > 0)
+        {
+            const double n = static_cast<double>(t.resolved);
+            Game::logMsg("GPU ms/frame: reflection-set L=%.2f R=%.2f | refract copy %.2f | eye-size RTs L=%.2f R=%.2f | frame interval %.2f | frames=%d dropped=%d ReflectionRtScale %.2f (%dx%d)",
+                t.sumMs[kSpanRefl][1] / n, t.sumMs[kSpanRefl][2] / n,
+                (t.sumMs[kSpanCopy][0] + t.sumMs[kSpanCopy][1] + t.sumMs[kSpanCopy][2]) / n,
+                t.sumMs[kSpanEye][1] / n, t.sumMs[kSpanEye][2] / n,
+                t.frameIntervals > 0 ? t.frameMs / t.frameIntervals : 0.0,
+                t.resolved, t.dropped, bmvr::g_ReflectionRtScale,
+                bmvr::g_ReflectionRtW, bmvr::g_ReflectionRtH);
+            for (int k = 0; k < kSpanKinds; ++k)
+                for (int e = 0; e < 3; ++e)
+                    t.sumMs[k][e] = 0.0;
+            t.frameMs = 0.0;
+            t.frameIntervals = 0;
+            t.resolved = 0;
+            t.dropped = 0;
+            t.lastLogMs = now;
+        }
+        // RT0 stays bound across Present; keep timing it in the next frame.
+        GpuTimerSwitch(device, resumeKind, resumeEye);
+        (void)vr;
+    }
+
+    void GpuTimerReleaseAll()
+    {
+        GpuPassTimer& t = g_GpuTimer;
+        auto rel = [](IDirect3DQuery9*& q) {
+            if (q)
+                q->Release();
+            q = nullptr;
+        };
+        rel(t.openBegin);
+        t.openKind = kSpanNone;
+        for (int f = 0; f < kGpuFrames; ++f)
+        {
+            for (GpuSpan& sp : t.frames[f])
+            {
+                rel(sp.begin);
+                rel(sp.end);
+            }
+            t.frames[f].clear();
+            rel(t.frameEnd[f]);
+        }
+        for (IDirect3DQuery9*& q : t.pool)
+            rel(q);
+        t.pool.clear();
+        rel(t.freqQuery);
+        t.freq = 0;
+        t.lastFrameEndTs = 0;
+    }
+
     HRESULT __stdcall HookedPresent(IDirect3DDevice9* device, const RECT* src, const RECT* dst, HWND hwnd, const RGNDATA* dirty)
     {
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
@@ -383,6 +642,7 @@ namespace
         }
         if (vr)
             vr->CaptureFrameBeforePresent();
+        GpuTimerOnPresent(device, vr);
         if (!g_OrigPresent)
             return D3DERR_INVALIDCALL;
         return g_OrigPresent(device, src, dst, hwnd, dirty);
@@ -513,6 +773,7 @@ namespace
             }
             g_Rt0ActualPtr = rt;
             g_Rt0ActualKnown = true;
+            GpuTimerOnRt0(device, vr, g_Rt0ActualW, g_Rt0ActualH);
         }
         if (SUCCEEDED(hr) && redirectedToEye && vr
             && vr->m_RenderWidth >= 640 && vr->m_RenderHeight >= 360)
@@ -608,8 +869,10 @@ namespace
             return false;
         if (vr->m_CaptureReentry || vr->HudPaintActive() || !vr->StereoWorldPassActive())
             return false;
-        if (std::abs(static_cast<int>(g_Rt0ActualW) - bmvr::g_ReflectionRtW) > 16
-            || std::abs(static_cast<int>(g_Rt0ActualH) - bmvr::g_ReflectionRtH) > 16)
+        // Exact size: +-16 px also matched the eye/2 bloom brightpass target
+        // (2008x2048 next to 2000x2048) and remapped it every frame.
+        if (static_cast<int>(g_Rt0ActualW) != bmvr::g_ReflectionRtW
+            || static_cast<int>(g_Rt0ActualH) != bmvr::g_ReflectionRtH)
             return false;
         if (g_Rt0ActualW == vr->m_RenderWidth && g_Rt0ActualH == vr->m_RenderHeight)
             return false;
@@ -1281,7 +1544,39 @@ namespace
         return g_OrigClear(device, useCount, useRects, flags, color, z, stencil);
     }
 
+    HRESULT HookedStretchRectInner(IDirect3DDevice9* device, IDirect3DSurface9* pSource,
+        const RECT* pSourceRect, IDirect3DSurface9* pDest, const RECT* pDestRect,
+        D3DTEXTUREFILTERTYPE filter);
+
+    // Refract copies (eye -> grown _rt_PowerOfTwoFB) get their own GPU span.
     HRESULT __stdcall HookedStretchRect(IDirect3DDevice9* device, IDirect3DSurface9* pSource,
+        const RECT* pSourceRect, IDirect3DSurface9* pDest, const RECT* pDestRect,
+        D3DTEXTUREFILTERTYPE filter)
+    {
+        VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+        bool timed = false;
+        int resumeKind = kSpanNone;
+        int resumeEye = 0;
+        if (device && pDest && vr && bmvr::g_ReflectionRtW > 0 && GpuTimerEnabled()
+            && vr->StereoWorldPassActive() && GpuTimerThreadOk())
+        {
+            D3DSURFACE_DESC d{};
+            if (SUCCEEDED(pDest->GetDesc(&d)) && static_cast<int>(d.Width) == bmvr::g_ReflectionRtW
+                && static_cast<int>(d.Height) == bmvr::g_ReflectionRtH)
+            {
+                resumeKind = g_GpuTimer.openKind;
+                resumeEye = g_GpuTimer.openEye;
+                GpuTimerSwitch(device, kSpanCopy, GpuTimerEye(vr));
+                timed = true;
+            }
+        }
+        const HRESULT hr = HookedStretchRectInner(device, pSource, pSourceRect, pDest, pDestRect, filter);
+        if (timed && !g_GpuTimer.failed)
+            GpuTimerSwitch(device, resumeKind, resumeEye);
+        return hr;
+    }
+
+    HRESULT HookedStretchRectInner(IDirect3DDevice9* device, IDirect3DSurface9* pSource,
         const RECT* pSourceRect, IDirect3DSurface9* pDest, const RECT* pDestRect,
         D3DTEXTUREFILTERTYPE filter)
     {
@@ -11934,6 +12229,7 @@ static IDirect3DTexture9* CachedPauseCopy(IDirect3DTexture9*& slot, IDirect3DDev
 void VR::ReleaseVRRenderTargetsForDeviceReset()
 {
     ReleasePauseLayerCopies();
+    GpuTimerReleaseAll();
     std::lock_guard<TextureStateMutex> lock(m_TextureMutex);
     // Reset rebinds RT0 / recreates the backbuffer behind the hooks.
     g_Rt0ActualPtr = nullptr;

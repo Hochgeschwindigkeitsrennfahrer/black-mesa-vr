@@ -218,3 +218,16 @@ Fix (not compiled or tested), all in `vr.cpp` D3D hooks, keyed on the actually b
 Projection: the reflection view keeps the eye frustum; the floor samples it with normalised screen coordinates, so no aspect change is needed.
 
 Quick-save gesture facing 180°: parked until the floor is fixed (user).
+
+## 12. d4a8fe0 headset result (2026-10-30): floor works; eye/2 mis-match, spam, lobby perf, pop-in
+
+User: lobby floor renders (`D3D reflection RT viewport 1920x1080 -> 2000x2048`), shimmer better (floor/wall edges + box downsample + strong FXAA). But:
+
+1. **Eye/2 RT matched as reflection.** `Rt0IsGrownReflection` used ±16 px; the eye/2 target **2008×2048** (bloom brightpass: `DSSR dev/downsample_non_hdr_brightpass dest=0,0 2008x2048 src=4016x4096`, most likely `_rt_SmallFB0` grown with FullFrame) sat next to the reflection size 2000×2048. Its viewport, scissor, clear and texel constants were remapped every frame. **Fix:** exact size match in both the D3D hooks and `ReflectionRtSized`; the grow never picks eye/2 or eye/4 (−16 px width if it would). The D3D hooks see surfaces, not `ITexture`s, so exact size plus a guaranteed-unique size stands in for pointer identity.
+2. **Log spam** (~117 000 lines / 10 min) from the remap flipping between 2008 and 2000 every frame. Gone with 1 (the remap log only fires on a size change).
+3. **Lobby perf** (dropped 1 → 408 → 559, reprojected 0.2 % → 4.4 % → 2.3 %). **GPU timing added** (`GpuPassTiming`, on automatically while `ReflectionRtScale > 0`): D3D timestamp spans between RT0 changes, classified as eye-sized RTs / reflection set / refract copy (StretchRect into a reflection-sized RT), per eye, read back 5 Presents later without a flush. Log every ~5 s:
+   `GPU ms/frame: reflection-set L=.. R=.. | refract copy .. | eye-size RTs L=.. R=.. | frame interval .. | frames=.. dropped=.. ReflectionRtScale .. (WxH)`.
+   "Reflection set" covers both the reflection and refraction views and their `_rt_gb*2` deferred passes. **Separate `RefractionRtScale` is not offered:** both views share the `_rt_gb*2` G-buffer, so different sizes would bring back the partial-viewport bug. To split the cost, toggle `r_WaterDrawReflection 0` / `r_WaterDrawRefraction 0` live and watch the reflection-set number.
+4. **Pop-in regression.** The eye/2 target is the bloom brightpass, not an occlusion buffer, so 1 is not an obvious cause. Lead: 73de657 keeps tracker view ids **3 and 4** shared between eyes as "shadow views", but in stock Source `VIEW_REFLECTION = 3` and `VIEW_REFRACTION = 4`. If BM's water views use those ids, the occlusion tracker mixes results between eyes, and bigger reflection RTs make those views heavier. **Diagnostic added:** `Occlusion tracker view id N (in M) eye=E rtTop=<rt> reflectionRt=0|1 plane=0|1`, once per combination. User test: `ReflectionRtScale=0` — pop-in gone or not.
+
+Open: door glass (needs `mat_specular 0` / `mat_crosshair`), gesture quick-save facing.

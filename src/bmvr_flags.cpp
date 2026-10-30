@@ -122,6 +122,7 @@ namespace bmvr
     uint32_t g_MaxEyeSize = 4096;
     float g_ReflectionRtScale = 0.f;
     int g_ReflectionRtW = 0;
+    bool g_GpuPassTiming = false;
     int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
@@ -642,6 +643,8 @@ namespace bmvr
                 g_VrSkipMotionBlur = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "StereoEnginePost") == 0)
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "GpuPassTiming") == 0)
+                g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ReflectionRtScale") == 0)
             {
                 const float v = static_cast<float>(atof(val));

@@ -463,10 +463,12 @@ namespace
     // (bmvr::g_ReflectionRtW/H, 0 = not grown). Reflection views use it as
     // their viewport; it must not be mistaken for a world pass and expanded
     // to the eye.
+    // Exact size only: a +-16 px tolerance also matched the eye/2 bloom
+    // brightpass target (2008x2048 next to 2000x2048, 2026-10-30), and the
+    // grow below never picks eye/2 or eye/4.
     bool ReflectionRtSized(int w, int h)
     {
-        return bmvr::g_ReflectionRtW > 0 && w > 0 && h > 0
-            && std::abs(w - bmvr::g_ReflectionRtW) <= 16 && std::abs(h - bmvr::g_ReflectionRtH) <= 16;
+        return bmvr::g_ReflectionRtW > 0 && w == bmvr::g_ReflectionRtW && h == bmvr::g_ReflectionRtH;
     }
     thread_local Vector g_CurViewOrigin{};
     thread_local Vector g_CurViewForward{};
@@ -8517,6 +8519,36 @@ void __fastcall Hooks::dOcclusionBeginView(void* ecx, void* edx, int viewId, int
         }
         viewId = (viewId & ~0xFFFF) | (id + kRightEyeViewIdOffset);
     }
+    {
+        // Pop-in diagnostic (2026-10-30): which tracker view ids run per eye
+        // and whether a reflection-set RT is bound (water reflection /
+        // refraction views). Logs each (id, eye, reflection) combination once.
+        const int eye = m_VR ? m_VR->m_StereoEye : -1;
+        const bool reflTop = g_RtStackDepth > 0
+            && ReflectionRtSized(g_RtStack[g_RtStackDepth - 1].w, g_RtStack[g_RtStackDepth - 1].h);
+        static int s_seen[48][3];
+        static int s_seenN;
+        const int finalId = viewId & 0xFFFF;
+        bool seen = false;
+        for (int i = 0; i < s_seenN; ++i)
+        {
+            if (s_seen[i][0] == finalId && s_seen[i][1] == eye && s_seen[i][2] == (reflTop ? 1 : 0))
+            {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen && s_seenN < 48)
+        {
+            s_seen[s_seenN][0] = finalId;
+            s_seen[s_seenN][1] = eye;
+            s_seen[s_seenN][2] = reflTop ? 1 : 0;
+            ++s_seenN;
+            Game::logMsg("Occlusion tracker view id %d (in %d) eye=%d rtTop=%s reflectionRt=%d plane=%d",
+                finalId, id, eye, g_RtStackDepth > 0 ? g_RtStack[g_RtStackDepth - 1].name : "-",
+                reflTop ? 1 : 0, plane ? 1 : 0);
+        }
+    }
     hkOcclusionBeginView.fOriginal(ecx, viewId, a2, plane, a4);
 }
 
@@ -8666,8 +8698,14 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     if (reflectRt && bmvr::ComputeOffscreenEyeSize(reflEyeW, reflEyeH))
     {
         const float scale = std::min(1.f, bmvr::g_ReflectionRtScale);
-        const int rw = static_cast<int>(static_cast<float>(reflEyeW) * scale) & ~15;
+        int rw = static_cast<int>(static_cast<float>(reflEyeW) * scale) & ~15;
         const int rh = static_cast<int>(static_cast<float>(reflEyeH) * scale) & ~15;
+        // The D3D hooks recognise the reflection set by exact size, so it
+        // must not equal the eye/2 or eye/4 engine targets (bloom/small FB).
+        const int ew = static_cast<int>(reflEyeW);
+        const int eh = static_cast<int>(reflEyeH);
+        if ((rw == ew / 2 && rh == eh / 2) || (rw == ew / 4 && rh == eh / 4))
+            rw -= 16;
         if (rw > w && rh > h && rw >= 256 && rh >= 256)
         {
             Game::logMsg("CreateNamedRT %s reflection grow %dx%d mode=%d -> %dx%d LITERAL (ReflectionRtScale %.2f of eye %ux%u)",

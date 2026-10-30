@@ -292,6 +292,10 @@ namespace bmvr
     // Size the reflection set was grown to (0 = not grown). Set by the
     // CreateNamedRT hook; read by the viewport/scissor/clear/constant hooks.
     extern int g_ReflectionRtW;
+    // GpuPassTiming (default false; also on while ReflectionRtScale > 0): log
+    // GPU ms per frame for eye-sized RTs, the reflection set and refract
+    // copies, per eye, every ~5 s (D3D timestamp queries, no stalls).
+    extern bool g_GpuPassTiming;
     extern int g_ReflectionRtH;
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;
