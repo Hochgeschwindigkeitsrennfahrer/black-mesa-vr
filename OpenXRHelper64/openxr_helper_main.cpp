@@ -133,6 +133,9 @@ namespace
         // The game rendered each eye at exactly the runtime's per-eye FOV
         // (off-centre CViewSetup): submit that FOV, never crop.
         bool gameRendersRuntimeFov = false;
+        // Eye swapchains at the game eye size (1:1 copy) when the game
+        // supplies the FOV. false = runtime recommended size (resampled).
+        bool swapchainAtSourceSize = true;
         bool useGameRenderPoseForProjection = false;
         int forceMonoProjectionEye = -1;
         int forceMonoProjectionView = -1;
@@ -809,6 +812,12 @@ namespace
                 uint32_t enabled = 0;
                 if (ParseUintArg(value, enabled))
                     options.gameRendersRuntimeFov = enabled != 0;
+            }
+            else if (const wchar_t* value = needsValue(L"--swapchain-at-source-size"))
+            {
+                uint32_t enabled = 0;
+                if (ParseUintArg(value, enabled))
+                    options.swapchainAtSourceSize = enabled != 0;
             }
             else if (const wchar_t* value = needsValue(L"--use-game-render-pose-for-projection"))
             {
@@ -7151,68 +7160,95 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             m_Eyes.resize(2);
             for (size_t eye = 0; eye < m_Eyes.size(); ++eye)
             {
-                VulkanEyeSwapchain& swapchain = m_Eyes[eye];
-                const XrViewConfigurationView& view = m_ViewConfigs[eye];
-                ChooseOpenXrSwapchainExtent(view, swapchain.width, swapchain.height);
-                swapchain.format = selectedFormat;
-
-                XrSwapchainCreateInfo createInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
-                createInfo.usageFlags =
-                    XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
-                    XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT |
-                    XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
-                createInfo.format = static_cast<int64_t>(selectedFormat);
-                createInfo.sampleCount = std::max(1u, view.recommendedSwapchainSampleCount);
-                createInfo.width = swapchain.width;
-                createInfo.height = swapchain.height;
-                createInfo.faceCount = 1;
-                createInfo.arraySize = 1;
-                createInfo.mipCount = 1;
-
-                result = m_Xr.xrCreateSwapchain(m_Session, &createInfo, &swapchain.handle);
-                swapchain.supportsTransferSrc = XR_SUCCEEDED(result) && swapchain.handle != XR_NULL_HANDLE;
-                if (!swapchain.supportsTransferSrc)
-                {
-                    m_Log.Print("xrCreateSwapchain(Vulkan transfer-src) failed result=%d; retrying without readback usage",
-                        static_cast<int>(result));
-                    swapchain.handle = XR_NULL_HANDLE;
-                    createInfo.usageFlags =
-                        XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
-                        XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
-                    result = m_Xr.xrCreateSwapchain(m_Session, &createInfo, &swapchain.handle);
-                }
-                if (!Succeeded(m_Log, "xrCreateSwapchain(Vulkan)", result) || swapchain.handle == XR_NULL_HANDLE)
+                uint32_t width = 0;
+                uint32_t height = 0;
+                ChooseOpenXrSwapchainExtent(m_ViewConfigs[eye], width, height);
+                if (!CreateEyeSwapchain(eye, width, height))
                     return false;
-
-                uint32_t imageCount = 0;
-                result = m_Xr.xrEnumerateSwapchainImages(swapchain.handle, 0, &imageCount, nullptr);
-                if (!Succeeded(m_Log, "xrEnumerateSwapchainImages(count)", result) || imageCount == 0)
-                    return false;
-
-                swapchain.images.assign(imageCount, XrSwapchainImageVulkanKHR{ XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR });
-                result = m_Xr.xrEnumerateSwapchainImages(
-                    swapchain.handle,
-                    imageCount,
-                    &imageCount,
-                    reinterpret_cast<XrSwapchainImageBaseHeader*>(swapchain.images.data()));
-                if (!Succeeded(m_Log, "xrEnumerateSwapchainImages(data)", result) || imageCount == 0)
-                    return false;
-
-                swapchain.images.resize(imageCount);
-                swapchain.layouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
-                if (!CreateSwapchainRenderTargets(swapchain))
-                    return false;
-
-                m_Log.Print(
-                    "Created Vulkan eye %zu swapchain %ux%u images=%u transferSrc=%u",
-                    eye,
-                    swapchain.width,
-                    swapchain.height,
-                    imageCount,
-                    swapchain.supportsTransferSrc ? 1u : 0u);
             }
 
             return true;
+        }
+
+        // One eye swapchain at width x height in the format CreateSwapchains
+        // selected (render targets for the sRGB shader blit included).
+        bool CreateEyeSwapchain(size_t eye, uint32_t width, uint32_t height)
+        {
+            if (eye >= m_Eyes.size() || eye >= m_ViewConfigs.size())
+                return false;
+            const VkFormat selectedFormat = m_SelectedSwapchainFormat;
+            VulkanEyeSwapchain& swapchain = m_Eyes[eye];
+            const XrViewConfigurationView& view = m_ViewConfigs[eye];
+            XrResult result = XR_SUCCESS;
+            swapchain.width = width;
+            swapchain.height = height;
+            swapchain.format = selectedFormat;
+
+            XrSwapchainCreateInfo createInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
+            createInfo.usageFlags =
+                XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
+                XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT |
+                XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
+            createInfo.format = static_cast<int64_t>(selectedFormat);
+            createInfo.sampleCount = std::max(1u, view.recommendedSwapchainSampleCount);
+            createInfo.width = swapchain.width;
+            createInfo.height = swapchain.height;
+            createInfo.faceCount = 1;
+            createInfo.arraySize = 1;
+            createInfo.mipCount = 1;
+
+            result = m_Xr.xrCreateSwapchain(m_Session, &createInfo, &swapchain.handle);
+            swapchain.supportsTransferSrc = XR_SUCCEEDED(result) && swapchain.handle != XR_NULL_HANDLE;
+            if (!swapchain.supportsTransferSrc)
+            {
+                m_Log.Print("xrCreateSwapchain(Vulkan transfer-src) failed result=%d; retrying without readback usage",
+                    static_cast<int>(result));
+                swapchain.handle = XR_NULL_HANDLE;
+                createInfo.usageFlags =
+                    XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
+                    XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+                result = m_Xr.xrCreateSwapchain(m_Session, &createInfo, &swapchain.handle);
+            }
+            if (!Succeeded(m_Log, "xrCreateSwapchain(Vulkan)", result) || swapchain.handle == XR_NULL_HANDLE)
+                return false;
+
+            uint32_t imageCount = 0;
+            result = m_Xr.xrEnumerateSwapchainImages(swapchain.handle, 0, &imageCount, nullptr);
+            if (!Succeeded(m_Log, "xrEnumerateSwapchainImages(count)", result) || imageCount == 0)
+                return false;
+
+            swapchain.images.assign(imageCount, XrSwapchainImageVulkanKHR{ XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR });
+            result = m_Xr.xrEnumerateSwapchainImages(
+                swapchain.handle,
+                imageCount,
+                &imageCount,
+                reinterpret_cast<XrSwapchainImageBaseHeader*>(swapchain.images.data()));
+            if (!Succeeded(m_Log, "xrEnumerateSwapchainImages(data)", result) || imageCount == 0)
+                return false;
+
+            swapchain.images.resize(imageCount);
+            swapchain.layouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
+            if (!CreateSwapchainRenderTargets(swapchain))
+                return false;
+
+            m_Log.Print(
+                "Created Vulkan eye %zu swapchain %ux%u images=%u transferSrc=%u",
+                eye,
+                swapchain.width,
+                swapchain.height,
+                imageCount,
+                swapchain.supportsTransferSrc ? 1u : 0u);
+            return true;
+        }
+
+        void DestroyEyeSwapchain(VulkanEyeSwapchain& swapchain)
+        {
+            DestroySwapchainRenderTargets(swapchain);
+            swapchain.images.clear();
+            swapchain.layouts.clear();
+            if (swapchain.handle != XR_NULL_HANDLE && m_Xr.xrDestroySwapchain)
+                m_Xr.xrDestroySwapchain(swapchain.handle);
+            swapchain.handle = XR_NULL_HANDLE;
         }
 
         void RefreshVisibilityMask()
@@ -8893,10 +8929,70 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             return true;
         }
 
+        // Eye swapchain at the game eye's size, so the eye blit is a 1:1 copy
+        // and only the runtime resamples (lens warp), like a game that renders
+        // into the swapchain. The recommended size made the helper resample
+        // 4096x4096 -> 3824x3904 with a single-mip bilinear shader before the
+        // runtime resampled again (PSVR2, 2026-10-30). Only when the game
+        // supplies the FOV for the whole image (fill blit); within
+        // maxImageRect. A size the runtime refuses is not retried; the
+        // recommended size comes back.
+        void MatchEyeSwapchainToSource(uint32_t eyeIndex)
+        {
+            if (!m_SwapchainAtSourceSize || !m_Bridge.HasState() || eyeIndex >= m_Eyes.size()
+                || eyeIndex >= m_ViewConfigs.size() || m_EyeSwapchainAcquired[eyeIndex])
+                return;
+            const VulkanGameEyeTexture& source = m_GameEyes[eyeIndex];
+            if (source.image == VK_NULL_HANDLE || !(source.haveExplicitFov || m_GameRendersRuntimeFov))
+                return;
+            uint32_t width = 0;
+            uint32_t height = 0;
+            BoundedSourcePixels(source.width, source.height, source.uMin, source.vMin, source.uMax, source.vMax, width, height);
+            VulkanEyeSwapchain& eye = m_Eyes[eyeIndex];
+            if (eye.width == width && eye.height == height)
+                return;
+            if (m_EyeSourceSizeFailedW[eyeIndex] == width && m_EyeSourceSizeFailedH[eyeIndex] == height)
+                return;
+            const XrViewConfigurationView& view = m_ViewConfigs[eyeIndex];
+            const uint32_t maxW = view.maxImageRectWidth ? view.maxImageRectWidth : 4096u;
+            const uint32_t maxH = view.maxImageRectHeight ? view.maxImageRectHeight : 4096u;
+            if (width < 640 || height < 360 || width > maxW || height > maxH)
+            {
+                m_EyeSourceSizeFailedW[eyeIndex] = width;
+                m_EyeSourceSizeFailedH[eyeIndex] = height;
+                m_Log.Print("Eye %u swapchain stays %ux%u: source %ux%u outside 640x360..%ux%u (maxImageRect)",
+                    eyeIndex, eye.width, eye.height, width, height, maxW, maxH);
+                return;
+            }
+            // The old swapchain's images may still be read by queued blits.
+            WaitGraphicsQueueIdle();
+            const uint32_t oldW = eye.width;
+            const uint32_t oldH = eye.height;
+            DestroyEyeSwapchain(eye);
+            if (CreateEyeSwapchain(eyeIndex, width, height))
+            {
+                m_Log.Print("Eye %u swapchain %ux%u -> %ux%u (game eye size; 1:1 copy, only the runtime resamples)",
+                    eyeIndex, oldW, oldH, width, height);
+                return;
+            }
+            m_EyeSourceSizeFailedW[eyeIndex] = width;
+            m_EyeSourceSizeFailedH[eyeIndex] = height;
+            DestroyEyeSwapchain(eye);
+            uint32_t recW = 0;
+            uint32_t recH = 0;
+            ChooseOpenXrSwapchainExtent(view, recW, recH);
+            const bool restored = CreateEyeSwapchain(eyeIndex, recW, recH);
+            m_Log.Print("Eye %u swapchain at source size %ux%u failed; recommended %ux%u restored=%u",
+                eyeIndex, width, height, recW, recH, restored ? 1u : 0u);
+        }
+
         bool RenderEye(uint32_t eyeIndex, uint32_t frameIndex, uint32_t sharedFrameId,
             bool waitForQueueIdle = true, bool releaseSwapchain = true)
         {
             if (eyeIndex >= L4D2VR_OPENXR_EYE_COUNT)
+                return false;
+            MatchEyeSwapchainToSource(eyeIndex);
+            if (eyeIndex >= m_Eyes.size() || m_Eyes[eyeIndex].handle == XR_NULL_HANDLE)
                 return false;
             m_CommandBuffer = BlitCommandBuffer(eyeIndex);
             VulkanEyeSwapchain& eye = m_Eyes[eyeIndex];
@@ -9313,6 +9409,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         int FrameLoop(const Options& options)
         {
             m_GameRendersRuntimeFov = options.gameRendersRuntimeFov;
+            m_SwapchainAtSourceSize = options.swapchainAtSourceSize;
             const ULONGLONG startTicks = GetTickCount64();
             uint32_t submittedFrames = 0;
             bool shouldExit = false;
@@ -10435,6 +10532,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         std::vector<VulkanEyeSwapchain> m_Eyes;
         std::array<VulkanGameEyeTexture, L4D2VR_OPENXR_EYE_COUNT> m_GameEyes;
         bool m_EyeSwapchainAcquired[L4D2VR_OPENXR_EYE_COUNT]{};
+        bool m_SwapchainAtSourceSize = true;
+        uint32_t m_EyeSourceSizeFailedW[L4D2VR_OPENXR_EYE_COUNT]{};
+        uint32_t m_EyeSourceSizeFailedH[L4D2VR_OPENXR_EYE_COUNT]{};
         static constexpr uint32_t kGameEyeCacheSlots = 4;
         std::array<std::array<VulkanGameEyeTexture, kGameEyeCacheSlots>, L4D2VR_OPENXR_EYE_COUNT> m_GameEyeCache{};
         std::array<VulkanGameEyeTexture, L4D2VR_OPENXR_OVERLAY_COUNT> m_OverlayTextures;
@@ -10471,6 +10571,7 @@ int wmain(int argc, wchar_t** argv)
     log.Print("OpenXR projection layer: %s", options.disableProjectionLayer ? "disabled" : "enabled");
     log.Print("OpenXR symmetric projection FOV submit: %s", options.useSymmetricProjectionFov ? "enabled" : "disabled");
     log.Print("OpenXR game renders runtime per-eye FOV (off-centre): %s", options.gameRendersRuntimeFov ? "yes" : "no");
+    log.Print("OpenXR eye swapchain at game eye size: %s", options.swapchainAtSourceSize ? "enabled" : "disabled");
     log.Print("OpenXR game render pose projection submit: %s", options.useGameRenderPoseForProjection ? "enabled" : "disabled");
     log.Print(
         "OpenXR force mono projection eye: %s(%d)",
