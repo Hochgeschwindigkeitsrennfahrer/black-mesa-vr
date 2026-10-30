@@ -594,6 +594,45 @@ namespace
         return desc.Width == vr->m_RenderWidth && desc.Height == vr->m_RenderHeight;
     }
 
+    // RT0 is one of the reflection RTs grown by ReflectionRtScale, in a
+    // stereo eye pass. The reflection/refraction views inherit the main
+    // view's window-sized CViewSetup (1920x1080), so their window-sized
+    // viewports, scissors, clears and texel-size constants must map to this
+    // RT, not to the eye. Left alone, the lobby mirror floor drew only into
+    // the top-left 1920x1080 of its 2000x2048 RTs: floor black below 52 % and
+    // past 96 % of the eye (2026-10-30). At ReflectionRtScale 1 the RT is
+    // eye-sized and the eye path below already handles it.
+    bool Rt0IsGrownReflection(VR* vr, UINT& w, UINT& h)
+    {
+        if (!vr || bmvr::g_ReflectionRtW <= 0 || !g_Rt0ActualKnown || !g_Rt0ActualPtr)
+            return false;
+        if (vr->m_CaptureReentry || vr->HudPaintActive() || !vr->StereoWorldPassActive())
+            return false;
+        if (std::abs(static_cast<int>(g_Rt0ActualW) - bmvr::g_ReflectionRtW) > 16
+            || std::abs(static_cast<int>(g_Rt0ActualH) - bmvr::g_ReflectionRtH) > 16)
+            return false;
+        if (g_Rt0ActualW == vr->m_RenderWidth && g_Rt0ActualH == vr->m_RenderHeight)
+            return false;
+        w = g_Rt0ActualW;
+        h = g_Rt0ActualH;
+        return true;
+    }
+
+    void LogReflectionRemap(const char* what, UINT fromW, UINT fromH, UINT toW, UINT toH)
+    {
+        static UINT s_lastFrom[3][2];
+        static UINT s_lastTo[3][2];
+        const int slot = what[0] == 'v' ? 0 : (what[0] == 's' ? 1 : 2);
+        if (s_lastFrom[slot][0] == fromW && s_lastFrom[slot][1] == fromH
+            && s_lastTo[slot][0] == toW && s_lastTo[slot][1] == toH)
+            return;
+        s_lastFrom[slot][0] = fromW;
+        s_lastFrom[slot][1] = fromH;
+        s_lastTo[slot][0] = toW;
+        s_lastTo[slot][1] = toH;
+        Game::logMsg("D3D reflection RT %s %ux%u -> %ux%u (ReflectionRtScale)", what, fromW, fromH, toW, toH);
+    }
+
     bool ShouldExpandWindowVpOnWorldRt(IDirect3DDevice9* device, VR* vr)
     {
         (void)device;
@@ -711,8 +750,18 @@ namespace
             return false;
         const float ww = static_cast<float>(winW);
         const float wh = static_cast<float>(winH);
-        const float ew = static_cast<float>(vr->m_RenderWidth);
-        const float eh = static_cast<float>(vr->m_RenderHeight);
+        // Window texel sizes map to the bound RT: the eye, or a grown
+        // reflection RT during the reflection/refraction views.
+        UINT tw = vr->m_RenderWidth;
+        UINT th = vr->m_RenderHeight;
+        UINT rw = 0, rh = 0;
+        if (Rt0IsGrownReflection(vr, rw, rh))
+        {
+            tw = rw;
+            th = rh;
+        }
+        const float ew = static_cast<float>(tw);
+        const float eh = static_cast<float>(th);
         if (ew < 640.f || eh < 360.f || ww < 640.f || wh < 360.f)
             return false;
         if (FloatNear(ww, ew, 0.51f) && FloatNear(wh, eh, 0.51f))
@@ -910,6 +959,7 @@ namespace
                 }
             }
         }
+        UINT reflW = 0, reflH = 0;
         if (use == pViewport && pViewport && vr && vr->D3dRt0IsMcRing())
         {
             int ox = 0, oy = 0;
@@ -940,6 +990,19 @@ namespace
                     }
                 }
             }
+        }
+        else if (use == pViewport && pViewport && vr
+            && ViewportMatchesWindow(pViewport->Width, pViewport->Height)
+            && pViewport->X <= 16 && pViewport->Y <= 16
+            && Rt0IsGrownReflection(vr, reflW, reflH))
+        {
+            vp = *pViewport;
+            vp.X = 0;
+            vp.Y = 0;
+            vp.Width = reflW;
+            vp.Height = reflH;
+            use = &vp;
+            LogReflectionRemap("viewport", pViewport->Width, pViewport->Height, reflW, reflH);
         }
         else if (use == pViewport && pViewport && vr
             && ViewportMatchesWindow(pViewport->Width, pViewport->Height)
@@ -995,7 +1058,19 @@ namespace
             const UINT w = static_cast<UINT>(pRect->right - pRect->left);
             const UINT h = static_cast<UINT>(pRect->bottom - pRect->top);
             int cx = 0, cy = 0, cw = 0, ch = 0;
-            if (vr->D3dRt0IsMcRing()
+            UINT reflW = 0, reflH = 0;
+            if (!vr->D3dRt0IsMcRing() && ViewportMatchesWindow(w, h)
+                && pRect->left <= 16 && pRect->top <= 16
+                && Rt0IsGrownReflection(vr, reflW, reflH))
+            {
+                expanded.left = 0;
+                expanded.top = 0;
+                expanded.right = static_cast<LONG>(reflW);
+                expanded.bottom = static_cast<LONG>(reflH);
+                use = &expanded;
+                LogReflectionRemap("scissor", w, h, reflW, reflH);
+            }
+            else if (vr->D3dRt0IsMcRing()
                 && vr->McClipAmbiguousWindowVp(pRect->left, pRect->top,
                     static_cast<int>(w), static_cast<int>(h), cx, cy, cw, ch))
             {
@@ -1061,7 +1136,29 @@ namespace
         D3DRECT full{};
         const D3DRECT* useRects = rects;
         DWORD useCount = count;
-        if (device && vr && ShouldExpandWindowVpOnWorldRt(device, vr))
+        UINT reflW = 0, reflH = 0;
+        if (device && vr && Rt0IsGrownReflection(vr, reflW, reflH))
+        {
+            // Rect-less clears cover the viewport, which SetViewport already
+            // grew. A window-sized rect at the origin covers the whole RT.
+            if (rects && count >= 1)
+            {
+                const LONG w = rects[0].x2 - rects[0].x1;
+                const LONG h = rects[0].y2 - rects[0].y1;
+                if (w > 0 && h > 0 && rects[0].x1 <= 16 && rects[0].y1 <= 16
+                    && ViewportMatchesWindow(static_cast<UINT>(w), static_cast<UINT>(h)))
+                {
+                    full.x1 = 0;
+                    full.y1 = 0;
+                    full.x2 = static_cast<LONG>(reflW);
+                    full.y2 = static_cast<LONG>(reflH);
+                    useRects = &full;
+                    useCount = 1;
+                    LogReflectionRemap("clear", static_cast<UINT>(w), static_cast<UINT>(h), reflW, reflH);
+                }
+            }
+        }
+        else if (device && vr && ShouldExpandWindowVpOnWorldRt(device, vr))
         {
             D3DVIEWPORT9 vp{};
             if (g_OrigSetViewport && SUCCEEDED(device->GetViewport(&vp))

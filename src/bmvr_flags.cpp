@@ -121,6 +121,8 @@ namespace bmvr
     bool g_StereoEnginePost = true;
     uint32_t g_MaxEyeSize = 4096;
     float g_ReflectionRtScale = 0.f;
+    int g_ReflectionRtW = 0;
+    int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.

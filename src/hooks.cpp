@@ -459,16 +459,14 @@ namespace
     thread_local int g_RenderViewNest = 0;
     thread_local int g_GluonFx = 0;
     DWORD g_GluonFxUntilMs = 0;
-    // Size of the reflection/refraction RTs grown by ReflectionRtScale (0 =
-    // not grown). Reflection views use it as their viewport; it must not be
-    // mistaken for a world pass and expanded to the eye.
-    int g_ReflectionRtW = 0;
-    int g_ReflectionRtH = 0;
-
+    // Size of the reflection/refraction RTs grown by ReflectionRtScale
+    // (bmvr::g_ReflectionRtW/H, 0 = not grown). Reflection views use it as
+    // their viewport; it must not be mistaken for a world pass and expanded
+    // to the eye.
     bool ReflectionRtSized(int w, int h)
     {
-        return g_ReflectionRtW > 0 && w > 0 && h > 0
-            && std::abs(w - g_ReflectionRtW) <= 16 && std::abs(h - g_ReflectionRtH) <= 16;
+        return bmvr::g_ReflectionRtW > 0 && w > 0 && h > 0
+            && std::abs(w - bmvr::g_ReflectionRtW) <= 16 && std::abs(h - bmvr::g_ReflectionRtH) <= 16;
     }
     thread_local Vector g_CurViewOrigin{};
     thread_local Vector g_CurViewForward{};
@@ -8677,8 +8675,8 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
             w = rw;
             h = rh;
             sizeMode = RT_SIZE_LITERAL;
-            g_ReflectionRtW = rw;
-            g_ReflectionRtH = rh;
+            bmvr::g_ReflectionRtW = rw;
+            bmvr::g_ReflectionRtH = rh;
         }
     }
     const int oldW = w;

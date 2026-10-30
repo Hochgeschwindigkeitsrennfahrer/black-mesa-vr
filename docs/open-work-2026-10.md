@@ -199,3 +199,22 @@ Fix (not compiled or tested):
 Refract `CopyRTEx` into `_rt_poweroftwofb`: in the eye pass the copy has no dst rect (whole 2000×2048 dest) and no src rect (whole source), so it already stretches the full eye into the full grown texture. Nothing to change there.
 
 Re-test: lobby floor fills the whole mirror at both 0.5 and 1.0; door glass; Xen/coast water; underwater overlay; no view-locked image in water. Expected log: `CreateNamedRT _rt_gbDepth2 reflection grow 1024x1024 mode=2 -> 2000x2048 ...` (and the other three), `PushRT ... kept (reflection RT size, not the eye)`, and no `PushRT null viewport 2000x2048 -> eye`.
+
+## 11. 55e0e8e headset result: reflection passes still draw 1920×1080 (2026-10-30)
+
+User: box downsample works and is a clear AA improvement (keep). Lobby floor: content only above ~52 % of the eye height and left of ~96 % of the width, black elsewhere — the whole floor surface, so the refraction pass too. 1920/2000 = 0.96, 1080/2048 = 0.527: the reflection and refraction views draw into a **1920×1080 (desktop window)** area of the 2000×2048 RTs. With 1024² RTs D3D9 clipped that viewport to the target, which then covered all of it.
+
+Cause: PushRT now keeps 2000×2048, but the reflection/refraction views inherit the main view's window-sized `CViewSetup` (1920×1080) and set that viewport themselves. The D3D-level hooks expanded window-sized viewports/scissors/clears and remapped window texel-size shader constants **only to the eye** (`D3D SetViewport 1920x1080 -> eye ... (q0 world RT)`); inside the reflection passes the constants were mapped to the eye size, not the RT.
+
+Fix (not compiled or tested), all in `vr.cpp` D3D hooks, keyed on the actually bound RT0 (`Rt0IsGrownReflection`: RT0 is the grown reflection size, stereo pass, not eye-sized):
+
+- `SetViewport`: window-sized viewport at the origin → full reflection RT.
+- `SetScissorRect`: same.
+- `Clear`: a window-sized rect at the origin → full RT (rect-less clears follow the viewport).
+- Window texel-size shader constants (`RewriteWindowSizeConstants`) map to the reflection RT size while it is bound, not the eye.
+- The reflection size moved to `bmvr::g_ReflectionRtW/H` so the CreateNamedRT and D3D hooks share it.
+- Log once per size change: `D3D reflection RT viewport|scissor|clear 1920x1080 -> 2000x2048 (ReflectionRtScale)`.
+
+Projection: the reflection view keeps the eye frustum; the floor samples it with normalised screen coordinates, so no aspect change is needed.
+
+Quick-save gesture facing 180°: parked until the floor is fixed (user).

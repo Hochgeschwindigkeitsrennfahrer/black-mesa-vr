@@ -289,6 +289,10 @@ namespace bmvr
     // the eye size): grow _rt_Water*, *Reflect*/*Refract* and _rt_PowerOfTwoFB.
     // Experiment for mirrored floors / refract glass at 1024 (2026-10-30).
     extern float g_ReflectionRtScale;
+    // Size the reflection set was grown to (0 = not grown). Set by the
+    // CreateNamedRT hook; read by the viewport/scissor/clear/constant hooks.
+    extern int g_ReflectionRtW;
+    extern int g_ReflectionRtH;
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
