@@ -81,6 +81,8 @@ typedef float(__thiscall* tGetScreenAspectRatio)(void* thisptr);
 typedef void(__thiscall* tNewRendererUpdatePerCamera)(void* thisptr, void* a1, void* view, bool secondary, void* a4);
 typedef void(__cdecl* tClientPvsVoid)();
 typedef void(__thiscall* tOcclusionBeginView)(void* thisptr, int viewId, int a2, const float* plane, bool a4);
+typedef void(__thiscall* tOccluderSetView)(void* thisptr, const float* origin, float fov, const float* worldToView,
+    const float* viewToProjection, const float* nearPlane);
 typedef void(__thiscall* tComputeViewMatrices)(void* thisptr, void* worldToView, void* viewToProjection, void* worldToProjection);
 typedef ITexture*(__thiscall* tCreateNamedRTEx)(void* thisptr, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags);
 typedef void(__thiscall* tEndRTAlloc)(void* thisptr);
@@ -158,6 +160,7 @@ public:
     static inline Hook<tClientPvsVoid> hkClientUpdatePvsNotifiers;
     static inline Hook<tClientPvsVoid> hkClientPvsNotifierCheck;
     static inline Hook<tOcclusionBeginView> hkOcclusionBeginView;
+    static inline Hook<tOccluderSetView> hkOccluderSetView;
     // Set when a leftover main view was skipped / when a view marked the
     // client PVS notifiers; both cleared by the FRAME_RENDER_END check.
     static inline bool m_SkippedViewSinceCheck = false;
@@ -236,6 +239,9 @@ public:
     static void __cdecl dClientUpdatePvsNotifiers();
     static void __cdecl dClientPvsNotifierCheck();
     static void __fastcall dOcclusionBeginView(void* ecx, void* edx, int viewId, int a2, const float* plane, bool a4);
+    static void __fastcall dOccluderSetView(void* ecx, void* edx, const float* origin, float fov, const float* worldToView,
+        const float* viewToProjection, const float* nearPlane);
+    static void ReplayOccluderView(int eye);
     static void __fastcall dComputeViewMatrices(void* ecx, void* edx, void* worldToView, void* viewToProjection, void* worldToProjection);
     static ITexture* __fastcall dCreateNamedRTEx(void* ecx, void* edx, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags);
     static void __fastcall dEndRTAlloc(void* ecx, void* edx);

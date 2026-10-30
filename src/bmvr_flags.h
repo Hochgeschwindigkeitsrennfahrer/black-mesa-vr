@@ -358,6 +358,13 @@ namespace bmvr
     // doorways). The right eye's views get their own id, so they get their
     // own queries against their own depth. false = stock (A/B aid).
     extern bool g_OcclusionTrackerPerEye;
+    // OccluderViewPerEye (default true): the engine's occluder system
+    // (r_occlusion, map func_occluder) takes its view in Push3DView, but the
+    // client tests renderables against it before pushing the view. Flat, that
+    // is the previous frame's view; in stereo the right eye was tested from the
+    // left eye's position (static props pop in/out behind occluders). Each eye
+    // now gets its own previous-frame occluder view. false = stock (A/B aid).
+    extern bool g_OccluderViewPerEye;
     // Exponential smoothing time (seconds) applied to HMD pitch/yaw while
     // scoped. Magnification otherwise turns every micro-movement into shake.
     extern float g_ScopeZoomSmoothSec;

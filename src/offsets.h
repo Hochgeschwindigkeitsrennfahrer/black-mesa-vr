@@ -482,6 +482,12 @@ public:
     // one result per object, queried against the first eye's depth. Beta 26234270.
     Offset OcclusionTrackerBeginView{ "client.dll", 0x253E50,
         "55 8B EC 56 8B F1 80 7E 04 00 74 ? A1 ? ? ? ? B9 ? ? ? ? FF 50 2C 85 C0 74 ? 8A 45 14 88 46 06 66 8B 45 08 66 89 46", 0, true };
+    // COcclusionSystem::SetView(const Vector* origin, float fov, const VMatrix* worldToView,
+    // const VMatrix* viewToProjection, const VPlane* nearPlane), vtable slot 1, thiscall,
+    // ret 0x14. Called by CRender::Push3DView / PopView; the occluder edge list is rebuilt
+    // lazily at the next IsOccluded. Beta 26234270.
+    Offset OccluderSetView{ "engine.dll", 0x130C70,
+        "55 8B EC 51 56 8B 75 10 8B C1 57 8B 7D 08 56 8D 48 48 89 45 FC D9 07 D9 98 98 00 00 00", 0, true };
     static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,

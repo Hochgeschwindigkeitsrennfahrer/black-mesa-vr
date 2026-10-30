@@ -255,6 +255,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkClientUpdatePvsNotifiers, "ClientUpdatePvsNotifiers");
     enableIfReady(hkClientPvsNotifierCheck, "ClientPvsNotifierCheck");
     enableIfReady(hkOcclusionBeginView, "OcclusionTrackerBeginView");
+    enableIfReady(hkOccluderSetView, "OccluderSetView");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -351,6 +352,10 @@ int Hooks::initSourceHooks()
         hkOcclusionBeginView.createHook((LPVOID)o.OcclusionTrackerBeginView.address, &dOcclusionBeginView);
     else if (bmvr::g_OcclusionTrackerPerEye && !o.OcclusionTrackerBeginView.valid)
         Game::noteMissingOffset("Occlusion tracker BeginView (per-eye occlusion culling)");
+    if (bmvr::g_OccluderViewPerEye && o.OccluderSetView.valid && !hkOccluderSetView.pTarget)
+        hkOccluderSetView.createHook((LPVOID)o.OccluderSetView.address, &dOccluderSetView);
+    else if (bmvr::g_OccluderViewPerEye && !o.OccluderSetView.valid)
+        Game::noteMissingOffset("Occluder SetView (per-eye occluder culling)");
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
@@ -4152,6 +4157,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     }
 
     auto callOriginal = [&](CViewSetup& view, int clearFlags, int drawFlags) {
+        if (m_VR)
+            ReplayOccluderView(m_VR->m_StereoEye);
         hkRenderView.fOriginal(ecx, view, clearFlags, drawFlags);
     };
 
@@ -8550,6 +8557,69 @@ void __fastcall Hooks::dOcclusionBeginView(void* ecx, void* edx, int viewId, int
         }
     }
     hkOcclusionBeginView.fOriginal(ecx, viewId, a2, plane, a4);
+}
+
+// The engine's occluder system (r_occlusion, map func_occluder) takes its view in
+// CRender::Push3DView, but the client tests renderables with IsOccluded while building the
+// view's lists, before that push. Flat, the test uses the previous frame's view, which is
+// close enough. In stereo the right eye was tested from where the left eye last pushed its
+// view, so static props the left eye saw as hidden behind an occluder (cable runs past a
+// wall corner, the soda machine, a doorway) were dropped from the right eye
+// (2026-10-30, headless: r_occlusion 0 restored them). Record each eye's last SetView and
+// replay it before that eye's RenderView, so each eye is tested from its own previous frame.
+namespace
+{
+    struct OccluderView
+    {
+        bool valid = false;
+        float origin[3];
+        float fov;
+        float worldToView[16];
+        float viewToProjection[16];
+        float nearPlane[4];
+    };
+    OccluderView g_OccluderViews[3];
+    void* g_OccluderSystem = nullptr;
+}
+
+void __fastcall Hooks::dOccluderSetView(void* ecx, void* edx, const float* origin, float fov, const float* worldToView,
+    const float* viewToProjection, const float* nearPlane)
+{
+    (void)edx;
+    const int eye = m_VR ? m_VR->m_StereoEye : 0;
+    if ((eye == 1 || eye == 2) && origin && worldToView && viewToProjection && nearPlane)
+    {
+        OccluderView& v = g_OccluderViews[eye];
+        std::memcpy(v.origin, origin, sizeof(v.origin));
+        v.fov = fov;
+        std::memcpy(v.worldToView, worldToView, sizeof(v.worldToView));
+        std::memcpy(v.viewToProjection, viewToProjection, sizeof(v.viewToProjection));
+        std::memcpy(v.nearPlane, nearPlane, sizeof(v.nearPlane));
+        v.valid = true;
+        g_OccluderSystem = ecx;
+    }
+    if (bmvr::g_PassTraceFrames > 0 && origin)
+        Game::logMsg("trace: OccluderSetView eye=%d origin=(%.1f,%.1f,%.1f) fov=%.2f", eye, origin[0], origin[1], origin[2], fov);
+    hkOccluderSetView.fOriginal(ecx, origin, fov, worldToView, viewToProjection, nearPlane);
+}
+
+void Hooks::ReplayOccluderView(int eye)
+{
+    if ((eye != 1 && eye != 2) || !hkOccluderSetView.fOriginal || !g_OccluderSystem)
+        return;
+    const OccluderView& v = g_OccluderViews[eye];
+    if (!v.valid)
+        return;
+    static int s_log;
+    if (s_log < 2)
+    {
+        Game::logMsg("Occluder view: eye %d tested from its own last view (%.1f,%.1f,%.1f)", eye,
+            v.origin[0], v.origin[1], v.origin[2]);
+        ++s_log;
+    }
+    if (bmvr::g_PassTraceFrames > 0)
+        Game::logMsg("trace: OccluderReplay eye=%d origin=(%.1f,%.1f,%.1f)", eye, v.origin[0], v.origin[1], v.origin[2]);
+    hkOccluderSetView.fOriginal(g_OccluderSystem, v.origin, v.fov, v.worldToView, v.viewToProjection, v.nearPlane);
 }
 
 void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a1, void* view, bool secondary, void* a4)
