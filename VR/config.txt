@@ -2,8 +2,20 @@
 # Player settings only. Other behavior uses the built-in defaults.
 
 # Multiplier on the runtime's recommended per-eye size. 1.0 = recommended.
-# 0.75 if the GPU is bound. Above 1.0 is extra supersampling (sharper, costs GPU).
+# 0.75 if the GPU is bound. Above 1.0 is extra supersampling (sharper, less
+# shimmer, costs GPU). With GPU headroom try 1.2-1.4 together with
+# OpenXRHelperDownsample=box below (PSVR2: 1.39 = 4016x4096 per eye).
 RenderScale=1.0
+
+# Largest eye side in pixels (2048-8192, default 4096). Above it both axes
+# shrink by one factor, so the eye keeps its shape. MulticoreMode caps the
+# height at 5456. Going far above 4096 can run the 32-bit game out of memory.
+MaxEyeSize=4096
+
+# box: with RenderScale above 1.0, the OpenXR helper averages the big eye
+# image down to the headset's recommended size itself (cleaner edges, less
+# shimmer). Empty = the big image goes to the runtime, which scales it.
+OpenXRHelperDownsample=
 
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
