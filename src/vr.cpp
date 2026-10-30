@@ -8546,7 +8546,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         || WeaponMenuOpen()
         || SettingsPanelOpen()
         || AimCrosshairVisible()
-        || ToastVisible());
+        || ToastVisible()
+        || bmvr::g_DebugBlankEye >= 0.5f); // keep the blanked eye after the panel closes
     if ((wantOverlay || wantHandHud) && !bmvr::TryHandOverlay())
     {
         static int s_skipOverlayLog;
@@ -8632,7 +8633,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         }
 
         // Debug (VR panel): black out one eye, so "which eye shows it?" needs
-        // no winking. Before the panel, which stays visible to switch it off.
+        // no winking. Stays on with the panel closed (not saved; off at restart).
+        // Before the panel, which stays visible to switch it off.
         if (stereoEye > 0 && static_cast<int>(bmvr::g_DebugBlankEye + 0.5f) == stereoEye)
         {
             DWORD zOld = 0, blendOld = 0;
@@ -11494,7 +11496,7 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
     IDirect3DSurface9* right = m_D9RightEyeSurface;
     if (!IsMenuUp()
         && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible() || ToastVisible()))
+            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible() || ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
     {
         DrawIndependentHandMarkers(left, 1, true, true);
         DrawIndependentHandMarkers(right, 2, true, true);

@@ -4695,7 +4695,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             }
             if (!m_VR->IsMenuUp()
                 && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible()))
+                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
             {
                 const long long t0 = QpcNow();
                 m_VR->DrawIndependentHandMarkers(
@@ -4757,7 +4757,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             }
             if (!m_VR->IsMenuUp()
                 && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible()))
+                || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
             {
                 const long long t0 = QpcNow();
                 m_VR->DrawIndependentHandMarkers(
