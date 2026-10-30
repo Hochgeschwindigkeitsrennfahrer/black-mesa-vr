@@ -180,3 +180,22 @@ Status: implemented; shader compiled with glslangValidator 15.1 and passes `spir
 2. `OpenXRHelperDownsample=box`: `Eye 0 scale path: box downsample source 4016x4096 -> swapchain 2884x2940`.
 
 Compare the shimmer and the GPU cost (SteamVR frame timing GPU ms, `OpenXR publish rate` / `paceWait`). The box pass reads ~16 M source pixels per eye in 4 taps per output pixel, so expect a fraction of a millisecond. The runtime then composites a smaller swapchain, which can win some of that back.
+
+## 10. ReflectionRtScale headset result and fix (2026-10-30)
+
+User, build 36a09b7, `ReflectionRtScale=0.5` (reflection RTs 1024² → 2000×2048 at eye 4016×4096): **the lobby floor/wall edge shimmer is gone**, so the 1024² reflection RT was the cause. But the mirror floor showed correct, ~2× magnified content only in the top-left quarter of each eye, black elsewhere (headset video frames).
+
+Log analysis:
+
+- The reflection view runs its own deferred pass: `PushRT null 2000x2048` → `PushRT _rt_gbdepthrt2 2000x2048` → `PushRT _rt_waterreflection`. Its G-buffer is `_rt_gbDepth2`, `_rt_gbDepthRT2`, `_rt_gbNormal2`, `_rt_gbLightDiff2`, all still **1024×1024** (mode 2, same size class as the water RTs). Under a 2000×2048 viewport only their top-left quarter was written.
+- In addition, `PushRT null/_rt_gbdepthrt2 viewport 2000x2048 -> eye 4016x4096 (offscreen native)`: the old "square aux" test (`|w-h| < 32`) no longer recognised the 2000×2048 reflection viewport and expanded it to the eye. `ClampStereoViewport` had the same test.
+
+Fix (not compiled or tested):
+
+1. `ReflectionRtScale` also grows `_rt_gb*2` (non-shadow) with the water/refract RTs, so the whole reflection set has one size. The 2026-08-21 failure was these grown to the *eye* while the water RTs stayed at 1024 — the mismatch in the other direction.
+2. The grown reflection size is remembered. PushRT and `ClampStereoViewport` leave viewports of that size alone (log: `PushRT ... viewport ... kept (reflection RT size, not the eye)`).
+3. `SrcLooksLikePowerOfTwoFb` (underwater overlay) also accepts the grown size.
+
+Refract `CopyRTEx` into `_rt_poweroftwofb`: in the eye pass the copy has no dst rect (whole 2000×2048 dest) and no src rect (whole source), so it already stretches the full eye into the full grown texture. Nothing to change there.
+
+Re-test: lobby floor fills the whole mirror at both 0.5 and 1.0; door glass; Xen/coast water; underwater overlay; no view-locked image in water. Expected log: `CreateNamedRT _rt_gbDepth2 reflection grow 1024x1024 mode=2 -> 2000x2048 ...` (and the other three), `PushRT ... kept (reflection RT size, not the eye)`, and no `PushRT null viewport 2000x2048 -> eye`.

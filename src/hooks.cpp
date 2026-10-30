@@ -459,6 +459,17 @@ namespace
     thread_local int g_RenderViewNest = 0;
     thread_local int g_GluonFx = 0;
     DWORD g_GluonFxUntilMs = 0;
+    // Size of the reflection/refraction RTs grown by ReflectionRtScale (0 =
+    // not grown). Reflection views use it as their viewport; it must not be
+    // mistaken for a world pass and expanded to the eye.
+    int g_ReflectionRtW = 0;
+    int g_ReflectionRtH = 0;
+
+    bool ReflectionRtSized(int w, int h)
+    {
+        return g_ReflectionRtW > 0 && w > 0 && h > 0
+            && std::abs(w - g_ReflectionRtW) <= 16 && std::abs(h - g_ReflectionRtH) <= 16;
+    }
     thread_local Vector g_CurViewOrigin{};
     thread_local Vector g_CurViewForward{};
     thread_local bool g_HaveCurView = false;
@@ -3113,6 +3124,11 @@ namespace
         if (width > 0 && height > 0 && std::abs(width - height) < 32
             && width + 32 < eyeW)
             return;
+        // Grown reflection RT (ReflectionRtScale < 1): its 2000x2048 view is
+        // not square, so the test above let it through and the reflection
+        // rendered at eye size into the top-left of its RT (2026-10-30).
+        if (ReflectionRtSized(width, height) && width + 32 < eyeW)
+            return;
         // Flashlight apply PushRT/Viewport is 2560 (G-buffer actual). Forcing
         // 1584 here is why the beam never landed in fused eyes. Keep engine
         // size; squash-blit after RenderView. Same lock when gbmatch was
@@ -3482,6 +3498,8 @@ namespace
 
     bool SrcLooksLikePowerOfTwoFb(int srcW, int srcH, int eyeW, int eyeH)
     {
+        if (ReflectionRtSized(srcW, srcH) && srcW + 32 < eyeW)
+            return true;
         if (srcW < 256 || srcH < 256 || srcW > 2048 || srcH > 2048)
             return false;
         if (srcW != srcH)
@@ -5641,8 +5659,19 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
         const bool backbuffer = (pTexture == nullptr)
             || (pushName && (std::strcmp(pushName, "null") == 0));
         const bool smallVp = nViewW > 0 && nViewH > 0 && (nViewW < 640 || nViewH < 360);
-        const bool squareAux = nViewW > 0 && nViewH > 0
-            && std::abs(nViewW - nViewH) < 32 && nViewW + 32 < eyeW;
+        const bool reflectionVp = ReflectionRtSized(nViewW, nViewH) && nViewW + 32 < eyeW;
+        const bool squareAux = (nViewW > 0 && nViewH > 0
+            && std::abs(nViewW - nViewH) < 32 && nViewW + 32 < eyeW) || reflectionVp;
+        if (reflectionVp)
+        {
+            static int s_reflVp;
+            if (s_reflVp < 12)
+            {
+                Game::logMsg("PushRT %s viewport %d,%d %dx%d kept (reflection RT size, not the eye)",
+                    pushName, nViewX, nViewY, nViewW, nViewH);
+                ++s_reflVp;
+            }
+        }
         if (eyeW >= 640 && eyeH >= 360 && (namedWorld || backbuffer)
             && !smallVp && !squareAux
             && (nViewW != eyeW || nViewH != eyeH || nViewW <= 0 || nViewH <= 0))
@@ -8620,10 +8649,21 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     // glass, 2026-10-30). Opt-in experiment: earlier reflection-viewport bugs
     // stamped a view-locked world into these RTs, and the reflection is a
     // second scene render per eye. _rt_Camera (monitor cameras) stays.
+    // The reflection view's own deferred G-buffer (_rt_gbDepth2,
+    // _rt_gbDepthRT2, _rt_gbNormal2, _rt_gbLightDiff2; 1024x1024 mode 2 like
+    // the water RTs) must grow with them: left at 1024 under a 2000x2048
+    // reflection viewport, only its top-left quarter was written and the
+    // mirror floor showed that quarter magnified, black elsewhere
+    // (2026-10-30). Growing these alone to the eye broke deferred albedo
+    // before (2026-08-21); the point is one size for the whole reflection set.
+    const size_t nameLen = name ? std::strlen(name) : 0;
+    const bool reflectGb = name && nameLen > 7 && std::strncmp(name, "_rt_gb", 6) == 0
+        && name[nameLen - 1] == '2'
+        && !std::strstr(name, "shadow") && !std::strstr(name, "Shadow");
     const bool reflectRt = name && bmvr::g_ReflectionRtScale > 0.f
         && (std::strstr(name, "Water") || std::strstr(name, "water")
             || std::strstr(name, "Reflect") || std::strstr(name, "Refract")
-            || std::strstr(name, "PowerOfTwo"));
+            || std::strstr(name, "PowerOfTwo") || reflectGb);
     uint32_t reflEyeW = 0, reflEyeH = 0;
     if (reflectRt && bmvr::ComputeOffscreenEyeSize(reflEyeW, reflEyeH))
     {
@@ -8637,6 +8677,8 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
             w = rw;
             h = rh;
             sizeMode = RT_SIZE_LITERAL;
+            g_ReflectionRtW = rw;
+            g_ReflectionRtH = rh;
         }
     }
     const int oldW = w;
