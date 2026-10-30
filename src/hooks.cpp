@@ -256,6 +256,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkClientPvsNotifierCheck, "ClientPvsNotifierCheck");
     enableIfReady(hkOcclusionBeginView, "OcclusionTrackerBeginView");
     enableIfReady(hkOccluderSetView, "OccluderSetView");
+    enableIfReady(hkOccluderIsOccluded, "OccluderIsOccluded");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -356,6 +357,8 @@ int Hooks::initSourceHooks()
         hkOccluderSetView.createHook((LPVOID)o.OccluderSetView.address, &dOccluderSetView);
     else if (bmvr::g_OccluderViewPerEye && !o.OccluderSetView.valid)
         Game::noteMissingOffset("Occluder SetView (per-eye occluder culling)");
+    if (o.OccluderIsOccluded.valid && !hkOccluderIsOccluded.pTarget)
+        hkOccluderIsOccluded.createHook((LPVOID)o.OccluderIsOccluded.address, &dOccluderIsOccluded);
     if (o.CreateNamedRTEx.valid)
         hkCreateNamedRTEx.createHook((LPVOID)o.CreateNamedRTEx.address, &dCreateNamedRTEx);
     if (o.EndRTAlloc.valid)
@@ -8620,6 +8623,23 @@ void Hooks::ReplayOccluderView(int eye)
     if (bmvr::g_PassTraceFrames > 0)
         Game::logMsg("trace: OccluderReplay eye=%d origin=(%.1f,%.1f,%.1f)", eye, v.origin[0], v.origin[1], v.origin[2]);
     hkOccluderSetView.fOriginal(g_OccluderSystem, v.origin, v.fov, v.worldToView, v.viewToProjection, v.nearPlane);
+}
+
+// Diagnostic (trace frames only): which eye/thread tests which box, against which occluder view
+// origin (this+0x98), with the edge list still dirty (this+4) or not, and the result.
+bool __fastcall Hooks::dOccluderIsOccluded(void* ecx, void* edx, const float* mins, const float* maxs)
+{
+    (void)edx;
+    if (bmvr::g_PassTraceFrames <= 0 || !ecx || !mins || !maxs)
+        return hkOccluderIsOccluded.fOriginal(ecx, mins, maxs);
+    const unsigned char* self = static_cast<const unsigned char*>(ecx);
+    const bool dirty = self[4] != 0;
+    const float* o = reinterpret_cast<const float*>(self + 0x98);
+    const bool r = hkOccluderIsOccluded.fOriginal(ecx, mins, maxs);
+    Game::logMsg("trace: IsOccluded eye=%d tid=%lu view=(%.1f,%.1f,%.1f) dirty=%d box=(%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f) -> %d",
+        m_VR ? m_VR->m_StereoEye : -1, GetCurrentThreadId(), o[0], o[1], o[2], dirty ? 1 : 0,
+        mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2], r ? 1 : 0);
+    return r;
 }
 
 void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a1, void* view, bool secondary, void* a4)

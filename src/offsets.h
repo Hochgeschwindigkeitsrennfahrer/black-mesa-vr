@@ -488,6 +488,10 @@ public:
     // lazily at the next IsOccluded. Beta 26234270.
     Offset OccluderSetView{ "engine.dll", 0x130C70,
         "55 8B EC 51 56 8B 75 10 8B C1 57 8B 7D 08 56 8D 48 48 89 45 FC D9 07 D9 98 98 00 00 00", 0, true };
+    // COcclusionSystem::IsOccluded(const Vector& mins, const Vector& maxs), vtable slot 2, thiscall,
+    // ret 0x8. Diagnostic hook only (trace frames). Beta 26234270.
+    Offset OccluderIsOccluded{ "engine.dll", 0x12F1C0,
+        "55 8B EC 81 EC E4 01 00 00 A1 ? ? ? ? 33 C5 89 45 FC 57 8B F9 8B 0D ? ? ? ? 89 BD 54 FE FF FF 81 F9", 0, true };
     static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,
