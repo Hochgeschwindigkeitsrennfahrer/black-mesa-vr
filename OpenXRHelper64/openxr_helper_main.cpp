@@ -8988,18 +8988,29 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 // SteamVR+Touch uses a second blit VS that negates NDC Y.
                 const bool flipY = m_FlipSubmitY;
                 const bool useShaderBlit = m_UseShaderBlit;
-                const bool containFit = !cropProjection;
+                // When the game supplies the frustum (explicit FOV, or it
+                // renders the runtime FOV) that FOV is submitted for the whole
+                // imageRect, so the image must fill it. Contain fit kept the
+                // source aspect and never scaled up: 4096x4096 into 3824x3904
+                // left 40 px bars and squeezed the picture ~2 % vertically
+                // (PSVR2, 2026-10-30), and RenderScale < 1 drew a shrunken
+                // picture. Contain fit stays for images without a matching FOV
+                // (window-sized eyes, where stretching repeated the last row).
+                const bool gameSuppliesFov = source.haveExplicitFov || m_GameRendersRuntimeFov;
+                const bool containFit = !cropProjection && !gameSuppliesFov;
                 static int s_loggedBlitKey = -1;
-                const int blitKey = (flipY ? 1 : 0) | (cropProjection ? 2 : 0) | (useShaderBlit ? 4 : 0);
+                const int blitKey = (flipY ? 1 : 0) | (cropProjection ? 2 : 0) | (useShaderBlit ? 4 : 0)
+                    | (containFit ? 8 : 0);
                 if (eyeIndex == 0 && s_loggedBlitKey != blitKey)
                 {
                     s_loggedBlitKey = blitKey;
-                    m_Log.Print("Using %s Vulkan eye blit path for swapchain format=%u flipY=%u crop=%u ndcYFlip=%u",
+                    m_Log.Print("Using %s Vulkan eye blit path for swapchain format=%u flipY=%u crop=%u ndcYFlip=%u fit=%s",
                         useShaderBlit ? "sRGB shader" : "transfer",
                         static_cast<unsigned int>(eye.format),
                         flipY ? 1u : 0u,
                         cropProjection ? 1u : 0u,
-                        (flipY && useShaderBlit && m_BlitPipelineFlipY != VK_NULL_HANDLE) ? 1u : 0u);
+                        (flipY && useShaderBlit && m_BlitPipelineFlipY != VK_NULL_HANDLE) ? 1u : 0u,
+                        containFit ? "contain" : "fill");
                 }
                 {
                     static uint32_t s_eyeBlitLogBudget = 48;
