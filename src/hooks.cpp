@@ -353,9 +353,9 @@ int Hooks::initSourceHooks()
         hkOcclusionBeginView.createHook((LPVOID)o.OcclusionTrackerBeginView.address, &dOcclusionBeginView);
     else if (bmvr::g_OcclusionTrackerPerEye && !o.OcclusionTrackerBeginView.valid)
         Game::noteMissingOffset("Occlusion tracker BeginView (per-eye occlusion culling)");
-    if (bmvr::g_OccluderViewPerEye && o.OccluderSetView.valid && !hkOccluderSetView.pTarget)
+    if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && o.OccluderSetView.valid && !hkOccluderSetView.pTarget)
         hkOccluderSetView.createHook((LPVOID)o.OccluderSetView.address, &dOccluderSetView);
-    else if (bmvr::g_OccluderViewPerEye && !o.OccluderSetView.valid)
+    else if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && !o.OccluderSetView.valid)
         Game::noteMissingOffset("Occluder SetView (per-eye occluder culling)");
     if (o.OccluderIsOccluded.valid && !hkOccluderIsOccluded.pTarget)
         hkOccluderIsOccluded.createHook((LPVOID)o.OccluderIsOccluded.address, &dOccluderIsOccluded);
@@ -8590,7 +8590,28 @@ void __fastcall Hooks::dOccluderSetView(void* ecx, void* edx, const float* origi
 {
     (void)edx;
     const int eye = m_VR ? m_VR->m_StereoEye : 0;
-    if ((eye == 1 || eye == 2) && origin && worldToView && viewToProjection && nearPlane)
+    // The occluder system projects its occluders with only the symmetric scales of this matrix
+    // (m00, m11, m23) but tests occludees with the full projection, so an off-centre eye
+    // (OffCenterEyes) shifts occludees sideways against the occluders: the right eye dropped a
+    // wall cable run behind a corner the left eye kept (2026-10-30, headless). Remove the
+    // off-centre shift so both sides use the same projection; a sideways shift applied to both
+    // does not change what overlaps what.
+    float symmetricProjection[16];
+    if (bmvr::g_OffCenterEyes && (eye == 1 || eye == 2) && viewToProjection)
+    {
+        std::memcpy(symmetricProjection, viewToProjection, sizeof(symmetricProjection));
+        static int s_log;
+        if (s_log < 2 || bmvr::g_PassTraceFrames > 0)
+        {
+            Game::logMsg("Occluder view: eye %d projection off-centre m02=%.4f m12=%.4f m20=%.4f m21=%.4f removed", eye,
+                symmetricProjection[2], symmetricProjection[6], symmetricProjection[8], symmetricProjection[9]);
+            ++s_log;
+        }
+        symmetricProjection[2] = 0.f;
+        symmetricProjection[6] = 0.f;
+        viewToProjection = symmetricProjection;
+    }
+    if (bmvr::g_OccluderViewPerEye && (eye == 1 || eye == 2) && origin && worldToView && viewToProjection && nearPlane)
     {
         OccluderView& v = g_OccluderViews[eye];
         std::memcpy(v.origin, origin, sizeof(v.origin));
