@@ -628,6 +628,8 @@ namespace dxvk {
 
     HRESULT STDMETHODCALLTYPE GetPixelShader(IDirect3DPixelShader9** ppShader);
 
+    void BmvrFixFlashlightShadowMatrix();
+
     HRESULT STDMETHODCALLTYPE SetPixelShaderConstantF(
             UINT   StartRegister,
       const float* pConstantData,

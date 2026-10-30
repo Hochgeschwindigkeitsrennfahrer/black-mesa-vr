@@ -6,6 +6,8 @@
 
 // Diagnostic: DXVK logs every draw while this is set (BM deferred-light pass in a pass trace).
 extern "C" volatile int g_BmvrD3dDrawTrace = 0;
+// d3d9 device: rebuild the flashlight shadow matrix from the current light pose (VR/config.txt FlashlightShadowMatrixFix).
+extern "C" volatile int g_BmvrFlashlightMatrixFix = 1;
 #include "bmvr_flags.h"
 #include <intrin.h>
 

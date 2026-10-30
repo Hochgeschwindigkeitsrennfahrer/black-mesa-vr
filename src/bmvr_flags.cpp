@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+extern "C" volatile int g_BmvrFlashlightMatrixFix;
+
 namespace bmvr
 {
     const std::wstring& TestDir()
@@ -558,6 +560,8 @@ namespace bmvr
                 g_AutoMatQueueMode = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MulticoreMode") == 0)
                 g_MulticoreMode = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "FlashlightShadowMatrixFix") == 0)
+                g_BmvrFlashlightMatrixFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0) ? 1 : 0;
             else if (std::strcmp(n, "Msaa") == 0 || std::strcmp(n, "msaa") == 0)
                 g_Msaa = NormalizeMsaa(atoi(val));
             else if (std::strcmp(n, "Haptics") == 0)

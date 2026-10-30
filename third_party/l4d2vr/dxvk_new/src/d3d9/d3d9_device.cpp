@@ -61,6 +61,7 @@ namespace {
 // BMVR diagnostic: set by hooks.cpp while a pass trace is inside BM's
 // deferred-light pass (_rt_gblightdiff); every draw is logged.
 extern "C" volatile int g_BmvrD3dDrawTrace;
+extern "C" volatile int g_BmvrFlashlightMatrixFix;
 namespace bmvr { void Log(const char* fmt, ...); }
 
 namespace dxvk {
@@ -4385,6 +4386,67 @@ namespace dxvk {
   }
 
 
+  // Black Mesa's deferred flashlight light draw gets the light position (ps c8, w = range
+  // 1000), its direction (c11) and the world-to-shadow matrix twice (c14-c17 = c18-c21).
+  // In stereo the first-drawn eye gets the matrix of the previous frame while position,
+  // direction and the shadow map are current, so its shadow trails the light while the
+  // flashlight moves (2026-10-30, left eye). Rebuild the matrix from c8/c11, keeping the
+  // projection scale and depth terms of the matrix the game set (roll 0, square frustum).
+  void D3D9DeviceEx::BmvrFixFlashlightShadowMatrix() {
+    if (!g_BmvrFlashlightMatrixFix)
+      return;
+    const auto& c = m_state.psConsts->fConsts;
+    const float* P = c[8].data;
+    const float* F = c[11].data;
+    if (P[3] != 1000.0f)
+      return;
+    for (uint32_t r = 14; r < 18; r++)
+      for (uint32_t k = 0; k < 4; k++)
+        if (c[r].data[k] != c[r + 4].data[k])
+          return;
+    const float* oR = c[14].data;
+    const float* oU = c[15].data;
+    const float* oD = c[16].data;
+    const float* oF = c[17].data;
+    auto dot3 = [](const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    const float lenF = std::sqrt(dot3(F, F));
+    const float lenOF = std::sqrt(dot3(oF, oF));
+    const float cot = std::sqrt(dot3(oR, oR));
+    if (std::fabs(lenF - 1.0f) > 0.02f || std::fabs(lenOF - 1.0f) > 0.02f || cot < 0.3f || cot > 5.0f)
+      return;
+    if (std::fabs(oR[2]) > 0.01f * cot || dot3(F, oF) < 0.9f)
+      return;
+    if (std::fabs(-dot3(oF, P) - oF[3]) > 20.0f)
+      return;
+    // Right = forward x world up (roll 0), up = right x forward; signs as in the game's matrix.
+    float R[3] = { F[1], -F[0], 0.0f };
+    const float lenR = std::sqrt(R[0] * R[0] + R[1] * R[1]);
+    if (lenR < 0.05f)
+      return;
+    R[0] /= lenR; R[1] /= lenR;
+    if (dot3(R, oR) < 0.0f) { R[0] = -R[0]; R[1] = -R[1]; }
+    float U[3] = { R[1] * F[2] - R[2] * F[1], R[2] * F[0] - R[0] * F[2], R[0] * F[1] - R[1] * F[0] };
+    if (dot3(U, oU) < 0.0f) { U[0] = -U[0]; U[1] = -U[1]; U[2] = -U[2]; }
+    const float depthScale = std::sqrt(dot3(oD, oD)) / lenOF;
+    const float depthBias = oD[3] - depthScale * oF[3];
+    const float fw = -dot3(F, P);
+    const float rows[8][4] = {
+      { cot * R[0], cot * R[1], cot * R[2], -cot * dot3(R, P) },
+      { cot * U[0], cot * U[1], cot * U[2], -cot * dot3(U, P) },
+      { depthScale * F[0], depthScale * F[1], depthScale * F[2], depthScale * fw + depthBias },
+      { F[0], F[1], F[2], fw },
+      { cot * R[0], cot * R[1], cot * R[2], -cot * dot3(R, P) },
+      { cot * U[0], cot * U[1], cot * U[2], -cot * dot3(U, P) },
+      { depthScale * F[0], depthScale * F[1], depthScale * F[2], depthScale * fw + depthBias },
+      { F[0], F[1], F[2], fw },
+    };
+    if (g_BmvrD3dDrawTrace)
+      bmvr::Log("trace: d3d flashlight matrix c16 %.4f %.4f %.4f %.2f -> %.4f %.4f %.4f %.2f",
+        oD[0], oD[1], oD[2], oD[3], rows[2][0], rows[2][1], rows[2][2], rows[2][3]);
+    SetShaderConstants<DxsoProgramTypes::PixelShader, D3D9ConstantType::Float>(14, &rows[0][0], 8);
+  }
+
+
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::DrawPrimitive(
           D3DPRIMITIVETYPE PrimitiveType,
           UINT             StartVertex,
@@ -4469,6 +4531,8 @@ namespace dxvk {
 
     if (unlikely(!PrimitiveCount || !NumVertices))
       return D3D_OK;
+
+    BmvrFixFlashlightShadowMatrix();
 
     if (unlikely(g_BmvrD3dDrawTrace)) {
       const auto& rs = m_state.renderStates;
