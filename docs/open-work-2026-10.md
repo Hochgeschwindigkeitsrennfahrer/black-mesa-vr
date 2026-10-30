@@ -34,11 +34,13 @@ Using explicit game projection FOV eye=0 (L=-1.0734 R=0.7583 U=0.9257 D=-0.9257)
 - The 4096 eye cap (`ComputeOffscreenEyeSize`) is why raising the SteamVR resolution made no difference this session: 3824×3904 × 1.2 is cut to 4096×4096.
 - Correction to an earlier claim: with `OffCenterEyes=true` the game renders the asymmetric frustum directly and submits it uncropped; the `boundsL=0.7571` in the helper-ready line is not used in gameplay. Pixel density is fine (about 1.05–1.07× the swapchain).
 
-**Next test (user):** `RenderScale=1.0`. The eye is then 3824×3904 = swapchain, so the blit is 1:1. The helper log should show `containBlit=(0,0 3824x3904)`. The `[OpenXR][EyeBlit]` line logs only the first 48 entries, so grep right after start.
+**User (2026-10-31):** `RenderScale=1.0` (eye = swapchain, blit already ~1:1) still aliases, as in many earlier sessions. So the helper resample is **not** the main cause of the shimmer. The two helper fixes below are still correct and remove a resample at every other RenderScale, but don't expect them to cure the shimmer. Gamma checked: the blit shader decodes sRGB (`srgbToLinear`) before writing the sRGB swapchain.
 
-**Planned helper changes (not started):**
-1. When the game supplies the FOV (explicit or game-renders-runtime-FOV): fill the whole image area, no contain fit. Keep contain fit only for window-sized images and menus. Small, strictly more correct.
-2. Create the swapchain at the game eye size (≤ `maxImageRect`) and copy 1:1, so only SteamVR resamples whatever RenderScale is. Better image, but more invasive: swapchain timing/recreate, and the helper has a history with non-recommended sizes. Separate commit so it can be reverted alone.
+**Helper changes (done, not compiled or headset-tested):**
+1. 13695af — fill the whole image area when the game supplies the FOV (explicit, or game renders the runtime FOV). Contain fit only for eyes without a matching FOV. Log: `Using ... eye blit path ... fit=fill`.
+2. bae6915 — eye swapchains recreated at the game eye size (within `maxImageRect`) before the next blit, so the copy is 1:1 and only the runtime resamples. A refused size is not retried; the recommended size comes back. `OpenXRHelperSwapchainAtSourceSize=false` turns it off (code default true, not in the shipped config). Log: `Eye N swapchain WxH -> WxH (game eye size; ...)`.
+
+The wall/floor shimmer cause is still open. Remaining candidates: BM content itself (specular/normal-map detail with no temporal AA, far more visible in a moving HMD than on a monitor), and the dxvk.conf AF / LOD bias test.
 
 Other things already checked: in-game anisotropic 16x is on. `dxvk.conf` with `d3d9.samplerAnisotropy = 16` / `d3d9.samplerLodBias = 0.5` next to `bms.exe` is being tested by the user; do not ship it yet.
 
@@ -74,7 +76,7 @@ Commits in question: 73de657 (per-eye occlusion tracker ids, `OcclusionTrackerPe
 
 ## 5. Other open items
 
-- `MC QueueMcCompositeToRing: no ICallQueue` / `MC Present fallback: ICallQueue did not copy 1x eyes` every frame with `MulticoreMode=true`. The eye copy never goes through the engine render queue and always falls back to the Present path. Frames still publish (90/s); possible frame-time/latency cost. Not investigated.
+- MulticoreMode eye copy (`MC QueueMcCompositeToRing: no ICallQueue` / `MC Present fallback: ICallQueue did not copy 1x eyes`). Both lines are log-capped (4 / 8 lines), so "every frame" was wrong: the same log also shows the queued path working (`MC queued 1x-eye OpenXR copy ... slot=186`, `MC 1x eyes -> OpenXR publish slot copied=1`). With multicore, the finished eye images are copied into the OpenXR publish slot by a functor queued onto the material (render) thread. When `GetCallQueue` returns nothing for that frame, the copy is done on the Present path instead. It only moves where the finished images get copied: it cannot cause aliasing, light flicker or culling changes. Frequency unknown; the `OpenXR publish rate` line now reports `mcQueued / mcQueueFail / mcMatCopied / mcPresentFallback` per second. Act only if the fallback rate is high.
 - `DSSR engine_post params ... (0 scanned)`: the material param scan finds nothing on this build. Harmless now (`$bloomenable` comes from FindVar).
 - `AntiAliasing=0` in the user's config is a retired key (ignored).
 

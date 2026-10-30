@@ -10714,7 +10714,8 @@ void VR::LogOpenXrPublishRate()
         "deferred=%.0f/s throttled=%.0f/s helperHold=%.0f/s dropped=%.0f/s pending=%u/%u maxPending=%u "
         "paceWait=%.0f/s avg=%.2fms max=%.2fms await=%.0f/s avg=%.2fms max=%.2fms handoffWait=%.0f/s "
         "helperHz=%.0f helperFeedback=%d consumedLag=%d pairs=%.0f/s "
-        "copyWait=%.0f/s avg=%.2fms max=%.2fms pairTid=%u copyTid=%u presentTid=%u",
+        "copyWait=%.0f/s avg=%.2fms max=%.2fms pairTid=%u copyTid=%u presentTid=%u "
+        "mcQueued=%.0f/s mcQueueFail=%.0f/s mcMatCopied=%.0f/s mcPresentFallback=%.0f/s",
         m_OpenXrSubmitAttempts * scale, m_OpenXrPublishes * scale,
         m_OpenXrSkippedNoNewFrame * scale, m_OpenXrSkipSameVsync * scale,
         m_OpenXrSkipStereoNoPose * scale,
@@ -10738,7 +10739,13 @@ void VR::LogOpenXrPublishRate()
         m_OpenXrCopyWaits * scale,
         m_OpenXrCopyWaits ? m_OpenXrCopyWaitMs / m_OpenXrCopyWaits : 0.0,
         m_OpenXrCopyWaitMaxMs,
-        m_OpenXrPairThread, m_OpenXrCopyThread, static_cast<unsigned>(GetCurrentThreadId()));
+        m_OpenXrPairThread, m_OpenXrCopyThread, static_cast<unsigned>(GetCurrentThreadId()),
+        m_McCopyQueuedCount * scale, m_McCopyQueueFailCount * scale,
+        m_McCopyMatDoneCount * scale, m_McPresentFallbackCount * scale);
+    m_McCopyQueuedCount = 0;
+    m_McCopyQueueFailCount = 0;
+    m_McCopyMatDoneCount = 0;
+    m_McPresentFallbackCount = 0;
     m_OpenXrCopyWaits = 0;
     m_OpenXrCopyWaitMs = 0.0;
     m_OpenXrCopyWaitMaxMs = 0.0;
@@ -11110,7 +11117,10 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
 
     const bool copied = CopyEyesToOpenXrPublishSlot(left, right, pend);
     if (copied)
+    {
         m_McEyeCopyDone = true;
+        ++m_McCopyMatDoneCount;
+    }
     static int s_comp;
     if (s_comp < 8)
     {
@@ -11155,8 +11165,12 @@ bool VR::QueueMcCompositeToRing(uint32_t band)
         return false;
     functor->AddRef();
     if (!QueueMcMatFunctor(functor, "QueueMcCompositeToRing"))
+    {
+        ++m_McCopyQueueFailCount;
         return false;
+    }
     m_McEyeCopyQueued = true;
+    ++m_McCopyQueuedCount;
     static int s_qLog;
     if (s_qLog < 8)
     {
@@ -13880,6 +13894,7 @@ void VR::SubmitVRTextures()
         }
         if (McPipelineEnabled())
         {
+            ++m_McPresentFallbackCount;
             static int s_mcPresentFb;
             if (s_mcPresentFb < 8)
             {

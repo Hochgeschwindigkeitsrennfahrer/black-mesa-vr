@@ -172,6 +172,12 @@ public:
     uint32_t m_OpenXrCopyThread = 0;
     uint32_t m_OpenXrPairThread = 0;
     uint32_t m_OpenXrStereoPairs = 0;
+    // MulticoreMode eye copy per publish-rate window: functor queued on the
+    // material thread, queue unavailable, copied there, Present fallback.
+    uint32_t m_McCopyQueuedCount = 0;
+    uint32_t m_McCopyQueueFailCount = 0;
+    uint32_t m_McCopyMatDoneCount = 0;
+    uint32_t m_McPresentFallbackCount = 0;
     // Publish every pending slot whose copy the GPU has completed (newest
     // wins; older completed ones are dropped as stale).
     void PollOpenXrDeferredPublish();
