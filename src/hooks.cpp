@@ -4459,6 +4459,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         m_VR->BeginStereoFramePose();
         if (m_VR->ShouldHwndBlitStereo())
         {
+            m_VR->m_HwndBlitStereoActive = true;
             // Simulator 1280 eyes / 2560 G-buffer: do not shrink CViewSetup to
             // 1280 (that plus DRAWHUD exited 1). One HWND view blit to both
             // eyes was mono and ALTERNATING_VISIBLE_FRAMES — 16:9 fov 106
@@ -4494,6 +4495,17 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             m_VR->m_StereoEye = 2;
             callOriginal(rightEyeView, nClearFlags, whatToDraw);
             const bool rightOk = m_VR->BlitHmdViewFromBackbuffer(m_VR->m_D9RightEyeSurface, true);
+            if (bmvr::g_HwndBlitHands && leftOk && rightOk)
+            {
+                // This HWND-blit path does not run the per-eye RenderView path
+                // where hands are normally drawn. Paint the gloves/HUD onto the
+                // eye surfaces after both blits; the function binds its own RT
+                // and saves/restores the engine D3D state.
+                m_VR->m_StereoEye = 1;
+                m_VR->DrawIndependentHandMarkers(m_VR->m_D9LeftEyeSurface, 1, true, true);
+                m_VR->m_StereoEye = 2;
+                m_VR->DrawIndependentHandMarkers(m_VR->m_D9RightEyeSurface, 2, true, true);
+            }
             m_VR->m_StereoEye = 0;
             m_VR->m_DirectEyeSubmit = true;
             m_VR->FlushStereoBlitGpu();
@@ -4509,6 +4521,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 ++s_hwndBlit;
             if (s_hwndBlit == 120)
                 bmvr::EndRisky(L"hmd_fb");
+            m_VR->m_HwndBlitStereoActive = false;
             return;
         }
         static int s_enterLog;

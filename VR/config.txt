@@ -126,3 +126,11 @@ WeaponMenuSettingsGear=true
 WeaponMenuTilt=true
 # The VR settings panel pauses the game while it is open.
 VrSettingsPause=true
+# Draw the VR gloves/wrist HUD in the HWND-blit stereo path. That path is used
+# when the per-eye RenderView path is unavailable (for example Steam Frame /
+# vrlink). Off by default; enable to get hands on those runtimes.
+HwndBlitHands=false
+# In-game pause: use the 2D GameUI capture instead of the in-world VGUI
+# overlay. The overlay needs the multicore queue; enable this on runtimes
+# where that queue is unavailable (for example Steam Frame / vrlink).
+Pause2dPanel=false

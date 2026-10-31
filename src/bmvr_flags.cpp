@@ -96,6 +96,12 @@ namespace bmvr
     float g_VrHandsModelScale = 0.85f;
     bool g_VrHandsDebugBoxes = false;
     bool g_HandHud = true;
+    // Draw the VR gloves/HUD in the ShouldHwndBlitStereo() path. That path
+    // historically skipped the overlay because binding the eye RTs killed
+    // gbmatch, but on runtimes where it is the only working stereo path
+    // (for example Steam Frame / vrlink) it is the only place hands can be
+    // drawn. Off by default; opt in from VR\config.txt.
+    bool g_HwndBlitHands = false;
     bool g_VrCrosshair = false;
     float g_VrCrosshairScale = 1.f;
     bool g_VrCrosshairDot = false;
@@ -115,6 +121,11 @@ namespace bmvr
     bool g_FlashlightLeftHand = false;
     float g_PauseMenuAlphaPasses = 3.f;
     bool g_PauseMenuColourFromFrame = true;
+    // Opt-in: use the 2D GameUI capture for the in-game pause instead of the
+    // in-world VGUI overlay. The overlay depends on the multicore queue; on
+    // runtimes where ICallQueue is unavailable (Steam Frame / vrlink) it
+    // leaves the pause panel showing the world with no menu.
+    bool g_Pause2dPanel = false;
     float g_DebugBlankEye = 0.f;
     float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;
@@ -596,6 +607,8 @@ namespace bmvr
                 g_VrHandsDebugBoxes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandHud") == 0)
                 g_HandHud = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "HwndBlitHands") == 0)
+                g_HwndBlitHands = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrCrosshair") == 0)
                 g_VrCrosshair = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrCrosshairScale") == 0)
@@ -634,6 +647,8 @@ namespace bmvr
                 g_PauseMenuColourFromFrame = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PauseMenuAlphaPasses") == 0)
                 g_PauseMenuAlphaPasses = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "Pause2dPanel") == 0)
+                g_Pause2dPanel = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlashlightLeftHand") == 0)
                 g_FlashlightLeftHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FrameCap") == 0)

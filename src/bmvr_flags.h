@@ -221,6 +221,8 @@ namespace bmvr
     extern bool g_VrHandsDebugBoxes;
     // Wrist HUD: health+suit flat on the off-hand, ammo sideways beside the gun hand.
     extern bool g_HandHud;
+    // Opt-in: draw gloves/HUD in the ShouldHwndBlitStereo() (HWND blit) path.
+    extern bool g_HwndBlitHands;
     // World-space aim reticle at the controller firing ray. Off by default;
     // VrCrosshair=true in config.txt turns it on.
     extern bool g_VrCrosshair;
@@ -275,6 +277,7 @@ namespace bmvr
     extern float g_DebugBlankEye;        // VR panel debug row: 1 = blank the left eye, 2 = the right (not saved)
     extern bool g_PauseMenuColourFromFrame; // pause-menu layer colour from the presented desktop frame (VR repaint stacks windows wrongly)
     extern float g_PauseMenuAlphaPasses; // pause-menu layer: N passes of a -> a + a(1-a), i.e. 1-(1-a)^(2^N); 0 = off
+    extern bool g_Pause2dPanel;          // opt-in: in-game pause uses the 2D GameUI capture, not the in-world overlay
     extern bool g_FlashlightLeftHand;    // flashlight from the left hand (along the gun while two-handed)
     extern float g_FrameCapMode;         // fps_max: 0 = game's own, 1 = headset rate + 10, 2 = 2x headset rate
     extern bool g_VrHandThrow;           // frag leaves the hand at the hand's speed (Lambda1VR-style throw)
