@@ -4589,7 +4589,7 @@ void VR::ProcessInput()
     UpdateSettingsPanel();
 
     bool usedAnalogTurn = false;
-    float turnY = 0.f;
+    float turnX = 0.f, turnY = 0.f;
     bool haveTurnY = false;
     // Snap-turn is tracking-space. Freeze it while GameUI is a room-locked
     // overlay so the panel stays in front (HMD look still works).
@@ -4603,6 +4603,7 @@ void VR::ProcessInput()
         usedAnalogTurn = true;
         if (!menuStick)
         {
+            turnX = analog.x;
             turnY = analog.y;
             haveTurnY = true;
         }
@@ -4721,7 +4722,30 @@ void VR::ProcessInput()
             buttons |= IN_ATTACK;
         if (!menuOwnsButtons && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
             buttons |= IN_ATTACK2;
-        if (PressedDigitalAction(m_ActionJump) || (haveTurnY && turnY > 0.65f))
+        // Right stick up = jump, down = crouch. Only past
+        // StickJumpCrouchThreshold and within 30 degrees of straight up or
+        // down, so the diagonal a turn passes through does not count. With
+        // TurnBlocksJumpCrouch, a stick that went sideways (turn) does
+        // neither until it is back near the centre.
+        static bool s_stickTurned;
+        bool stickJump = false, stickCrouch = false;
+        if (haveTurnY)
+        {
+            const float ax = fabsf(turnX), ay = fabsf(turnY);
+            if (ax * ax + ay * ay < 0.25f * 0.25f)
+                s_stickTurned = false;
+            else if (ax > 0.5f && ax > ay)
+                s_stickTurned = true;
+            const bool vertical = ay >= bmvr::g_StickJumpCrouchThreshold && ax <= ay * 0.577f;
+            if (vertical && !(bmvr::g_TurnBlocksJumpCrouch && s_stickTurned))
+            {
+                stickJump = turnY > 0.f;
+                stickCrouch = turnY < 0.f;
+            }
+        }
+        else
+            s_stickTurned = false;
+        if (PressedDigitalAction(m_ActionJump) || stickJump)
             buttons |= IN_JUMP;
         // Left trigger is Use. Right trigger is Use only while holstered.
         // Hold to hold a pickup; release pulses a second Use to drop.
@@ -4736,19 +4760,16 @@ void VR::ProcessInput()
             if (PressedDigitalAction(m_ActionCrouchToggle, true))
                 m_CrouchToggled = !m_CrouchToggled;
         }
-        if (haveTurnY)
+        if (stickCrouch)
         {
-            if (turnY < -0.65f)
-            {
-                if (bmvr::g_CrouchStickHold)
-                    buttons |= IN_DUCK;
-                else if (!s_crouchAxis)
-                    m_CrouchToggled = !m_CrouchToggled;
-                s_crouchAxis = true;
-            }
-            else
-                s_crouchAxis = false;
+            if (bmvr::g_CrouchStickHold)
+                buttons |= IN_DUCK;
+            else if (!s_crouchAxis)
+                m_CrouchToggled = !m_CrouchToggled;
+            s_crouchAxis = true;
         }
+        else
+            s_crouchAxis = false;
         if (m_CrouchToggled)
             buttons |= IN_DUCK;
         if (bmvr::g_SprintToggle)

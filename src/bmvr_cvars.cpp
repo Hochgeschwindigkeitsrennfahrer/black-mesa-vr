@@ -57,6 +57,10 @@ namespace bmvr
         VrCvar g_Cvars[] = {
             { "bmvr_crouch_hold", "VR: right stick down crouches only while held (0 = each push toggles)",
               Kind::Bool, 0.f, 1.f, &g_CrouchStickHold, nullptr },
+            { "bmvr_stick_jump_crouch", "VR: how far the right stick goes up/down before it jumps/crouches (0.3..0.95)",
+              Kind::Float, 0.3f, 0.95f, nullptr, &g_StickJumpCrouchThreshold },
+            { "bmvr_turn_blocks_jump_crouch", "VR: after the right stick turned, no stick jump/crouch until it is centred",
+              Kind::Bool, 0.f, 1.f, &g_TurnBlocksJumpCrouch, nullptr },
             { "bmvr_sprint_toggle", "VR: a sprint click keeps sprinting until the move stick is released (0 = hold the click)",
               Kind::Bool, 0.f, 1.f, &g_SprintToggle, nullptr },
             { "bmvr_gun_pitch", "VR: extra gun pitch in degrees on top of the controller's own tilt (negative = lower)",

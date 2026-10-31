@@ -90,6 +90,11 @@ ScopeZoomFovScale=0.28
 # Right stick down: crouch only while held (false = toggle). Left stick click: sprint latches
 # until the stick is centred again (false = hold the click).
 CrouchStickHold=false
+# Right stick up/down: how far (0.3..0.95) it must go before it jumps/crouches; it also has
+# to point within 30 degrees of straight up/down. TurnBlocksJumpCrouch: after the stick went
+# sideways to turn, no jump/crouch until it is back near the centre.
+StickJumpCrouchThreshold=0.8
+TurnBlocksJumpCrouch=true
 SprintToggle=false
 # Two-handed guns: squeezing the support grip on the gun latches the hold (no need to
 # keep squeezing); squeeze again, or take the hand away from the gun, to let go.

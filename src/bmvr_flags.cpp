@@ -134,6 +134,8 @@ namespace bmvr
     bool g_WeaponMenuSettingsGear = true;
     bool g_WeaponMenuTilt = true;
     bool g_CrouchStickHold = false;
+    float g_StickJumpCrouchThreshold = 0.8f;
+    bool g_TurnBlocksJumpCrouch = true;
     bool g_SprintToggle = false;
     bool g_VrSettingsPause = true;
     bool g_HideHandsWithoutSuit = true;
@@ -614,6 +616,14 @@ namespace bmvr
                 g_VrShotOriginFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "CrouchStickHold") == 0)
                 g_CrouchStickHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "StickJumpCrouchThreshold") == 0)
+            {
+                const float t = static_cast<float>(atof(val));
+                if (t >= 0.3f && t <= 0.95f)
+                    g_StickJumpCrouchThreshold = t;
+            }
+            else if (std::strcmp(n, "TurnBlocksJumpCrouch") == 0)
+                g_TurnBlocksJumpCrouch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SprintToggle") == 0)
                 g_SprintToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSettingsPause") == 0)

@@ -309,6 +309,13 @@ namespace bmvr
     // CrouchStickHold=true: right stick down crouches only while held
     // (default false = each push toggles crouch).
     extern bool g_CrouchStickHold;
+    // StickJumpCrouchThreshold: how far (0..1) the right stick must go up/down
+    // for jump/crouch (default 0.8); it also has to point within 30 degrees
+    // of straight up/down.
+    extern float g_StickJumpCrouchThreshold;
+    // TurnBlocksJumpCrouch=true: after the right stick went sideways (turn),
+    // no stick jump/crouch until it returns near the centre.
+    extern bool g_TurnBlocksJumpCrouch;
     // SprintToggle=true: one sprint click (left stick click) keeps sprinting
     // until the left stick returns to centre or sprint is clicked again
     // (default false = hold the click).
