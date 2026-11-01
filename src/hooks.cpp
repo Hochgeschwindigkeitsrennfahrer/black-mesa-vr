@@ -4047,7 +4047,8 @@ namespace
         // Extra paint is engine VGUI only. Forcing UIPANELS|CURSOR during
         // in-game GameUI copies menu chrome onto a cleared-transparent overlay.
         // HEV HUD is client DRAWHUD, not this path.
-        if (!vr->WantPauseWorldOverlay())
+        const bool title = !vr->WantPauseWorldOverlay() && vr->WantTitleHudOverlay();
+        if (!vr->WantPauseWorldOverlay() && !title)
             return;
         if (!vr->AppActivated())
             return;
@@ -4064,6 +4065,7 @@ namespace
 
         MatCtxScope scope;
         vr->SetHudPaintActive(true);
+        vr->SetHudPaintTitle(title);
         const bool mc = vr->McPipelineEnabled();
         bool queued = false;
         if (mc)
@@ -4087,10 +4089,15 @@ namespace
         // and strobes. D3D bind replaces named PushRT.
         if (!queued)
             vr->PreparePauseHudForVgui(scope.ctx);
-        const int paintMode = PAINT_UIPANELS;
+        // Title layer: the client HUD tree with only the logo / message
+        // panels left visible for this one paint.
+        const int paintMode = title ? PAINT_INGAMEPANELS : PAINT_UIPANELS;
+        unsigned int hiddenPanels[256];
+        const int hiddenCount = title ? vr->IsolateTitleHudPanels(hiddenPanels, 256) : 0;
         ++g_VguiOverlayReentry;
         const bool painted = SehVguiPaintOriginal(vgui, paintMode);
         --g_VguiOverlayReentry;
+        vr->RestoreTitleHudPanels(hiddenPanels, hiddenCount);
         if (!painted)
         {
             if (!queued)
@@ -6360,7 +6367,9 @@ void __fastcall Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
         if (m_VR)
             m_VR->SetVguiPaintActive(false);
     }
-    if (inGame && eligible && m_VR && m_VR->WantPauseWorldOverlay()
+    if (inGame && eligible && m_VR)
+        m_VR->UpdateTitleHud();
+    if (inGame && eligible && m_VR && m_VR->WantHudLayer()
         && !m_VR->Want2dMenuPanel())
         PaintVguiToOverlay(ecx, mode);
 }

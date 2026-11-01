@@ -6496,6 +6496,209 @@ void VR::NoteEngineVGui(void* engineVgui)
         m_EngineVGuiFromPaint = engineVgui;
 }
 
+namespace
+{
+    // vgui2.dll VGUI_Panel009 (VPanelWrapper; slot 0 is the destructor).
+    // Slots from the Steam BM vgui2.dll thunks (2026-11-01): 14 SetVisible,
+    // 15 IsVisible, 17 GetChildCount, 18 GetChild, 20 GetParent, 37 GetName.
+    template <typename R, typename... A>
+    R PanelCall(void* ipanel, int slot, A... a)
+    {
+        using Fn = R(__thiscall*)(void*, A...);
+        return (*reinterpret_cast<Fn**>(ipanel))[slot](ipanel, a...);
+    }
+
+    constexpr int kPanelSetVisible = 14;
+    constexpr int kPanelIsVisible = 15;
+    constexpr int kPanelGetChildCount = 17;
+    constexpr int kPanelGetChild = 18;
+    constexpr int kPanelGetParent = 20;
+    constexpr int kPanelGetName = 37;
+
+    // HudCredits = the "BL@CK MESA" intro logo, HudMessage = chapter titles.
+    const char* const kTitleHudNames[2] = { "HudCredits", "HudMessage" };
+
+    // Depth-first from the vgui root; fills found[i] for kTitleHudNames[i].
+    bool SehFindTitleHudPanels(void* ipanel, unsigned int root, unsigned int* found)
+    {
+        __try
+        {
+            unsigned int stack[64];
+            int sp = 0;
+            int visited = 0;
+            stack[sp++] = root;
+            while (sp > 0 && visited < 4096)
+            {
+                const unsigned int p = stack[--sp];
+                ++visited;
+                const char* name = PanelCall<const char*>(ipanel, kPanelGetName, p);
+                if (name)
+                {
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        if (!found[i] && std::strcmp(name, kTitleHudNames[i]) == 0)
+                            found[i] = p;
+                    }
+                }
+                if (found[0] && found[1])
+                    return true;
+                const int n = PanelCall<int>(ipanel, kPanelGetChildCount, p);
+                for (int c = 0; c < n && sp < 64; ++c)
+                {
+                    const unsigned int child = PanelCall<unsigned int>(ipanel, kPanelGetChild, p, c);
+                    if (child)
+                        stack[sp++] = child;
+                }
+            }
+            return found[0] || found[1];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    bool SehPanelVisible(void* ipanel, unsigned int p)
+    {
+        __try
+        {
+            return PanelCall<bool>(ipanel, kPanelIsVisible, p);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    int SehIsolatePanels(void* ipanel, const unsigned int* targets, int targetCount,
+        unsigned int* hidden, int cap)
+    {
+        int count = 0;
+        __try
+        {
+            unsigned int keep[40];
+            int keepCount = 0;
+            unsigned int parents[32];
+            int parentCount = 0;
+            for (int t = 0; t < targetCount; ++t)
+            {
+                if (keepCount < 40)
+                    keep[keepCount++] = targets[t];
+                unsigned int p = PanelCall<unsigned int>(ipanel, kPanelGetParent, targets[t]);
+                for (int depth = 0; p && depth < 16 && keepCount < 40 && parentCount < 32; ++depth)
+                {
+                    keep[keepCount++] = p;
+                    parents[parentCount++] = p;
+                    p = PanelCall<unsigned int>(ipanel, kPanelGetParent, p);
+                }
+            }
+            for (int a = 0; a < parentCount; ++a)
+            {
+                const unsigned int parent = parents[a];
+                const int n = PanelCall<int>(ipanel, kPanelGetChildCount, parent);
+                for (int c = 0; c < n && count < cap; ++c)
+                {
+                    const unsigned int child = PanelCall<unsigned int>(ipanel, kPanelGetChild, parent, c);
+                    if (!child)
+                        continue;
+                    bool kept = false;
+                    for (int k = 0; k < keepCount && !kept; ++k)
+                        kept = keep[k] == child;
+                    for (int h = 0; h < count && !kept; ++h)
+                        kept = hidden[h] == child;
+                    if (kept || !PanelCall<bool>(ipanel, kPanelIsVisible, child))
+                        continue;
+                    PanelCall<void>(ipanel, kPanelSetVisible, child, false);
+                    hidden[count++] = child;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return count;
+    }
+
+    void SehShowPanels(void* ipanel, const unsigned int* panels, int count)
+    {
+        __try
+        {
+            for (int i = 0; i < count; ++i)
+                PanelCall<void>(ipanel, kPanelSetVisible, panels[i], true);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+}
+
+void VR::UpdateTitleHud()
+{
+    const bool was = m_TitleHudActive;
+    m_TitleHudActive = false;
+    if (!m_IsVREnabled || !m_GameplayEligible || !m_SeenGameplay || PauseUiActive())
+        return;
+    if (!m_VguiPanel && m_Game)
+        m_VguiPanel = m_Game->GetInterface("vgui2.dll", "VGUI_Panel009");
+    if (!m_VguiPanel || !m_Game->m_EngineVGui)
+        return;
+    if (!m_TitleHudPanels[0] || !m_TitleHudPanels[1])
+    {
+        const unsigned long long now = GetTickCount64();
+        if (now >= m_TitleHudNextSearchMs)
+        {
+            m_TitleHudNextSearchMs = now + 2000;
+            // PANEL_ROOT = 0.
+            const unsigned int root = static_cast<unsigned int>(
+                reinterpret_cast<uintptr_t>(m_Game->m_EngineVGui->GetPanel(0)));
+            if (root && SehFindTitleHudPanels(m_VguiPanel, root, m_TitleHudPanels))
+            {
+                Game::logMsg("Title HUD panels: HudCredits=%08X HudMessage=%08X",
+                    m_TitleHudPanels[0], m_TitleHudPanels[1]);
+            }
+        }
+    }
+    for (int i = 0; i < 2; ++i)
+    {
+        if (m_TitleHudPanels[i] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[i]))
+            m_TitleHudActive = true;
+    }
+    if (m_TitleHudActive != was)
+    {
+        // New epoch: the helper locks the HUD layer at the current head pose.
+        if (m_TitleHudActive && ++m_MenuOverlayEpoch == 0)
+            m_MenuOverlayEpoch = 1;
+        Game::logMsg("Title HUD %s (credits=%d message=%d)", m_TitleHudActive ? "shown" : "hidden",
+            m_TitleHudPanels[0] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[0]) ? 1 : 0,
+            m_TitleHudPanels[1] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[1]) ? 1 : 0);
+    }
+}
+
+bool VR::WantTitleHudOverlay() const
+{
+    return m_TitleHudActive && !WantPauseWorldOverlay() && !Want2dMenuPanel();
+}
+
+int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
+{
+    if (!m_VguiPanel)
+        return 0;
+    unsigned int targets[2];
+    int n = 0;
+    for (int i = 0; i < 2; ++i)
+    {
+        if (m_TitleHudPanels[i] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[i]))
+            targets[n++] = m_TitleHudPanels[i];
+    }
+    return n ? SehIsolatePanels(m_VguiPanel, targets, n, hidden, cap) : 0;
+}
+
+void VR::RestoreTitleHudPanels(const unsigned int* hidden, int count)
+{
+    if (m_VguiPanel && count > 0)
+        SehShowPanels(m_VguiPanel, hidden, count);
+}
+
 bool VR::EngineGameUiVisible() const
 {
     void* p = nullptr;
@@ -13373,12 +13576,15 @@ void VR::StampPauseOverlayCursor()
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
         return;
-    if (bmvr::g_PauseMenuColourFromFrame)
+    // Title layer (intro logo / chapter text): no frame colour, no pointer.
+    const bool title = m_HudPaintTitle.load(std::memory_order_acquire);
+    if (bmvr::g_PauseMenuColourFromFrame && !title)
         PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
     const int alphaPasses = static_cast<int>(bmvr::g_PauseMenuAlphaPasses + 0.5f);
     if (alphaPasses > 0)
         FixPauseLayerAlpha(device, m_D9HUDSurface, alphaPasses > 6 ? 6 : alphaPasses);
-    DrawMenuCursorOnSurface(device, m_D9HUDSurface);
+    if (!title)
+        DrawMenuCursorOnSurface(device, m_D9HUDSurface);
     device->Release();
 }
 
@@ -13633,12 +13839,13 @@ void VR::SubmitHudOverlay()
     }
 
     const bool pauseUi = WantPauseWorldOverlay();
+    const bool titleUi = !pauseUi && WantTitleHudOverlay();
     // Gameplay extra-paint is CEngineVGui PAINT_UIPANELS (GameUI / pause
     // chrome), not client DRAWHUD / _rt_Hud. Showing that on a transparent
     // SteamVR overlay every frame is the floating pause-menu glass in the HMD
     // (log: extra-paint mode=0x7 pause=0, overlay shown). HEV HUD cannot come
     // from this path. Loading GameUI is not paused and must not stick here.
-    if (!pauseUi)
+    if (!pauseUi && !titleUi)
     {
         m_Overlay->HideOverlay(m_HUDTopHandle);
         static int s_hidePlay;
@@ -13685,7 +13892,7 @@ void VR::BindHudOverlayWhileQueueLocked()
         return;
     if (!m_HudPaintedThisFrame.load(std::memory_order_acquire))
         return;
-    if (!WantPauseWorldOverlay())
+    if (!WantHudLayer())
         return;
     m_Overlay->SetOverlayTexture(m_HUDTopHandle, &m_VKHUD.m_VRTexture);
     static int s_hudBindLog;
@@ -14301,7 +14508,7 @@ void VR::SubmitVRTextures()
         if (McPipelineEnabled() && (m_McEyeCopyQueued || m_McEyeCopyDone))
         {
             LogOpenXrPublishRate();
-            if (WantPauseWorldOverlay())
+            if (WantHudLayer())
             {
                 if (m_HudOverlayReady && m_D9HUDSurface)
                 {
@@ -14434,7 +14641,7 @@ void VR::SubmitVRTextures()
         // The overlay has its own generation on the helper side; it does not
         // need to match the eye frame id.
         const uint32_t overlayFrameId = m_OpenXrSubmitFrameId.fetch_add(1, std::memory_order_acq_rel);
-        if (WantPauseWorldOverlay() && !McPipelineEnabled())
+        if (WantHudLayer() && !McPipelineEnabled())
         {
             static int s_pause3dLog;
             if (s_pause3dLog < 8)

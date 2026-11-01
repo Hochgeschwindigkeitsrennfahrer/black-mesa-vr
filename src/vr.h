@@ -640,6 +640,13 @@ public:
     DWORD m_MenuLastVisibleMs = 0;
     int m_MenuPointerHand = 1;
     void* m_EngineVGuiFromPaint = nullptr;
+    void* m_VguiPanel = nullptr; // vgui2.dll VGUI_Panel009
+    unsigned int m_TitleHudPanels[2] = {};
+    unsigned long long m_TitleHudNextSearchMs = 0;
+    bool m_TitleHudActive = false;
+    // The HUD RT paint in flight is the title layer (no menu cursor / colour
+    // fix). Read on the material thread for the queued end.
+    std::atomic<bool> m_HudPaintTitle{ false };
     bool m_PressedTurn = false;
     bool m_StereoEyesDrawnThisFrame = false;
     // 0 = mono, 1 = left, 2 = right. Matches Source StereoEye_t.
@@ -946,6 +953,18 @@ public:
     void FlushPendingQuit();
     void PollVrMenuEvents();
     void NoteEngineVGui(void* engineVgui);
+    // Intro logo (env_credits -> HudCredits) and env_message / game_text
+    // (HudMessage): client HUD panels the eyes never get (DRAWHUD is stripped
+    // there). While one is visible in gameplay it is painted alone onto the
+    // pause HUD RT and shown on the HUD layer.
+    void UpdateTitleHud();
+    bool WantTitleHudOverlay() const;
+    bool WantHudLayer() const { return WantPauseWorldOverlay() || WantTitleHudOverlay(); }
+    // Hide every visible panel that is not a visible title panel or one of its
+    // ancestors; returns how many were hidden into `hidden`.
+    int IsolateTitleHudPanels(unsigned int* hidden, int cap);
+    void RestoreTitleHudPanels(const unsigned int* hidden, int count);
+    void SetHudPaintTitle(bool title) { m_HudPaintTitle.store(title, std::memory_order_release); }
     bool GameUiVisible() const { return m_GameUiVisible; }
     // WM_ACTIVATEAPP. Default true so the first frames publish before any
     // activate message. Alt-tab sets false.
