@@ -4737,15 +4737,19 @@ void VR::ProcessInput()
         // StickJumpCrouchThreshold and within 30 degrees of straight up or
         // down, so the diagonal a turn passes through does not count. With
         // TurnBlocksJumpCrouch, a stick that went sideways (turn) does
-        // neither until it is back near the centre.
+        // neither until it is back near the centre. A started crouch lasts
+        // until the stick is back near the centre (or pushed up), so sliding
+        // it along the bottom edge to turn keeps the player crouched.
         static bool s_stickTurned;
+        static bool s_stickCrouchHeld;
         bool stickJump = false, stickCrouch = false;
         if (haveTurnY)
         {
             const float ax = fabsf(turnX), ay = fabsf(turnY);
-            if (ax * ax + ay * ay < 0.25f * 0.25f)
+            const bool centred = ax * ax + ay * ay < 0.25f * 0.25f;
+            if (centred)
                 s_stickTurned = false;
-            else if (ax > 0.5f && ax > ay)
+            else if (ax > 0.5f && ax > ay && !s_stickCrouchHeld)
                 s_stickTurned = true;
             const bool vertical = ay >= bmvr::g_StickJumpCrouchThreshold && ax <= ay * 0.577f;
             if (vertical && !(bmvr::g_TurnBlocksJumpCrouch && s_stickTurned))
@@ -4753,9 +4757,18 @@ void VR::ProcessInput()
                 stickJump = turnY > 0.f;
                 stickCrouch = turnY < 0.f;
             }
+            if (stickCrouch)
+                s_stickCrouchHeld = true;
+            else if (centred || turnY >= 0.25f)
+                s_stickCrouchHeld = false;
+            if (s_stickCrouchHeld)
+                stickCrouch = true;
         }
         else
+        {
             s_stickTurned = false;
+            s_stickCrouchHeld = false;
+        }
         if (PressedDigitalAction(m_ActionJump) || stickJump)
             buttons |= IN_JUMP;
         // Left trigger is Use. Right trigger is Use only while holstered.
