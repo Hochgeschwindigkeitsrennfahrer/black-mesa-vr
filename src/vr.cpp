@@ -16,6 +16,7 @@
 
 #include <d3dcompiler.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cctype>
@@ -89,6 +90,10 @@ namespace
     constexpr UINT kIDirect3DDevice9_Clear = 43;
     constexpr UINT kIDirect3DDevice9_SetViewport = 47;
     constexpr UINT kIDirect3DDevice9_SetScissorRect = 75;
+    constexpr UINT kIDirect3DDevice9_DrawPrimitive = 81;
+    constexpr UINT kIDirect3DDevice9_DrawIndexedPrimitive = 82;
+    constexpr UINT kIDirect3DDevice9_DrawPrimitiveUP = 83;
+    constexpr UINT kIDirect3DDevice9_DrawIndexedPrimitiveUP = 84;
     constexpr UINT kIDirect3DDevice9_SetVertexShaderConstantF = 94;
     constexpr UINT kIDirect3DDevice9_SetPixelShaderConstantF = 109;
 
@@ -482,6 +487,359 @@ namespace
         return (eye == 1 || eye == 2) ? eye : 0;
     }
 
+    // Render-target audit (test aid, VR/audit.txt [frames]): for every draw,
+    // copy and clear, which RT it writes (size, viewport) and which RT
+    // textures it samples, with the eye and frame that last wrote each one.
+    // Flags: OTHER-EYE (sampled RT last written by the other eye), PREV-FRAME,
+    // UNSEEN (not written since the audit started: stale or static), VP-OUT
+    // (viewport/scissor past the RT). The draw hooks are only enabled while an
+    // audit runs. One line per change of (RT, viewport, sampled RTs, eye, HUD).
+    using tDrawPrimitive = HRESULT(__stdcall*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
+    using tDrawIndexedPrimitive = HRESULT(__stdcall*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
+    using tDrawPrimitiveUP = HRESULT(__stdcall*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, const void*, UINT);
+    using tDrawIndexedPrimitiveUP = HRESULT(__stdcall*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT,
+        const void*, D3DFORMAT, const void*, UINT);
+    tDrawPrimitive g_OrigDrawPrimitive = nullptr;
+    tDrawIndexedPrimitive g_OrigDrawIndexedPrimitive = nullptr;
+    tDrawPrimitiveUP g_OrigDrawPrimitiveUP = nullptr;
+    tDrawIndexedPrimitiveUP g_OrigDrawIndexedPrimitiveUP = nullptr;
+    void** g_AuditVtbl = nullptr;
+
+    struct AuditTex
+    {
+        UINT w = 0, h = 0;
+        int writerEye = -1;      // -1 = not written since the audit started
+        bool writerHud = false;
+        uint32_t writeFrame = 0;
+        uint32_t writeSeq = 0;
+    };
+    std::recursive_mutex g_AuditMutex;
+    std::map<const void*, AuditTex> g_AuditTex;
+    std::atomic<int> g_AuditFramesLeft{ 0 };  // Presents left; the first one only warms up the writer map
+    std::atomic<bool> g_AuditHooksOn{ false };
+    uint32_t g_AuditFrame = 0;
+    uint32_t g_AuditSeq = 0;
+    int g_AuditLines = 0;
+    std::string g_AuditGroup;
+    std::string g_AuditGroupLine;
+    int g_AuditGroupDraws = 0;
+    uint64_t g_AuditGroupPrims = 0;
+    constexpr int kAuditMaxLines = 6000;
+
+    bool AuditLogging()
+    {
+        return g_AuditFramesLeft.load(std::memory_order_acquire) > 0 && g_AuditFrame > 0;
+    }
+
+    const char* AuditSizeLabel(VR* vr, UINT w, UINT h)
+    {
+        if (!vr)
+            return "";
+        const UINT ew = vr->m_RenderWidth, eh = vr->m_RenderHeight;
+        if (w == ew && h == eh) return "eye";
+        if (w == ew / 2 && h == eh / 2) return "eye/2";
+        if (w == ew / 4 && h == eh / 4) return "eye/4";
+        if (bmvr::g_ReflectionRtW > 0 && static_cast<int>(w) == bmvr::g_ReflectionRtW
+            && static_cast<int>(h) == bmvr::g_ReflectionRtH) return "refl";
+        if (bmvr::g_RefractCopyRtW > 0 && static_cast<int>(w) == bmvr::g_RefractCopyRtW
+            && static_cast<int>(h) == bmvr::g_RefractCopyRtH) return "refrcopy";
+        UINT winW = 0, winH = 0;
+        if (QueryGameClientSize(winW, winH) && w == winW && h == winH) return "win";
+        if (w == 1024 && h == 1024) return "1024sq";
+        return "";
+    }
+
+    // Texture key for an RT surface: its container texture when it has one.
+    const void* AuditSurfaceKey(IDirect3DSurface9* s, UINT& w, UINT& h)
+    {
+        w = h = 0;
+        if (!s)
+            return nullptr;
+        D3DSURFACE_DESC d{};
+        if (SUCCEEDED(s->GetDesc(&d)))
+        {
+            w = d.Width;
+            h = d.Height;
+        }
+        IDirect3DTexture9* t = nullptr;
+        if (SUCCEEDED(s->GetContainer(__uuidof(IDirect3DTexture9), reinterpret_cast<void**>(&t))) && t)
+        {
+            const void* key = t;
+            t->Release();
+            return key;
+        }
+        return s;
+    }
+
+    void AuditMarkWritten(VR* vr, const void* key, UINT w, UINT h, int eye)
+    {
+        if (!key)
+            return;
+        AuditTex& t = g_AuditTex[key];
+        t.w = w;
+        t.h = h;
+        t.writerEye = eye;
+        t.writerHud = vr && vr->HudPaintActive();
+        t.writeFrame = g_AuditFrame;
+        t.writeSeq = ++g_AuditSeq;
+    }
+
+    void AuditFlushGroup()
+    {
+        if (g_AuditGroupLine.empty())
+            return;
+        if (g_AuditLines < kAuditMaxLines)
+        {
+            Game::logMsg("%s | draws=%d prims=%llu", g_AuditGroupLine.c_str(), g_AuditGroupDraws,
+                static_cast<unsigned long long>(g_AuditGroupPrims));
+            ++g_AuditLines;
+        }
+        g_AuditGroupLine.clear();
+        g_AuditGroup.clear();
+        g_AuditGroupDraws = 0;
+        g_AuditGroupPrims = 0;
+    }
+
+    // Appends " name WxH[label] w=eE fN flags" for a sampled or source texture.
+    void AuditDescribeRead(VR* vr, std::string& out, const char* tag, const void* key, UINT w, UINT h, int eye)
+    {
+        char buf[200];
+        auto it = g_AuditTex.find(key);
+        const AuditTex* t = it != g_AuditTex.end() ? &it->second : nullptr;
+        std::string flags;
+        if (!t || t->writerEye < 0)
+            flags += " UNSEEN";
+        else
+        {
+            if ((eye == 1 || eye == 2) && (t->writerEye == 1 || t->writerEye == 2) && t->writerEye != eye)
+                flags += " OTHER-EYE";
+            if (t->writeFrame < g_AuditFrame)
+                flags += " PREV-FRAME";
+        }
+        const char* label = AuditSizeLabel(vr, w, h);
+        std::snprintf(buf, sizeof(buf), " %s %p %ux%u%s%s%s w=%s%d%s seq%u%s", tag, key, w, h,
+            label[0] ? "[" : "", label, label[0] ? "]" : "",
+            t ? "e" : "", t ? t->writerEye : -1, t && t->writerHud ? "/hud" : "",
+            t ? t->writeSeq : 0, flags.c_str());
+        out += buf;
+    }
+
+    // Called from every draw while an audit runs.
+    void AuditDraw(IDirect3DDevice9* device, UINT prims)
+    {
+        if (g_AuditFramesLeft.load(std::memory_order_acquire) <= 0 || !device)
+            return;
+        VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+        std::lock_guard<std::recursive_mutex> lock(g_AuditMutex);
+        const int eye = GpuTimerEye(vr);
+        const bool hud = vr && vr->HudPaintActive();
+        IDirect3DSurface9* rt = nullptr;
+        device->GetRenderTarget(0, &rt);
+        UINT rw = 0, rh = 0;
+        const void* rtKey = AuditSurfaceKey(rt, rw, rh);
+        if (rt)
+            rt->Release();
+        if (AuditLogging())
+        {
+            D3DVIEWPORT9 vp{};
+            device->GetViewport(&vp);
+            DWORD scissorOn = 0;
+            device->GetRenderState(D3DRS_SCISSORTESTENABLE, &scissorOn);
+            RECT sc{};
+            if (scissorOn)
+                device->GetScissorRect(&sc);
+            char head[320];
+            const char* label = AuditSizeLabel(vr, rw, rh);
+            const bool vpOut = rw && (vp.X + vp.Width > rw || vp.Y + vp.Height > rh);
+            const bool scOut = scissorOn && rw && (sc.right > static_cast<LONG>(rw) || sc.bottom > static_cast<LONG>(rh));
+            std::snprintf(head, sizeof(head), "audit f%u e%d%s: RT0 %p %ux%u%s%s%s vp %lu,%lu %lux%lu%s%s",
+                g_AuditFrame, eye, hud ? " HUD" : "", rtKey, rw, rh,
+                label[0] ? "[" : "", label, label[0] ? "]" : "",
+                vp.X, vp.Y, vp.Width, vp.Height, vpOut ? " VP-OUT" : "", scOut ? " SC-OUT" : "");
+            std::string line = head;
+            if (scissorOn)
+            {
+                char sb[80];
+                std::snprintf(sb, sizeof(sb), " sc %ld,%ld-%ld,%ld", sc.left, sc.top, sc.right, sc.bottom);
+                line += sb;
+            }
+            std::string reads;
+            for (DWORD stage = 0; stage < 16; ++stage)
+            {
+                IDirect3DBaseTexture9* bt = nullptr;
+                if (FAILED(device->GetTexture(stage, &bt)) || !bt)
+                    continue;
+                if (bt->GetType() == D3DRTYPE_TEXTURE)
+                {
+                    auto* tex = static_cast<IDirect3DTexture9*>(bt);
+                    D3DSURFACE_DESC d{};
+                    if (SUCCEEDED(tex->GetLevelDesc(0, &d)) && (d.Usage & D3DUSAGE_RENDERTARGET))
+                    {
+                        char tag[8];
+                        std::snprintf(tag, sizeof(tag), "s%lu", stage);
+                        AuditDescribeRead(vr, reads, tag, bt, d.Width, d.Height, eye);
+                    }
+                }
+                bt->Release();
+            }
+            if (!reads.empty())
+                line += " |" + reads;
+            // Group by everything but the writer sequence numbers.
+            std::string key = line;
+            for (size_t p = key.find(" seq"); p != std::string::npos; p = key.find(" seq", p + 1))
+            {
+                size_t e = key.find(' ', p + 1);
+                key.erase(p, e == std::string::npos ? std::string::npos : e - p);
+            }
+            if (key != g_AuditGroup)
+            {
+                AuditFlushGroup();
+                g_AuditGroup = key;
+                g_AuditGroupLine = line;
+            }
+            ++g_AuditGroupDraws;
+            g_AuditGroupPrims += prims;
+        }
+        AuditMarkWritten(vr, rtKey, rw, rh, eye);
+    }
+
+    void AuditStretchRect(IDirect3DSurface9* src, const RECT* srcRect, IDirect3DSurface9* dst, const RECT* dstRect)
+    {
+        if (g_AuditFramesLeft.load(std::memory_order_acquire) <= 0)
+            return;
+        VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+        std::lock_guard<std::recursive_mutex> lock(g_AuditMutex);
+        const int eye = GpuTimerEye(vr);
+        UINT sw = 0, sh = 0, dw = 0, dh = 0;
+        const void* sk = AuditSurfaceKey(src, sw, sh);
+        const void* dk = AuditSurfaceKey(dst, dw, dh);
+        if (AuditLogging())
+        {
+            AuditFlushGroup();
+            std::string line;
+            char head[200];
+            std::snprintf(head, sizeof(head), "audit f%u e%d%s: StretchRect", g_AuditFrame, eye,
+                vr && vr->HudPaintActive() ? " HUD" : "");
+            line = head;
+            AuditDescribeRead(vr, line, "src", sk, sw, sh, eye);
+            char rects[160];
+            std::snprintf(rects, sizeof(rects), " rect %ld,%ld-%ld,%ld -> dst %p %ux%u[%s] rect %ld,%ld-%ld,%ld",
+                srcRect ? srcRect->left : -1, srcRect ? srcRect->top : -1, srcRect ? srcRect->right : -1, srcRect ? srcRect->bottom : -1,
+                dk, dw, dh, AuditSizeLabel(vr, dw, dh),
+                dstRect ? dstRect->left : -1, dstRect ? dstRect->top : -1, dstRect ? dstRect->right : -1, dstRect ? dstRect->bottom : -1);
+            line += rects;
+            if (g_AuditLines < kAuditMaxLines)
+            {
+                Game::logMsg("%s", line.c_str());
+                ++g_AuditLines;
+            }
+        }
+        AuditMarkWritten(vr, dk, dw, dh, eye);
+    }
+
+    void AuditClear(IDirect3DDevice9* device, DWORD flags)
+    {
+        if (g_AuditFramesLeft.load(std::memory_order_acquire) <= 0 || !device || !(flags & D3DCLEAR_TARGET))
+            return;
+        VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+        std::lock_guard<std::recursive_mutex> lock(g_AuditMutex);
+        IDirect3DSurface9* rt = nullptr;
+        device->GetRenderTarget(0, &rt);
+        UINT rw = 0, rh = 0;
+        const void* key = AuditSurfaceKey(rt, rw, rh);
+        if (rt)
+            rt->Release();
+        const int eye = GpuTimerEye(vr);
+        if (AuditLogging() && g_AuditLines < kAuditMaxLines)
+        {
+            AuditFlushGroup();
+            Game::logMsg("audit f%u e%d%s: Clear RT0 %p %ux%u[%s]", g_AuditFrame, eye,
+                vr && vr->HudPaintActive() ? " HUD" : "", key, rw, rh, AuditSizeLabel(vr, rw, rh));
+            ++g_AuditLines;
+        }
+        AuditMarkWritten(vr, key, rw, rh, eye);
+    }
+
+    void AuditSetDrawHooks(bool on)
+    {
+        if (!g_AuditVtbl || g_AuditHooksOn.load() == on)
+            return;
+        for (UINT i : { kIDirect3DDevice9_DrawPrimitive, kIDirect3DDevice9_DrawIndexedPrimitive,
+                 kIDirect3DDevice9_DrawPrimitiveUP, kIDirect3DDevice9_DrawIndexedPrimitiveUP })
+        {
+            if (on)
+                MH_EnableHook(g_AuditVtbl[i]);
+            else
+                MH_DisableHook(g_AuditVtbl[i]);
+        }
+        g_AuditHooksOn.store(on);
+    }
+
+    void AuditStart(int frames)
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_AuditMutex);
+        g_AuditTex.clear();
+        g_AuditFrame = 0;
+        g_AuditSeq = 0;
+        g_AuditLines = 0;
+        g_AuditGroup.clear();
+        g_AuditGroupLine.clear();
+        g_AuditFramesLeft.store(frames + 1, std::memory_order_release);
+        AuditSetDrawHooks(true);
+        Game::logMsg("audit: %d frames (+1 warm-up), draw hooks %s", frames, g_AuditVtbl ? "on" : "missing");
+    }
+
+    void AuditOnPresent()
+    {
+        if (g_AuditFramesLeft.load(std::memory_order_acquire) <= 0)
+            return;
+        std::lock_guard<std::recursive_mutex> lock(g_AuditMutex);
+        AuditFlushGroup();
+        if (AuditLogging() && g_AuditLines < kAuditMaxLines)
+        {
+            Game::logMsg("audit f%u: Present", g_AuditFrame);
+            ++g_AuditLines;
+        }
+        ++g_AuditFrame;
+        if (g_AuditFramesLeft.fetch_sub(1, std::memory_order_acq_rel) == 1)
+        {
+            VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+            Game::logMsg("audit: done, %d lines%s; RT textures written:", g_AuditLines,
+                g_AuditLines >= kAuditMaxLines ? " (capped)" : "");
+            for (const auto& [key, t] : g_AuditTex)
+                Game::logMsg("audit tex %p %ux%u[%s] last e%d%s frame %u seq %u", key, t.w, t.h,
+                    AuditSizeLabel(vr, t.w, t.h), t.writerEye, t.writerHud ? "/hud" : "", t.writeFrame, t.writeSeq);
+            AuditSetDrawHooks(false);
+        }
+    }
+
+    HRESULT __stdcall HookedDrawPrimitive(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, UINT start, UINT count)
+    {
+        AuditDraw(device, count);
+        return g_OrigDrawPrimitive(device, type, start, count);
+    }
+
+    HRESULT __stdcall HookedDrawIndexedPrimitive(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, INT base,
+        UINT minIndex, UINT numVerts, UINT startIndex, UINT count)
+    {
+        AuditDraw(device, count);
+        return g_OrigDrawIndexedPrimitive(device, type, base, minIndex, numVerts, startIndex, count);
+    }
+
+    HRESULT __stdcall HookedDrawPrimitiveUP(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, UINT count,
+        const void* data, UINT stride)
+    {
+        AuditDraw(device, count);
+        return g_OrigDrawPrimitiveUP(device, type, count, data, stride);
+    }
+
+    HRESULT __stdcall HookedDrawIndexedPrimitiveUP(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, UINT minIndex,
+        UINT numVerts, UINT count, const void* indices, D3DFORMAT fmt, const void* verts, UINT stride)
+    {
+        AuditDraw(device, count);
+        return g_OrigDrawIndexedPrimitiveUP(device, type, minIndex, numVerts, count, indices, fmt, verts, stride);
+    }
+
     int GpuTimerKindForRt0(VR* vr, UINT w, UINT h)
     {
         if (!vr || !vr->StereoWorldPassActive() || vr->HudPaintActive() || vr->m_CaptureReentry)
@@ -644,6 +1002,7 @@ namespace
         if (vr)
             vr->CaptureFrameBeforePresent();
         GpuTimerOnPresent(device, vr);
+        AuditOnPresent();
         if (!g_OrigPresent)
             return D3DERR_INVALIDCALL;
         return g_OrigPresent(device, src, dst, hwnd, dirty);
@@ -1396,6 +1755,7 @@ namespace
     HRESULT __stdcall HookedClear(IDirect3DDevice9* device, DWORD count, const D3DRECT* rects,
         DWORD flags, D3DCOLOR color, float z, DWORD stencil)
     {
+        AuditClear(device, flags);
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
         D3DRECT full{};
         const D3DRECT* useRects = rects;
@@ -1571,6 +1931,7 @@ namespace
                 timed = true;
             }
         }
+        AuditStretchRect(pSource, pSourceRect, pDest, pDestRect);
         const HRESULT hr = HookedStretchRectInner(device, pSource, pSourceRect, pDest, pDestRect, filter);
         if (timed && !g_GpuTimer.failed)
             GpuTimerSwitch(device, resumeKind, resumeEye);
@@ -3789,7 +4150,9 @@ namespace
 
     // Read back a render-target surface and write every `step`th pixel as a
     // 24-bit BMP. 8888 and 16F formats; others are only logged.
-    bool DumpSurfaceBmp(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path, int step)
+    // alphaOnly: write the alpha channel as grey (layers blended by alpha).
+    bool DumpSurfaceBmp(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path, int step,
+        bool alphaOnly = false)
     {
         if (!dev || !src)
             return false;
@@ -3826,12 +4189,16 @@ namespace
                         const uint16_t* p = reinterpret_cast<const uint16_t*>(row) + static_cast<size_t>(x * step) * 4;
                         auto c = [](float v) { return static_cast<uint8_t>(std::clamp(v, 0.f, 1.f) * 255.f + 0.5f); };
                         r = c(HalfToFloat(p[0])); g = c(HalfToFloat(p[1])); b = c(HalfToFloat(p[2]));
+                        if (alphaOnly)
+                            r = g = b = c(HalfToFloat(p[3]));
                     }
                     else
                     {
                         const uint8_t* p = row + static_cast<size_t>(x * step) * 4;
                         if (bgra) { b = p[0]; g = p[1]; r = p[2]; }
                         else { r = p[0]; g = p[1]; b = p[2]; }
+                        if (alphaOnly)
+                            r = g = b = p[3];
                     }
                     out[x * 3 + 0] = b; out[x * 3 + 1] = g; out[x * 3 + 2] = r;
                 }
@@ -3888,6 +4255,21 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         bmvr::g_PassTraceFrames = std::clamp(frames, 1, 8) + 1;
         Game::logMsg("trace: %d frames", bmvr::g_PassTraceFrames - 1);
     }
+    // VR/audit.txt [frames]: render-target audit (sizes, viewports, which eye
+    // wrote each sampled RT) for that many Presents, with the pass trace on too
+    // so RT names line up with the audit lines.
+    const std::string auditTrigger = bmvr::VrFilePath("audit.txt");
+    if (FILE* af = std::fopen(auditTrigger.c_str(), "rb"))
+    {
+        int frames = 2;
+        if (std::fscanf(af, "%d", &frames) < 1)
+            frames = 2;
+        std::fclose(af);
+        std::remove(auditTrigger.c_str());
+        frames = std::clamp(frames, 1, 8);
+        bmvr::g_PassTraceFrames = frames + 1;
+        AuditStart(frames);
+    }
     const std::string trigger = bmvr::VrFilePath("dump.txt");
     FILE* f = std::fopen(trigger.c_str(), "rb");
     if (!f)
@@ -3922,6 +4304,7 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
     else
         Game::logMsg("debug dump: no publish slot (%u)", slot);
     DumpSurfaceBmp(dev, m_D9HUDSurface, base + "-hud.bmp", 2);
+    DumpSurfaceBmp(dev, m_D9HUDSurface, base + "-hud-alpha.bmp", 2, true);
     dev->Release();
 }
 
@@ -6736,6 +7119,8 @@ namespace
         return (*reinterpret_cast<Fn**>(ipanel))[slot](ipanel, a...);
     }
 
+    constexpr int kPanelGetPos = 3;
+    constexpr int kPanelGetSize = 5;
     constexpr int kPanelSetVisible = 14;
     constexpr int kPanelIsVisible = 15;
     constexpr int kPanelGetChildCount = 17;
@@ -6779,6 +7164,21 @@ namespace
                 }
             }
             return found[0] || found[1];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // x, y, wide, tall of a panel (relative to its parent); false on a fault.
+    bool SehPanelBounds(void* ipanel, unsigned int p, int* out)
+    {
+        __try
+        {
+            PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetPos, p, &out[0], &out[1]);
+            PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetSize, p, &out[2], &out[3]);
+            return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -6899,6 +7299,12 @@ void VR::UpdateTitleHud()
         Game::logMsg("Title HUD %s (credits=%d message=%d)", m_TitleHudActive ? "shown" : "hidden",
             m_TitleHudPanels[0] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[0]) ? 1 : 0,
             m_TitleHudPanels[1] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[1]) ? 1 : 0);
+        for (int i = 0; m_TitleHudActive && i < 2; ++i)
+        {
+            int b[4] = {};
+            if (m_TitleHudPanels[i] && SehPanelBounds(m_VguiPanel, m_TitleHudPanels[i], b))
+                Game::logMsg("Title HUD %s bounds %d,%d %dx%d", kTitleHudNames[i], b[0], b[1], b[2], b[3]);
+        }
     }
 }
 
@@ -12830,6 +13236,20 @@ void VR::InstallDeviceHooks(IDirect3DDevice9* device)
         MH_EnableHook(vtbl[kIDirect3DDevice9_SetPixelShaderConstantF]);
     else
         g_OrigSetPixelShaderConstantF = nullptr;
+
+    // Render-target audit draw hooks: created now, enabled only while an
+    // audit runs (VR/audit.txt).
+    if (MH_CreateHook(vtbl[kIDirect3DDevice9_DrawPrimitive], reinterpret_cast<LPVOID>(&HookedDrawPrimitive),
+            reinterpret_cast<LPVOID*>(&g_OrigDrawPrimitive)) == MH_OK
+        && MH_CreateHook(vtbl[kIDirect3DDevice9_DrawIndexedPrimitive], reinterpret_cast<LPVOID>(&HookedDrawIndexedPrimitive),
+            reinterpret_cast<LPVOID*>(&g_OrigDrawIndexedPrimitive)) == MH_OK
+        && MH_CreateHook(vtbl[kIDirect3DDevice9_DrawPrimitiveUP], reinterpret_cast<LPVOID>(&HookedDrawPrimitiveUP),
+            reinterpret_cast<LPVOID*>(&g_OrigDrawPrimitiveUP)) == MH_OK
+        && MH_CreateHook(vtbl[kIDirect3DDevice9_DrawIndexedPrimitiveUP], reinterpret_cast<LPVOID>(&HookedDrawIndexedPrimitiveUP),
+            reinterpret_cast<LPVOID*>(&g_OrigDrawIndexedPrimitiveUP)) == MH_OK)
+        g_AuditVtbl = vtbl;
+    else
+        Game::logMsg("MH_CreateHook draw (audit) failed");
 
     m_D3DHooksInstalled = true;
     g_DeviceHooksEnabled = true;
