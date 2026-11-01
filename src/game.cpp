@@ -979,6 +979,54 @@ int Game::CollectLadders(Vector* bottoms, Vector* tops, int maxLadders)
     return n;
 }
 
+int Game::CollectMountedGunProps(int* indexes, int maxProps)
+{
+    static int s_index[32];
+    static int s_count = 0;
+    static DWORD s_scanMs = 0;
+    if (!m_ClientEntityList)
+        return 0;
+    const DWORD now = GetTickCount();
+    if (s_scanMs == 0 || now - s_scanMs > 1000)
+    {
+        s_scanMs = now;
+        s_count = 0;
+        const int hi = m_ClientEntityList->GetHighestEntityIndex();
+        for (int e = 1; e <= hi && s_count < 32; ++e)
+        {
+            const char* model = GetEntityModelName(GetClientEntity(e));
+            if (model && (std::strstr(model, "props_marines/50cal.mdl")
+                || std::strstr(model, "props_marines/tow_missile_system")))
+                s_index[s_count++] = e;
+        }
+        static int s_loggedCount = -1;
+        if (s_count != s_loggedCount)
+        {
+            s_loggedCount = s_count;
+            Game::logMsg("Mounted guns: %d on the map", s_count);
+        }
+    }
+    int n = 0;
+    for (int i = 0; i < s_count && n < maxProps; ++i)
+        indexes[n++] = s_index[i];
+    return n;
+}
+
+bool Game::GetEntityAbsOrigin(C_BaseEntity* entity, Vector& out)
+{
+    if (!entity)
+        return false;
+    __try
+    {
+        out = *reinterpret_cast<const Vector*>(reinterpret_cast<const char*>(entity) + Offsets::kCBaseEntity_AbsOrigin);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+    return out.LengthSqr() > 0.f;
+}
+
 bool Game::LocalPlayerHasSuit()
 {
     ScanWristHudNetVars();

@@ -742,6 +742,18 @@ public:
     // Weapon fire, shoot origin, and flashlight must not follow a leftover
     // left-hand Use latch. Only a live physics hold redirects those.
     bool UseGrabRedirectsFire() const { return m_GrabLatched && m_GrabUseEntityHeld; }
+    // Mounted gun (func_50cal / func_tow): the player's use entity while
+    // standing at one. Either trigger holds the handles (letting go of both
+    // gets off), secondary fire shoots, and the barrel swings around its
+    // mount opposite to the hands (MountedGunAim).
+    bool OnMountedGun() const { return m_OnGun; }
+    void UpdateMountedGun();
+    // Usercmd angles that turn the gun's barrel where the hands push it:
+    // hands right = barrel left, hands up = barrel down, relative to where
+    // the barrel pointed when the hands took hold. The game aims the barrel at
+    // what the eye sees along these angles, so they point from the engine eye
+    // at the point the wanted barrel line hits. False when not on a gun.
+    bool MountedGunAim(QAngle& out);
     // The game's +use trace (eye along the usercmd angles) runs on the press
     // tick, so the angles follow the pressing hand for the first 0.3 s of a
     // press; otherwise the left trigger picks up what the gun points at and
@@ -1427,6 +1439,18 @@ private:
     bool m_LastGrabHandLeft = true;
     bool m_GrabHoldingPhysics = false;
     bool m_GrabUseEntityHeld = false;
+    bool m_OnGun = false;
+    int m_GunPropIndex = 0;
+    // Right hand within reach of a gun's mount while not on it: R2 grabs
+    // (= Use) instead of firing the weapon.
+    bool m_GunRightNear = false;
+    bool m_GunHeldLeft = false;
+    bool m_GunHeldRight = false;
+    bool m_GunAimBaseValid = false;
+    int m_GunAimHands = 0;
+    QAngle m_GunHandBase{};
+    QAngle m_GunBarrelBase{};
+    QAngle m_GunLastAim{};
     bool m_UseWasHeld = false;
     double m_UseDropGapUntilMs = 0.0;
     double m_UseDropPulseUntilMs = 0.0;

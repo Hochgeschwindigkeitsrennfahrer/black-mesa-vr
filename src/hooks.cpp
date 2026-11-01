@@ -4951,6 +4951,12 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             apply(meleeAim);
             return;
         }
+        QAngle gunAim{};
+        if (m_VR->MountedGunAim(gunAim))
+        {
+            apply(gunAim);
+            return;
+        }
         // Pickup follow uses the grab hand. Weapon fire / flashlight must not:
         // leftover left-Use latch used to keep viewangles and shoot origin on
         // that hand after a door, button, or charger.
@@ -5033,7 +5039,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         if (local > 0)
             localPlayer = m_Game->m_ClientEntityList->GetClientEntity(local);
     }
-    if (m_VR && m_VR->EmptyHands())
+    if (m_VR && m_VR->EmptyHands() && !m_VR->OnMountedGun())
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     // Predicted FireBullets add m_vecPunchAngle on the client. That punch
     // resets on map load and then walks the visible hit off the crosshair.
@@ -5149,7 +5155,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         m_VR->ApplyWorldVguiTriggerClick(cmd);
     const bool vguiAteAttack = (buttonsBeforeOriginal & (IN_ATTACK | IN_ATTACK2)) != 0
         && (cmd->buttons & (IN_ATTACK | IN_ATTACK2)) == 0;
-    if (m_VR && m_VR->EmptyHands())
+    if (m_VR && m_VR->EmptyHands() && !m_VR->OnMountedGun())
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else if (vguiAteAttack || (m_VR && m_VR->WorldVguiSuppressAttack()))
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);

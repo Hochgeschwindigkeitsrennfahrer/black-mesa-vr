@@ -95,6 +95,11 @@ public:
     // World-space bottom/top mount points of the map's func_useableladders
     // (CFuncLadder; entity list rescanned at most once a second).
     int CollectLadders(Vector* bottoms, Vector* tops, int maxLadders);
+    // Entity indexes of the props mounted guns turn (50cal / TOW model; the
+    // func_50cal / func_tow itself is a brush with no model of its own).
+    // Rescanned at most once a second.
+    int CollectMountedGunProps(int* indexes, int maxProps);
+    bool GetEntityAbsOrigin(C_BaseEntity* entity, Vector& out);
     int RpgLaserOnOffset() const;
     int RpgLaserDotOffset() const;
     C_BaseEntity* FindEntityByNetworkNameContains(const char* token);

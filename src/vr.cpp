@@ -4718,9 +4718,19 @@ void VR::ProcessInput()
         else if (!menuButtonHeld)
             s_menuButtonsLatched = false;
         const bool menuOwnsButtons = s_menuButtonsLatched;
-        if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped())
+        // On a mounted gun (or reaching for one with the right hand) R2 holds
+        // the handles like L2, and secondary fire shoots the gun: the game
+        // fires it on IN_ATTACK only.
+        UpdateMountedGun();
+        const bool gunGripRight = m_OnGun || m_GunRightNear;
+        if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped() && !gunGripRight)
             buttons |= IN_ATTACK;
-        if (!menuOwnsButtons && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
+        if (!menuOwnsButtons && m_OnGun)
+        {
+            if (PressedDigitalAction(m_ActionSecondaryAttack))
+                buttons |= IN_ATTACK;
+        }
+        else if (!menuOwnsButtons && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
             buttons |= IN_ATTACK2;
         // Right stick up = jump, down = crouch. Only past
         // StickJumpCrouchThreshold and within 30 degrees of straight up or
@@ -4750,7 +4760,10 @@ void VR::ProcessInput()
         // Left trigger is Use. Right trigger is Use only while holstered.
         // Hold to hold a pickup; release pulses a second Use to drop.
         m_UseFireHeld = (buttons & (IN_ATTACK | IN_ATTACK2)) != 0;
-        UpdateUseGrab(buttons, leftUse, !menuOwnsButtons && emptyHands && primaryHeld);
+        const bool rightUse = !menuOwnsButtons && (emptyHands || gunGripRight) && primaryHeld;
+        m_GunHeldLeft = leftUse;
+        m_GunHeldRight = rightUse;
+        UpdateUseGrab(buttons, leftUse, rightUse);
         if (!menuOwnsButtons && PressedDigitalAction(m_ActionReload))
             buttons |= IN_RELOAD;
         if (PressedDigitalAction(m_ActionCrouch))
@@ -5876,6 +5889,194 @@ bool VR::TryGetVrGrabTarget(Vector& origin) const
     return true;
 }
 
+void VR::UpdateMountedGun()
+{
+    const bool wasOnGun = m_OnGun;
+    m_OnGun = false;
+    m_GunRightNear = false;
+    if (!m_Game || !m_GameplayEligible)
+    {
+        m_GunAimBaseValid = false;
+        return;
+    }
+    int props[32];
+    const int n = m_Game->CollectMountedGunProps(props, 32);
+    if (n <= 0)
+    {
+        m_GunAimBaseValid = false;
+        return;
+    }
+    // The gun brush (func_50cal / func_tow) is parented to its prop: on a
+    // gun, the use entity is a brush model next to one of the props.
+    // The brush's own origin is not usable on the client (parented, not
+    // kept up to date), so the prop has to be near the player instead.
+    C_BaseEntity* useEnt = m_Game->LocalPlayerUseEntity();
+    const char* useModel = useEnt ? m_Game->GetEntityModelName(useEnt) : nullptr;
+    Vector useOrigin{};
+    const bool useIsBrush = useModel && useModel[0] == '*' && m_Game->LocalPlayerAbsOrigin(useOrigin);
+    Vector hand{};
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    const bool haveHand = m_RightControllerTrackingValid && body.LengthSqr() > 1.f
+        && (hand = GetRightControllerAbsPos(body)).LengthSqr() > 1.f;
+    // Mount to hand: the handles sit about 20 units behind it.
+    constexpr float kUseNearProp = 128.f;
+    constexpr float kHandReach = 30.f;
+    for (int i = 0; i < n; ++i)
+    {
+        C_BaseEntity* prop = m_Game->GetClientEntity(props[i]);
+        Vector pivot{};
+        QAngle unused{};
+        if (!prop || (!m_Game->GetEntityAttachment(prop, "aimrotation", pivot, unused)
+            && !m_Game->GetEntityAbsOrigin(prop, pivot)))
+            continue;
+        if (useIsBrush && (useOrigin - pivot).LengthSqr() < kUseNearProp * kUseNearProp)
+        {
+            m_OnGun = true;
+            m_GunPropIndex = props[i];
+            break;
+        }
+        if (haveHand && (hand - pivot).LengthSqr() < kHandReach * kHandReach)
+            m_GunRightNear = true;
+    }
+    if (m_OnGun)
+        m_GunRightNear = false;
+    if (m_OnGun != wasOnGun)
+    {
+        static int s_gunLog;
+        if (s_gunLog < 24)
+        {
+            Game::logMsg("Mounted gun %s (prop %d)", m_OnGun ? "taken" : "left", m_GunPropIndex);
+            ++s_gunLog;
+        }
+    }
+    if (!m_OnGun)
+        m_GunAimBaseValid = false;
+}
+
+bool VR::MountedGunAim(QAngle& out)
+{
+    if (!m_OnGun || !m_Game)
+        return false;
+    C_BaseEntity* prop = m_Game->GetClientEntity(m_GunPropIndex);
+    Vector pivot{};
+    QAngle pivotAngles{};
+    const bool haveAttach = prop && m_Game->GetEntityAttachment(prop, "aimrotation", pivot, pivotAngles);
+    if (!haveAttach && !(prop && m_Game->GetEntityAbsOrigin(prop, pivot)))
+        return false;
+    // The hands on the handles: those holding a trigger, both = their midpoint.
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    if (body.LengthSqr() <= 1.f)
+        return false;
+    const bool left = m_GunHeldLeft && m_LeftControllerTrackingValid;
+    const bool right = m_GunHeldRight && m_RightControllerTrackingValid;
+    if (!left && !right)
+    {
+        // Between letting go and the game taking the player off the gun.
+        if (!m_GunAimBaseValid)
+            return false;
+        out = m_GunLastAim;
+        return true;
+    }
+    Vector hands{};
+    if (left)
+        hands = GetLeftControllerAbsPos(body);
+    if (right)
+        hands = left ? (hands + GetRightControllerAbsPos(body)) * 0.5f : GetRightControllerAbsPos(body);
+    Vector push = pivot - hands;
+    if (VectorNormalize(push) <= 0.01f)
+        return false;
+    QAngle handAngles{};
+    QAngle::VectorAngles(push, handAngles);
+    const int handMask = (left ? 1 : 0) | (right ? 2 : 0);
+    if (!m_GunAimBaseValid || handMask != m_GunAimHands)
+    {
+        // A new hold (or a hand added / let go): the barrel stays where it
+        // points, only hand movement from here on turns it.
+        Vector muzzle{};
+        QAngle unused{};
+        Vector barrel{};
+        if (prop && m_Game->GetEntityAttachment(prop, "muzzle", muzzle, unused)
+            && (barrel = muzzle - pivot, VectorNormalize(barrel) > 0.01f))
+            QAngle::VectorAngles(barrel, m_GunBarrelBase);
+        else if (m_GunAimBaseValid)
+            m_GunBarrelBase = m_GunLastAim;
+        else
+        {
+            // No muzzle attachment on the client (50cal prop, 2026-11-01):
+            // the barrel points away from the hands, level. The hands are
+            // above the mount, so their own pitch would tip it ~25 deg down.
+            m_GunBarrelBase = handAngles;
+            m_GunBarrelBase.x = 0.f;
+        }
+        m_GunHandBase = handAngles;
+        m_GunAimHands = handMask;
+        m_GunAimBaseValid = true;
+        Game::logMsg("Mounted gun hold: hands %s, pivot (%.0f,%.0f,%.0f)%s, barrel yaw %.1f pitch %.1f",
+            left && right ? "both" : (left ? "left" : "right"), pivot.x, pivot.y, pivot.z,
+            haveAttach ? "" : " (prop origin)", m_GunBarrelBase.y, m_GunBarrelBase.x);
+    }
+    auto wrap = [](float a) {
+        while (a > 180.f) a -= 360.f;
+        while (a < -180.f) a += 360.f;
+        return a;
+    };
+    QAngle wanted{};
+    wanted.x = wrap(m_GunBarrelBase.x) + wrap(handAngles.x - m_GunHandBase.x);
+    wanted.y = wrap(m_GunBarrelBase.y + wrap(handAngles.y - m_GunHandBase.y));
+    wanted.z = 0.f;
+    if (wanted.x > 89.f) wanted.x = 89.f;
+    if (wanted.x < -89.f) wanted.x = -89.f;
+    Vector dir{};
+    QAngle::AngleVectors(wanted, &dir, nullptr, nullptr);
+    Vector target = pivot + dir * 8192.f;
+    if (m_Game->m_EngineTrace)
+    {
+        C_BaseEntity* player = m_Game->GetLocalPlayerEntity();
+        CTraceFilterSkipTwoEntities filter(player, prop, 0);
+        Ray_t ray;
+        ray.Init(pivot + dir * 16.f, target);
+        CGameTrace tr{};
+        m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
+        if (tr.fraction < 1.f && !tr.startsolid)
+            target = tr.endpos;
+    }
+    Vector toTarget = target - m_SetupOrigin;
+    if (VectorNormalize(toTarget) <= 0.01f)
+        return false;
+    QAngle aim{};
+    QAngle::VectorAngles(toTarget, aim);
+    aim.x = wrap(aim.x);
+    if (aim.x > 89.f) aim.x = 89.f;
+    if (aim.x < -89.f) aim.x = -89.f;
+    aim.z = 0.f;
+    m_GunLastAim = aim;
+    static DWORD s_aimLogMs;
+    static int s_aimLog;
+    const DWORD now = GetTickCount();
+    if (bmvr::g_AimDebug || (now - s_aimLogMs > 1000 && s_aimLog < 120))
+    {
+        s_aimLogMs = now;
+        ++s_aimLog;
+        Vector muzzle{};
+        QAngle unused{};
+        float barrelYaw = 0.f, barrelPitch = 0.f;
+        Vector barrel{};
+        if (prop && m_Game->GetEntityAttachment(prop, "muzzle", muzzle, unused)
+            && (barrel = muzzle - pivot, VectorNormalize(barrel) > 0.01f))
+        {
+            QAngle b{};
+            QAngle::VectorAngles(barrel, b);
+            barrelYaw = wrap(b.y);
+            barrelPitch = wrap(b.x);
+        }
+        Game::logMsg("Mounted gun aim: hands yaw %.1f pitch %.1f (hold %.1f %.1f) -> wanted yaw %.1f pitch %.1f, sent yaw %.1f pitch %.1f, barrel now yaw %.1f pitch %.1f",
+            wrap(handAngles.y), wrap(handAngles.x), wrap(m_GunHandBase.y), wrap(m_GunHandBase.x),
+            wanted.y, wanted.x, wrap(aim.y), aim.x, barrelYaw, barrelPitch);
+    }
+    out = aim;
+    return true;
+}
+
 static bool UseNameLooksLikeWorldToggle(const char* n)
 {
     if (!n || !n[0])
@@ -5942,6 +6143,19 @@ void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
 {
     const bool useHeld = leftUse || rightUse;
     const double now = QpcNowMs();
+    {
+        static C_BaseEntity* s_lastUseEnt;
+        static int s_useEntLog;
+        C_BaseEntity* useEnt = m_Game->LocalPlayerUseEntity();
+        if (useEnt != s_lastUseEnt && s_useEntLog < 40)
+        {
+            const char* cls = useEnt ? m_Game->GetEntityClientClassName(useEnt) : nullptr;
+            const char* mdl = useEnt ? m_Game->GetEntityModelName(useEnt) : nullptr;
+            Game::logMsg("Use entity: %s model %s", useEnt ? (cls ? cls : "?") : "none", mdl ? mdl : "-");
+            ++s_useEntLog;
+        }
+        s_lastUseEnt = useEnt;
+    }
     const bool worldToggle = UseEntityIsWorldToggle(m_Game);
     const bool heldProp = UseEntityIsHeldProp(m_Game);
     // Server usercmds lag the client by a tick or two, so controller calls
