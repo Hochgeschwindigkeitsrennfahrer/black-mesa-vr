@@ -68,6 +68,24 @@ for f in "${DLLS[@]}"; do
 done
 echo "test DLL $(sha256sum < "$BMVR_DLL" | cut -c1-12) installed $(date +%T)" > "$out/run.log"
 
+# A locked (or blanked) desktop stalls GPU runs on :0 and confuses window shots: unlock it first, every run.
+# loginctl's Unlock reaches cinnamon-screensaver; --deactivate is the fallback. Logged in run.log.
+unlock_desktop() {
+	command -v cinnamon-screensaver-command >/dev/null || return 0
+	cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' || return 0
+	loginctl unlock-sessions 2>/dev/null || true
+	sleep 1
+	cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' && cinnamon-screensaver-command -d 2>/dev/null
+	sleep 1
+	DISPLAY=:0 xset dpms force on 2>/dev/null || true
+	if cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active'; then
+		echo "desktop locked and could not be unlocked $(date +%T)" | tee -a "$out/run.log" >&2
+	else
+		echo "desktop was locked: unlocked $(date +%T)" >> "$out/run.log"
+	fi
+}
+unlock_desktop
+
 if [[ -n ${BMVR_GPU:-} ]]; then
 	# real GPU on an existing X display (window appears there); 32-bit lavapipe crashes on map load since 2026-10-12
 	display=${BMVR_DISPLAY:-:0}
