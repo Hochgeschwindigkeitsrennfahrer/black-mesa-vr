@@ -478,7 +478,7 @@ namespace
     // grow below never picks eye/2 or eye/4.
     bool ReflectionRtSized(int w, int h)
     {
-        return bmvr::g_ReflectionRtW > 0 && w == bmvr::g_ReflectionRtW && h == bmvr::g_ReflectionRtH;
+        return bmvr::GrownAuxRtSized(w, h);
     }
     thread_local Vector g_CurViewOrigin{};
     thread_local Vector g_CurViewForward{};
@@ -8835,14 +8835,19 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     const bool reflectGb = name && nameLen > 7 && std::strncmp(name, "_rt_gb", 6) == 0
         && name[nameLen - 1] == '2'
         && !std::strstr(name, "shadow") && !std::strstr(name, "Shadow");
-    const bool reflectRt = name && bmvr::g_ReflectionRtScale > 0.f
-        && (std::strstr(name, "Water") || std::strstr(name, "water")
+    // _rt_PowerOfTwoFB is only a copy of the eye, so it has its own scale
+    // (RefractCopyRtScale): growing it alone fixes the stair-stepped floor /
+    // wall junctions without the second scene render of the reflection set.
+    const bool refractCopy = name && std::strstr(name, "PowerOfTwo") != nullptr;
+    const float auxScale = refractCopy ? bmvr::RefractCopyRtScale() : bmvr::g_ReflectionRtScale;
+    const bool reflectRt = name && auxScale > 0.f
+        && (refractCopy || std::strstr(name, "Water") || std::strstr(name, "water")
             || std::strstr(name, "Reflect") || std::strstr(name, "Refract")
-            || std::strstr(name, "PowerOfTwo") || reflectGb);
+            || reflectGb);
     uint32_t reflEyeW = 0, reflEyeH = 0;
     if (reflectRt && bmvr::ComputeOffscreenEyeSize(reflEyeW, reflEyeH))
     {
-        const float scale = std::min(1.f, bmvr::g_ReflectionRtScale);
+        const float scale = std::min(1.f, auxScale);
         int rw = static_cast<int>(static_cast<float>(reflEyeW) * scale) & ~15;
         const int rh = static_cast<int>(static_cast<float>(reflEyeH) * scale) & ~15;
         // The D3D hooks recognise the reflection set by exact size, so it
@@ -8853,13 +8858,22 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
             rw -= 16;
         if (rw > w && rh > h && rw >= 256 && rh >= 256)
         {
-            Game::logMsg("CreateNamedRT %s reflection grow %dx%d mode=%d -> %dx%d LITERAL (ReflectionRtScale %.2f of eye %ux%u)",
-                name, w, h, sizeMode, rw, rh, scale, reflEyeW, reflEyeH);
+            Game::logMsg("CreateNamedRT %s reflection grow %dx%d mode=%d -> %dx%d LITERAL (%s %.2f of eye %ux%u)",
+                name, w, h, sizeMode, rw, rh, refractCopy ? "RefractCopyRtScale" : "ReflectionRtScale",
+                scale, reflEyeW, reflEyeH);
             w = rw;
             h = rh;
             sizeMode = RT_SIZE_LITERAL;
-            bmvr::g_ReflectionRtW = rw;
-            bmvr::g_ReflectionRtH = rh;
+            if (refractCopy)
+            {
+                bmvr::g_RefractCopyRtW = rw;
+                bmvr::g_RefractCopyRtH = rh;
+            }
+            else
+            {
+                bmvr::g_ReflectionRtW = rw;
+                bmvr::g_ReflectionRtH = rh;
+            }
         }
     }
     const int oldW = w;

@@ -22,6 +22,13 @@ OpenXRHelperDownsample=
 # edges at headset resolution. Costs GPU in rooms with big reflective floors.
 ReflectionRtScale=0.5
 
+# The screen copy shiny floors and wired glass sample (_rt_PowerOfTwoFB) as a
+# fraction of the eye size. At the engine's 1024x1024 the floor next to walls
+# and other floor types shows a blown-up copy of that edge: jagged junctions
+# that RenderScale and FXAA cannot fix. Only a copy, so much cheaper than
+# ReflectionRtScale. -1 (or unset) = same as ReflectionRtScale, 0 = 1024x1024.
+RefractCopyRtScale=-1
+
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
 WorldRenderAtEyeSize=true

@@ -575,13 +575,14 @@ namespace
         if (now - t.lastLogMs >= 5000 && t.resolved > 0)
         {
             const double n = static_cast<double>(t.resolved);
-            Game::logMsg("GPU ms/frame: reflection-set L=%.2f R=%.2f | refract copy %.2f | eye-size RTs L=%.2f R=%.2f | frame interval %.2f | frames=%d dropped=%d ReflectionRtScale %.2f (%dx%d)",
+            Game::logMsg("GPU ms/frame: reflection-set L=%.2f R=%.2f | refract copy %.2f | eye-size RTs L=%.2f R=%.2f | frame interval %.2f | frames=%d dropped=%d ReflectionRtScale %.2f (%dx%d) RefractCopyRtScale %.2f (%dx%d)",
                 t.sumMs[kSpanRefl][1] / n, t.sumMs[kSpanRefl][2] / n,
                 (t.sumMs[kSpanCopy][0] + t.sumMs[kSpanCopy][1] + t.sumMs[kSpanCopy][2]) / n,
                 t.sumMs[kSpanEye][1] / n, t.sumMs[kSpanEye][2] / n,
                 t.frameIntervals > 0 ? t.frameMs / t.frameIntervals : 0.0,
                 t.resolved, t.dropped, bmvr::g_ReflectionRtScale,
-                bmvr::g_ReflectionRtW, bmvr::g_ReflectionRtH);
+                bmvr::g_ReflectionRtW, bmvr::g_ReflectionRtH, bmvr::RefractCopyRtScale(),
+                bmvr::g_RefractCopyRtW, bmvr::g_RefractCopyRtH);
             for (int k = 0; k < kSpanKinds; ++k)
                 for (int e = 0; e < 3; ++e)
                     t.sumMs[k][e] = 0.0;
@@ -865,14 +866,14 @@ namespace
     // eye-sized and the eye path below already handles it.
     bool Rt0IsGrownReflection(VR* vr, UINT& w, UINT& h)
     {
-        if (!vr || bmvr::g_ReflectionRtW <= 0 || !g_Rt0ActualKnown || !g_Rt0ActualPtr)
+        if (!vr || (bmvr::g_ReflectionRtW <= 0 && bmvr::g_RefractCopyRtW <= 0)
+            || !g_Rt0ActualKnown || !g_Rt0ActualPtr)
             return false;
         if (vr->m_CaptureReentry || vr->HudPaintActive() || !vr->StereoWorldPassActive())
             return false;
         // Exact size: +-16 px also matched the eye/2 bloom brightpass target
         // (2008x2048 next to 2000x2048) and remapped it every frame.
-        if (static_cast<int>(g_Rt0ActualW) != bmvr::g_ReflectionRtW
-            || static_cast<int>(g_Rt0ActualH) != bmvr::g_ReflectionRtH)
+        if (!bmvr::GrownAuxRtSized(static_cast<int>(g_Rt0ActualW), static_cast<int>(g_Rt0ActualH)))
             return false;
         if (g_Rt0ActualW == vr->m_RenderWidth && g_Rt0ActualH == vr->m_RenderHeight)
             return false;
@@ -1557,12 +1558,12 @@ namespace
         bool timed = false;
         int resumeKind = kSpanNone;
         int resumeEye = 0;
-        if (device && pDest && vr && bmvr::g_ReflectionRtW > 0 && GpuTimerEnabled()
+        if (device && pDest && vr && bmvr::g_RefractCopyRtW > 0 && GpuTimerEnabled()
             && vr->StereoWorldPassActive() && GpuTimerThreadOk())
         {
             D3DSURFACE_DESC d{};
-            if (SUCCEEDED(pDest->GetDesc(&d)) && static_cast<int>(d.Width) == bmvr::g_ReflectionRtW
-                && static_cast<int>(d.Height) == bmvr::g_ReflectionRtH)
+            if (SUCCEEDED(pDest->GetDesc(&d)) && static_cast<int>(d.Width) == bmvr::g_RefractCopyRtW
+                && static_cast<int>(d.Height) == bmvr::g_RefractCopyRtH)
             {
                 resumeKind = g_GpuTimer.openKind;
                 resumeEye = g_GpuTimer.openEye;

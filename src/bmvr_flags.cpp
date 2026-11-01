@@ -124,7 +124,10 @@ namespace bmvr
     bool g_StereoEnginePost = true;
     uint32_t g_MaxEyeSize = 4096;
     float g_ReflectionRtScale = 0.5f;
+    float g_RefractCopyRtScale = -1.f;
     int g_ReflectionRtW = 0;
+    int g_RefractCopyRtW = 0;
+    int g_RefractCopyRtH = 0;
     bool g_GpuPassTiming = false;
     int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
@@ -667,6 +670,11 @@ namespace bmvr
             {
                 const float v = static_cast<float>(atof(val));
                 g_ReflectionRtScale = (v > 0.f && v <= 1.f) ? v : 0.f;
+            }
+            else if (std::strcmp(n, "RefractCopyRtScale") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                g_RefractCopyRtScale = v < 0.f ? -1.f : ((v > 0.f && v <= 1.f) ? v : 0.f);
             }
             else if (std::strcmp(n, "MaxEyeSize") == 0)
             {
@@ -2220,6 +2228,17 @@ namespace bmvr
         width = w;
         height = h;
         return w >= 640 && h >= 360;
+    }
+
+    float RefractCopyRtScale()
+    {
+        return g_RefractCopyRtScale < 0.f ? g_ReflectionRtScale : g_RefractCopyRtScale;
+    }
+
+    bool GrownAuxRtSized(int w, int h)
+    {
+        return (g_ReflectionRtW > 0 && w == g_ReflectionRtW && h == g_ReflectionRtH)
+            || (g_RefractCopyRtW > 0 && w == g_RefractCopyRtW && h == g_RefractCopyRtH);
     }
 
     bool WorldRtGrowActive()

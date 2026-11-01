@@ -291,6 +291,17 @@ namespace bmvr
     // At 1024 mirrored floors / refract glass shimmered at the edges; 0.5 fixes
     // that at an acceptable cost in the headset (2026-10-30).
     extern float g_ReflectionRtScale;
+    // RefractCopyRtScale (default -1 = same as ReflectionRtScale; 0 = engine
+    // 1024x1024; 0.25..1 = fraction of the eye size): _rt_PowerOfTwoFB only,
+    // the screen copy refract materials (shiny floors, wired glass) sample.
+    // It is a copy, not a scene render, so it is cheap to grow on its own.
+    extern float g_RefractCopyRtScale;
+    float RefractCopyRtScale();
+    // Size _rt_PowerOfTwoFB was grown to (0 = not grown).
+    extern int g_RefractCopyRtW;
+    extern int g_RefractCopyRtH;
+    // w x h is the grown reflection set or the grown refract copy.
+    bool GrownAuxRtSized(int w, int h);
     // Size the reflection set was grown to (0 = not grown). Set by the
     // CreateNamedRT hook; read by the viewport/scissor/clear/constant hooks.
     extern int g_ReflectionRtW;
