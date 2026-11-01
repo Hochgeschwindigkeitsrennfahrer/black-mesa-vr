@@ -29,7 +29,8 @@ namespace
     constexpr int kRowPx = 64;
     constexpr int kSectionPx = 48;
     constexpr float kPanelWidthHu = 20.f;      // ~51 cm; the panel is ~1.6x taller than wide
-    constexpr float kPanelDistanceHu = 44.f;   // ~1.12 m in front of the eyes: about +-20 deg tall, near the game menu
+    constexpr float kPanelMinDistanceHu = 44.f;  // ~1.12 m in front of the eyes, near the game menu
+    constexpr float kPanelHalfFovDeg = 22.f;      // pushed back until the panel is about +-22 deg tall
     constexpr float kPanelDropHu = 3.f;        // a little below eye height
     // Zones in texture pixels.
     constexpr int kMinusX0 = 600, kMinusX1 = 690;
@@ -123,6 +124,13 @@ namespace
     }
     int TexH() { return RowTop(static_cast<int>(Rows().size())) + 16; }
     float PanelHeightHu() { return kPanelWidthHu * static_cast<float>(TexH()) / kTexW; }
+    // The panel grows with every row, so it moves back instead of making you
+    // look far up and down (29 rows = ~1.24 m tall, ~1.5 m away).
+    float PanelDistanceHu()
+    {
+        const float fit = PanelHeightHu() * 0.5f / tanf(kPanelHalfFovDeg * kPi / 180.f);
+        return fit > kPanelMinDistanceHu ? fit : kPanelMinDistanceHu;
+    }
 
     std::string FormatValue(const Row& r)
     {
@@ -412,7 +420,7 @@ void VR::OpenSettingsPanel()
     Vector yawRight = CrossProduct(yawFwd, worldUp);
     VectorNormalize(yawRight);
     const Vector eye = GetViewOrigin(body);
-    const Vector center = eye + yawFwd * kPanelDistanceHu - worldUp * kPanelDropHu;
+    const Vector center = eye + yawFwd * PanelDistanceHu() - worldUp * kPanelDropHu;
     // Same latching as the weapon menu: stored relative to the body and the
     // turn offset, so the panel stays put in the room while you look around.
     m_SettingsLatchDelta = center - body;
