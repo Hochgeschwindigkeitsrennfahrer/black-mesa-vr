@@ -59,6 +59,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_CrouchStickHold, nullptr },
             { "bmvr_stick_jump_crouch", "VR: how far the right stick goes up/down before it jumps/crouches (0.3..0.95)",
               Kind::Float, 0.3f, 0.95f, nullptr, &g_StickJumpCrouchThreshold },
+            { "bmvr_skip_screen_effects", "VR: leave out the stun / intro-blur screen overlays (they paste one flat copy of the view over both eyes)",
+              Kind::Bool, 0.f, 1.f, &g_VrSkipScreenEffects, nullptr },
             { "bmvr_turn_blocks_jump_crouch", "VR: after the right stick turned, no stick jump/crouch until it is centred",
               Kind::Bool, 0.f, 1.f, &g_TurnBlocksJumpCrouch, nullptr },
             { "bmvr_sprint_toggle", "VR: a sprint click keeps sprinting until the move stick is released (0 = hold the click)",

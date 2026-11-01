@@ -120,6 +120,7 @@ namespace bmvr
     bool g_VrHandThrow = true;
     float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
+    bool g_VrSkipScreenEffects = true;
     bool g_StereoEnginePost = true;
     uint32_t g_MaxEyeSize = 4096;
     float g_ReflectionRtScale = 0.5f;
@@ -656,6 +657,8 @@ namespace bmvr
                 g_TwoHandHoldWhileGrip = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSkipMotionBlur") == 0)
                 g_VrSkipMotionBlur = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrSkipScreenEffects") == 0)
+                g_VrSkipScreenEffects = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "StereoEnginePost") == 0)
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassTiming") == 0)

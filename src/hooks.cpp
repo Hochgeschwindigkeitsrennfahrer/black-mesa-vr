@@ -5864,6 +5864,23 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
         }
         return;
     }
+    // No env_screeneffect overlays in VR (stun / intro blur, e.g. the c2a3c
+    // ambush knockout). Each draws a 1024x512 copy of an earlier eye image
+    // full-screen over the eye before saving the current one, so the eyes
+    // get a stale, flat second view on top of the stereo scene.
+    if (bmvr::g_VrSkipScreenEffects && matName && m_VR && m_VR->m_IsVREnabled
+        && m_VR->IsGameplayEligible()
+        && (std::strcmp(matName, "__ep1introeffect") == 0 || std::strcmp(matName, "__stuneffect") == 0
+            || std::strcmp(matName, "__ep2stuneffect") == 0))
+    {
+        static int s_skipScreenFx;
+        if (s_skipScreenFx < 4)
+        {
+            Game::logMsg("DSSR skip screen effect %s dest=%dx%d src=%dx%d", matName, width, height, srcWidth, srcHeight);
+            ++s_skipScreenFx;
+        }
+        return;
+    }
     const bool stereoEyePost = Hooks::m_VR && Hooks::m_VR->StereoWorldPassActive()
         && (bmvr::OffscreenWorldMatchesEyes() || Hooks::m_VR->ShouldHwndBlitStereo());
     // Gameplay only (non-background LevelInit and IsInGame, same gate as the

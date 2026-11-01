@@ -280,6 +280,7 @@ namespace bmvr
     extern bool g_VrHandThrow;           // frag leaves the hand at the hand's speed (Lambda1VR-style throw)
     extern float g_ThrowScale;           // hand speed x 2/3 x this, capped at 1000 u/s (Lambda1VR vr_throw_scale)
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
+    extern bool g_VrSkipScreenEffects;   // skip env_screeneffect overlays (stun / intro blur) in VR
     extern bool g_StereoEnginePost;      // run engine_post (tonemap / colour correction / FXAA) on eyes, bloom zeroed
     // MaxEyeSize (default 4096, 2048..8192): largest eye RT side. Both axes
     // shrink by one factor when RenderScale asks for more. MulticoreMode also
