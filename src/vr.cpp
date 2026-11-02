@@ -11627,9 +11627,9 @@ void VR::UpdateAutoMatQueueMode()
     if (s_qlog < 8)
     {
         // Mode 0 (single-threaded) is expected in menus, loading and warmup;
-        // multicore switches to 2 once gameplay runs ("AutoMatQueueMode set 2").
+        // multicore switches to 2 after that ("AutoMatQueueMode set 2").
         Game::logMsg("Material queue mode=%d%s slots=%d auto=%d multicore=%d ring=%d try=%d set=%d get=%d eq=%d failedSlot=%d",
-            current, (current == 0 && !m_GameplayEligible) ? " (single-threaded until gameplay)" : "",
+            current, (current == 0 && bmvr::g_MulticoreMode) ? " (single-threaded until warmup ends, then 2)" : "",
             m_Game->MaterialThreadSlotsValid() ? 1 : 0,
             bmvr::g_AutoMatQueueMode ? 1 : 0, bmvr::g_MulticoreMode ? 1 : 0, m_McRingReady ? 1 : 0,
             bmvr::TryMatQueue() ? 1 : 0,
