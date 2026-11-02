@@ -377,6 +377,12 @@ namespace bmvr
     // the head moves). The right eye gets its own queries for all its views
     // (incl. floor/water reflections). false = stock (A/B aid).
     extern bool g_PixelVisPerEye;
+    // GlowHold (seconds, default 0.3, cvar bmvr_glow_hold, 0 = off): a glow
+    // that dims keeps its brightest recent value this long, then fades over
+    // the same time, so partial occlusion (dirty glass, the edge of an eye's
+    // view, small head movements) no longer flickers it. Brightening is
+    // immediate. Per glow, per eye and view.
+    extern float g_GlowHold;
     // OccluderViewPerEye (default true): the engine's occluder system
     // (r_occlusion, map func_occluder) takes its view in Push3DView, but the
     // client tests renderables against it before pushing the view. Flat, that

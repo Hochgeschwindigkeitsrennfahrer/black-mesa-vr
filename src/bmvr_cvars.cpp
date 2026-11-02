@@ -83,6 +83,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrCrosshairDot, nullptr },
             { "bmvr_pixelvis_per_eye", "VR: each eye keeps its own glow visibility queries (0 = stock: the eyes share one, glows can drop out)",
               Kind::Bool, 0.f, 1.f, &g_PixelVisPerEye, nullptr },
+            { "bmvr_glow_hold", "VR: seconds a dimming light glow keeps its brightness before it fades (0 = off; stops flicker behind dirty glass / at the view edge)",
+              Kind::Float, 0.f, 2.f, nullptr, &g_GlowHold },
             { "bmvr_menu_smooth", "VR: menu pointer smoothing in seconds (lower = more direct)",
               Kind::Float, 0.02f, 0.6f, nullptr, &g_MenuCursorSmoothSec },
         };

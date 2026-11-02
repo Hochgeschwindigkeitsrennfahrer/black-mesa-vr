@@ -51,6 +51,48 @@ static int __cdecl PixelVisCurrentViewId()
     return id;
 }
 
+// Glow hold (GlowHold / bmvr_glow_hold): per query (= per glow, eye and view)
+// keep the brightest recent value while the game's value dips, then fade.
+using PixelVisQueryFractionFn = float(__thiscall*)(void* query, float fadeTimeInv);
+static PixelVisQueryFractionFn g_OrigPixelVisQueryFraction = nullptr;
+
+static float __fastcall PixelVisQueryFractionHold(void* ecx, void* edx, float fadeTimeInv)
+{
+    (void)edx;
+    const float raw = g_OrigPixelVisQueryFraction(ecx, fadeTimeInv);
+    const float hold = bmvr::g_GlowHold;
+    if (!(hold > 0.f) || !std::isfinite(raw))
+        return raw;
+    struct Held { float shown; ULONGLONG seenMs; ULONGLONG holdUntilMs; };
+    static std::unordered_map<const void*, Held> s_held;
+    static ULONGLONG s_nextPurge;
+    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG holdMs = static_cast<ULONGLONG>(hold * 1000.f);
+    auto [it, fresh] = s_held.try_emplace(ecx, Held{ raw, now, now + holdMs });
+    Held& h = it->second;
+    // Not asked for a while: the query was idle or reused for another glow.
+    if (fresh || now - h.seenMs > 500)
+        h = Held{ raw, now, now + holdMs };
+    else if (raw >= h.shown)
+    {
+        h.shown = raw;
+        h.holdUntilMs = now + holdMs;
+    }
+    else if (now >= h.holdUntilMs)
+    {
+        const float fade = static_cast<float>(now - h.seenMs) / (hold * 1000.f);
+        h.shown = (std::max)(raw, h.shown - fade);
+    }
+    h.seenMs = now;
+    if (now >= s_nextPurge)
+    {
+        s_nextPurge = now + 10000;
+        for (auto p = s_held.begin(); p != s_held.end();)
+            p = (now - p->second.seenMs > 2000) ? s_held.erase(p) : std::next(p);
+    }
+    return h.shown;
+}
+
 // Headless diagnostic (env BMVR_PIXELVIS_STATS=1): every 5 s, per eye, how
 // often a glow's visible fraction fell from lit (>= 0.5) to near zero (< 0.05)
 // since that eye's previous call for the same glow. Hooks
@@ -221,6 +263,15 @@ static void InstallPixelVisPerEye()
         VirtualProtect(rel, 4, old, &old);
     }
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
+    auto* qf = reinterpret_cast<unsigned char*>(client + Offsets::kPixelVisQueryFractionRva);
+    static const unsigned char kQfPrologue[] = { 0x55, 0x8B, 0xEC, 0x51, 0x57, 0x8B, 0xF9, 0x83, 0x7F, 0x18, 0x00 };
+    if (std::memcmp(qf, kQfPrologue, sizeof(kQfPrologue)) == 0
+        && MH_CreateHook(qf, reinterpret_cast<LPVOID>(&PixelVisQueryFractionHold),
+            reinterpret_cast<LPVOID*>(&g_OrigPixelVisQueryFraction)) == MH_OK
+        && MH_EnableHook(qf) == MH_OK)
+        Game::logMsg("Glow hold hook on (GlowHold %.2f s, cvar bmvr_glow_hold)", bmvr::g_GlowHold);
+    else
+        Game::noteMissingOffset("Pixel visibility query fraction (glow hold)");
     Game::logMsg("Pixel visibility per eye: %u call sites patched (%s), unused queries kept %d frames",
         static_cast<unsigned>(sizeof(Offsets::kPixelVisViewIdCallRvas) / sizeof(Offsets::kPixelVisViewIdCallRvas[0])),
         bmvr::g_PixelVisPerEye ? "on" : "off, bmvr_pixelvis_per_eye 1 turns it on",
@@ -5094,6 +5145,19 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         return false;
     if (!cmd)
         return hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
+    // The caller stores the final cmd->viewangles into the engine after this
+    // returns; note them so the next tick can tell a restored (loaded) angle.
+    struct CmdYawNote
+    {
+        CUserCmd* cmd;
+        ~CmdYawNote()
+        {
+            if (Hooks::m_VR && cmd->command_number && std::isfinite(cmd->viewangles.y))
+                Hooks::m_VR->NoteCmdYaw(cmd->viewangles.y);
+        }
+    } cmdYawNote{ cmd };
+    if (m_VR && m_VR->m_IsVREnabled && cmd->command_number)
+        m_VR->SyncTurnToRestoredYaw(cmd->viewangles.y);
 
     // Yaw actually written to cmd->viewangles this tick. Movement is expressed
     // relative to viewangles, so the stick-to-usercmd conversion below has to

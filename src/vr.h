@@ -660,6 +660,20 @@ public:
     Vector m_StereoBodyOrigin{};
     bool m_StereoCopyOffset = false;
     bool m_SeenGameplay = false;
+    // Loading a save (or a level change) restores the player's angles in the
+    // engine, but the view is head yaw + turn offset, so the saved direction
+    // was lost: after a load the player faced wherever the current offset
+    // pointed, sometimes the other way. CreateMove (client mode) is entered with
+    // the engine's angles, which are what the previous tick wrote unless the
+    // engine set them; for a while after a load such a change re-aims the
+    // turn offset once. A load is a gap in usercmds (the LevelInit hook is not
+    // installed on BM, and reloading the same map does not change its name).
+    int m_YawSyncTicks = 0;
+    ULONGLONG m_LastCmdMs = 0;
+    bool m_LastCmdYawValid = false;
+    float m_LastCmdYaw = 0.f;
+    void SyncTurnToRestoredYaw(float engineYaw);
+    void NoteCmdYaw(float yaw) { m_LastCmdYaw = yaw; m_LastCmdYawValid = true; }
     bool m_GameplayEligible = false;
     int m_GameplayFrames = 0;
     uint32_t m_PresentTick = 0;

@@ -2848,6 +2848,7 @@ void VR::OnLevelInit(const char* newmap)
     bmvr::NoteEngineMapName(newmap);
     bmvr::SetGameplayWorldRts(m_GameplayEligible);
     m_SeenGameplay = false;
+    m_YawSyncTicks = 600;
     m_GameplayFrames = 0;
     m_EligiblePresents = 0;
     m_SafeLookActive = false;
@@ -4860,6 +4861,30 @@ bool VR::PressedDigitalAction(vr::VRActionHandle_t handle, bool onChanged) const
     if (onChanged)
         return data.bState && data.bChanged;
     return data.bState;
+}
+
+void VR::SyncTurnToRestoredYaw(float engineYaw)
+{
+    const ULONGLONG now = GetTickCount64();
+    if (m_LastCmdMs && now - m_LastCmdMs > 400)
+        m_YawSyncTicks = 600;
+    m_LastCmdMs = now;
+    if (m_YawSyncTicks <= 0)
+        return;
+    if (!m_LastCmdYawValid || !m_HmdPoseValid || !m_GameplayEligible || !std::isfinite(engineYaw))
+        return;
+    --m_YawSyncTicks;
+    const float changed = WrapYaw(engineYaw - m_LastCmdYaw);
+    if (fabsf(changed) < 1.f)
+        return;
+    m_YawSyncTicks = 0;
+    const float viewYaw = GetViewAngle().y;
+    const float before = m_RotationOffsetY.load(std::memory_order_acquire);
+    float offset = before + WrapYaw(engineYaw - viewYaw);
+    offset -= 360.f * floorf(offset / 360.f);
+    m_RotationOffsetY.store(offset, std::memory_order_release);
+    Game::logMsg("Turn synced to the restored view: engine yaw %.1f (last sent %.1f), view %.1f, turn offset %.1f -> %.1f",
+        engineYaw, m_LastCmdYaw, viewYaw, before, offset);
 }
 
 void VR::ApplyTurnStick(float stickX, float deltaMs)
@@ -6943,7 +6968,10 @@ void VR::FlushPendingGameUi()
     {
         const bool ok = m_Game->ClientCmd_Unrestricted("save quick");
         Game::logMsg("Quick save ClientCmd_Unrestricted ok=%d", ok ? 1 : 0);
-        ShowToast(ok ? "GAME SAVED" : "SAVE FAILED");
+        // The game's own "Saved..." HUD message reaches the HUD layer; only a
+        // command that never ran gets a message of ours.
+        if (!ok)
+            ShowToast("SAVE FAILED");
     }
     const int op = m_PendingGameUi.exchange(0, std::memory_order_acq_rel);
     if (op == 0 || !m_Game)

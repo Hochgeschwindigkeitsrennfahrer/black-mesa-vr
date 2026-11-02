@@ -508,6 +508,9 @@ public:
     static constexpr uint32_t kPixelVisQueryAgeCmpRva = 0xD40D1;
     static constexpr uint32_t kPixelVisSetAgeCmpRva = 0xD416B;
     static constexpr unsigned char kPixelVisQueryGraceFrames = 8;
+    // CPixelVisibilityQuery::GetFractionVisible(float fadeTimeInv): thiscall on the
+    // query, returns brightness * on-screen fraction in ST0, ret 4. Beta 26234270.
+    static constexpr uint32_t kPixelVisQueryFractionRva = 0xD4650;
     // Headless diagnostic only (BMVR_PIXELVIS_STATS): CPixelVisibilitySystem
     // GetFractionVisible 0xD48B0 and find-or-create query for a view 0xD4560.
     static constexpr uint32_t kPixelVisGetFractionRva = 0xD48B0;
