@@ -8677,6 +8677,44 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             return pose;
         }
 
+        // In front of the head at this frame's located pose (the projection
+        // layers' time), turning and tilting with it.
+        XrPosef BuildHeadLockedOverlayPose(
+            const L4D2VROpenXrOverlayDesc& overlay,
+            const std::vector<XrView>& locatedViews,
+            uint32_t locatedCount,
+            const XrPosef* gameRenderCenterPose)
+        {
+            XrPosef head{};
+            if (!locatedViews.empty())
+            {
+                head = locatedViews[0].pose;
+                if (locatedCount >= 2 && locatedViews.size() >= 2)
+                {
+                    head.position.x = (locatedViews[0].pose.position.x + locatedViews[1].pose.position.x) * 0.5f;
+                    head.position.y = (locatedViews[0].pose.position.y + locatedViews[1].pose.position.y) * 0.5f;
+                    head.position.z = (locatedViews[0].pose.position.z + locatedViews[1].pose.position.z) * 0.5f;
+                }
+            }
+            else
+                head = *gameRenderCenterPose;
+            const float distance = (std::isfinite(overlay.distanceMeters) && overlay.distanceMeters > 0.1f && overlay.distanceMeters < 10.0f)
+                ? overlay.distanceMeters
+                : 3.0f;
+            const XrVector3f local{
+                overlay.offsetMeters[0],
+                overlay.offsetMeters[1],
+                overlay.offsetMeters[2] - distance };
+            const XrVector3f offset = RotateOpenXrVector(head.orientation, local);
+            XrPosef pose{};
+            pose.orientation = head.orientation;
+            pose.position = XrVector3f{
+                head.position.x + offset.x,
+                head.position.y + offset.y,
+                head.position.z + offset.z };
+            return pose;
+        }
+
         XrPosef BuildOverlaySubmitPose(
             uint32_t overlayIndex,
             const L4D2VROpenXrOverlayDesc& overlay,
@@ -8684,6 +8722,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             uint32_t locatedCount,
             const XrPosef* gameRenderCenterPose = nullptr)
         {
+            if ((overlay.reserved1 & L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED) != 0
+                && (!locatedViews.empty() || gameRenderCenterPose))
+                return BuildHeadLockedOverlayPose(overlay, locatedViews, locatedCount, gameRenderCenterPose);
             const XrPosef pose = BuildOverlayPose(overlay, locatedViews, locatedCount, gameRenderCenterPose);
             if (overlayIndex >= m_OverlaySpatialLocks.size() || !OverlayUsesSpatialLock(overlayIndex))
                 return pose;

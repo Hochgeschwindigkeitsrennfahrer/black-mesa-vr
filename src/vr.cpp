@@ -4660,6 +4660,9 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
     overlay.visible = 1;
     overlay.reserved0 = m_MenuOverlayEpoch;
     overlay.reserved1 = L4D2VR_OPENXR_OVERLAY_FLAG_BLEND_ALPHA;
+    // Title texts stay in front of the eyes; the pause menu stays put in the room.
+    if (!WantPauseWorldOverlay() && WantTitleHudOverlay())
+        overlay.reserved1 |= L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED;
     if (!FillOpenXrOverlayTextureFromShared(overlay, hud))
         return false;
 
