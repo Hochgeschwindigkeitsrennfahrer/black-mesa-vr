@@ -6814,6 +6814,15 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             if (!m_InputBridge.InitializeSession(m_Session, m_AppSpace, m_HandTrackingExtensionEnabled, m_Log))
                 return false;
 
+            // Head-locked overlays (title texts): a quad in VIEW space stays fixed
+            // to the display, with no per-frame pose prediction error.
+            XrReferenceSpaceCreateInfo viewInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
+            viewInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+            viewInfo.poseInReferenceSpace.orientation.w = 1.0f;
+            if (!Succeeded(m_Log, "xrCreateReferenceSpace(VIEW, head-locked overlays)",
+                    m_Xr.xrCreateReferenceSpace(m_Session, &viewInfo, &m_OverlayViewSpace)))
+                m_OverlayViewSpace = XR_NULL_HANDLE;
+
             m_Log.Print("Created OpenXR Vulkan session and LOCAL reference space");
             m_Bridge.Update(L4D2VROpenXrBridgeStatus::SessionCreated, 0, 0, "OpenXR Vulkan session created");
             return true;
@@ -10192,7 +10201,21 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                         }
                                         else
                                         {
-                                            overlayLayer.pose = BuildOverlaySubmitPose(overlayIndex, overlay, locatedViews, locatedCount, overlayGameRenderCenterPose);
+                                            if ((overlay.reserved1 & L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED) != 0
+                                                && m_OverlayViewSpace != XR_NULL_HANDLE)
+                                            {
+                                                const float distance = (std::isfinite(overlay.distanceMeters) && overlay.distanceMeters > 0.1f && overlay.distanceMeters < 10.0f)
+                                                    ? overlay.distanceMeters
+                                                    : 3.0f;
+                                                overlayLayer.space = m_OverlayViewSpace;
+                                                overlayLayer.pose.orientation = XrQuaternionf{ 0.0f, 0.0f, 0.0f, 1.0f };
+                                                overlayLayer.pose.position = XrVector3f{
+                                                    overlay.offsetMeters[0],
+                                                    overlay.offsetMeters[1],
+                                                    overlay.offsetMeters[2] - distance };
+                                            }
+                                            else
+                                                overlayLayer.pose = BuildOverlaySubmitPose(overlayIndex, overlay, locatedViews, locatedCount, overlayGameRenderCenterPose);
                                             overlayLayer.size = XrExtent2Df{ widthMeters, heightMeters };
                                         }
 
@@ -10557,6 +10580,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             }
             if (m_CommandPool != VK_NULL_HANDLE && m_Vk.vkDestroyCommandPool)
                 m_Vk.vkDestroyCommandPool(m_VkDevice, m_CommandPool, nullptr);
+            if (m_OverlayViewSpace != XR_NULL_HANDLE && m_Xr.xrDestroySpace)
+                m_Xr.xrDestroySpace(m_OverlayViewSpace);
             if (m_AppSpace != XR_NULL_HANDLE && m_Xr.xrDestroySpace)
                 m_Xr.xrDestroySpace(m_AppSpace);
             if (m_Session != XR_NULL_HANDLE && m_Xr.xrDestroySession)
@@ -10585,6 +10610,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         XrSystemId m_SystemId = XR_NULL_SYSTEM_ID;
         XrSession m_Session = XR_NULL_HANDLE;
         XrSpace m_AppSpace = XR_NULL_HANDLE;
+        XrSpace m_OverlayViewSpace = XR_NULL_HANDLE;
         XrSessionState m_SessionState = XR_SESSION_STATE_UNKNOWN;
         XrEnvironmentBlendMode m_BlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
         OpenXrInputBridge m_InputBridge;
