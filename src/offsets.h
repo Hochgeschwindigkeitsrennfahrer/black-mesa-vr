@@ -496,6 +496,22 @@ public:
     Offset OccluderIsOccluded{ "engine.dll", 0x12F1C0,
         "55 8B EC 81 EC E4 01 00 00 A1 ? ? ? ? 33 C5 89 45 FC 57 8B F9 8B 0D ? ? ? ? 89 BD 54 FE FF FF 81 F9", 0, true };
     static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
+    // client CurrentViewID() and the pixel-visibility code's calls to it (E8 rel32):
+    // CPixelVisibilitySystem::GetFractionVisible 0xD48B0 (view check + find/create
+    // the query for the view) and EndView 0xD41F0 (issue that view's queries).
+    // The debug-spew calls in the same code are left alone. Beta 26234270.
+    static constexpr uint32_t kClientCurrentViewIdRva = 0x1F6A00;
+    static constexpr uint32_t kPixelVisViewIdCallRvas[] = { 0xD48D4, 0xD48F6, 0xD4215, 0xD42EB, 0xD43EA };
+    // `cmp eax, 1` (83 F8 01) on framecount - issued frame: DeleteUnusedQueries 0xD4080
+    // (per query) and the per-set check in EndScene 0xD4110. The immediate becomes
+    // kPixelVisQueryGraceFrames. Beta 26234270.
+    static constexpr uint32_t kPixelVisQueryAgeCmpRva = 0xD40D1;
+    static constexpr uint32_t kPixelVisSetAgeCmpRva = 0xD416B;
+    static constexpr unsigned char kPixelVisQueryGraceFrames = 8;
+    // Headless diagnostic only (BMVR_PIXELVIS_STATS): CPixelVisibilitySystem
+    // GetFractionVisible 0xD48B0 and find-or-create query for a view 0xD4560.
+    static constexpr uint32_t kPixelVisGetFractionRva = 0xD48B0;
+    static constexpr uint32_t kPixelVisQueryForViewRva = 0xD4560;
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,
         "55 8B EC B8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 08", 0, true };

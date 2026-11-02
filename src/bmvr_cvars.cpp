@@ -81,6 +81,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrCrosshair, nullptr },
             { "bmvr_aim_dot", "VR: aim marker as a red laser dot (0 = amber crosshair)",
               Kind::Bool, 0.f, 1.f, &g_VrCrosshairDot, nullptr },
+            { "bmvr_pixelvis_per_eye", "VR: each eye keeps its own glow visibility queries (0 = stock: the eyes share one, glows can drop out)",
+              Kind::Bool, 0.f, 1.f, &g_PixelVisPerEye, nullptr },
             { "bmvr_menu_smooth", "VR: menu pointer smoothing in seconds (lower = more direct)",
               Kind::Float, 0.02f, 0.6f, nullptr, &g_MenuCursorSmoothSec },
         };

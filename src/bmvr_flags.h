@@ -370,6 +370,13 @@ namespace bmvr
     // doorways). The right eye's views get their own id, so they get their
     // own queries against their own depth. false = stock (A/B aid).
     extern bool g_OcclusionTrackerPerEye;
+    // PixelVisPerEye (default true, cvar bmvr_pixelvis_per_eye): glows (light
+    // halos, sprites, monitors) fade by a GPU visible-pixel query kept per view
+    // id. Both eyes are the main view, so the right eye's query replaced the
+    // left eye's and a glow outside one eye dropped out in both (flicker while
+    // the head moves). The right eye gets its own queries for all its views
+    // (incl. floor/water reflections). false = stock (A/B aid).
+    extern bool g_PixelVisPerEye;
     // OccluderViewPerEye (default true): the engine's occluder system
     // (r_occlusion, map func_occluder) takes its view in Push3DView, but the
     // client tests renderables against it before pushing the view. Flat, that

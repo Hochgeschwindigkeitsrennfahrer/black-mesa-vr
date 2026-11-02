@@ -34,6 +34,199 @@ static bool AreaPortalComputeViewCallSiteOk(int fn)
     return ok;
 }
 
+// Pixel visibility (glow occlusion queries) is keyed by CurrentViewID().
+// The redirected calls give the right eye's views their own id (id + 0x100,
+// as dOcclusionBeginView does for the occlusion tracker). Unlike there, the
+// reflection / refraction views (3 / 4) are included: each eye renders its own
+// and shared queries made glows in floor reflections flicker (headless at
+// reflref: right-eye drops 20-36 per 5 s in view 3 shared, 0 per eye).
+using ClientCurrentViewIdFn = int(__cdecl*)();
+static ClientCurrentViewIdFn g_ClientCurrentViewId = nullptr;
+
+static int __cdecl PixelVisCurrentViewId()
+{
+    const int id = g_ClientCurrentViewId();
+    if (bmvr::g_PixelVisPerEye && Hooks::m_VR && Hooks::m_VR->m_StereoEye == 2 && id >= 0 && id < 0x100)
+        return id + 0x100;
+    return id;
+}
+
+// Headless diagnostic (env BMVR_PIXELVIS_STATS=1): every 5 s, per eye, how
+// often a glow's visible fraction fell from lit (>= 0.5) to near zero (< 0.05)
+// since that eye's previous call for the same glow. Hooks
+// CPixelVisibilitySystem::GetFractionVisible (thiscall, ret 8).
+using PixelVisFractionFn = float(__thiscall*)(void* sys, const void* params, void* handle);
+static PixelVisFractionFn g_OrigPixelVisFraction = nullptr;
+static int g_PixelVisCreates[2];
+
+static float __fastcall PixelVisFractionStats(void* ecx, void* edx, const void* params, void* handle)
+{
+    (void)edx;
+    const float f = g_OrigPixelVisFraction(ecx, params, handle);
+    const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
+    if (eye != 1 && eye != 2)
+        return f;
+    struct Stats { int samples = 0, lit = 0, drops = 0; };
+    static std::unordered_map<uintptr_t, float> s_last[2];
+    static Stats s_stats[2];
+    static ULONGLONG s_next;
+    const int e = eye - 1;
+    // Per glow and view (eye views, monitor cameras, reflection/refraction).
+    const int viewId = g_ClientCurrentViewId ? g_ClientCurrentViewId() : 0;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(handle) ^ (static_cast<uintptr_t>(viewId & 0xFF) << 24);
+    static int s_viewDrops[16][2];
+    const auto it = s_last[e].find(key);
+    if (it != s_last[e].end() && it->second >= 0.5f && f < 0.05f)
+    {
+        ++s_stats[e].drops;
+        ++s_viewDrops[viewId & 0xF][e];
+    }
+    s_last[e][key] = f;
+    ++s_stats[e].samples;
+    if (f >= 0.5f)
+        ++s_stats[e].lit;
+    const ULONGLONG now = GetTickCount64();
+    if (!s_next)
+        s_next = now + 5000;
+    if (now >= s_next)
+    {
+        Game::logMsg("pixelvis stats (per_eye=%d): creates id0=%d id0x100=%d glows L=%u R=%u samples L=%d R=%d lit L=%d R=%d drops L=%d R=%d",
+            bmvr::g_PixelVisPerEye ? 1 : 0, g_PixelVisCreates[0], g_PixelVisCreates[1],
+            static_cast<unsigned>(s_last[0].size()), static_cast<unsigned>(s_last[1].size()),
+            s_stats[0].samples, s_stats[1].samples, s_stats[0].lit, s_stats[1].lit,
+            s_stats[0].drops, s_stats[1].drops);
+        char views[160] = {};
+        int len = 0;
+        for (int v = 0; v < 16; ++v)
+        {
+            if (s_viewDrops[v][0] || s_viewDrops[v][1])
+                len += _snprintf(views + len, sizeof(views) - len, " view%d L=%d R=%d", v, s_viewDrops[v][0], s_viewDrops[v][1]);
+            s_viewDrops[v][0] = s_viewDrops[v][1] = 0;
+        }
+        Game::logMsg("pixelvis drops by view:%s", len ? views : " none");
+        g_PixelVisCreates[0] = g_PixelVisCreates[1] = 0;
+        s_stats[0] = Stats();
+        s_stats[1] = Stats();
+        s_next = now + 5000;
+    }
+    return f;
+}
+
+// Diagnostic: CPixelVisibilitySystem's find-or-create query for (set, view id)
+// (thiscall, ret 8); counts the creations per view id (a glow's query being
+// thrown away and restarted at brightness 0).
+using PixelVisQueryForViewFn = unsigned(__thiscall*)(void* sys, void* set, unsigned viewId);
+static PixelVisQueryForViewFn g_OrigPixelVisQueryForView = nullptr;
+
+static unsigned __fastcall PixelVisQueryForViewStats(void* ecx, void* edx, void* set, unsigned viewId)
+{
+    (void)edx;
+    // Same list walk as the original: the set's query list holds one query per view id.
+    const auto* sys = static_cast<const unsigned char*>(ecx);
+    const auto* heads = *reinterpret_cast<unsigned char* const*>(sys + 0x50);
+    const auto* queries = *reinterpret_cast<unsigned char* const*>(sys + 0x44);
+    unsigned short q = *reinterpret_cast<const unsigned short*>(heads + *reinterpret_cast<const unsigned short*>(static_cast<unsigned char*>(set) + 0xC) * 10);
+    bool found = false;
+    for (int guard = 0; q != 0xFFFF && guard < 64; ++guard)
+    {
+        if (*reinterpret_cast<const unsigned short*>(queries + 0x22 + q * 0x28) == (viewId & 0xFFFF))
+        {
+            found = true;
+            break;
+        }
+        q = *reinterpret_cast<const unsigned short*>(queries + 0x26 + q * 0x28);
+    }
+    if (!found)
+        ++g_PixelVisCreates[viewId >= 0x100 ? 1 : 0];
+    return g_OrigPixelVisQueryForView(ecx, set, viewId);
+}
+
+static void InstallPixelVisStats(uintptr_t client)
+{
+    char v[8] = {};
+    if (!GetEnvironmentVariableA("BMVR_PIXELVIS_STATS", v, sizeof(v)) || v[0] != '1')
+        return;
+    auto* fn = reinterpret_cast<LPVOID>(client + Offsets::kPixelVisGetFractionRva);
+    if (MH_CreateHook(fn, reinterpret_cast<LPVOID>(&PixelVisFractionStats),
+            reinterpret_cast<LPVOID*>(&g_OrigPixelVisFraction)) == MH_OK
+        && MH_EnableHook(fn) == MH_OK)
+        Game::logMsg("pixelvis stats hook on (BMVR_PIXELVIS_STATS)");
+    auto* qfn = reinterpret_cast<LPVOID>(client + Offsets::kPixelVisQueryForViewRva);
+    if (MH_CreateHook(qfn, reinterpret_cast<LPVOID>(&PixelVisQueryForViewStats),
+            reinterpret_cast<LPVOID*>(&g_OrigPixelVisQueryForView)) == MH_OK)
+        MH_EnableHook(qfn);
+}
+
+static void InstallPixelVisPerEye()
+{
+    const uintptr_t client = reinterpret_cast<uintptr_t>(GetModuleHandleA("client.dll"));
+    if (!client || g_ClientCurrentViewId)
+        return;
+    const uintptr_t target = client + Offsets::kClientCurrentViewIdRva;
+    for (const uint32_t rva : Offsets::kPixelVisViewIdCallRvas)
+    {
+        const auto* call = reinterpret_cast<const unsigned char*>(client + rva);
+        bool ok = false;
+        __try
+        {
+            ok = call[0] == 0xE8
+                && client + rva + 5 + *reinterpret_cast<const int32_t*>(call + 1) == target;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+        if (!ok)
+        {
+            Game::logMsg("Pixel visibility per eye: call site client+0x%X MISMATCH (not patched)", rva);
+            Game::noteMissingOffset("Pixel visibility CurrentViewID call sites (per-eye glow fix)");
+            return;
+        }
+    }
+    // A query (or a glow's whole set of queries) not issued in the last frame
+    // is deleted, and a new one starts at brightness 0 and fades in. That
+    // cleanup also runs between the two eyes, so after a game frame without
+    // rendering the right eye's queries were two frames old and deleted every
+    // time: right-eye glows pulsed. Allow kPixelVisQueryGraceFrames instead of 1.
+    for (const uint32_t rva : { Offsets::kPixelVisQueryAgeCmpRva, Offsets::kPixelVisSetAgeCmpRva })
+    {
+        const auto* cmp = reinterpret_cast<const unsigned char*>(client + rva);
+        if (cmp[0] != 0x83 || cmp[1] != 0xF8 || cmp[2] != 0x01)
+        {
+            Game::logMsg("Pixel visibility per eye: age check client+0x%X MISMATCH (not patched)", rva);
+            Game::noteMissingOffset("Pixel visibility query age checks (per-eye glow fix)");
+            return;
+        }
+    }
+    g_ClientCurrentViewId = reinterpret_cast<ClientCurrentViewIdFn>(target);
+    InstallPixelVisStats(client);
+    // Headless A/B aid: BMVR_PIXELVIS_NOGRACE=1 keeps the stock 1-frame age.
+    char noGrace[8] = {};
+    const bool grace = !(GetEnvironmentVariableA("BMVR_PIXELVIS_NOGRACE", noGrace, sizeof(noGrace)) && noGrace[0] == '1');
+    for (const uint32_t rva : { Offsets::kPixelVisQueryAgeCmpRva, Offsets::kPixelVisSetAgeCmpRva })
+    {
+        if (!grace)
+            break;
+        auto* imm = reinterpret_cast<unsigned char*>(client + rva + 2);
+        DWORD old = 0;
+        if (!VirtualProtect(imm, 1, PAGE_EXECUTE_READWRITE, &old))
+            continue;
+        *imm = Offsets::kPixelVisQueryGraceFrames;
+        VirtualProtect(imm, 1, old, &old);
+    }
+    for (const uint32_t rva : Offsets::kPixelVisViewIdCallRvas)
+    {
+        auto* rel = reinterpret_cast<int32_t*>(client + rva + 1);
+        DWORD old = 0;
+        if (!VirtualProtect(rel, 4, PAGE_EXECUTE_READWRITE, &old))
+            continue;
+        *rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&PixelVisCurrentViewId) - (client + rva + 5));
+        VirtualProtect(rel, 4, old, &old);
+    }
+    FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
+    Game::logMsg("Pixel visibility per eye: %u call sites patched (%s), unused queries kept %d frames",
+        static_cast<unsigned>(sizeof(Offsets::kPixelVisViewIdCallRvas) / sizeof(Offsets::kPixelVisViewIdCallRvas[0])),
+        bmvr::g_PixelVisPerEye ? "on" : "off, bmvr_pixelvis_per_eye 1 turns it on",
+        grace ? static_cast<int>(Offsets::kPixelVisQueryGraceFrames) : 1);
+}
+
 // Offset of addr inside server.dll (0 if outside/unknown). AimDebug and the
 // shot-origin caller whitelist identify call sites by return address.
 // dServerBmShootSource calls this on every player +0x474 call, so the module
@@ -58,6 +251,7 @@ static uint32_t ServerRva(uintptr_t addr)
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_map>
 #include <cstring>
 #include <mutex>
 
@@ -357,6 +551,7 @@ int Hooks::initSourceHooks()
         hkOcclusionBeginView.createHook((LPVOID)o.OcclusionTrackerBeginView.address, &dOcclusionBeginView);
     else if (bmvr::g_OcclusionTrackerPerEye && !o.OcclusionTrackerBeginView.valid)
         Game::noteMissingOffset("Occlusion tracker BeginView (per-eye occlusion culling)");
+    InstallPixelVisPerEye();
     if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && o.OccluderSetView.valid && !hkOccluderSetView.pTarget)
         hkOccluderSetView.createHook((LPVOID)o.OccluderSetView.address, &dOccluderSetView);
     else if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && !o.OccluderSetView.valid)
