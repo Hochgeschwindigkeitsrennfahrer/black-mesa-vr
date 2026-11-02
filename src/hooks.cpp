@@ -4495,6 +4495,27 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
 
     if (m_VR && mainView)
         m_VR->m_SetupOrigin = setup.origin;
+    {
+        // Headless diagnostic (BMVR_VIEW_TRACE=1): the engine's view for the
+        // main pass ~4x per second, to compare scripted cameras with ours.
+        static int s_viewTrace = -1;
+        if (s_viewTrace < 0)
+        {
+            char v[8] = {};
+            s_viewTrace = GetEnvironmentVariableA("BMVR_VIEW_TRACE", v, sizeof(v)) && v[0] == '1';
+        }
+        static ULONGLONG s_next;
+        if (s_viewTrace && mainView && m_Game && GetTickCount64() >= s_next)
+        {
+            s_next = GetTickCount64() + 250;
+            const Vector va = m_VR ? m_VR->GetViewAngle() : Vector();
+            Game::logMsg("view trace: engine origin (%.0f %.0f %.0f) angles (%.1f %.1f %.1f) fov %.1f; ours (%.1f %.1f %.1f) scripted=%d",
+                setup.origin.x, setup.origin.y, setup.origin.z, setup.angles.x, setup.angles.y, setup.angles.z,
+                setup.fov, va.x, va.y, va.z, m_VR && m_VR->ScriptedCameraActive() ? 1 : 0);
+        }
+    }
+    if (m_VR && mainView && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && inGame)
+        m_VR->UpdateScriptedCamera(setup.angles);
 
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && inGame)
         m_VR->WaitPosesForStereoFrame();
@@ -4512,6 +4533,17 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     auto applyL4d2VrHead = [&](CViewSetup& view, bool stereo, bool leftEye) {
         if (!m_VR || !m_VR->m_HmdPoseValid)
             return;
+        // A scripted camera (point_viewcontrol, cutscene) drives the view:
+        // its orientation, with the head turning relative to it.
+        Vector camRight;
+        if (m_VR->ScriptedCameraActive() && m_VR->ScriptedCameraView(view.angles, camRight))
+        {
+            const float halfIpd = (m_VR->m_Ipd * m_VR->m_IpdScale * m_VR->m_VRScale) * 0.5f;
+            view.origin = setup.origin;
+            if (stereo)
+                view.origin += camRight * (leftEye ? -halfIpd : halfIpd);
+            return;
+        }
         view.angles = m_VR->GetViewAngle();
         SnapRpgLaserDot();
         if (stereo)
@@ -5153,7 +5185,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         ~CmdYawNote()
         {
             if (Hooks::m_VR && cmd->command_number && std::isfinite(cmd->viewangles.y))
-                Hooks::m_VR->NoteCmdYaw(cmd->viewangles.y);
+                Hooks::m_VR->NoteCmdAngles(cmd->viewangles.x, cmd->viewangles.y);
         }
     } cmdYawNote{ cmd };
     if (m_VR && m_VR->m_IsVREnabled && cmd->command_number)

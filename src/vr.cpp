@@ -4863,6 +4863,83 @@ bool VR::PressedDigitalAction(vr::VRActionHandle_t handle, bool onChanged) const
     return data.bState;
 }
 
+bool VR::ScriptedCameraActive() const
+{
+    return m_ScriptedCamActive && bmvr::g_FollowScriptedCamera;
+}
+
+void VR::UpdateScriptedCamera(const Vector& engineAngles)
+{
+    if (!m_LastCmdYawValid || !std::isfinite(engineAngles.x) || !std::isfinite(engineAngles.y))
+        return;
+    // Clear of view punch and screen shake (a few degrees, mostly roll).
+    const bool differs = fabsf(WrapYaw(engineAngles.y - m_LastCmdYaw)) > 8.f
+        || fabsf(engineAngles.x - m_LastCmdPitch) > 8.f || fabsf(engineAngles.z) > 8.f;
+    QAngle hmd{};
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        hmd = m_StereoFramePoseActive ? m_StereoFrameAngles : m_HmdAngAbs;
+    }
+    // Enter after 10 frames that differ, leave after 45 that match (the
+    // engine angles follow the usercmd again).
+    if (differs)
+        m_ScriptedCamFrames = m_ScriptedCamActive ? 0 : m_ScriptedCamFrames + 1;
+    else
+        m_ScriptedCamFrames = m_ScriptedCamActive ? m_ScriptedCamFrames + 1 : 0;
+    if (!m_ScriptedCamActive && m_ScriptedCamFrames >= 10)
+    {
+        m_ScriptedCamActive = true;
+        m_ScriptedCamFrames = 0;
+        m_ScriptedCamHmdYaw0 = hmd.y;
+        Game::logMsg("Scripted camera on: engine angles (%.1f %.1f %.1f), last sent (%.1f %.1f)",
+            engineAngles.x, engineAngles.y, engineAngles.z, m_LastCmdPitch, m_LastCmdYaw);
+    }
+    else if (m_ScriptedCamActive && m_ScriptedCamFrames >= 45)
+    {
+        m_ScriptedCamActive = false;
+        m_ScriptedCamFrames = 0;
+        Game::logMsg("Scripted camera off: engine angles (%.1f %.1f %.1f)", engineAngles.x, engineAngles.y, engineAngles.z);
+    }
+    m_ScriptedCamAngles = QAngle(engineAngles.x, engineAngles.y, engineAngles.z);
+}
+
+bool VR::ScriptedCameraView(Vector& angles, Vector& right) const
+{
+    QAngle hmd{};
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        hmd = m_StereoFramePoseActive ? m_StereoFrameAngles : m_HmdAngAbs;
+    }
+    // Head orientation relative to where it pointed when the camera took over,
+    // expressed in the camera's frame: world = camera * head.
+    Vector cf, cr, cu, hf, hr, hu;
+    QAngle::AngleVectors(m_ScriptedCamAngles, &cf, &cr, &cu);
+    QAngle::AngleVectors(QAngle(hmd.x, WrapYaw(hmd.y - m_ScriptedCamHmdYaw0), hmd.z), &hf, &hr, &hu);
+    const Vector cl = cr * -1.f;
+    auto toWorld = [&](const Vector& v) { return cf * v.x + cl * v.y + cu * v.z; };
+    const Vector f = toWorld(hf);
+    const Vector l = toWorld(hr * -1.f);
+    const Vector u = toWorld(hu);
+    const float xy = sqrtf(f.x * f.x + f.y * f.y);
+    float pitch, yaw, roll;
+    if (xy > 0.001f)
+    {
+        yaw = atan2f(f.y, f.x);
+        pitch = atan2f(-f.z, xy);
+        roll = atan2f(l.z, u.z);
+    }
+    else
+    {
+        yaw = atan2f(-l.x, l.y);
+        pitch = atan2f(-f.z, xy);
+        roll = 0.f;
+    }
+    constexpr float kDeg = 180.f / 3.14159265f;
+    angles = Vector(pitch * kDeg, yaw * kDeg, roll * kDeg);
+    right = l * -1.f;
+    return std::isfinite(angles.x) && std::isfinite(angles.y) && std::isfinite(angles.z);
+}
+
 void VR::SyncTurnToRestoredYaw(float engineYaw)
 {
     const ULONGLONG now = GetTickCount64();

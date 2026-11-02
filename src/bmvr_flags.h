@@ -383,6 +383,10 @@ namespace bmvr
     // view, small head movements) no longer flickers it. Brightening is
     // immediate. Per glow, per eye and view.
     extern float g_GlowHold;
+    // FollowScriptedCamera (default true, cvar bmvr_follow_scripted_camera):
+    // while a cutscene camera drives the view (fall + drag scene, tram), the
+    // view takes its orientation with the head turning relative to it.
+    extern bool g_FollowScriptedCamera;
     // OccluderViewPerEye (default true): the engine's occluder system
     // (r_occlusion, map func_occluder) takes its view in Push3DView, but the
     // client tests renderables against it before pushing the view. Flat, that

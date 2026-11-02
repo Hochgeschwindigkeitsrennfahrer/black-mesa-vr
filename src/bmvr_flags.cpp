@@ -152,6 +152,7 @@ namespace bmvr
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
     float g_GlowHold = 0.3f;
+    bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;
     float g_ScopeZoomSmoothSec = 0.16f;
     float g_VrHandsPoseRotX = 0.f;
@@ -674,6 +675,8 @@ namespace bmvr
                 g_MenuCursorHook = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "OcclusionTrackerPerEye") == 0)
                 g_OcclusionTrackerPerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "FollowScriptedCamera") == 0)
+                g_FollowScriptedCamera = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GlowHold") == 0)
             {
                 const float v = static_cast<float>(atof(val));

@@ -673,7 +673,22 @@ public:
     bool m_LastCmdYawValid = false;
     float m_LastCmdYaw = 0.f;
     void SyncTurnToRestoredYaw(float engineYaw);
-    void NoteCmdYaw(float yaw) { m_LastCmdYaw = yaw; m_LastCmdYawValid = true; }
+    float m_LastCmdPitch = 0.f;
+    void NoteCmdAngles(float pitch, float yaw) { m_LastCmdPitch = pitch; m_LastCmdYaw = yaw; m_LastCmdYawValid = true; }
+    // Scripted camera (FollowScriptedCamera / bmvr_follow_scripted_camera):
+    // in normal play the engine's view angles are the ones the mod sent with
+    // the last usercmd; a cutscene camera (point_viewcontrol, the drag scene,
+    // the tram) replaces them. While it does, the view takes the camera's
+    // orientation and the head turns relative to it (head yaw measured from
+    // where it pointed when the camera took over).
+    bool m_ScriptedCamActive = false;
+    int m_ScriptedCamFrames = 0;
+    float m_ScriptedCamHmdYaw0 = 0.f;
+    QAngle m_ScriptedCamAngles{};
+    void UpdateScriptedCamera(const Vector& engineAngles);
+    bool ScriptedCameraActive() const;
+    // Camera x head orientation for the eyes (pitch, yaw, roll), and its right vector.
+    bool ScriptedCameraView(Vector& angles, Vector& right) const;
     bool m_GameplayEligible = false;
     int m_GameplayFrames = 0;
     uint32_t m_PresentTick = 0;
