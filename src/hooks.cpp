@@ -61,6 +61,8 @@ static uint32_t ServerRva(uintptr_t addr)
 #include <cstring>
 #include <mutex>
 
+void BmvrAuditNoteMaterial(const char* name);
+
 namespace
 {
     void** SehMaterialSystemVTable(IMaterialSystem* mat)
@@ -3343,6 +3345,25 @@ namespace
                 }
             }
         }
+        void* bindFn = SehContextVtableSlot(ctx, Offsets::kIMatRenderContext_Bind);
+        if (bindFn
+            && !HookAlreadyHasTarget(Hooks::hkMatBind, bindFn)
+            && !HookAlreadyHasTarget(Hooks::hkMatBindQueued, bindFn))
+        {
+            static std::mutex s_bindMu;
+            std::lock_guard<std::mutex> lock(s_bindMu);
+            // Created disabled; SetMatBindHooks turns them on for an audit.
+            auto tryBind = [&](Hook<tMatBind>& hk, const char* tag) {
+                if (hk.pTarget)
+                    return false;
+                if (hk.createHook(bindFn, &Hooks::dMatBind) != 0)
+                    return false;
+                Game::logMsg("Hook created: Bind %s fn=%p", tag, bindFn);
+                return true;
+            };
+            if (!tryBind(Hooks::hkMatBind, "ctx"))
+                tryBind(Hooks::hkMatBindQueued, "ctx-queued");
+        }
         if (dimFn
             && !HookAlreadyHasTarget(Hooks::hkGetRenderTargetDimensions, dimFn)
             && !HookAlreadyHasTarget(Hooks::hkGetRenderTargetDimensionsBase, dimFn)
@@ -5307,6 +5328,44 @@ void __fastcall Hooks::dGetRenderTargetDimensions(void* ecx, void* edx, int& wid
     ApplyHwndStereoRtDimLie(width, height, queuedStub);
 }
 
+namespace
+{
+    const char* SehMaterialName(IMaterial* material)
+    {
+        __try
+        {
+            return material ? material->GetName() : nullptr;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+    }
+}
+
+void Hooks::SetMatBindHooks(bool on)
+{
+    for (Hook<tMatBind>* hk : { &hkMatBind, &hkMatBindQueued })
+    {
+        if (!hk->pTarget || hk->isEnabled == on)
+            continue;
+        if ((on ? MH_EnableHook(hk->pTarget) : MH_DisableHook(hk->pTarget)) == MH_OK)
+            hk->isEnabled = on;
+    }
+}
+
+void __fastcall Hooks::dMatBind(void* ecx, void* edx, IMaterial* material, void* proxyData)
+{
+    (void)edx;
+    // Enabled only while an audit runs: names the material of each draw.
+    BmvrAuditNoteMaterial(SehMaterialName(material));
+    void* slot = SehContextVtableSlot(ecx, Offsets::kIMatRenderContext_Bind);
+    if (hkMatBindQueued.fOriginal && slot == hkMatBindQueued.pTarget)
+        hkMatBindQueued.fOriginal(ecx, material, proxyData);
+    else if (hkMatBind.fOriginal)
+        hkMatBind.fOriginal(ecx, material, proxyData);
+}
+
 void __fastcall Hooks::dDepthRange(void* ecx, void* edx, float zNear, float zFar)
 {
     (void)edx;
@@ -6391,7 +6450,10 @@ void __fastcall Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
             m_VR->SetVguiPaintActive(false);
     }
     if (inGame && eligible && m_VR)
+    {
         m_VR->UpdateTitleHud();
+        m_VR->UpdateScreenEffectNoDraw();
+    }
     if (inGame && eligible && m_VR && m_VR->WantHudLayer()
         && !m_VR->Want2dMenuPanel())
         PaintVguiToOverlay(ecx, mode);

@@ -21,6 +21,7 @@ struct D3D9_TEXTURE_VR_DESC;
 struct ModelRenderInfo_t;
 class Game;
 class ITexture;
+class IMaterial;
 class IMatRenderContext;
 class ICallQueue;
 class CFunctor;
@@ -666,6 +667,10 @@ public:
     uint32_t m_PassThroughMainViews = 0;
     bool m_AppliedVrPerfCvars = false;
     std::string m_CurrentMapName;
+    std::string m_ScreenFxMap;
+    IMaterial* m_ScreenFxMaterials[3] = {};
+    bool m_ScreenFxNoDraw = false;
+    int m_ScreenFxMaterialCount = -1;
     bool m_FrameCopyLatched = false;
     uint32_t m_FrameCopyWidth = 0;
     uint32_t m_FrameCopyHeight = 0;
@@ -980,6 +985,7 @@ public:
     // ancestors; returns how many were hidden into `hidden`.
     int IsolateTitleHudPanels(unsigned int* hidden, int cap);
     void RestoreTitleHudPanels(const unsigned int* hidden, int count);
+    void UpdateScreenEffectNoDraw();
     void SetHudPaintTitle(bool title) { m_HudPaintTitle.store(title, std::memory_order_release); }
     bool GameUiVisible() const { return m_GameUiVisible; }
     // WM_ACTIVATEAPP. Default true so the first frames publish before any

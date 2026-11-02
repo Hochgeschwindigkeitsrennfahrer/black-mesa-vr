@@ -525,6 +525,8 @@ namespace
     int g_AuditGroupDraws = 0;
     uint64_t g_AuditGroupPrims = 0;
     constexpr int kAuditMaxLines = 6000;
+    // Material the render thread bound last (IMatRenderContext::Bind hook).
+    thread_local char t_AuditMaterial[96];
 
     bool AuditLogging()
     {
@@ -657,6 +659,11 @@ namespace
                 label[0] ? "[" : "", label, label[0] ? "]" : "",
                 vp.X, vp.Y, vp.Width, vp.Height, vpOut ? " VP-OUT" : "", scOut ? " SC-OUT" : "");
             std::string line = head;
+            if (t_AuditMaterial[0])
+            {
+                line += " mat=";
+                line += t_AuditMaterial;
+            }
             if (scissorOn)
             {
                 char sb[80];
@@ -786,6 +793,7 @@ namespace
         g_AuditGroupLine.clear();
         g_AuditFramesLeft.store(frames + 1, std::memory_order_release);
         AuditSetDrawHooks(true);
+        Hooks::SetMatBindHooks(true);
         Game::logMsg("audit: %d frames (+1 warm-up), draw hooks %s", frames, g_AuditVtbl ? "on" : "missing");
     }
 
@@ -810,6 +818,7 @@ namespace
                 Game::logMsg("audit tex %p %ux%u[%s] last e%d%s frame %u seq %u", key, t.w, t.h,
                     AuditSizeLabel(vr, t.w, t.h), t.writerEye, t.writerHud ? "/hud" : "", t.writeFrame, t.writeSeq);
             AuditSetDrawHooks(false);
+            Hooks::SetMatBindHooks(false);
         }
     }
 
@@ -7332,6 +7341,134 @@ namespace
         {
         }
     }
+}
+
+namespace
+{
+    // env_screeneffect overlays (episodic intro blur, stun, EP2 stun). Each
+    // draws an earlier 1024x512 corner copy of the frame over the eye, which
+    // in VR is the other eye's, then saves this eye's top-left corner: a flat,
+    // mirrored second view over the stereo scene (c2a3c ambush drag). Black
+    // Mesa draws them without DrawScreenSpaceRectangle, so the DSSR skip
+    // missed them (audit, 2026-11-02).
+    const char* const kVrSkippedScreenEffects[] = { "__ep1introeffect", "__stuneffect", "__ep2stuneffect" };
+
+    // Code-made materials are not in FindMaterial's lookup; walk the list.
+    int SehFindScreenEffectMaterials(void* matsys, IMaterial** out)
+    {
+        int found = 0;
+        __try
+        {
+            void** vt = *reinterpret_cast<void***>(matsys);
+            using tFirst = unsigned short(__thiscall*)(void*);
+            using tNext = unsigned short(__thiscall*)(void*, unsigned short);
+            using tGet = IMaterial*(__thiscall*)(void*, unsigned short);
+            const auto first = reinterpret_cast<tFirst>(vt[Offsets::kIMaterialSystem_FirstMaterialVt]);
+            const auto next = reinterpret_cast<tNext>(vt[Offsets::kIMaterialSystem_NextMaterialVt]);
+            const auto invalid = reinterpret_cast<tFirst>(vt[Offsets::kIMaterialSystem_InvalidMaterialVt]);
+            const auto get = reinterpret_cast<tGet>(vt[Offsets::kIMaterialSystem_GetMaterialVt]);
+            const unsigned short end = invalid(matsys);
+            for (unsigned short h = first(matsys); h != end; h = next(matsys, h))
+            {
+                IMaterial* m = get(matsys, h);
+                const char* name = m ? m->GetName() : nullptr;
+                if (!name || name[0] != '_' || name[1] != '_')
+                    continue;
+                for (int i = 0; i < 3; ++i)
+                {
+                    if (!out[i] && std::strcmp(name, kVrSkippedScreenEffects[i]) == 0)
+                    {
+                        out[i] = m;
+                        ++found;
+                    }
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return found;
+    }
+
+    int SehNumMaterials(void* matsys)
+    {
+        __try
+        {
+            using tNum = int(__thiscall*)(void*);
+            return reinterpret_cast<tNum>((*reinterpret_cast<void***>(matsys))[Offsets::kIMaterialSystem_GetNumMaterialsVt])(matsys);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    }
+
+    void SehSetNoDraw(IMaterial* m, bool on)
+    {
+        __try
+        {
+            using tSetFlag = void(__thiscall*)(IMaterial*, int, bool);
+            reinterpret_cast<tSetFlag>((*reinterpret_cast<void***>(m))[Offsets::kIMaterial_SetMaterialVarFlagVt])(
+                m, MATERIAL_VAR_NO_DRAW, on);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+}
+
+// The game creates the screen-effect materials when an effect first starts,
+// not at map load. Per frame: the material count (one call); the list is
+// only walked when it changed while one of the three is still missing. The
+// NO_DRAW flag only changes with VR / bmvr_skip_screen_effects.
+void VR::UpdateScreenEffectNoDraw()
+{
+    if (!m_Game || !m_Game->m_MaterialSystem)
+        return;
+    void* matsys = m_Game->m_MaterialSystem;
+    if (m_ScreenFxMap != m_CurrentMapName)
+    {
+        m_ScreenFxMap = m_CurrentMapName;
+        for (IMaterial*& m : m_ScreenFxMaterials)
+            m = nullptr;
+        m_ScreenFxMaterialCount = -1;
+        m_ScreenFxNoDraw = false;
+    }
+    if (!m_ScreenFxMaterials[0] || !m_ScreenFxMaterials[1] || !m_ScreenFxMaterials[2])
+    {
+        const int count = SehNumMaterials(matsys);
+        if (count != m_ScreenFxMaterialCount)
+        {
+            m_ScreenFxMaterialCount = count;
+            IMaterial* before[3] = { m_ScreenFxMaterials[0], m_ScreenFxMaterials[1], m_ScreenFxMaterials[2] };
+            LARGE_INTEGER f{}, t0{}, t1{};
+            QueryPerformanceFrequency(&f);
+            QueryPerformanceCounter(&t0);
+            SehFindScreenEffectMaterials(matsys, m_ScreenFxMaterials);
+            QueryPerformanceCounter(&t1);
+            const double ms = f.QuadPart ? 1000.0 * (t1.QuadPart - t0.QuadPart) / f.QuadPart : 0.0;
+            for (int i = 0; i < 3; ++i)
+            {
+                if (m_ScreenFxMaterials[i] && !before[i])
+                {
+                    Game::logMsg("Screen effect %s found (%d materials, scan %.2f ms)",
+                        kVrSkippedScreenEffects[i], count, ms);
+                    if (m_ScreenFxNoDraw)
+                        SehSetNoDraw(m_ScreenFxMaterials[i], true);
+                }
+            }
+        }
+    }
+    const bool want = bmvr::g_VrSkipScreenEffects && m_IsVREnabled;
+    if (want == m_ScreenFxNoDraw)
+        return;
+    m_ScreenFxNoDraw = want;
+    for (IMaterial* m : m_ScreenFxMaterials)
+    {
+        if (m)
+            SehSetNoDraw(m, want);
+    }
+    Game::logMsg("Screen effects (stun / intro blur) %s in VR", want ? "off" : "on");
 }
 
 void VR::UpdateTitleHud()
@@ -15976,3 +16113,12 @@ void VR::Update()
 extern "C" void __cdecl L4D2VR_ShutdownSystemMouseInputSuppression()
 {
 }
+
+void BmvrAuditNoteMaterial(const char* name)
+{
+    if (!name)
+        name = "";
+    std::strncpy(t_AuditMaterial, name, sizeof(t_AuditMaterial) - 1);
+    t_AuditMaterial[sizeof(t_AuditMaterial) - 1] = 0;
+}
+

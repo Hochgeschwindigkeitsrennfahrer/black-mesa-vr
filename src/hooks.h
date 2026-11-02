@@ -64,6 +64,7 @@ typedef void(__thiscall* tViewport)(void* thisptr, int x, int y, int width, int 
 typedef void(__thiscall* tGetViewport)(void* thisptr, int& x, int& y, int& width, int& height);
 typedef void(__thiscall* tGetRenderTargetDimensions)(void* thisptr, int& width, int& height);
 typedef void(__thiscall* tDepthRange)(void* thisptr, float zNear, float zFar);
+typedef void(__thiscall* tMatBind)(void* thisptr, IMaterial* material, void* proxyData);
 typedef void(__thiscall* tDrawModelExecute)(void* thisptr, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
 typedef void*(__cdecl* tLightcacheFindNearest)(int x, int y, int z, int flags);
 typedef void(__thiscall* tPushRenderTargetAndViewport)(void* thisptr, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);
@@ -146,6 +147,8 @@ public:
     static inline Hook<tGetRenderTargetDimensions> hkGetRenderTargetDimensionsQueued;
     static inline Hook<tDepthRange> hkDepthRange;
     static inline Hook<tDepthRange> hkDepthRangeQueued;
+    static inline Hook<tMatBind> hkMatBind;
+    static inline Hook<tMatBind> hkMatBindQueued;
     static inline Hook<tDrawModelExecute> hkDrawModelExecute;
     static inline Hook<tLightcacheFindNearest> hkLightcacheFindNearest;
     static inline Hook<tPushRenderTargetAndViewport> hkPushRenderTargetAndViewport;
@@ -223,6 +226,8 @@ public:
     static void __fastcall dGetViewport(void* ecx, void* edx, int& x, int& y, int& width, int& height);
     static void __fastcall dGetRenderTargetDimensions(void* ecx, void* edx, int& width, int& height);
     static void __fastcall dDepthRange(void* ecx, void* edx, float zNear, float zFar);
+    static void SetMatBindHooks(bool on);
+    static void __fastcall dMatBind(void* ecx, void* edx, IMaterial* material, void* proxyData);
     static void __fastcall dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
     static void* __cdecl dLightcacheFindNearest(int x, int y, int z, int flags);
     static void __fastcall dPushRenderTargetAndViewport(void* ecx, void* edx, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);

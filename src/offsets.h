@@ -402,6 +402,9 @@ public:
     // Z test. Same slot as L4D2VR sdk.h. Hardware and queued vtables both
     // implement it; hook from TryHookMatContextQueries like GetViewport.
     static constexpr int kIMatRenderContext_DepthRange = 0x2C;
+    // IMatRenderContext::Bind(IMaterial*, void* proxyData): slot 9, between
+    // GetRenderTargetDimensions (8) and BindLightmapPage (10).
+    static constexpr int kIMatRenderContext_Bind = 0x24;
     static constexpr int kIMatRenderContext_GetViewport = 0x9C;
     static constexpr int kIMatRenderContext_PushRT6 = 0x23C;
     static constexpr int kIMatRenderContext_PopRT = 0x24C;
@@ -513,14 +516,20 @@ public:
 
     // IMaterialSystem vtable (Ghidra materialsystem.dll, GetRenderContext slot 103).
     static constexpr int kIMaterialSystem_FindTextureVt = 84; // +0x150
-    // Dump slot 71 + 7 (same shift as FindTexture 77→84 / GetRenderContext 96→103).
-    static constexpr int kIMaterialSystem_FindMaterialVt = 78; // +0x138
-    // FindMaterial 78, then First/Next/Invalid/Get/GetNum, FindTexture 84.
-    // No IsMaterialLoaded between FindMaterial and FirstMaterial (not dedicated).
-    static constexpr int kIMaterialSystem_FirstMaterialVt = 79;
-    static constexpr int kIMaterialSystem_NextMaterialVt = 80;
-    static constexpr int kIMaterialSystem_InvalidMaterialVt = 81;
-    static constexpr int kIMaterialSystem_GetMaterialVt = 82;
+    // CMaterialSystem vtable via RTTI (26234270, 2026-11-02): 77 FindMaterial
+    // (4 args), 78 FirstMaterial, 79 NextMaterial(h), 80 InvalidMaterial
+    // (0xffff), 81 GetMaterial(h), 82 GetNumMaterials, 83 is a one-argument
+    // setter (calling it as GetNumMaterials crashed the map load).
+    static constexpr int kIMaterialSystem_FindMaterialVt = 77;
+    static constexpr int kIMaterialSystem_FirstMaterialVt = 78;
+    static constexpr int kIMaterialSystem_NextMaterialVt = 79;
+    static constexpr int kIMaterialSystem_InvalidMaterialVt = 80;
+    static constexpr int kIMaterialSystem_GetMaterialVt = 81;
+    static constexpr int kIMaterialSystem_GetNumMaterialsVt = 82;
+    // CMaterial vtable via RTTI (26234270): 29 AlphaModulate, 30 ColorModulate,
+    // 31 SetMaterialVarFlag(flag, on), 32 GetMaterialVarFlag. Two slots past
+    // sdk.h's IMaterial (its SetMaterialVarFlag lands on AlphaModulate).
+    static constexpr int kIMaterial_SetMaterialVarFlagVt = 31;
     static constexpr int kIMaterialSystem_SetRTFBOverrideVt = 142; // +0x238
     static constexpr int kIMaterialSystem_GetRTFBDimensionsVt = 143; // +0x23C
 
