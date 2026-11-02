@@ -1140,6 +1140,28 @@ bool Game::WeaponHasNoAmmo(C_BaseEntity* weapon)
     return clip <= 0 && reserve <= 0;
 }
 
+bool Game::ReadLocalPlayerHealth(int& health)
+{
+    ScanWristHudNetVars();
+    if (!m_EngineClient || !m_ClientEntityList || g_nvHealth < 0)
+        return false;
+    const int local = m_EngineClient->GetLocalPlayer();
+    if (local <= 0)
+        return false;
+    void* player = m_ClientEntityList->GetClientEntity(local);
+    if (!player)
+        return false;
+    __try
+    {
+        health = *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(player) + g_nvHealth);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+
 bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air)
 {
     ScanWristHudNetVars();

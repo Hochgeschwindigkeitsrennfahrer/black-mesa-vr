@@ -4933,6 +4933,18 @@ void VR::UpdateScriptedCamera(const Vector& engineAngles)
 {
     if (!m_LastCmdYawValid || !std::isfinite(engineAngles.x) || !std::isfinite(engineAngles.y))
         return;
+    // Dead: the engine rolls the view onto the floor, not a cutscene camera
+    // (followed, it flipped the whole view over).
+    int health = 1;
+    if (m_Game && m_Game->ReadLocalPlayerHealth(health) && health <= 0)
+    {
+        if (m_ScriptedCamActive)
+            Game::logMsg("Scripted camera off: player dead (health %d)", health);
+        m_ScriptedCamActive = false;
+        m_ScriptedCamDiffersNow = false;
+        m_ScriptedCamFrames = 0;
+        return;
+    }
     // Clear of view punch and screen shake (a few degrees, mostly roll).
     const bool differs = fabsf(WrapYaw(engineAngles.y - m_LastCmdYaw)) > 8.f
         || fabsf(engineAngles.x - m_LastCmdPitch) > 8.f || fabsf(engineAngles.z) > 8.f;

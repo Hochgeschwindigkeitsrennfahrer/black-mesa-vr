@@ -84,6 +84,8 @@ public:
     bool ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air);
     // False only when m_bWearingSuit resolved and reads 0 (pre-HEV intro).
     bool LocalPlayerHasSuit();
+    // Local player m_iHealth; false when it cannot be read.
+    bool ReadLocalPlayerHealth(int& health);
     // True only when m_bZooming resolved and reads 1 (crossbow scope).
     bool LocalPlayerZooming();
     // -1 if the netvar is missing/retired, otherwise 0 or 1.
