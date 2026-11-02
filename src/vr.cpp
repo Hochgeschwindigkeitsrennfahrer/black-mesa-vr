@@ -5257,7 +5257,10 @@ void VR::ProcessInput()
     if (!paused && !MenuGameplayBlocked())
     {
         const bool primaryHeld = PressedDigitalAction(m_ActionPrimaryAttack);
-        const bool emptyHands = m_EmptyHands;
+        // No weapon at all (start of the game, drag scene) counts as bare
+        // hands: the right-stick tap cannot holster then, so R2 stayed fire
+        // with nothing to fire and only L2 could use.
+        const bool emptyHands = m_EmptyHands || !m_HasHeldWeapon;
         const bool leftUse = PressedDigitalAction(m_ActionUse);
         // The settings panel takes trigger, Cross and Circle (reload / alt-fire).
         // They stay blocked after it (or the weapon menu) closes until they
@@ -5325,7 +5328,8 @@ void VR::ProcessInput()
         }
         if (PressedDigitalAction(m_ActionJump) || stickJump)
             buttons |= IN_JUMP;
-        // Left trigger is Use. Right trigger is Use only while holstered.
+        // Left trigger is Use. Right trigger is Use only while holstered or
+        // without any weapon.
         // Hold to hold a pickup; release pulses a second Use to drop.
         m_UseFireHeld = (buttons & (IN_ATTACK | IN_ATTACK2)) != 0;
         const bool rightUse = !menuOwnsButtons && (emptyHands || gunGripRight) && primaryHeld;
