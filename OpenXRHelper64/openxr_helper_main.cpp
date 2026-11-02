@@ -10029,6 +10029,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                 if (!overlay.valid || !overlay.visible || !overlay.texture.valid)
                                 {
                                     ResetOverlaySpatialLock(overlayIndex, "hidden");
+                                    m_OverlayBlittedSinceShown[overlayIndex] = false;
                                     continue;
                                 }
 
@@ -10051,9 +10052,12 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                         {
                                             blittedAnyOverlayFrame = true;
                                             blittedGpuWork = true;
+                                            m_OverlayBlittedSinceShown[overlayIndex] = true;
                                         }
                                     }
                                 }
+                                if (!m_OverlayBlittedSinceShown[overlayIndex])
+                                    overlayReadyForSubmit = false;
 
                                 if (overlayReadyForSubmit && overlaySwapchain.handle != XR_NULL_HANDLE)
                                 {
@@ -10601,6 +10605,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         std::array<std::array<VulkanGameEyeTexture, kGameEyeCacheSlots>, L4D2VR_OPENXR_EYE_COUNT> m_GameEyeCache{};
         std::array<VulkanGameEyeTexture, L4D2VR_OPENXR_OVERLAY_COUNT> m_OverlayTextures;
         std::array<VulkanEyeSwapchain, L4D2VR_OPENXR_OVERLAY_COUNT> m_OverlaySwapchains;
+        // The swapchain still holds what the overlay showed before it was last
+        // hidden (e.g. a pause-menu load screen). Submitted again before this
+        // showing's first blit, that old picture flashed in the view when the
+        // "Saved..." title layer appeared.
+        std::array<bool, L4D2VR_OPENXR_OVERLAY_COUNT> m_OverlayBlittedSinceShown{};
         std::array<OverlaySpatialLock, L4D2VR_OPENXR_OVERLAY_COUNT> m_OverlaySpatialLocks;
         ULONGLONG m_DebugImageDumpStartMs = 0;
         ULONGLONG m_DebugImageDumpWaitingGameFrameLogMs = 0;
