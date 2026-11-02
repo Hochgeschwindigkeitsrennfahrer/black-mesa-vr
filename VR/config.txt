@@ -38,6 +38,12 @@ TurnSpeed=0.25
 SnapTurning=false
 SnapTurnAngle=45.0
 
+# Cutscene cameras (the fall and drag in the soldier ambush, the tram) take the
+# view with them; the head turns relative to them. Needs strong VR legs: you
+# are tipped onto your back and dragged. false = head only (the view stays
+# level and the scene plays around you). Also in the VR settings panel.
+FollowScriptedCamera=true
+
 # Extra nudge on top of the built-in weapon poses (Source units / degrees).
 ViewmodelPosOffsetX=0.0
 ViewmodelPosOffsetY=0.0

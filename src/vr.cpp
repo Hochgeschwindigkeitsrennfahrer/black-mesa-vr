@@ -4926,7 +4926,7 @@ bool VR::CopyPauseThumbnail(std::vector<unsigned char>& bgr)
 
 bool VR::ScriptedCameraActive() const
 {
-    return m_ScriptedCamActive && bmvr::g_FollowScriptedCamera;
+    return m_ScriptedCamActive && m_ScriptedCamDiffersNow && bmvr::g_FollowScriptedCamera;
 }
 
 void VR::UpdateScriptedCamera(const Vector& engineAngles)
@@ -4942,7 +4942,10 @@ void VR::UpdateScriptedCamera(const Vector& engineAngles)
         hmd = m_StereoFramePoseActive ? m_StereoFrameAngles : m_HmdAngAbs;
     }
     // Enter after 10 frames that differ, leave after 45 that match (the
-    // engine angles follow the usercmd again).
+    // engine angles follow the usercmd again). In between, matching frames
+    // render the normal view and a differing one picks the camera up again
+    // with the same head reference.
+    m_ScriptedCamDiffersNow = differs;
     if (differs)
         m_ScriptedCamFrames = m_ScriptedCamActive ? 0 : m_ScriptedCamFrames + 1;
     else

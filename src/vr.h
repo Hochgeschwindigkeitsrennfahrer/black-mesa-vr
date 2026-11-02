@@ -683,6 +683,11 @@ public:
     // orientation and the head turns relative to it (head yaw measured from
     // where it pointed when the camera took over).
     bool m_ScriptedCamActive = false;
+    // This frame's engine angles differ from the last usercmd. The camera view
+    // is only used on such frames: once control returns the engine angles are
+    // the usercmd's (already head-driven), and camera x head would apply the
+    // head twice (lying on the floor at the end of the drag scene: pitch doubled).
+    bool m_ScriptedCamDiffersNow = false;
     int m_ScriptedCamFrames = 0;
     float m_ScriptedCamHmdYaw0 = 0.f;
     QAngle m_ScriptedCamAngles{};
