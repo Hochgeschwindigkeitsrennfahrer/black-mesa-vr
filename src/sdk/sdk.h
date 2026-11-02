@@ -728,6 +728,11 @@ public:
 	void AddRefAssignTo(T*& pTo) { ::SafeRelease(pTo); if (BaseClass::m_pObject) BaseClass::m_pObject->AddRef(); pTo = BaseClass::m_pObject; }
 };
 
+// Stock SDK layout. Black Mesa's CMaterial (26234270, RTTI) matches it up to
+// NeedsTangentSpace (23) and has two extra methods before AlphaModulate, so
+// AlphaModulate and everything after it are two slots further on (e.g.
+// SetMaterialVarFlag is 31, not 29): call those by raw slot
+// (Offsets::kIMaterial_*), not through this class. GetName / FindVar are fine.
 class IMaterial
 {
 public:
