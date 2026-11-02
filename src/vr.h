@@ -12,6 +12,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <vector>
 #include <string>
 #include <cstring>
 #include <chrono>
@@ -689,6 +690,17 @@ public:
     bool ScriptedCameraActive() const;
     // Camera x head orientation for the eyes (pitch, yaw, roll), and its right vector.
     bool ScriptedCameraView(Vector& angles, Vector& right) const;
+    // Save thumbnails: Black Mesa grabs the desktop frame at the end of the
+    // frame render, and in the pause menu that frame is black behind the menu
+    // (the world is not rendered; the headset keeps the last eyes). When the
+    // pause starts, the held left eye is scaled to kPauseThumbSize² once on
+    // the Present thread; a save from the pause menu writes that instead.
+    static constexpr int kPauseThumbSize = 360;
+    std::mutex m_PauseThumbMutex;
+    std::vector<unsigned char> m_PauseThumbBgr;   // kPauseThumbSize² BGR, top row first
+    bool m_PauseThumbReady = false;
+    void CapturePauseThumbnail();
+    bool CopyPauseThumbnail(std::vector<unsigned char>& bgr);
     bool m_GameplayEligible = false;
     int m_GameplayFrames = 0;
     uint32_t m_PresentTick = 0;

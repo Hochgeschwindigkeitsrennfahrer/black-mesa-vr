@@ -93,6 +93,87 @@ static float __fastcall PixelVisQueryFractionHold(void* ecx, void* edx, float fa
     return h.shown;
 }
 
+// Save thumbnail from the pause menu: the game's grab of the desktop frame is
+// black behind the menu there, so the file it wrote gets the held left eye.
+using SaveShotWriterFn = void(__thiscall*)(void* view, const char* name, int w, int h, bool pow2, bool vtf);
+static SaveShotWriterFn g_OrigSaveShotWriter = nullptr;
+static const volatile unsigned char* g_SaveShotNow = nullptr;
+
+// The game writes the file a little later; overwrite it once it is there.
+struct PendingSaveShot
+{
+    std::wstring path;
+    std::string name;
+    std::vector<unsigned char> bgr;
+    int size = 0;
+    ULONGLONG giveUpMs = 0;
+};
+static PendingSaveShot g_PendingSaveShot;
+
+static bool WriteSaveShotPixels(const PendingSaveShot& p)
+{
+    FILE* f = _wfopen(p.path.c_str(), L"r+b");
+    if (!f)
+        return false;
+    bool ok = false;
+    unsigned char hdr[18] = {};
+    if (fread(hdr, 1, sizeof(hdr), f) == sizeof(hdr) && hdr[2] == 2 && hdr[16] == 24
+        && (hdr[12] | (hdr[13] << 8)) == p.size && (hdr[14] | (hdr[15] << 8)) == p.size)
+    {
+        // Bit 5 of the descriptor: top-left origin; otherwise rows go bottom-up.
+        const bool topDown = (hdr[17] & 0x20) != 0;
+        const size_t rowBytes = static_cast<size_t>(p.size) * 3;
+        fseek(f, 18 + hdr[0], SEEK_SET);
+        ok = true;
+        for (int y = 0; y < p.size && ok; ++y)
+        {
+            const int row = topDown ? y : p.size - 1 - y;
+            ok = fwrite(p.bgr.data() + static_cast<size_t>(row) * rowBytes, 1, rowBytes, f) == rowBytes;
+        }
+    }
+    fclose(f);
+    return ok;
+}
+
+static void FlushPendingSaveShot()
+{
+    if (g_PendingSaveShot.path.empty())
+        return;
+    const bool ok = WriteSaveShotPixels(g_PendingSaveShot);
+    if (!ok && GetTickCount64() < g_PendingSaveShot.giveUpMs)
+        return;
+    Game::logMsg("Save thumbnail from the pause menu: %s <- held left eye (%s)",
+        g_PendingSaveShot.name.c_str(), ok ? "ok" : "file not ready in 3 s, the game's picture stays");
+    g_PendingSaveShot = PendingSaveShot();
+}
+
+static void __fastcall SaveShotWriter(void* ecx, void* edx, const char* name, int w, int h, bool pow2, bool vtf)
+{
+    (void)edx;
+    const bool now = g_SaveShotNow && *g_SaveShotNow != 0;
+    g_OrigSaveShotWriter(ecx, name, w, h, pow2, vtf);
+    std::vector<unsigned char> bgr;
+    if (!now || vtf || pow2 || !name || !Hooks::m_VR || !Hooks::m_VR->WantPauseWorldOverlay()
+        || w != VR::kPauseThumbSize || h != VR::kPauseThumbSize || !Hooks::m_VR->CopyPauseThumbnail(bgr))
+        return;
+    // name is relative to the mod folder (bms\\), e.g. save/bms-050.tga; "//MOD/" form too.
+    std::string rel = name;
+    if (rel.rfind("//MOD/", 0) == 0)
+        rel = rel.substr(6);
+    wchar_t exe[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring path(exe);
+    path = path.substr(0, path.find_last_of(L"\\/") + 1) + L"bms\\";
+    for (char c : rel)
+        path += static_cast<wchar_t>(c == '/' ? '\\' : c);
+    g_PendingSaveShot.path = path;
+    g_PendingSaveShot.name = name;
+    g_PendingSaveShot.bgr.swap(bgr);
+    g_PendingSaveShot.size = w;
+    g_PendingSaveShot.giveUpMs = GetTickCount64() + 3000;
+    FlushPendingSaveShot();
+}
+
 // Headless diagnostic (env BMVR_PIXELVIS_STATS=1): every 5 s, per eye, how
 // often a glow's visible fraction fell from lit (>= 0.5) to near zero (< 0.05)
 // since that eye's previous call for the same glow. Hooks
@@ -603,6 +684,23 @@ int Hooks::initSourceHooks()
     else if (bmvr::g_OcclusionTrackerPerEye && !o.OcclusionTrackerBeginView.valid)
         Game::noteMissingOffset("Occlusion tracker BeginView (per-eye occlusion culling)");
     InstallPixelVisPerEye();
+    if (const uintptr_t client = reinterpret_cast<uintptr_t>(GetModuleHandleA("client.dll")); client && !g_OrigSaveShotWriter)
+    {
+        // Prologue, then cmp byte ptr [kSaveShotNowRva], 0 at +0x13.
+        const auto* fn = reinterpret_cast<const unsigned char*>(client + Offsets::kSaveShotWriterRva);
+        const uintptr_t flag = client + Offsets::kSaveShotNowRva;
+        if (fn[0] == 0x55 && fn[1] == 0x8B && fn[2] == 0xEC && fn[0x13] == 0x80 && fn[0x14] == 0x3D
+            && *reinterpret_cast<const uint32_t*>(fn + 0x15) == static_cast<uint32_t>(flag)
+            && MH_CreateHook(const_cast<unsigned char*>(fn), reinterpret_cast<LPVOID>(&SaveShotWriter),
+                reinterpret_cast<LPVOID*>(&g_OrigSaveShotWriter)) == MH_OK
+            && MH_EnableHook(const_cast<unsigned char*>(fn)) == MH_OK)
+        {
+            g_SaveShotNow = reinterpret_cast<const volatile unsigned char*>(flag);
+            Game::logMsg("Save thumbnail hook on (pause-menu saves get the held eye)");
+        }
+        else
+            Game::noteMissingOffset("Save thumbnail writer (pause-menu save pictures)");
+    }
     if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && o.OccluderSetView.valid && !hkOccluderSetView.pTarget)
         hkOccluderSetView.createHook((LPVOID)o.OccluderSetView.address, &dOccluderSetView);
     else if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && !o.OccluderSetView.valid)
@@ -4459,6 +4557,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         m_VR->FlushPendingGameUi();
         m_VR->TickAudioFocusRecover();
     }
+    FlushPendingSaveShot();
 
     EnsureServerFlashlightHook();
     if (m_VR)

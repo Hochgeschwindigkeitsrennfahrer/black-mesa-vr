@@ -511,6 +511,11 @@ public:
     // CPixelVisibilityQuery::GetFractionVisible(float fadeTimeInv): thiscall on the
     // query, returns brightness * on-screen fraction in ST0, ret 4. Beta 26234270.
     static constexpr uint32_t kPixelVisQueryFractionRva = 0xD4650;
+    // Save thumbnail writer (CViewRender, vtable +0x5C): (name, w, h, pow2, vtf),
+    // ret 0x14. Deferred unless the byte kSaveShotNowRva is set (end of
+    // CViewRender::Render 0x1E50A0); then it box-scales the current RT into a TGA.
+    static constexpr uint32_t kSaveShotWriterRva = 0x1E6350;
+    static constexpr uint32_t kSaveShotNowRva = 0x6C5BA4;
     // Headless diagnostic only (BMVR_PIXELVIS_STATS): CPixelVisibilitySystem
     // GetFractionVisible 0xD48B0 and find-or-create query for a view 0xD4560.
     static constexpr uint32_t kPixelVisGetFractionRva = 0xD48B0;
