@@ -1510,7 +1510,26 @@ namespace
         }
         if (labelOff <= 0)
             return nullptr;
-        return reinterpret_cast<const char*>(desc + labelOff);
+        // Copied under SEH: the header can be freed under us (no viewmodel is
+        // drawn without a weapon, so the cached header stays an old weapon's;
+        // after saves/loads its model was unloaded and a strncmp on the label
+        // crashed the game, 2026-11-02). Callers only ever get the copy.
+        thread_local char s_copy[4][96];
+        thread_local unsigned s_next;
+        char* out = s_copy[s_next++ & 3];
+        const char* src = reinterpret_cast<const char*>(desc + labelOff);
+        __try
+        {
+            int n = 0;
+            for (; n < 95 && src[n]; ++n)
+                out[n] = src[n];
+            out[n] = 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+        return out;
     }
 
     void SuppressViewmodelMovementAnims(void* viewmodel)
@@ -1529,15 +1548,16 @@ namespace
         }
         const char* label = StudioSequenceLabel(hdr, seq);
         const bool melee = Hooks::m_VR->IsPerformingMelee();
-        // Labels live inside the studiohdr, so the pointer identifies the
-        // sequence; classify once per sequence change instead of three
-        // lowercase passes + ~30 strstr on every CalcViewModelView.
-        struct LabelClass { const char* label; char text[16]; bool action; bool loco; bool equip; };
-        static LabelClass s_lc{};
-        if (!label || label != s_lc.label
+        // Classify once per sequence change instead of three lowercase passes
+        // + ~30 strstr on every CalcViewModelView. The label is a copy, so the
+        // header + sequence index identify it.
+        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; };
+        static LabelClass s_lc{ nullptr, -1 };
+        if (!label || hdr != s_lc.hdr || seq != s_lc.seq
             || std::strncmp(s_lc.text, label, sizeof(s_lc.text) - 1) != 0)
         {
-            s_lc.label = label;
+            s_lc.hdr = hdr;
+            s_lc.seq = seq;
             s_lc.text[0] = 0;
             if (label)
                 strncpy_s(s_lc.text, label, _TRUNCATE);
