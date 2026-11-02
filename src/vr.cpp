@@ -1008,6 +1008,9 @@ namespace
                 ++s_presentStereo;
             }
         }
+        if (vr && vr->m_IsVREnabled && vr->IsGameplayEligible() && vr->m_DirectEyeSubmit
+            && !vr->Want2dMenuPanel())
+            vr->LogRenderPathIfChanged();
         if (vr)
             vr->CaptureFrameBeforePresent();
         GpuTimerOnPresent(device, vr);
@@ -11623,8 +11626,10 @@ void VR::UpdateAutoMatQueueMode()
     static int s_qlog;
     if (s_qlog < 8)
     {
-        Game::logMsg("GetMatQueueMode=%d vtableOk=%d slots=%d auto=%d multicore=%d ring=%d try=%d set=%d get=%d eq=%d failedSlot=%d",
-            current, m_Game->MaterialVTableMatchesDump() ? 1 : 0,
+        // Mode 0 (single-threaded) is expected in menus, loading and warmup;
+        // multicore switches to 2 once gameplay runs ("AutoMatQueueMode set 2").
+        Game::logMsg("Material queue mode=%d%s slots=%d auto=%d multicore=%d ring=%d try=%d set=%d get=%d eq=%d failedSlot=%d",
+            current, (current == 0 && !m_GameplayEligible) ? " (single-threaded until gameplay)" : "",
             m_Game->MaterialThreadSlotsValid() ? 1 : 0,
             bmvr::g_AutoMatQueueMode ? 1 : 0, bmvr::g_MulticoreMode ? 1 : 0, m_McRingReady ? 1 : 0,
             bmvr::TryMatQueue() ? 1 : 0,
@@ -12854,6 +12859,39 @@ bool VR::ShouldHwndBlitStereo() const
     if (bmvr::UseGbMatchViewLock())
         return true;
     return McEyesSmallerThanWindow();
+}
+
+void VR::LogRenderPathIfChanged()
+{
+    const bool worldMatch = bmvr::OffscreenWorldMatchesEyes();
+    const bool hwndBlit = ShouldHwndBlitStereo();
+    const bool mc = McPipelineEnabled();
+    const int path = hwndBlit ? 3 : (worldMatch ? (mc ? 1 : 2) : 4);
+    static int s_lastPath;
+    static int s_logs;
+    if (path == s_lastPath || s_logs >= 16)
+        return;
+    s_lastPath = path;
+    ++s_logs;
+    char why[256];
+    bmvr::DescribeWorldRtMatch(why, sizeof(why));
+    switch (path)
+    {
+    case 1:
+        Game::logMsg("Render path: per-eye stereo at eye size, multicore (best path) eye=%ux%u", m_RenderWidth, m_RenderHeight);
+        break;
+    case 2:
+        Game::logMsg("Render path: per-eye stereo at eye size, single-threaded (MulticoreMode=%d) eye=%ux%u",
+            bmvr::g_MulticoreMode ? 1 : 0, m_RenderWidth, m_RenderHeight);
+        break;
+    case 3:
+        Game::logMsg("Render path: FALLBACK window view blitted into the eyes (no multicore, window resolution); %s%s",
+            why, McEyesSmallerThanWindow() ? "; eyes fit inside the game window" : "");
+        break;
+    default:
+        Game::logMsg("Render path: per-eye stereo without eye-sized world RTs; %s", why);
+        break;
+    }
 }
 
 bool VR::McPipelineEnabled() const
@@ -15425,7 +15463,10 @@ void VR::SubmitVRTextures()
             static int s_mcPresentFb;
             if (s_mcPresentFb < 8)
             {
-                Game::logMsg("MC Present fallback: ICallQueue did not copy 1x eyes queued=%d done=%d",
+                // A Present now and then finds no eye copy for this frame
+                // (Present runs faster than the game). The rate is
+                // mcPresentFallback in "OpenXR publish rate"; ~0/s is normal.
+                Game::logMsg("MC Present without a queued eye copy (occasional is normal; see mcPresentFallback/s) queued=%d done=%d",
                     m_McEyeCopyQueued ? 1 : 0, m_McEyeCopyDone ? 1 : 0);
                 ++s_mcPresentFb;
             }

@@ -121,6 +121,8 @@ namespace bmvr
     // GMod/L4D2VR: OpenVR recommended * RenderScale, 16-aligned, cap 4096.
     // Independent of HWND. False if offscreen path is skipped or rec is unknown.
     bool ComputeOffscreenEyeSize(uint32_t& width, uint32_t& height);
+    // Why OffscreenWorldMatchesEyes() is true or false, for the render-path log.
+    void DescribeWorldRtMatch(char* buf, size_t size);
     // `_rt_FullFrameFB*` target size. False unless WorldRtGrowActive.
     bool ComputeGrownWorldFramebuffer(uint32_t& width, uint32_t& height);
     // `_rt_gb*` target size. Additionally requires FullFrame to already be at

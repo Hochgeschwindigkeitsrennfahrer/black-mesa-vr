@@ -860,6 +860,8 @@ public:
     // GMod: queued material system writes band M of a 2W x 3H ring; helper
     // copies band (M-2). False keeps the verified single-core 1x-eye path.
     bool McPipelineEnabled() const;
+    // One log line when the gameplay render path changes (best / fallback + why).
+    void LogRenderPathIfChanged();
     bool McEyesSmallerThanWindow() const;
     // One HWND-sized RenderView + squash-blit both eyes. Not fused.
     // True when FullFrame/G-buffer stayed window-sized and either gbmatch

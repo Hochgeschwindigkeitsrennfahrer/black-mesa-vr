@@ -880,6 +880,9 @@ namespace bmvr
         }
     }
 
+    static bool g_SkipLogQuiet = false;
+    static std::string g_BuiltInOff;
+
     static void ApplySkipName(const std::string& name, const char* via)
     {
         if (name == "hmd_swap")
@@ -1007,7 +1010,37 @@ namespace bmvr
         }
         else
             return;
-        Log("Skip %s (%s)", name.c_str(), via ? via : "skip file");
+        if (!g_SkipLogQuiet)
+            Log("Skip %s (%s)", name.c_str(), via ? via : "skip file");
+    }
+
+    // Paths that never worked on Black Mesa. InitFromDisk turns them off on
+    // every launch by design. They are not written to bmvr_skip.txt any more:
+    // a skip-file entry and a "Persisted skip ... died" line read like a crash
+    // on the player's machine. Older installs still list them there.
+    static bool IsBuiltInOff(const char* name)
+    {
+        static const char* const kNames[] = {
+            "hl2vr_eye", "hl2vr_ham", "hl2vr_pixelvis", "stereo_vis", "hl2vr_predraw",
+            "steamvr_rt", "hmd_swap", "wait_idle", "abs_view", "stereo_copy", "stereo_fov",
+            "ff_hmdfit", "ff_gbfit", "hmd_world",
+        };
+        for (const char* n : kNames)
+        {
+            if (std::strcmp(n, name) == 0)
+                return true;
+        }
+        return false;
+    }
+
+    static void DisableBuiltIn(const char* name)
+    {
+        g_SkipLogQuiet = true;
+        ApplySkipName(name, nullptr);
+        g_SkipLogQuiet = false;
+        if (!g_BuiltInOff.empty())
+            g_BuiltInOff += ' ';
+        g_BuiltInOff += name;
     }
 
     static void ReadSkipFile(const std::wstring& path)
@@ -1119,6 +1152,14 @@ namespace bmvr
                 Log("Ignoring named_eye skip-file entry (named PushRT wrap is off; HMD-aspect G-buffer retry)");
                 continue;
             }
+            if (IsBuiltInOff(n))
+            {
+                // Same as InitFromDisk's built-in list; logged there once.
+                g_SkipLogQuiet = true;
+                ApplySkipName(n, "bmvr_skip.txt");
+                g_SkipLogQuiet = false;
+                continue;
+            }
             ApplySkipName(n, "bmvr_skip.txt");
         }
         fclose(f);
@@ -1148,7 +1189,8 @@ namespace bmvr
         WriteUtf8File(SkipPath(), line, true);
         WriteUtf8File(ModuleDir() + L"\\bmvr_skip.txt", line, true);
         if (reason)
-            Log("Persisted skip '%s': %s", name, reason);
+            Log("Disabled '%s' for later launches too (%s); delete bmvr_skip.txt next to bms.exe to retry it",
+                name, reason);
     }
 
     void SetDllModule(HMODULE module)
@@ -1646,20 +1688,23 @@ namespace bmvr
             "HL2VR queued WaitGetPoses on ICallQueue");
         ConsumeIfStuck(L"hl2vr_eye", g_TryHl2vrStereoEye, "hl2vr_eye",
             "HL2VR CViewSetup.m_eStereoEye LEFT/RIGHT");
-        PersistSkip("hl2vr_eye",
-            "first stereo RenderView died after writing m_eStereoEye LEFT/RIGHT (OpenXR, 2026-09-04); hl2vr native retry presented white freeze (2026-09-05)");
+        // First stereo RenderView died after writing m_eStereoEye LEFT/RIGHT
+        // (OpenXR, 2026-09-04); the native retry presented a white freeze (2026-09-05).
+        DisableBuiltIn("hl2vr_eye");
         for (const auto& dir : FlagDirs())
         {
             DeleteFileW((dir + L"\\bmvr_in_hl2vr_ham.flag").c_str());
             DeleteFileW((dir + L"\\bmvr_in_hl2vr_pixelvis.flag").c_str());
             DeleteFileW((dir + L"\\bmvr_in_stereo_vis.flag").c_str());
         }
-        PersistSkip("hl2vr_ham",
-            "OpenXR visibility-mask HAM drew a black overlay on the world; no FPS gain (2026-09-05)");
-        PersistSkip("hl2vr_pixelvis",
-            "PixelVisibility_EndCurrentView skip on the second stereo eye; one-eye skybox + flashlight through walls (2026-09-05)");
-        PersistSkip("stereo_vis",
-            "CViewRender+0x744 is m_rbTakeFreezeFrame; zeroing it draws an empty freeze (white void) while m_flFreezeFrameUntil is live (2026-09-05)");
+        // OpenXR visibility-mask HAM drew a black overlay on the world; no FPS gain (2026-09-05).
+        DisableBuiltIn("hl2vr_ham");
+        // PixelVisibility_EndCurrentView skip on the second stereo eye: one-eye
+        // skybox + flashlight through walls (2026-09-05).
+        DisableBuiltIn("hl2vr_pixelvis");
+        // CViewRender+0x744 is m_rbTakeFreezeFrame; zeroing it draws an empty
+        // freeze (white void) while m_flFreezeFrameUntil is live (2026-09-05).
+        DisableBuiltIn("stereo_vis");
         ConsumeIfStuck(L"hl2vr_predraw", g_TryHl2vrPredraw, "hl2vr_predraw",
             "HL2VR DrawAllMaterials pipeline predraw");
         ConsumeIfStuck(L"hl2vr_playercull", g_TryHl2vrPlayerCull, "hl2vr_playercull",
@@ -1680,44 +1725,48 @@ namespace bmvr
         // 2560x1440 deferred G-buffer. Stereo pair logged redirected=1, blit
         // skipped, Present ~90fps, audio OK, Escape menu OK, world black on
         // desktop and HMD. Crash-sticky never fired (process stayed alive).
-        PersistSkip("steamvr_rt", "3296 offscreen SetRT over 2560 G-buffer blacked world");
+        DisableBuiltIn("steamvr_rt");
         // 16:9 blit stereo is not fused. Do not keep offering it.
         // Verified on this DLL 2026-08-16: CreateDevice + Reset forced 3168x3100,
         // desktop went black, one OpenVR Submit then rt0=null / waiting room.
-        if (g_TryHmdSwapchain)
-            PersistSkip("hmd_swap", "black desktop + SteamVR waiting room after Reset");
+        DisableBuiltIn("hmd_swap");
         // TransferSurface(..., TRUE) + WaitDeviceIdle during loading with
         // compositor DoNotHaveFocus coincided with the 1 FPS crash.
-        if (g_TryWaitIdle)
-            PersistSkip("wait_idle", "WaitDeviceIdle during loading crash");
+        DisableBuiltIn("wait_idle");
         // Absolute HMD yaw/pitch on the live CViewSetup replaced the tram's
         // scripted camera (e.g. yaw 96.5 → HMD 14.7) and the headset went
         // black after the load logo. L4D2VR only writes HMD on stereo copies.
-        if (g_TryAbsView)
-            PersistSkip("abs_view", "absolute HMD on live CViewSetup blacked gameplay after load logo");
-        if (g_TryStereoCopy)
-            PersistSkip("stereo_copy", "16:9 blit stereo is not fused");
-        PersistSkip("stereo_fov", "HMD FOV in 16:9 pixels is magnified and not fused");
-        PersistSkip("ff_hmdfit", "unbind A2R10 FullFrame whites HMD; G-buffer 1584 vs PushRT 2560");
-        PersistSkip("ff_gbfit", "LITERAL FullFrame+G-buffer 1584 died on background04 before stereo; user miss");
+        DisableBuiltIn("abs_view");
+        // 16:9 blit stereo is not fused.
+        DisableBuiltIn("stereo_copy");
+        // HMD FOV in 16:9 pixels is magnified and not fused.
+        DisableBuiltIn("stereo_fov");
+        // Unbinding the A2R10 FullFrame whites the HMD; G-buffer 1584 vs PushRT 2560.
+        DisableBuiltIn("ff_hmdfit");
+        // LITERAL FullFrame+G-buffer 1584 died on background04 before stereo.
+        DisableBuiltIn("ff_gbfit");
         // 2026-09-04: 8 HMD-fb pass-throughs at 3168 OpenXR succeeded, then
         // the first stereo pair died after pose latch. Copies wrote
         // m_eStereoEye LEFT/RIGHT and drew RIGHT then LEFT. BM RenderView
         // indexes this+0x744 by [ebx+0x1C]. Leave MONO (0); LEFT then RIGHT.
         // 2026-09-05: hl2vr native ignored that skip, wrote stereoEye=2 on
-        // the first RIGHT copy, and presented white freeze. Always skip.
-        PersistSkip("hl2vr_eye",
-            "first stereo RenderView died after writing m_eStereoEye LEFT/RIGHT (OpenXR, 2026-09-04); hl2vr native retry presented white freeze (2026-09-05)");
-        PersistSkip("hl2vr_predraw",
-            "DrawAllMaterials dummy DrawScreenSpaceRectangle null-called shaderapidx9 (C0000005 eip=0, 2026-09-05)");
+        // the first RIGHT copy, and presented white freeze. Always skip
+        // (DisableBuiltIn("hl2vr_eye") above).
+        // DrawAllMaterials dummy DrawScreenSpaceRectangle null-called
+        // shaderapidx9 (C0000005 eip=0, 2026-09-05).
+        DisableBuiltIn("hl2vr_predraw");
         for (const auto& dir : FlagDirs())
         {
             DeleteFileW((dir + L"\\bmvr_in_hl2vr_proj.flag").c_str());
             DeleteFileW((dir + L"\\bmvr_in_hl2vr_cproj.flag").c_str());
             DeleteFileW((dir + L"\\bmvr_in_hl2vr_neye.flag").c_str());
         }
+        // LITERAL FullFrame+G-buffer at SteamVR rec still PushRT 2560x1440:
+        // HMD warp + bottom garbage. WorldRenderAtEyeSize=true is the working path.
         if (!g_WorldEyeSizeOptIn)
-            PersistSkip("hmd_world", "LITERAL FullFrame+G-buffer at SteamVR rec still PushRT 2560x1440; HMD warp + bottom garbage");
+            DisableBuiltIn("hmd_world");
+        Log("Built-in off (paths that do not work on Black Mesa; off on every setup by design, not a crash): %s",
+            g_BuiltInOff.c_str());
         // Do not PersistSkip or ConsumeIfStuck fl_gbmatch. Skip-file ignore
         // was not enough: leftover bmvr_in_fl_gbmatch.flag still disabled
         // the HWND lock on OpenXR Simulator (2026-09-09).
@@ -2339,6 +2388,30 @@ namespace bmvr
             return false;
         return SizesNear(g_FullFrameActualWidth, eyeW) && SizesNear(g_FullFrameActualHeight, eyeH)
             && SizesNear(g_GbActualWidth, eyeW) && SizesNear(g_GbActualHeight, eyeH);
+    }
+
+    void DescribeWorldRtMatch(char* buf, size_t size)
+    {
+        if (!buf || !size)
+            return;
+        uint32_t eyeW = 0, eyeH = 0;
+        const bool haveEye = ComputeOffscreenEyeSize(eyeW, eyeH);
+        const char* state = "world RTs match the eyes";
+        if (!g_WorldEyeSizeOptIn)
+            state = "WorldRenderAtEyeSize is off";
+        else if (!g_TryOffscreenHmd)
+            state = "offscreen eyes disabled (hmd_offscreen in bmvr_skip.txt or a crash flag)";
+        else if (!g_TryOffscreenWorldGrow)
+            state = "world RT grow disabled (hmd_world)";
+        else if (!g_GameplayWorldRts)
+            state = "not a gameplay map yet";
+        else if (!haveEye)
+            state = "eye size unknown";
+        else if (!OffscreenWorldMatchesEyes())
+            state = "world RTs were created at another size than the eyes";
+        snprintf(buf, size, "%s: FullFrame %ux%u G-buffer %ux%u eye %ux%u (recommended %ux%u RenderScale %.2f)",
+            state, g_FullFrameActualWidth, g_FullFrameActualHeight, g_GbActualWidth, g_GbActualHeight,
+            eyeW, eyeH, g_RecommendedEyeWidth, g_RecommendedEyeHeight, g_RenderScale);
     }
 
     void SetOpenXrHelperSession(bool active)
