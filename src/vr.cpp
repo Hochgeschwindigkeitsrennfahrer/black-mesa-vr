@@ -4933,13 +4933,14 @@ void VR::UpdateScriptedCamera(const Vector& engineAngles)
 {
     if (!m_LastCmdYawValid || !std::isfinite(engineAngles.x) || !std::isfinite(engineAngles.y))
         return;
-    // Dead: the engine rolls the view onto the floor, not a cutscene camera
-    // (followed, it flipped the whole view over).
-    int health = 1;
-    if (m_Game && m_Game->ReadLocalPlayerHealth(health) && health <= 0)
+    // Only a cutscene camera (point_viewcontrol) sets the player's view
+    // entity. Death (the view rolled onto the floor; followed, it turned the
+    // whole view over), view punch, shakes and grabs never do.
+    bool viewEntitySet = true;
+    if (m_Game && m_Game->ReadLocalPlayerViewEntitySet(viewEntitySet) && !viewEntitySet)
     {
         if (m_ScriptedCamActive)
-            Game::logMsg("Scripted camera off: player dead (health %d)", health);
+            Game::logMsg("Scripted camera off: view entity cleared");
         m_ScriptedCamActive = false;
         m_ScriptedCamDiffersNow = false;
         m_ScriptedCamFrames = 0;

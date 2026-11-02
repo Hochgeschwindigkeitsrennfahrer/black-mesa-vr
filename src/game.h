@@ -84,8 +84,10 @@ public:
     bool ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air);
     // False only when m_bWearingSuit resolved and reads 0 (pre-HEV intro).
     bool LocalPlayerHasSuit();
-    // Local player m_iHealth; false when it cannot be read.
-    bool ReadLocalPlayerHealth(int& health);
+    // Local player m_hViewEntity is set (a point_viewcontrol camera has the
+    // view; death, view punch and shakes never set it). False when it cannot
+    // be read (offset not found, no player).
+    bool ReadLocalPlayerViewEntitySet(bool& set);
     // True only when m_bZooming resolved and reads 1 (crossbow scope).
     bool LocalPlayerZooming();
     // -1 if the netvar is missing/retired, otherwise 0 or 1.

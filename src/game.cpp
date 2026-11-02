@@ -595,6 +595,7 @@ const char* Game::GetEntityClientClassName(C_BaseEntity* entity)
 namespace
 {
     int g_nvHealth = -1;
+    int g_nvViewEntity = -1;
     int g_nvArmor = -1;
     int g_nvClip1 = -1;
     int g_nvClip2 = -1;
@@ -726,6 +727,9 @@ void Game::ScanWristHudNetVars()
     if (g_nvHealth < 0)
         g_nvHealth = 0x98;
     // Live HEV is C_BlackMesaPlayer::m_ArmorValue 0x17C0, not C_BasePlayer 0x134C.
+    // DT_LocalPlayerExclusive m_hViewEntity (0x12E8 on 26234270), registered
+    // as 68 <offset> 68 <name> like a datamap field.
+    g_nvViewEntity = FindDatamapFieldOffset(base, imgSize, "m_hViewEntity", 0x800, 0x3000);
     g_nvArmor = FindDatamapFieldOffset(base, imgSize, "m_ArmorValue", 0x1000, 0x4000);
     if (g_nvArmor < 0)
         g_nvArmor = 0x17C0;
@@ -797,6 +801,8 @@ void Game::ScanWristHudNetVars()
     Game::logMsg("Wrist HUD netvars health=%d armor=%d clip1=%d clip2=%d ammo=%d primType=%d secType=%d",
         g_nvHealth, g_nvArmor, g_nvClip1, g_nvClip2, g_nvAmmoBase, g_nvPrimaryAmmoType,
         g_nvSecondaryAmmoType);
+    Game::logMsg("VR netvar m_hViewEntity=%d (%s)", g_nvViewEntity,
+        g_nvViewEntity >= 0 ? "cutscene cameras need it" : "not found: cutscene follow uses the angles alone");
     Game::logMsg("VR netvars m_Local=%d m_bWearingSuit(+local)=%d suit=%d zooming=%d flashlight=%d rpgLaserOn=%d rpgLaserDot=%d water=%d airFinished=%d moveType=%d flags=%d",
         localData, suitInLocal, g_nvWearingSuit, g_nvZooming, flashlight,
         g_nvRpgLaserOn, g_nvRpgLaserDot, g_nvWaterLevel, g_nvAirFinished, g_nvMoveType, g_nvFlags);
@@ -1140,10 +1146,10 @@ bool Game::WeaponHasNoAmmo(C_BaseEntity* weapon)
     return clip <= 0 && reserve <= 0;
 }
 
-bool Game::ReadLocalPlayerHealth(int& health)
+bool Game::ReadLocalPlayerViewEntitySet(bool& set)
 {
     ScanWristHudNetVars();
-    if (!m_EngineClient || !m_ClientEntityList || g_nvHealth < 0)
+    if (!m_EngineClient || !m_ClientEntityList || g_nvViewEntity < 0)
         return false;
     const int local = m_EngineClient->GetLocalPlayer();
     if (local <= 0)
@@ -1153,7 +1159,9 @@ bool Game::ReadLocalPlayerHealth(int& health)
         return false;
     __try
     {
-        health = *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(player) + g_nvHealth);
+        const unsigned int h = *reinterpret_cast<volatile unsigned int*>(
+            reinterpret_cast<unsigned char*>(player) + g_nvViewEntity);
+        set = h != 0xFFFFFFFFu && h != 0;
         return true;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
