@@ -26,8 +26,9 @@ ReflectionRtScale=0.5
 # fraction of the eye size. At the engine's 1024x1024 the floor next to walls
 # and other floor types shows a blown-up copy of that edge: jagged junctions
 # that RenderScale and FXAA cannot fix. Only a copy, so much cheaper than
-# ReflectionRtScale. -1 (or unset) = same as ReflectionRtScale, 0 = 1024x1024.
-RefractCopyRtScale=-1
+# ReflectionRtScale. 0.5 is recommended in every case, also with
+# ReflectionRtScale=0. -1 (or unset) = same as ReflectionRtScale, 0 = 1024x1024.
+RefractCopyRtScale=0.5
 
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
