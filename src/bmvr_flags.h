@@ -377,7 +377,7 @@ namespace bmvr
     // the head moves). The right eye gets its own queries for all its views
     // (incl. floor/water reflections). false = stock (A/B aid).
     extern bool g_PixelVisPerEye;
-    // GlowHold (seconds, default 0.3, cvar bmvr_glow_hold, 0 = off): a glow
+    // GlowHold (seconds, default 0 = off, cvar bmvr_glow_hold): a glow
     // that dims keeps its brightest recent value this long, then fades over
     // the same time, so partial occlusion (dirty glass, the edge of an eye's
     // view, small head movements) no longer flickers it. Brightening is

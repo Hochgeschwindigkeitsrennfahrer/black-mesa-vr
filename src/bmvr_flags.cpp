@@ -151,7 +151,7 @@ namespace bmvr
     bool g_RightEyeFirst = false;
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
-    float g_GlowHold = 0.3f;
+    float g_GlowHold = 0.f;
     bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;
     float g_ScopeZoomSmoothSec = 0.16f;
