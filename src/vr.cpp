@@ -12773,8 +12773,12 @@ void VR::LogRenderPathIfChanged()
             bmvr::g_MulticoreMode ? 1 : 0, m_RenderWidth, m_RenderHeight);
         break;
     case 3:
-        Game::logMsg("Render path: FALLBACK window view blitted into the eyes (no multicore, window resolution); %s%s",
-            why, McEyesSmallerThanWindow() ? "; eyes fit inside the game window" : "");
+        Game::logMsg("Render path: FALLBACK window view blitted into the eyes (window resolution); %s%s%s",
+            why, McEyesSmallerThanWindow() ? "; eyes fit inside the game window" : "",
+            bmvr::g_MulticoreMode
+                ? "; MulticoreMode=true has no effect on this path (the game still switches its material "
+                  "queue on, but no eye copies are queued, so mcPresentFallback/s equals the frame rate)"
+                : "");
         break;
     default:
         Game::logMsg("Render path: per-eye stereo without eye-sized world RTs; %s", why);
@@ -15343,12 +15347,23 @@ void VR::SubmitVRTextures()
             static int s_mcPresentFb;
             if (s_mcPresentFb < 8)
             {
-                // A Present now and then finds no eye copy for this frame
-                // (Present runs faster than the game). The rate is
-                // mcPresentFallback in "OpenXR publish rate"; ~0/s is normal.
-                Game::logMsg("MC Present without a queued eye copy (occasional is normal; see mcPresentFallback/s) queued=%d done=%d",
-                    m_McEyeCopyQueued ? 1 : 0, m_McEyeCopyDone ? 1 : 0);
-                ++s_mcPresentFb;
+                // On the per-eye path a Present now and then finds no eye copy
+                // for this frame (Present runs faster than the game); the rate
+                // is mcPresentFallback in "OpenXR publish rate", ~0/s is normal.
+                // On the window-blit fallback nothing is ever queued.
+                if (ShouldHwndBlitStereo())
+                {
+                    if (s_mcPresentFb == 0)
+                        Game::logMsg("MC: no eye copies queued: the window-blit fallback renders the eyes "
+                            "single-threaded, MulticoreMode has no effect (see 'Render path: FALLBACK')");
+                    s_mcPresentFb = 8;
+                }
+                else
+                {
+                    Game::logMsg("MC Present without a queued eye copy (occasional is normal; see mcPresentFallback/s) queued=%d done=%d",
+                        m_McEyeCopyQueued ? 1 : 0, m_McEyeCopyDone ? 1 : 0);
+                    ++s_mcPresentFb;
+                }
             }
         }
         const bool haveNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
