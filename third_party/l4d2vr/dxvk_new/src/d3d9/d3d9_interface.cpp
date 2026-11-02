@@ -388,7 +388,6 @@ namespace dxvk {
     // recommended size. Do not ExitProcess if SteamVR is off — the game must
     // still launch; VR::InitOpenVR retries on the Game thread.
     const bool noHmd = IsNoHmdLaunchArgPresent();
-    bool stampedHmdSwap = false;
     bmvr::InitFromDisk();
     bmvr::SetStage("create_device");
     if (pPresentationParameters && !pPresentationParameters->Windowed)
@@ -443,37 +442,10 @@ namespace dxvk {
           const uint32_t winH = pPresentationParameters->BackBufferHeight;
           bmvr::ComputeHmdFramebufferSize(recW, recH, winW, winH, projAspect);
           bmvr::InstallEarlyFramebufferHook();
-          uint32_t bbW = pPresentationParameters->BackBufferWidth;
-          uint32_t bbH = pPresentationParameters->BackBufferHeight;
-          if (bmvr::TryHmdSwapchain() && bmvr::TryHmdFramebuffer()
-              && bmvr::ApplyHmdAspectBackbuffer(bbW, bbH))
-          {
-            pPresentationParameters->Windowed = TRUE;
-            pPresentationParameters->BackBufferWidth = bbW;
-            pPresentationParameters->BackBufferHeight = bbH;
-            Logger::info(str::format(
-              "BMVR CreateDevice: windowed backbuffer ",
-              winW, "x", winH, " -> HMD-aspect ",
-              bbW, "x", bbH, " (HWND stays desktop size)"));
-          }
           Logger::info(str::format(
             "BMVR CreateDevice: OpenVR ready recommended ", recW, "x", recH,
             " window ", winW, "x", winH,
-            " G-buffer ", bmvr::g_FramebufferWidth, "x", bmvr::g_FramebufferHeight,
-            " (swapchain force=", bmvr::TryHmdSwapchain() ? 1 : 0, ")"));
-
-          if (bmvr::TryHmdSwapchain())
-          {
-            bmvr::BeginRisky(L"hmd_swap");
-            stampedHmdSwap = true;
-            Logger::info(str::format(
-              "BMVR CreateDevice: using HMD recommended swapchain ",
-              recW, "x", recH, " (was ",
-              pPresentationParameters->BackBufferWidth, "x",
-              pPresentationParameters->BackBufferHeight, ")"));
-            pPresentationParameters->BackBufferWidth = recW;
-            pPresentationParameters->BackBufferHeight = recH;
-          }
+            " G-buffer ", bmvr::g_FramebufferWidth, "x", bmvr::g_FramebufferHeight));
         }
       }
       else
@@ -495,8 +467,6 @@ namespace dxvk {
       nullptr, // <-- pFullscreenDisplayMode
       reinterpret_cast<IDirect3DDevice9Ex**>(ppReturnedDeviceInterface));
 
-    if (stampedHmdSwap)
-      bmvr::EndRisky(L"hmd_swap");
 
     if (SUCCEEDED(result)
      && ppReturnedDeviceInterface != nullptr

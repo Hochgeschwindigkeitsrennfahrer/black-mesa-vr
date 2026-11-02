@@ -4607,18 +4607,15 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 bmvr::BeginRisky(L"hmd_offscreen");
             if (bmvr::TryOffscreenWorldGrow())
                 bmvr::BeginRisky(L"hmd_world");
-            if (bmvr::TrySteamVrEyeRt())
-                bmvr::BeginRisky(L"steamvr_rt");
             if (bmvr::UseGbMatchViewLock())
                 bmvr::BeginRisky(L"fl_gbmatch");
-            Game::logMsg("Stereo HMD-fb begin setup=%dx%d unscaled=%dx%d stereoEye=%d eye=%dx%d fov=%.1f->%.1f aspect=%.3f->%.3f zNear=%.1f ipd=%.2f L=(%.1f,%.1f,%.1f) R=(%.1f,%.1f,%.1f) steamvr_rt=%d offscreen=%d worldMatch=%d gbmatch=%d",
+            Game::logMsg("Stereo HMD-fb begin setup=%dx%d unscaled=%dx%d stereoEye=%d eye=%dx%d fov=%.1f->%.1f aspect=%.3f->%.3f zNear=%.1f ipd=%.2f L=(%.1f,%.1f,%.1f) R=(%.1f,%.1f,%.1f) offscreen=%d worldMatch=%d gbmatch=%d",
                 setup.width, setup.height, setup.m_nUnscaledWidth, setup.m_nUnscaledHeight,
                 setup.m_eStereoEye, eyeW, eyeH,
                 setup.fov, leftEyeView.fov, setup.m_flAspectRatio, leftEyeView.m_flAspectRatio,
                 leftEyeView.zNear, ipd,
                 leftEyeView.origin.x, leftEyeView.origin.y, leftEyeView.origin.z,
                 rightEyeView.origin.x, rightEyeView.origin.y, rightEyeView.origin.z,
-                bmvr::TrySteamVrEyeRt() ? 1 : 0,
                 bmvr::TryOffscreenHmd() ? 1 : 0,
                 bmvr::OffscreenWorldMatchesEyes() ? 1 : 0,
                 bmvr::UseGbMatchViewLock() ? 1 : 0);
@@ -4884,14 +4881,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 bmvr::EndRisky(L"hmd_offscreen");
             if (bmvr::TryOffscreenWorldGrow())
                 bmvr::EndRisky(L"hmd_world");
-            if (bmvr::TrySteamVrEyeRt())
-                bmvr::EndRisky(L"steamvr_rt");
-            if (bmvr::TryFullFrameStereo())
-                bmvr::EndRisky(L"ff_stereo");
-            if (bmvr::TryHmdFitFullFrame())
-                bmvr::EndRisky(L"ff_hmdfit");
-            if (bmvr::TryEyeFitWorldRts())
-                bmvr::EndRisky(L"ff_gbfit");
             if (bmvr::TryFlashlightGbMatch())
                 bmvr::EndRisky(L"fl_gbmatch");
             if (bmvr::TryGbLeftSkip())
@@ -8395,31 +8384,7 @@ void __fastcall Hooks::dGetBackBufferDimensions(void* ecx, void* edx, int& width
         return;
     if (McLeftoverRecording())
         return;
-    if (bmvr::TryHmdFitFullFrame()
-        && m_VR && !NestedRenderView() && !AuxSceneRtBound()
-        && m_VR->StereoWorldPassActive()
-        && m_VR->m_RenderWidth >= 640 && m_VR->m_RenderHeight >= 360)
-    {
-        width = static_cast<int>(m_VR->m_RenderWidth);
-        height = static_cast<int>(m_VR->m_RenderHeight);
-        return;
-    }
     uint32_t fbW = 0, fbH = 0;
-    if (bmvr::TryHmdFitFullFrame() && bmvr::HaveHmdFramebufferSize(fbW, fbH)
-        && !NestedRenderView() && !AuxSceneRtBound()
-        && m_VR && m_VR->StereoWorldPassActive())
-    {
-        static int s_bbLog;
-        if (s_bbLog < 8 && (width != static_cast<int>(fbW) || height != static_cast<int>(fbH)))
-        {
-            Game::logMsg("GetBackBufferDimensions %dx%d -> %ux%u (HMD-fit)",
-                width, height, fbW, fbH);
-            ++s_bbLog;
-        }
-        width = static_cast<int>(fbW);
-        height = static_cast<int>(fbH);
-        return;
-    }
     if (!bmvr::HaveHmdFramebufferSize(fbW, fbH))
         return;
     static int s_bbKeep;
@@ -8460,31 +8425,7 @@ void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& hei
     }
     if (McLeftoverRecording())
         return;
-    if (bmvr::TryHmdFitFullFrame()
-        && m_VR && !NestedRenderView() && !AuxSceneRtBound()
-        && m_VR->StereoWorldPassActive()
-        && m_VR->m_RenderWidth >= 640 && m_VR->m_RenderHeight >= 360)
-    {
-        width = static_cast<int>(m_VR->m_RenderWidth);
-        height = static_cast<int>(m_VR->m_RenderHeight);
-        return;
-    }
     uint32_t fbW = 0, fbH = 0;
-    if (bmvr::TryHmdFitFullFrame() && bmvr::HaveHmdFramebufferSize(fbW, fbH)
-        && !NestedRenderView() && !AuxSceneRtBound()
-        && m_VR && m_VR->StereoWorldPassActive())
-    {
-        static int s_ssFit;
-        if (s_ssFit < 8 && (width != static_cast<int>(fbW) || height != static_cast<int>(fbH)))
-        {
-            Game::logMsg("GetScreenSize %dx%d -> %ux%u (HMD-fit)",
-                width, height, fbW, fbH);
-            ++s_ssFit;
-        }
-        width = static_cast<int>(fbW);
-        height = static_cast<int>(fbH);
-        return;
-    }
     if (!bmvr::HaveHmdFramebufferSize(fbW, fbH))
         return;
     // Permanent 1584x1440 videomode inside a 2560x1440 HWND pillarboxed the
@@ -8979,37 +8920,6 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
             bmvr::BeginRisky(L"hmd_world");
         }
     }
-    else if (bmvr::TryHmdFitFullFrame()
-        && haveFb && !skipGrow && (namedFb || namedGb)
-        && name
-        && sizeMode != RT_SIZE_PICMIP
-        && !(w >= 256 && h >= 256))
-    {
-        const int oldW = w;
-        const int oldH = h;
-        const int oldMode = sizeMode;
-        w = static_cast<int>(fbW);
-        h = static_cast<int>(fbH);
-        sizeMode = RT_SIZE_LITERAL;
-        static int s_fitLog;
-        if (s_fitLog < 12)
-        {
-            Game::logMsg("CreateNamedRT %s %dx%d mode=%d -> LITERAL %ux%u (%s, rec=%ux%u unused)",
-                name, oldW, oldH, oldMode, fbW, fbH,
-                namedGb ? "eye-fit G-buffer" : "HMD-fit FullFrame",
-                bmvr::g_RecommendedEyeWidth, bmvr::g_RecommendedEyeHeight);
-            ++s_fitLog;
-        }
-        static bool s_ffFitRisky;
-        if (!s_ffFitRisky)
-        {
-            s_ffFitRisky = true;
-            if (bmvr::TryHmdFitFullFrame())
-                bmvr::BeginRisky(L"ff_hmdfit");
-            if (bmvr::TryEyeFitWorldRts())
-                bmvr::BeginRisky(L"ff_gbfit");
-        }
-    }
     else if (haveFb && (fullMode || namedFb) && name
         && !std::strstr(name, "shadow") && !std::strstr(name, "Shadow")
         && !std::strstr(name, "csm") && !std::strstr(name, "CSM")
@@ -9102,10 +9012,6 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
         {
             bmvr::g_FullFrameActualWidth = static_cast<uint32_t>(aw);
             bmvr::g_FullFrameActualHeight = static_cast<uint32_t>(ah);
-            if (bmvr::TryHmdFitFullFrame() && haveFb
-                && std::abs(aw - static_cast<int>(fbW)) < 32
-                && std::abs(ah - static_cast<int>(fbH)) < 32)
-                bmvr::EndRisky(L"ff_hmdfit");
         }
         else if (aw > 0 && namedFb && !namedLs && bmvr::g_FullFrameActualWidth < 640)
         {

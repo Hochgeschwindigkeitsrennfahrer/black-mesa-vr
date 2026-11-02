@@ -124,8 +124,6 @@ namespace dxvk {
             D3D9SwapChainEx* swap,
             const D3DPRESENT_PARAMETERS* next)
         {
-            if (bmvr::TryHmdSwapchain())
-                return false;
             if (!swap || !next || !next->Windowed)
                 return false;
             const D3DPRESENT_PARAMETERS* cur = swap->GetPresentParams();
@@ -185,106 +183,6 @@ namespace dxvk {
             }
             params->MultiSampleType = D3DMULTISAMPLE_NONE;
             params->MultiSampleQuality = 0;
-        }
-
-        static void BmvrForceHmdAspectWindowedBackbuffer(D3DPRESENT_PARAMETERS* params)
-        {
-            if (!params)
-                return;
-            // hmd_swap skip: do not resize the windowed swapchain to G-buffer
-            // size. CreateDevice/Reset that to 2384x2160 after bm_c1a0a
-            // (2026-08-18) SetWindowPos'd the HWND, released VR RTs, then
-            // Present died. G-buffers stay HMD-sized via CreateNamedRT.
-            if (!bmvr::TryHmdSwapchain())
-                return;
-            uint32_t w = params->BackBufferWidth;
-            uint32_t h = params->BackBufferHeight;
-            if (!bmvr::ApplyHmdAspectBackbuffer(w, h))
-                return;
-            static int s_log;
-            if (s_log < 6)
-            {
-                Logger::info(str::format(
-                    "BMVR windowed backbuffer ",
-                    params->BackBufferWidth, "x", params->BackBufferHeight,
-                    " -> HMD-aspect ", w, "x", h));
-                ++s_log;
-            }
-            params->Windowed = TRUE;
-            params->BackBufferWidth = w;
-            params->BackBufferHeight = h;
-            params->MultiSampleType = D3DMULTISAMPLE_NONE;
-            params->MultiSampleQuality = 0;
-        }
-
-        // Source copies BackBufferWidth/Height out of Reset into videomode.
-        // Skipping an identical 1576 Reset while the caller still has 2560
-        // leaves GetScreenSize at 2560 and HUD/_rt_Hud mismatched (2026-08-17).
-        // Do not write Windowed back — that Reset-looped.
-        static void BmvrSyncCallerBackbufferSize(
-            D3DPRESENT_PARAMETERS* caller,
-            const D3DPRESENT_PARAMETERS* local)
-        {
-            if (!caller || !local)
-                return;
-            if (!bmvr::TryHmdFramebuffer() || !bmvr::TryHmdSwapchain())
-                return;
-            if (caller->BackBufferWidth == local->BackBufferWidth
-                && caller->BackBufferHeight == local->BackBufferHeight)
-                return;
-            static int s_log;
-            if (s_log < 8)
-            {
-                Logger::info(str::format(
-                    "BMVR Reset caller size ",
-                    caller->BackBufferWidth, "x", caller->BackBufferHeight,
-                    " -> ", local->BackBufferWidth, "x", local->BackBufferHeight));
-                ++s_log;
-            }
-            caller->BackBufferWidth = local->BackBufferWidth;
-            caller->BackBufferHeight = local->BackBufferHeight;
-        }
-
-        static bool VrForceSwapchainBackBufferToEyeSize(
-            VR* vr,
-            D3DPRESENT_PARAMETERS* params,
-            D3DDISPLAYMODEEX* fullscreenMode = nullptr) {
-            // Black Mesa: HMD-sized swapchain blacks the desktop and leaves
-            // SteamVR in the waiting room after Reset. Keep the game's window
-            // size unless the hmd_swap retry is still enabled.
-            if (!bmvr::TryHmdSwapchain())
-                return false;
-            if (!vr || !params || vr->m_RenderWidth == 0 || vr->m_RenderHeight == 0)
-                return false;
-
-            const UINT eyeWidth = static_cast<UINT>(vr->m_RenderWidth);
-            const UINT eyeHeight = static_cast<UINT>(vr->m_RenderHeight);
-            const UINT oldWidth = params->BackBufferWidth;
-            const UINT oldHeight = params->BackBufferHeight;
-            const D3DMULTISAMPLE_TYPE oldMultiSampleType = params->MultiSampleType;
-            const DWORD oldMultiSampleQuality = params->MultiSampleQuality;
-
-            params->BackBufferWidth = eyeWidth;
-            params->BackBufferHeight = eyeHeight;
-            params->MultiSampleType = D3DMULTISAMPLE_NONE;
-            params->MultiSampleQuality = 0;
-
-            if (!params->Windowed && fullscreenMode) {
-                fullscreenMode->Width = eyeWidth;
-                fullscreenMode->Height = eyeHeight;
-            }
-
-            const bool sizeChanged = oldWidth != eyeWidth || oldHeight != eyeHeight;
-            const bool msaaChanged = oldMultiSampleType != D3DMULTISAMPLE_NONE || oldMultiSampleQuality != 0;
-            const bool changed = sizeChanged || msaaChanged;
-            if (changed) {
-                Logger::info(str::format(
-                    "L4D2VR forcing reset backbuffer to VR eye submit-compatible settings: ",
-                    oldWidth, "x", oldHeight, " msaa=", static_cast<UINT>(oldMultiSampleType), "/", oldMultiSampleQuality,
-                    " -> ", eyeWidth, "x", eyeHeight, " msaa=0/0"));
-            }
-
-            return changed;
         }
 
         static void VrAimLineDrawQuad(
@@ -1685,12 +1583,9 @@ namespace dxvk {
     if (unlikely(pPresentationParameters == nullptr))
       return D3DERR_INVALIDCALL;
 
-    D3DPRESENT_PARAMETERS* caller = pPresentationParameters;
     D3DPRESENT_PARAMETERS local = *pPresentationParameters;
     BmvrStripSwapchainMsaa(&local);
     BmvrKeepDesktopWindowed(&local);
-    BmvrForceHmdAspectWindowedBackbuffer(&local);
-    BmvrSyncCallerBackbufferSize(caller, &local);
     if (BmvrShouldSkipIdenticalWindowedReset(m_implicitSwapchain.ptr(), &local)
      || BmvrShouldSkipWindowedSizeReset(m_implicitSwapchain.ptr(), &local)) {
       static int s_skipLog;
@@ -1709,7 +1604,6 @@ namespace dxvk {
     VR* vr = (g_Game != nullptr) ? g_Game->m_VR : nullptr;
     if (vr) {
       vr->ReleaseVRRenderTargetsForDeviceReset();
-      VrForceSwapchainBackBufferToEyeSize(vr, pPresentationParameters);
     }
 
     D3D9DeviceLock lock = LockDevice();
@@ -6722,12 +6616,9 @@ namespace dxvk {
     if (unlikely(pPresentationParameters == nullptr))
       return D3DERR_INVALIDCALL;
 
-    D3DPRESENT_PARAMETERS* caller = pPresentationParameters;
     D3DPRESENT_PARAMETERS local = *pPresentationParameters;
     BmvrStripSwapchainMsaa(&local);
     BmvrKeepDesktopWindowed(&local);
-    BmvrForceHmdAspectWindowedBackbuffer(&local);
-    BmvrSyncCallerBackbufferSize(caller, &local);
     if (BmvrShouldSkipIdenticalWindowedReset(m_implicitSwapchain.ptr(), &local)
      || BmvrShouldSkipWindowedSizeReset(m_implicitSwapchain.ptr(), &local)) {
       m_deviceLostState = D3D9DeviceLostState::Ok;
@@ -6738,7 +6629,6 @@ namespace dxvk {
     VR* vr = (g_Game != nullptr) ? g_Game->m_VR : nullptr;
     if (vr) {
       vr->ReleaseVRRenderTargetsForDeviceReset();
-      VrForceSwapchainBackBufferToEyeSize(vr, pPresentationParameters, pFullscreenDisplayMode);
     }
 
     D3D9DeviceLock lock = LockDevice();

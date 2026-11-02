@@ -18,20 +18,13 @@ namespace bmvr
     void Log(const char* fmt, ...);
     void SetStage(const char* stage);
 
-    bool TryHmdSwapchain();
     bool TryHmdFramebuffer();
     bool TryHmdNative();
     bool TryNamedRenderTargets();
-    bool TryNamedStereoWrap();
     bool TryStereoRenderView();
-    bool TryWaitDeviceIdle();
-    bool TryAbsoluteHmdView();
     bool TryMenuCompositor();
     bool TryRelativeHmdLook();
-    bool TryStereoCopy();
-    bool TryStereoFov();
     bool TryMatQueue();
-    bool TrySteamVrEyeRt();
     bool TryOffscreenHmd();
     // LITERAL FullFrame/G-buffer at SteamVR rec. The 2026-08-26 miss
     // (worldMatch+redirect drew HWND 2560x1440 into 2544x2480) is explained:
@@ -56,7 +49,6 @@ namespace bmvr
 
     void DisableNamedRenderTargets(const char* reason);
     void DisableStereoRenderView(const char* reason);
-    void DisableStereoFov(const char* reason);
     void PersistSkip(const char* name, const char* reason);
 
     void BeginRisky(const wchar_t* name);
@@ -113,8 +105,7 @@ namespace bmvr
     };
 
     // L4D2VR/Portal2: G-buffer = OpenVR recommended size. Window-fit is only
-    // the fallback if recommended size crash-stickies. ApplyHmdAspectBackbuffer
-    // rewrites the windowed D3D backbuffer to that size. GetScreenSize must
+    // the fallback if recommended size crash-stickies. GetScreenSize must
     // return the same values or HUD composite uses 16:9 CViewSetup on HMD RTs.
     void ComputeHmdFramebufferSize(uint32_t recW, uint32_t recH, uint32_t winW, uint32_t winH, float projAspect);
     void FitHmdAspectInWindow(uint32_t winW, uint32_t winH, float aspect, uint32_t& eyeW, uint32_t& eyeH);
@@ -141,7 +132,6 @@ namespace bmvr
     HWND GameWindow();
     // Client size of GameWindow(), cached for a few ms. Thread-safe.
     bool QueryWindowClientSize(uint32_t& width, uint32_t& height);
-    bool ApplyHmdAspectBackbuffer(uint32_t& width, uint32_t& height);
     void InstallEarlyFramebufferHook();
     void SetGameplayWorldRts(bool gameplayMap);
 
@@ -438,10 +428,6 @@ namespace bmvr
     // Old stereo vis workaround: r_portalsopenall + r_occlusion 0. Default
     // off — that pair draws the whole map and tanks open/complex areas.
     extern bool g_ForceOpenVis;
-    // Hidden-area mesh early-Z after D3DCLEAR_ZBUFFER. Verified miss
-    // 2026-09-05: OpenXR visibility-mask draw was a black overlay, no FPS
-    // gain. Persist-skipped (hl2vr_ham). HiddenAreaMesh=true does not retry.
-    extern bool g_HiddenAreaMesh;
     // Dummy-draw materials after LevelInit. Verified miss 2026-09-05:
     // DrawScreenSpaceRectangle null-called shaderapidx9 (C0000005 eip=0)
     // and leftover hmd_offscreen dropped the next launch onto HWND gbmatch.
@@ -495,16 +481,9 @@ namespace bmvr
     bool TryGameUiActivate();
     bool TryMeleeTrace();
     bool TryFramebufferOverride();
-    bool TryFullFrameStereo();
-    // 47777b5 same-buffer: FullFrame/G-buffer LITERAL at window-capped HMD-fit
-    // (~1584x1440). Independent of ff_stereo (broken grow). Sticky ff_hmdfit.
-    bool TryHmdFitFullFrame();
-    // LITERAL FullFrame AND G-buffer at eye size (1584). Verified miss
-    // 2026-08-22 (died on background04 before stereo). Do not retry.
-    bool TryEyeFitWorldRts();
     // Stereo view stays 2560 (G-buffer size) with HMD fov/aspect/IPD so the
     // deferred flashlight apply runs, then squash-blit into 1584 eyes.
-    // Sticky fl_gbmatch. Not ff_hmdfit / ff_gbfit / 16:9 stereo.
+    // Sticky fl_gbmatch.
     bool TryFlashlightGbMatch();
     // Under gbmatch, skip the leftover 16:9 desktop main (2 renders/frame).
     // Own sticky gb_leftskip; a death falls back to 3-render gbmatch.
@@ -514,23 +493,6 @@ namespace bmvr
     // HL2VR: QueueCall WaitGetPoses onto ICallQueue. Sticky disables queued
     // WGP only — sync WaitGetPoses on the calling thread stays on.
     bool TryHl2vrQueuedWgp();
-    // Write CViewSetup.m_eStereoEye LEFT/RIGHT (1/2). Never a pixel height.
-    bool TryHl2vrStereoEye();
-    // OpenVR GetHiddenAreaMesh early-Z after D3DCLEAR_ZBUFFER (3adc23b2).
-    // Persist-skipped: black overlay, 2026-09-05.
-    bool TryHl2vrHam();
-    // PixelVisibility_EndCurrentView once per stereo pair (26a5fe68).
-    // Persist-skipped: second-eye skip, one-eye 2D skybox miss, 2026-09-05.
-    bool TryHl2vrPixelVis();
-    // CVRViewRender::DrawAllMaterials dummy draw after map load (aeaf3f03).
-    bool TryHl2vrPredraw();
-    // C_BaseVRPlayer::GetRenderBoundsWorldspace ±1000 (feb36883). Off —
-    // leftover cull-opt from 2026-09-05. Do not re-arm.
-    bool TryHl2vrPlayerCull();
-    // Do not zero CViewRender+0x744. That byte is m_rbTakeFreezeFrame
-    // (RenderView cmp + m_flFreezeFrameUntil at +0x748). Persist-skipped:
-    // empty freeze / white void, 2026-09-05.
-    bool TryStereoVisReset();
     // Apply OpenXR/OpenVR controller poses into tracking (viewmodel + gloves).
     bool TryCtrlPose();
     // CalcViewModelView hard-lock to the aim controller.

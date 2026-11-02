@@ -194,7 +194,6 @@ namespace bmvr
     // hitch is separate; do not put WaitGetPoses on the RenderView thread.
     bool g_CompositorPostPresentHandoff = true;
     bool g_ForceOpenVis = false;
-    bool g_HiddenAreaMesh = false;
     bool g_MaterialPredraw = false;
     bool g_StereoBlitGpuFlush = true;
     // Synchronous publish spins ~12 ms per pair on the material thread
@@ -221,34 +220,18 @@ namespace bmvr
 
     static HMODULE g_Module = nullptr;
     static std::mutex g_LogMutex;
-    static bool g_TryHmdSwapchain = true;
     static bool g_TryHmdFramebuffer = true;
     static bool g_TryHmdNative = true;
     static bool g_TryNamedRT = true;
-    static bool g_TryNamedStereoWrap = false;
     static bool g_TryStereoRV = true;
-    static bool g_TryWaitIdle = true;
-    static bool g_TryAbsView = true;
     static bool g_TryMenuCompositor = true;
     static bool g_TryRelativeHmdLook = true;
-    static bool g_TryStereoCopy = false;
-    static bool g_TryStereoFov = false;
     static bool g_TryMatQueue = true;
     static bool g_TryHl2vrQueuedWgp = true;
-    static bool g_TryHl2vrStereoEye = false;
-    static bool g_TryHl2vrHam = false;
-    static bool g_TryHl2vrPixelVis = false;
-    static bool g_TryHl2vrPredraw = false;
-    static bool g_TryHl2vrPlayerCull = false;
-    static bool g_TryStereoVisReset = false;
-    static bool g_Hl2vrHamBlocked = false;
-    static bool g_Hl2vrPixelVisBlocked = false;
-    static bool g_Hl2vrPlayerCullBlocked = false;
     static bool g_TryCtrlPose = true;
     static bool g_TryCtrlVm = true;
     static bool g_TryVrGloves = true;
     static bool g_TryHandOverlay = true;
-    static bool g_TrySteamVrEyeRt = false;
     // Private eyes at OpenVR recommended * RenderScale. World RTs stay at
     // the HWND (gbmatch squash-blit). LITERAL FullFrame/G-buffer at rec
     // filled only the top HWND slice of the eyes (2026-08-26, user miss).
@@ -274,19 +257,6 @@ namespace bmvr
     static bool g_TryGameUiActivate = true;
     static bool g_TryMeleeTrace = true;
     static bool g_TryFbOverride = true;
-    // 2026-08-20 HMD: LITERAL FullFrame grow (2560x2144) + eyes 2192x2144
-    // warped/smeared the scene and put gun/hands behind the player. Sticky
-    // ff_stereo already persisted; keep the attempt OFF. Do not grow FullFrame.
-    static bool g_TryFullFrameStereo = false;
-    // 47777b5 same-buffer: size FullFrame to fitted eye size, not 16:9 HWND.
-    // Verified fail 2026-08-22: LITERAL 1584 FullFrame + G-buffer while PushRT
-    // still used 2560 viewports; unbind copied A2R10 HDR (fmt=35) into LDR
-    // eyes → white untextured HMD, textured desktop, ~20fps. Keep OFF.
-    static bool g_TryHmdFitFullFrame = false;
-    // Same-buffer retry that also LITERAL-sized `_rt_gb*` to 1584. Verified
-    // miss 2026-08-22: alloc succeeded, process died on background04 before
-    // 120 stereo frames (crash-sticky). Do not retry.
-    static bool g_TryEyeFitWorldRts = false;
     // Keep stereo CViewSetup/viewport at 2560 GB size so deferred flashlight
     // apply runs; HMD fov+aspect+IPD; squash-blit into 1584 eyes. Not an RT
     // resize (ff_hmdfit / ff_gbfit). Sticky fl_gbmatch. Default on; leftover
@@ -776,8 +746,6 @@ namespace bmvr
                 g_DesktopLeftoverRender = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ForceOpenVis") == 0)
                 g_ForceOpenVis = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "HiddenAreaMesh") == 0)
-                g_HiddenAreaMesh = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MaterialPredraw") == 0)
                 g_MaterialPredraw = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "StereoBlitGpuFlush") == 0)
@@ -880,14 +848,29 @@ namespace bmvr
         }
     }
 
-    static bool g_SkipLogQuiet = false;
-    static std::string g_BuiltInOff;
+    // Skip-file names of removed experiments (docs/RETIRED.md). Old installs
+    // may still list them; there is nothing left to turn off.
+    static bool IsRetiredSkipName(const std::string& name)
+    {
+        static const char* const kRetired[] = {
+            "hmd_swap", "wait_idle", "abs_view", "stereo_copy", "stereo_fov", "steamvr_rt",
+            "ff_stereo", "ff_hmdfit", "ff_gbfit", "stereo_vis", "named_bind", "named_l4d",
+            "named_eye", "named_push", "hl2vr_eye", "hl2vr_ham", "hl2vr_pixelvis",
+            "hl2vr_playercull", "hl2vr_predraw", "hl2vr_proj", "hl2vr_cproj", "hl2vr_neye",
+        };
+        for (const char* n : kRetired)
+        {
+            if (name == n)
+                return true;
+        }
+        return false;
+    }
 
     static void ApplySkipName(const std::string& name, const char* via)
     {
-        if (name == "hmd_swap")
-            g_TryHmdSwapchain = false;
-        else if (name == "hmd_fb")
+        if (IsRetiredSkipName(name))
+            return;
+        if (name == "hmd_fb")
             g_TryHmdFramebuffer = false;
         else if (name == "hmd_native")
             g_TryHmdNative = false;
@@ -895,12 +878,6 @@ namespace bmvr
             g_TryNamedRT = false;
         else if (name == "stereo_rv")
             g_TryStereoRV = false;
-        else if (name == "named_bind" || name == "named_l4d" || name == "named_eye" || name == "named_push")
-            g_TryNamedStereoWrap = false;
-        else if (name == "wait_idle")
-            g_TryWaitIdle = false;
-        else if (name == "abs_view")
-            g_TryAbsView = false;
         else if (name == "menu_vr")
         {
             Log("Ignoring menu_vr skip (%s): empty-map GameUI Submit must stay on",
@@ -909,16 +886,10 @@ namespace bmvr
         }
         else if (name == "rel_look")
             g_TryRelativeHmdLook = false;
-        else if (name == "stereo_copy")
-            g_TryStereoCopy = false;
-        else if (name == "stereo_fov")
-            g_TryStereoFov = false;
         else if (name == "mat_queue")
         {
             g_TryMatQueue = false;
         }
-        else if (name == "steamvr_rt")
-            g_TrySteamVrEyeRt = false;
         else if (name == "hmd_offscreen")
             g_TryOffscreenHmd = false;
         else if (name == "hmd_world")
@@ -946,12 +917,6 @@ namespace bmvr
             g_TryMeleeTrace = false;
         else if (name == "fb_override")
             g_TryFbOverride = false;
-        else if (name == "ff_stereo")
-            g_TryFullFrameStereo = false;
-        else if (name == "ff_hmdfit")
-            g_TryHmdFitFullFrame = false;
-        else if (name == "ff_gbfit")
-            g_TryEyeFitWorldRts = false;
         else if (name == "fl_gbmatch")
             g_TryFlashlightGbMatch = false;
         else if (name == "gb_leftskip")
@@ -962,37 +927,6 @@ namespace bmvr
             g_TryDme = false;
         else if (name == "hl2vr_wgp")
             g_TryHl2vrQueuedWgp = false;
-        else if (name == "hl2vr_eye")
-            g_TryHl2vrStereoEye = false;
-        else if (name == "stereo_vis")
-            g_TryStereoVisReset = false;
-        else if (name == "hl2vr_ham")
-        {
-            g_TryHl2vrHam = false;
-            g_Hl2vrHamBlocked = true;
-            g_HiddenAreaMesh = false;
-        }
-        else if (name == "hl2vr_pixelvis")
-        {
-            g_TryHl2vrPixelVis = false;
-            g_Hl2vrPixelVisBlocked = true;
-        }
-        else if (name == "hl2vr_playercull")
-        {
-            // First stereo BeginRisky overlapped this with hmd_fb / quit, so
-            // a later death skip-filed it. Player-cull crash-sticky is
-            // one-launch only (persist=false).
-            Log("Ignoring %s skip (%s): not a permanent ban",
-                name.c_str(), via ? via : "skip file");
-            return;
-        }
-        else if (name == "hl2vr_predraw")
-            g_TryHl2vrPredraw = false;
-        else if (name == "hl2vr_proj" || name == "hl2vr_cproj" || name == "hl2vr_neye")
-        {
-            // Leftover from the reverted native OpenVR stereo experiment.
-            return;
-        }
         else if (name == "msaa")
         {
             g_MsaaAllowed = false;
@@ -1010,37 +944,7 @@ namespace bmvr
         }
         else
             return;
-        if (!g_SkipLogQuiet)
-            Log("Skip %s (%s)", name.c_str(), via ? via : "skip file");
-    }
-
-    // Paths that never worked on Black Mesa. InitFromDisk turns them off on
-    // every launch by design. They are not written to bmvr_skip.txt any more:
-    // a skip-file entry and a "Persisted skip ... died" line read like a crash
-    // on the player's machine. Older installs still list them there.
-    static bool IsBuiltInOff(const char* name)
-    {
-        static const char* const kNames[] = {
-            "hl2vr_eye", "hl2vr_ham", "hl2vr_pixelvis", "stereo_vis", "hl2vr_predraw",
-            "steamvr_rt", "hmd_swap", "wait_idle", "abs_view", "stereo_copy", "stereo_fov",
-            "ff_hmdfit", "ff_gbfit", "hmd_world",
-        };
-        for (const char* n : kNames)
-        {
-            if (std::strcmp(n, name) == 0)
-                return true;
-        }
-        return false;
-    }
-
-    static void DisableBuiltIn(const char* name)
-    {
-        g_SkipLogQuiet = true;
-        ApplySkipName(name, nullptr);
-        g_SkipLogQuiet = false;
-        if (!g_BuiltInOff.empty())
-            g_BuiltInOff += ' ';
-        g_BuiltInOff += name;
+        Log("Skip %s (%s)", name.c_str(), via ? via : "skip file");
     }
 
     static void ReadSkipFile(const std::wstring& path)
@@ -1150,14 +1054,6 @@ namespace bmvr
             if (std::strcmp(n, "named_eye") == 0)
             {
                 Log("Ignoring named_eye skip-file entry (named PushRT wrap is off; HMD-aspect G-buffer retry)");
-                continue;
-            }
-            if (IsBuiltInOff(n))
-            {
-                // Same as InitFromDisk's built-in list; logged there once.
-                g_SkipLogQuiet = true;
-                ApplySkipName(n, "bmvr_skip.txt");
-                g_SkipLogQuiet = false;
                 continue;
             }
             ApplySkipName(n, "bmvr_skip.txt");
@@ -1603,7 +1499,6 @@ namespace bmvr
         ConsumeIfStuck(L"msaa", g_MsaaAllowed, "msaa", "HL2VR scene MSAA");
         if (!g_MsaaAllowed)
             g_Msaa = 0;
-        ConsumeIfStuck(L"hmd_swap", g_TryHmdSwapchain, "hmd_swap", "HMD-sized swapchain");
         ConsumeIfStuck(L"hmd_native", g_TryHmdNative, "hmd_native", "L4D2VR recommended G-buffer size");
         // Last launch: 8 pass-through 1584 RenderViews (zNear=7) succeeded,
         // then stereo wrote 1440 into CViewSetup+0x1C (m_eStereoEye on BM).
@@ -1611,8 +1506,6 @@ namespace bmvr
         for (const auto& dir : FlagDirs())
             DeleteFileW((dir + L"\\bmvr_in_hmd_fb.flag").c_str());
         ConsumeIfStuck(L"named_rt", g_TryNamedRT, "named_rt", "MaterialSystem named eye RTs");
-        ConsumeIfStuck(L"wait_idle", g_TryWaitIdle, "wait_idle", "WaitDeviceIdle");
-        ConsumeIfStuck(L"abs_view", g_TryAbsView, "abs_view", "absolute HMD CViewSetup");
         // 2026-08-16 hang persist-skipped this. Skip-file is already ignored.
         // 2026-09-03: BeginRisky stayed armed until LevelInit, so quitting (or
         // an install killing bms.exe) from GameUI left bmvr_in_menu_vr.flag.
@@ -1625,13 +1518,10 @@ namespace bmvr
         // died (2026-08-19). That is not the look copy. Same as skip-file ignore.
         for (const auto& dir : FlagDirs())
             DeleteFileW((dir + L"\\bmvr_in_rel_look.flag").c_str());
-        ConsumeIfStuck(L"stereo_copy", g_TryStereoCopy, "stereo_copy", "double RenderView blit stereo");
-        ConsumeIfStuck(L"stereo_fov", g_TryStereoFov, "stereo_fov", "same-size HMD-FOV double RenderView");
         // Skip-file mat_queue is ignored. Do not PersistSkip a leftover flag
         // from an EndFrame/gbmatch death — that false-bans SetThreadMode.
         for (const auto& dir : FlagDirs())
             DeleteFileW((dir + L"\\bmvr_in_mat_queue.flag").c_str());
-        ConsumeIfStuck(L"steamvr_rt", g_TrySteamVrEyeRt, "steamvr_rt", "SteamVR recommended eye RT (offscreen)");
         // WorldRenderAtEyeSize keeps private eyes at recommended size.
         // Predraw's dummy DrawScreenSpaceRectangle AV'd after the first
         // stereo pair (2026-09-05, shaderapidx9+412FF eip=0) while
@@ -1665,12 +1555,6 @@ namespace bmvr
             "crowbar TraceRay viewmodel-origin rewrite");
         ConsumeIfStuck(L"fb_override", g_TryFbOverride, "fb_override",
             "IMaterialSystem::SetRenderTargetFrameBufferSizeOverrides");
-        ConsumeIfStuck(L"ff_stereo", g_TryFullFrameStereo, "ff_stereo",
-            "stereo at FullFrame/OpenVR recommended size (swapchain unchanged)");
-        ConsumeIfStuck(L"ff_hmdfit", g_TryHmdFitFullFrame, "ff_hmdfit",
-            "47777b5 HMD-fit FullFrame LITERAL (window-capped, not grow)");
-        ConsumeIfStuck(L"ff_gbfit", g_TryEyeFitWorldRts, "ff_gbfit",
-            "LITERAL FullFrame+G-buffer at eye size (HDR unbind still skipped)");
         // Skip-file already ignores fl_gbmatch. ConsumeIfStuck still disabled
         // it from leftover bmvr_in_fl_gbmatch.flag (BeginRisky held when the
         // first simulator pair died). Next launch then double-RVed 1280 into
@@ -1686,29 +1570,6 @@ namespace bmvr
         Log("Ignoring drawhud crash-sticky (third HWND HUD pass after small-eye stereo)");
         ConsumeIfStuck(L"hl2vr_wgp", g_TryHl2vrQueuedWgp, "hl2vr_wgp",
             "HL2VR queued WaitGetPoses on ICallQueue");
-        ConsumeIfStuck(L"hl2vr_eye", g_TryHl2vrStereoEye, "hl2vr_eye",
-            "HL2VR CViewSetup.m_eStereoEye LEFT/RIGHT");
-        // First stereo RenderView died after writing m_eStereoEye LEFT/RIGHT
-        // (OpenXR, 2026-09-04); the native retry presented a white freeze (2026-09-05).
-        DisableBuiltIn("hl2vr_eye");
-        for (const auto& dir : FlagDirs())
-        {
-            DeleteFileW((dir + L"\\bmvr_in_hl2vr_ham.flag").c_str());
-            DeleteFileW((dir + L"\\bmvr_in_hl2vr_pixelvis.flag").c_str());
-            DeleteFileW((dir + L"\\bmvr_in_stereo_vis.flag").c_str());
-        }
-        // OpenXR visibility-mask HAM drew a black overlay on the world; no FPS gain (2026-09-05).
-        DisableBuiltIn("hl2vr_ham");
-        // PixelVisibility_EndCurrentView skip on the second stereo eye: one-eye
-        // skybox + flashlight through walls (2026-09-05).
-        DisableBuiltIn("hl2vr_pixelvis");
-        // CViewRender+0x744 is m_rbTakeFreezeFrame; zeroing it draws an empty
-        // freeze (white void) while m_flFreezeFrameUntil is live (2026-09-05).
-        DisableBuiltIn("stereo_vis");
-        ConsumeIfStuck(L"hl2vr_predraw", g_TryHl2vrPredraw, "hl2vr_predraw",
-            "HL2VR DrawAllMaterials pipeline predraw");
-        ConsumeIfStuck(L"hl2vr_playercull", g_TryHl2vrPlayerCull, "hl2vr_playercull",
-            "HL2VR local-player GetRenderBoundsWorldspace", false);
         ConsumeIfStuck(L"ctrl_pose", g_TryCtrlPose, "ctrl_pose",
             "first OpenXR/OpenVR controller pose apply", false);
         ConsumeIfStuck(L"ctrl_vm", g_TryCtrlVm, "ctrl_vm",
@@ -1721,58 +1582,9 @@ namespace bmvr
         // disabling the viewmodel hook; createHook still uses a short window.
         for (const auto& dir : FlagDirs())
             DeleteFileW((dir + L"\\bmvr_in_dme.flag").c_str());
-        // 2026-08-18: 3296x3216 private eyes + SetRT/depth redirect over the
-        // 2560x1440 deferred G-buffer. Stereo pair logged redirected=1, blit
-        // skipped, Present ~90fps, audio OK, Escape menu OK, world black on
-        // desktop and HMD. Crash-sticky never fired (process stayed alive).
-        DisableBuiltIn("steamvr_rt");
-        // 16:9 blit stereo is not fused. Do not keep offering it.
-        // Verified on this DLL 2026-08-16: CreateDevice + Reset forced 3168x3100,
-        // desktop went black, one OpenVR Submit then rt0=null / waiting room.
-        DisableBuiltIn("hmd_swap");
-        // TransferSurface(..., TRUE) + WaitDeviceIdle during loading with
-        // compositor DoNotHaveFocus coincided with the 1 FPS crash.
-        DisableBuiltIn("wait_idle");
-        // Absolute HMD yaw/pitch on the live CViewSetup replaced the tram's
-        // scripted camera (e.g. yaw 96.5 → HMD 14.7) and the headset went
-        // black after the load logo. L4D2VR only writes HMD on stereo copies.
-        DisableBuiltIn("abs_view");
-        // 16:9 blit stereo is not fused.
-        DisableBuiltIn("stereo_copy");
-        // HMD FOV in 16:9 pixels is magnified and not fused.
-        DisableBuiltIn("stereo_fov");
-        // Unbinding the A2R10 FullFrame whites the HMD; G-buffer 1584 vs PushRT 2560.
-        DisableBuiltIn("ff_hmdfit");
-        // LITERAL FullFrame+G-buffer 1584 died on background04 before stereo.
-        DisableBuiltIn("ff_gbfit");
-        // 2026-09-04: 8 HMD-fb pass-throughs at 3168 OpenXR succeeded, then
-        // the first stereo pair died after pose latch. Copies wrote
-        // m_eStereoEye LEFT/RIGHT and drew RIGHT then LEFT. BM RenderView
-        // indexes this+0x744 by [ebx+0x1C]. Leave MONO (0); LEFT then RIGHT.
-        // 2026-09-05: hl2vr native ignored that skip, wrote stereoEye=2 on
-        // the first RIGHT copy, and presented white freeze. Always skip
-        // (DisableBuiltIn("hl2vr_eye") above).
-        // DrawAllMaterials dummy DrawScreenSpaceRectangle null-called
-        // shaderapidx9 (C0000005 eip=0, 2026-09-05).
-        DisableBuiltIn("hl2vr_predraw");
-        for (const auto& dir : FlagDirs())
-        {
-            DeleteFileW((dir + L"\\bmvr_in_hl2vr_proj.flag").c_str());
-            DeleteFileW((dir + L"\\bmvr_in_hl2vr_cproj.flag").c_str());
-            DeleteFileW((dir + L"\\bmvr_in_hl2vr_neye.flag").c_str());
-        }
-        // LITERAL FullFrame+G-buffer at SteamVR rec still PushRT 2560x1440:
-        // HMD warp + bottom garbage. WorldRenderAtEyeSize=true is the working path.
-        if (!g_WorldEyeSizeOptIn)
-            DisableBuiltIn("hmd_world");
-        Log("Built-in off (paths that do not work on Black Mesa; off on every setup by design, not a crash): %s",
-            g_BuiltInOff.c_str());
         // Do not PersistSkip or ConsumeIfStuck fl_gbmatch. Skip-file ignore
         // was not enough: leftover bmvr_in_fl_gbmatch.flag still disabled
         // the HWND lock on OpenXR Simulator (2026-09-09).
-        // Named HDR wrap + rewriting CSimpleWorldView PushRT(NULL) dies after
-        // the third bind even when the named RT is 2560x1440. Do not retry it.
-        g_TryNamedStereoWrap = false;
         Log("hmd_offscreen=%d hmd_world=%d optIn=%d (%s)",
             g_TryOffscreenHmd ? 1 : 0, g_TryOffscreenWorldGrow ? 1 : 0,
             g_WorldEyeSizeOptIn ? 1 : 0,
@@ -1782,7 +1594,6 @@ namespace bmvr
         SetStage("init");
     }
 
-    bool TryHmdSwapchain() { return g_TryHmdSwapchain; }
     bool TryHmdFramebuffer() { return g_TryHmdFramebuffer; }
     bool OffCenterTestActive()
     {
@@ -1804,16 +1615,10 @@ namespace bmvr
     }
     bool TryHmdNative() { return g_TryHmdNative; }
     bool TryNamedRenderTargets() { return g_TryNamedRT; }
-    bool TryNamedStereoWrap() { return g_TryNamedStereoWrap; }
     bool TryStereoRenderView() { return g_TryStereoRV; }
-    bool TryWaitDeviceIdle() { return g_TryWaitIdle; }
-    bool TryAbsoluteHmdView() { return g_TryAbsView; }
     bool TryMenuCompositor() { return g_TryMenuCompositor; }
     bool TryRelativeHmdLook() { return g_TryRelativeHmdLook; }
-    bool TryStereoCopy() { return g_TryStereoCopy; }
-    bool TryStereoFov() { return g_TryStereoFov; }
     bool TryMatQueue() { return g_TryMatQueue; }
-    bool TrySteamVrEyeRt() { return g_TrySteamVrEyeRt; }
     bool TryOffscreenHmd() { return g_TryOffscreenHmd; }
     bool TryOffscreenWorldGrow() { return g_TryOffscreenWorldGrow; }
     static bool MapNameIsGameplay(const char* map)
@@ -1886,20 +1691,11 @@ namespace bmvr
     bool TryGameUiActivate() { return g_TryGameUiActivate; }
     bool TryMeleeTrace() { return g_TryMeleeTrace; }
     bool TryFramebufferOverride() { return g_TryFbOverride; }
-    bool TryFullFrameStereo() { return g_TryFullFrameStereo; }
-    bool TryHmdFitFullFrame() { return g_TryHmdFitFullFrame; }
-    bool TryEyeFitWorldRts() { return g_TryEyeFitWorldRts; }
     bool TryFlashlightGbMatch() { return g_TryFlashlightGbMatch; }
     bool TryGbLeftSkip() { return g_TryGbLeftSkip; }
     bool TryDrawHud() { return g_TryDrawHud; }
     bool TryDrawModelExecute() { return g_TryDme; }
     bool TryHl2vrQueuedWgp() { return g_TryHl2vrQueuedWgp; }
-    bool TryHl2vrStereoEye() { return g_TryHl2vrStereoEye; }
-    bool TryHl2vrHam() { return g_TryHl2vrHam; }
-    bool TryHl2vrPixelVis() { return g_TryHl2vrPixelVis; }
-    bool TryHl2vrPredraw() { return g_TryHl2vrPredraw; }
-    bool TryHl2vrPlayerCull() { return g_TryHl2vrPlayerCull; }
-    bool TryStereoVisReset() { return g_TryStereoVisReset; }
     bool TryCtrlPose() { return g_TryCtrlPose; }
     bool TryCtrlVm() { return g_TryCtrlVm; }
     bool TryVrGloves() { return g_TryVrGloves; }
@@ -1913,11 +1709,6 @@ namespace bmvr
     void DisableStereoRenderView(const char* reason)
     {
         PersistSkip("stereo_rv", reason);
-    }
-
-    void DisableStereoFov(const char* reason)
-    {
-        PersistSkip("stereo_fov", reason);
     }
 
     // In-process record of which crash-sticky flags are currently on disk.
@@ -2441,18 +2232,6 @@ namespace bmvr
         // died (2026-08-18).
         width = g_FramebufferWidth;
         height = g_FramebufferHeight;
-        return true;
-    }
-
-    bool ApplyHmdAspectBackbuffer(uint32_t& width, uint32_t& height)
-    {
-        uint32_t w = 0, h = 0;
-        if (!HaveHmdFramebufferSize(w, h))
-            return false;
-        if (width == w && height == h)
-            return false;
-        width = w;
-        height = h;
         return true;
     }
 }

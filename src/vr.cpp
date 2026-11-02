@@ -1066,8 +1066,7 @@ namespace
         }
         if (index == 0 && vr && device && dest)
         {
-            if ((bmvr::TrySteamVrEyeRt() || bmvr::OffscreenWorldMatchesEyes()
-                    || vr->McPipelineEnabled())
+            if ((bmvr::OffscreenWorldMatchesEyes() || vr->McPipelineEnabled())
                 && rt
                 && rt != dest
                 && SurfaceMatchesWindowOrBackbuffer(device, rt))
@@ -1185,7 +1184,7 @@ namespace
         if (vr)
             eyeDepth = vr->McPlaybackEyeDepth();
         if (!eyeDepth && vr && !vr->McPipelineEnabled() && vr->StereoEyeBlitActive()
-            && (bmvr::TrySteamVrEyeRt() || bmvr::OffscreenWorldMatchesEyes()))
+            && bmvr::OffscreenWorldMatchesEyes())
         {
             if (vr->StereoEyeBlitDest() == vr->m_D9LeftEyeSurface)
                 eyeDepth = vr->m_D9LeftEyeDepthSurface;
@@ -3159,18 +3158,12 @@ bool VR::InitOpenVR()
     {
         bmvr::g_RecommendedEyeWidth = recW;
         bmvr::g_RecommendedEyeHeight = recH;
-        // Do not assign m_RenderWidth/Height to the HMD size unless the
-        // swapchain retry is still enabled. Reset() forces the D3D9
-        // backbuffer to these values; 3168x3100 produced a black desktop
-        // and SteamVR waiting room on this DLL (2026-08-16).
-        if (bmvr::TryHmdSwapchain())
-        {
-            m_RenderWidth = recW;
-            m_RenderHeight = recH;
-        }
+        // m_RenderWidth/Height stay off the HMD size here: an HMD-sized
+        // swapchain gave a black desktop and the SteamVR waiting room
+        // (2026-08-16). Eyes are separate offscreen RTs (ChooseEyeRenderSize).
     }
-    Game::logMsg("OpenVR recommended RT %ux%u (swapchain force=%d, eye/swapchain size %ux%u)",
-        recW, recH, bmvr::TryHmdSwapchain() ? 1 : 0, m_RenderWidth, m_RenderHeight);
+    Game::logMsg("OpenVR recommended RT %ux%u (eye size %ux%u)",
+        recW, recH, m_RenderWidth, m_RenderHeight);
     ApplyRenderTargetFramebufferOverride();
     RefreshIpdFromHmd();
 
@@ -5481,12 +5474,8 @@ void VR::ChooseEyeRenderSize()
         && m_VKLeftEye.m_VulkanData.m_nWidth >= 640
         && m_VKLeftEye.m_VulkanData.m_nHeight >= 360)
     {
-        const uint32_t recW = bmvr::g_RecommendedEyeWidth;
-        const uint32_t recH = bmvr::g_RecommendedEyeHeight;
         const UINT haveW = m_VKLeftEye.m_VulkanData.m_nWidth;
         const UINT haveH = m_VKLeftEye.m_VulkanData.m_nHeight;
-        const bool wantSteamVr = bmvr::TrySteamVrEyeRt() && recW >= 640 && recH >= 360
-            && (haveW + 32 < recW || haveH + 32 < recH);
         uint32_t offW = 0, offH = 0;
         const bool haveOff = bmvr::ComputeOffscreenEyeSize(offW, offH);
         const bool wantOffscreenResize = haveOff
@@ -5498,26 +5487,7 @@ void VR::ChooseEyeRenderSize()
             m_RenderHeight = haveH;
             return;
         }
-        uint32_t ffW = 0, ffH = 0;
-        const bool wantFullFrame = bmvr::TryFullFrameStereo()
-            && bmvr::g_FullFrameActualWidth >= 640 && bmvr::g_FullFrameActualHeight >= 360;
-        if (wantFullFrame)
-        {
-            bmvr::FitHmdAspectInWindow(
-                bmvr::g_FullFrameActualWidth, bmvr::g_FullFrameActualHeight,
-                m_Aspect, ffW, ffH);
-            if (ffW + 32 > haveW || ffH + 32 > haveH)
-            {
-                // Fall through and recreate eyes at FullFrame-fitted size.
-            }
-            else if (!wantSteamVr && !wantOffscreenResize)
-            {
-                m_RenderWidth = haveW;
-                m_RenderHeight = haveH;
-                return;
-            }
-        }
-        else if (!wantSteamVr && !wantOffscreenResize)
+        if (!wantOffscreenResize)
         {
             m_RenderWidth = haveW;
             m_RenderHeight = haveH;
@@ -5542,88 +5512,6 @@ void VR::ChooseEyeRenderSize()
         m_RenderWidth = offW;
         m_RenderHeight = offH;
         return;
-    }
-
-    // steamvr_rt: offscreen eyes at GetRecommendedRenderTargetSize(). Verified
-    // 2026-08-18: 3296x3216 > 2560x1440 G-buffer, SetRT redirect, skipped BB
-    // blit, world black on desktop and HMD (audio + Escape menu still worked).
-    // Only retry if the recommended size actually fits the window.
-    if (bmvr::TrySteamVrEyeRt() && recW >= 640 && recH >= 360
-        && recW <= winWKnown + 32 && recH <= winHKnown + 32)
-    {
-        float s = bmvr::g_RenderScale;
-        if (!(s > 0.24f && s < 4.f))
-            s = 1.f;
-        if (s > 1.f)
-            s = 1.f;
-        uint32_t eyeW = (static_cast<uint32_t>(static_cast<float>(recW) * s + 0.5f) + 15u) & ~15u;
-        uint32_t eyeH = (static_cast<uint32_t>(static_cast<float>(recH) * s + 0.5f) + 15u) & ~15u;
-        if (eyeW < 640)
-            eyeW = recW;
-        if (eyeH < 360)
-            eyeH = recH;
-        m_RenderWidth = eyeW;
-        m_RenderHeight = eyeH;
-        Game::logMsg("Eye RT %ux%u (SteamVR recommended %ux%u RenderScale=%.2f, window %ux%u)",
-            eyeW, eyeH, recW, recH, bmvr::g_RenderScale, winWKnown, winHKnown);
-        return;
-    }
-
-    if (bmvr::TryFullFrameStereo()
-        && bmvr::g_FullFrameActualWidth >= 640 && bmvr::g_FullFrameActualHeight >= 360)
-    {
-        float aspect = m_Aspect;
-        if (!(aspect > 0.5f && aspect < 3.f) && recW >= 640 && recH >= 360)
-            aspect = static_cast<float>(recW) / static_cast<float>(recH);
-        uint32_t eyeW = 0, eyeH = 0;
-        const uint32_t recAlignW = (recW + 15u) & ~15u;
-        const uint32_t recAlignH = (recH + 15u) & ~15u;
-        if (recAlignW >= 640 && recAlignH >= 360
-            && recAlignW <= bmvr::g_FullFrameActualWidth
-            && recAlignH <= bmvr::g_FullFrameActualHeight)
-        {
-            eyeW = recAlignW;
-            eyeH = recAlignH;
-        }
-        else
-        {
-            bmvr::FitHmdAspectInWindow(
-                bmvr::g_FullFrameActualWidth, bmvr::g_FullFrameActualHeight,
-                aspect, eyeW, eyeH);
-        }
-        float s = bmvr::g_RenderScale;
-        if (!(s > 0.24f && s < 4.f))
-            s = 1.f;
-        if (s > 1.001f || s < 0.999f)
-        {
-            uint32_t scaledW = (static_cast<uint32_t>(static_cast<float>(eyeW) * s + 0.5f) + 15u) & ~15u;
-            uint32_t scaledH = (static_cast<uint32_t>(static_cast<float>(eyeH) * s + 0.5f) + 15u) & ~15u;
-            if (scaledW > bmvr::g_FullFrameActualWidth || scaledH > bmvr::g_FullFrameActualHeight)
-                bmvr::FitHmdAspectInWindow(
-                    bmvr::g_FullFrameActualWidth, bmvr::g_FullFrameActualHeight,
-                    aspect, scaledW, scaledH);
-            if (scaledW >= 640 && scaledH >= 360)
-            {
-                eyeW = scaledW;
-                eyeH = scaledH;
-            }
-        }
-        if (eyeW >= 640 && eyeH >= 360)
-        {
-            if (m_RenderWidth != eyeW || m_RenderHeight != eyeH)
-            {
-                Game::logMsg(
-                    "Resolution rec=%ux%u fullframe=%ux%u window=%ux%u eye=%ux%u RenderScale=%.2f ff_stereo=1",
-                    recW, recH,
-                    bmvr::g_FullFrameActualWidth, bmvr::g_FullFrameActualHeight,
-                    winWKnown, winHKnown, eyeW, eyeH, bmvr::g_RenderScale);
-                if (eyeW > winWKnown + 32 || eyeH > winHKnown + 32)
-                    bmvr::BeginRisky(L"ff_stereo");
-            }
-            m_RenderWidth = eyeW;
-            m_RenderHeight = eyeH;
-            return;
-        }
     }
 
     uint32_t fbW = 0, fbH = 0;
@@ -13611,9 +13499,6 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
                 EnsureMcRing(device);
             return true;
         }
-        const bool growForFullFrame = bmvr::TryFullFrameStereo()
-            && w > haveW + 32
-            && !m_StereoEyeBlitActive;
         const bool liveOffscreenResize = bmvr::TryOffscreenHmd()
             && !m_StereoEyeBlitActive
             && (w + 32 < haveW || h + 32 < haveH || haveW + 32 < w || haveH + 32 < h);
@@ -13624,8 +13509,7 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
             m_RenderHeight = haveH;
             return true;
         }
-        if ((!bmvr::TrySteamVrEyeRt() && !growForFullFrame && !liveOffscreenResize)
-            || (!liveOffscreenResize && haveW + 32 >= w))
+        if (!liveOffscreenResize)
         {
             Game::logMsg("Keep existing D3D eyes %ux%u (requested %ux%u; HWND resize must not recreate)",
                 haveW, haveH, w, h);
@@ -13635,13 +13519,9 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
                 EnsureMcRing(device);
             return true;
         }
-        Game::logMsg("Recreating D3D eyes %ux%u -> %ux%u (%s)",
-            haveW, haveH, w, h,
-            liveOffscreenResize ? "SteamVR live SS" : (growForFullFrame ? "FullFrame stereo" : "SteamVR recommended"));
         // Do not BeginRisky on live SS. Stereo already settled hmd_offscreen
         // after 120 frames; a recreate+quit false-banned the path.
-        if (growForFullFrame && !liveOffscreenResize)
-            bmvr::BeginRisky(L"ff_stereo");
+        Game::logMsg("Recreating D3D eyes %ux%u -> %ux%u (SteamVR live SS)", haveW, haveH, w, h);
         m_CreatedVRTextures.store(false, std::memory_order_release);
     }
 
@@ -15721,9 +15601,9 @@ void VR::SubmitVRTextures()
     ResolveMsaaEyesToSubmit(device);
     IDirect3DSurface9* leftSubmit = m_D9LeftEyeSubmitSurface ? m_D9LeftEyeSubmitSurface : m_D9LeftEyeSurface;
     IDirect3DSurface9* rightSubmit = m_D9RightEyeSubmitSurface ? m_D9RightEyeSubmitSurface : m_D9RightEyeSurface;
-    const BOOL waitGpu = bmvr::TryWaitDeviceIdle() ? TRUE : FALSE;
-    if (bmvr::TryWaitDeviceIdle())
-        bmvr::BeginRisky(L"wait_idle");
+    // No WaitDeviceIdle around the transfer: it stalled the GPU every
+    // submit and coincided with a 1 fps crash during loading (2026-08).
+    const BOOL waitGpu = FALSE;
     const bool okL = leftSubmit && SUCCEEDED(g_D3DVR9->TransferSurface(leftSubmit, waitGpu))
         && FillSharedTexture(leftSubmit, m_VKLeftEye);
     bool okR = false;
@@ -15737,10 +15617,6 @@ void VR::SubmitVRTextures()
         m_HudPaintedThisFrame.store(false, std::memory_order_release);
         m_HudOverlayHasImage = true;
     }
-    if (bmvr::TryWaitDeviceIdle() && g_D3DVR9)
-        g_D3DVR9->WaitDeviceIdle();
-    if (bmvr::TryWaitDeviceIdle())
-        bmvr::EndRisky(L"wait_idle");
     g_D3DVR9->UnlockDevice();
 
     if (!okL)
