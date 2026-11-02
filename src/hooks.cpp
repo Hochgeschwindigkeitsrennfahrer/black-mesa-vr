@@ -591,6 +591,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
     enableIfReady(hkDrawTexturedRect, "DrawTexturedRect");
+    enableIfReady(hkPanelSetSize, "PanelSetSize");
     enableIfReady(hkAdjustEngineViewport, "AdjustEngineViewport");
     enableIfReady(hkDrawModelExecute, "DrawModelExecute");
     enableIfReady(hkLightcacheFindNearest, "LightcacheFindNearest");
@@ -740,6 +741,22 @@ int Hooks::initSourceHooks()
         }
         else
             Game::logMsg("VGUI_Surface030/031 missing; pause dimmer skip unavailable");
+        // vgui2.dll VGUI_Panel009 slot 4 SetSize (same table as the panel
+        // calls in vr.cpp: 3 GetPos, 5 GetSize).
+        void* ipanel = m_Game->GetInterface("vgui2.dll", "VGUI_Panel009");
+        void** pvt = nullptr;
+        __try
+        {
+            pvt = ipanel ? *reinterpret_cast<void***>(ipanel) : nullptr;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            pvt = nullptr;
+        }
+        if (!pvt)
+            Game::noteMissingOffset("VGUI_Panel009 (client UI root at window size)");
+        else if (hkPanelSetSize.createHook(pvt[4], &dPanelSetSize) != 0)
+            Game::logMsg("Panel SetSize createHook failed");
     }
     if (o.VGui_Paint.valid && bmvr::TryVguiPaint())
         hkVgui_Paint.createHook((LPVOID)o.VGui_Paint.address, &dVGui_Paint);
@@ -9444,6 +9461,43 @@ void __fastcall Hooks::dDrawTexturedRect(void* ecx, void* edx, int x0, int y0, i
         return;
     if (hkDrawTexturedRect.fOriginal)
         hkDrawTexturedRect.fOriginal(ecx, x0, y0, x1, y1);
+}
+
+// The client's view render (client 0x201DB0, 'VGui_DrawHud') sizes the
+// client UI roots (PANEL_CLIENTDLL, PANEL_CLIENTDLL_TOOLS) to the view, which
+// in VR is the eye (3472x3536). Client-scheme panels scale their proportional
+// sizes by that root, so BM's menu UI (its own load dialog included) laid
+// out at map start came out ~3.3x too big: a load from the pause menu showed
+// the top-left 1920x1080 of an oversized load screen. Menus and HUD are
+// window-sized layers in VR, as in flat play: keep both roots at the window.
+// SetSize only runs on layout, so this costs nothing per frame.
+void __fastcall Hooks::dPanelSetSize(void* ecx, void* edx, unsigned int vpanel, int wide, int tall)
+{
+    (void)edx;
+    if (m_VR && m_Game && m_Game->m_EngineVGui
+        && wide == static_cast<int>(m_VR->m_RenderWidth) && tall == static_cast<int>(m_VR->m_RenderHeight))
+    {
+        // PANEL_CLIENTDLL = 2, PANEL_CLIENTDLL_TOOLS = 6.
+        const unsigned int client = static_cast<unsigned int>(
+            reinterpret_cast<uintptr_t>(m_Game->m_EngineVGui->GetPanel(2)));
+        const unsigned int tools = static_cast<unsigned int>(
+            reinterpret_cast<uintptr_t>(m_Game->m_EngineVGui->GetPanel(6)));
+        uint32_t winW = 0, winH = 0;
+        if ((vpanel == client || vpanel == tools) && bmvr::QueryWindowClientSize(winW, winH)
+            && winW >= 640 && winH >= 360)
+        {
+            static int s_log;
+            if (s_log < 2)
+            {
+                Game::logMsg("Client UI root %dx%d -> window %ux%u", wide, tall, winW, winH);
+                ++s_log;
+            }
+            wide = static_cast<int>(winW);
+            tall = static_cast<int>(winH);
+        }
+    }
+    if (hkPanelSetSize.fOriginal)
+        hkPanelSetSize.fOriginal(ecx, vpanel, wide, tall);
 }
 
 void bmvr::InstallEarlyFramebufferHook()

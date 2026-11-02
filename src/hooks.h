@@ -90,6 +90,7 @@ typedef ITexture*(__thiscall* tCreateNamedRTEx)(void* thisptr, const char* name,
 typedef void(__thiscall* tEndRTAlloc)(void* thisptr);
 typedef void(__thiscall* tDrawFilledRect)(void* thisptr, int x0, int y0, int x1, int y1);
 typedef void(__thiscall* tDrawTexturedRect)(void* thisptr, int x0, int y0, int x1, int y1);
+typedef void(__thiscall* tPanelSetSize)(void* thisptr, unsigned int vpanel, int wide, int tall);
 typedef float(__thiscall* tGetViewModelFOV)(void* thisptr);
 typedef BOOL(WINAPI* tGetCursorPos)(LPPOINT point);
 typedef void(__thiscall* tEndFrame)(void* thisptr);
@@ -174,6 +175,7 @@ public:
     static inline Hook<tEndRTAlloc> hkEndRTAlloc;
     static inline Hook<tDrawFilledRect> hkDrawFilledRect;
     static inline Hook<tDrawTexturedRect> hkDrawTexturedRect;
+    static inline Hook<tPanelSetSize> hkPanelSetSize;
     static inline Hook<tGetViewModelFOV> hkGetViewModelFOV;
     static inline Hook<tGetCursorPos> hkGetCursorPos;
     static inline Hook<tEndFrame> hkEndFrame;
@@ -255,6 +257,7 @@ public:
     static void __fastcall dEndRTAlloc(void* ecx, void* edx);
     static void __fastcall dDrawFilledRect(void* ecx, void* edx, int x0, int y0, int x1, int y1);
     static void __fastcall dDrawTexturedRect(void* ecx, void* edx, int x0, int y0, int x1, int y1);
+    static void __fastcall dPanelSetSize(void* ecx, void* edx, unsigned int vpanel, int wide, int tall);
     static float __fastcall dGetViewModelFOV(void* ecx, void* edx);
     static BOOL WINAPI dGetCursorPos(LPPOINT point);
     static void __fastcall dEndFrame(void* ecx, void* edx);
