@@ -7171,6 +7171,35 @@ namespace
         }
     }
 
+    constexpr int kPanelGetAbsPos = 10;
+    constexpr int kPanelGetClipRect = 11;
+
+    // One line per panel from p up to the root: what VGUI clips the title
+    // paint against (abs pos + clip rect are only valid during a paint).
+    void SehLogPanelChain(void* ipanel, unsigned int p, const char* tag)
+    {
+        __try
+        {
+            for (int depth = 0; p && depth < 12; ++depth)
+            {
+                int x = 0, y = 0, w = 0, h = 0, ax = 0, ay = 0, c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+                PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetPos, p, &x, &y);
+                PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetSize, p, &w, &h);
+                PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetAbsPos, p, &ax, &ay);
+                PanelCall<void, unsigned int, int*, int*, int*, int*>(ipanel, kPanelGetClipRect, p,
+                    &c0, &c1, &c2, &c3);
+                const char* name = PanelCall<const char*>(ipanel, kPanelGetName, p);
+                Game::logMsg("Title HUD chain %s d%d %s vis=%d pos %d,%d size %dx%d abs %d,%d clip %d,%d-%d,%d",
+                    tag, depth, name ? name : "?", PanelCall<bool>(ipanel, kPanelIsVisible, p) ? 1 : 0,
+                    x, y, w, h, ax, ay, c0, c1, c2, c3);
+                p = PanelCall<unsigned int>(ipanel, kPanelGetParent, p);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
     // x, y, wide, tall of a panel (relative to its parent); false on a fault.
     bool SehPanelBounds(void* ipanel, unsigned int p, int* out)
     {
@@ -7245,6 +7274,51 @@ namespace
         {
         }
         return count;
+    }
+
+    constexpr int kPanelSetSize = 4;
+
+    // Sizes p and its parents that are bigger than w x h down to w x h;
+    // returns how many were changed (old sizes in sizes[]).
+    int SehFitPanelChain(void* ipanel, unsigned int p, int w, int h,
+        unsigned int* panels, int (*sizes)[2], int count, int cap)
+    {
+        __try
+        {
+            for (int depth = 0; p && depth < 12 && count < cap; ++depth)
+            {
+                int pw = 0, ph = 0;
+                PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetSize, p, &pw, &ph);
+                bool seen = false;
+                for (int i = 0; i < count && !seen; ++i)
+                    seen = panels[i] == p;
+                if (!seen && (pw > w || ph > h))
+                {
+                    panels[count] = p;
+                    sizes[count][0] = pw;
+                    sizes[count][1] = ph;
+                    ++count;
+                    PanelCall<void, unsigned int, int, int>(ipanel, kPanelSetSize, p, w, h);
+                }
+                p = PanelCall<unsigned int>(ipanel, kPanelGetParent, p);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return count;
+    }
+
+    void SehRestorePanelSizes(void* ipanel, const unsigned int* panels, const int (*sizes)[2], int count)
+    {
+        __try
+        {
+            for (int i = count - 1; i >= 0; --i)
+                PanelCall<void, unsigned int, int, int>(ipanel, kPanelSetSize, panels[i], sizes[i][0], sizes[i][1]);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
     }
 
     void SehShowPanels(void* ipanel, const unsigned int* panels, int count)
@@ -7322,7 +7396,34 @@ int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
     for (int i = 0; i < 2; ++i)
     {
         if (m_TitleHudPanels[i] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[i]))
+        {
             targets[n++] = m_TitleHudPanels[i];
+            static int s_chainLog[2];
+            if (s_chainLog[i] < 2)
+            {
+                SehLogPanelChain(m_VguiPanel, m_TitleHudPanels[i], kTitleHudNames[i]);
+                ++s_chainLog[i];
+            }
+        }
+    }
+    // The client root follows the eye-sized screen (3472x3536 at the user's
+    // RenderScale), and HudCredits fills it. Painted that way into the
+    // 1280x640 HUD RT the title paint issued no draw at all (audit,
+    // 2026-11-01); at eyes up to ~1300 px the root stays window-sized and the
+    // logo shows. Shrinking the chain to the RT for this paint brings it back.
+    m_TitleFitCount = 0;
+    UINT tw = 0, th = 0;
+    if (n && HudOverlayPixelSize(tw, th))
+    {
+        for (int i = 0; i < n; ++i)
+            m_TitleFitCount = SehFitPanelChain(m_VguiPanel, targets[i], static_cast<int>(tw),
+                static_cast<int>(th), m_TitleFitPanels, m_TitleFitSizes, m_TitleFitCount, 16);
+        static int s_fitLog;
+        if (m_TitleFitCount && s_fitLog < 4)
+        {
+            Game::logMsg("Title HUD fitted %d panels to %ux%u for the paint", m_TitleFitCount, tw, th);
+            ++s_fitLog;
+        }
     }
     return n ? SehIsolatePanels(m_VguiPanel, targets, n, hidden, cap) : 0;
 }
@@ -7331,6 +7432,9 @@ void VR::RestoreTitleHudPanels(const unsigned int* hidden, int count)
 {
     if (m_VguiPanel && count > 0)
         SehShowPanels(m_VguiPanel, hidden, count);
+    if (m_VguiPanel && m_TitleFitCount > 0)
+        SehRestorePanelSizes(m_VguiPanel, m_TitleFitPanels, m_TitleFitSizes, m_TitleFitCount);
+    m_TitleFitCount = 0;
 }
 
 bool VR::EngineGameUiVisible() const

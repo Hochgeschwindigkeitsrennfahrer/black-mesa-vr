@@ -642,6 +642,10 @@ public:
     void* m_EngineVGuiFromPaint = nullptr;
     void* m_VguiPanel = nullptr; // vgui2.dll VGUI_Panel009
     unsigned int m_TitleHudPanels[2] = {};
+    // Panels resized to the HUD RT for the title paint, with their own sizes.
+    unsigned int m_TitleFitPanels[16] = {};
+    int m_TitleFitSizes[16][2] = {};
+    int m_TitleFitCount = 0;
     unsigned long long m_TitleHudNextSearchMs = 0;
     bool m_TitleHudActive = false;
     // The HUD RT paint in flight is the title layer (no menu cursor / colour
