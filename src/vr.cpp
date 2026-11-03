@@ -1252,6 +1252,25 @@ namespace
         return true;
     }
 
+    // The window-sized reflection viewport/scissor/clear as the game issues
+    // it on a grown reflection RT. When the RT is narrower or shorter than the
+    // window (eye 3472 at ReflectionRtScale 0.5 = 1728 wide vs a 1920x1080
+    // window) the size can arrive clamped to the RT per axis; that must remap
+    // too, or the view only fills part of the RT and the rest keeps an older
+    // frame (2026-11-03: the menu lobby showing in bm_c2a2a's water).
+    bool MatchesWindowOnReflectionRt(UINT w, UINT h, UINT rw, UINT rh)
+    {
+        if (ViewportMatchesWindow(w, h))
+            return true;
+        UINT winW = 0, winH = 0;
+        if (!QueryGameClientSize(winW, winH))
+            return false;
+        const int cw = static_cast<int>((std::min)(winW, rw));
+        const int ch = static_cast<int>((std::min)(winH, rh));
+        return (cw != static_cast<int>(winW) || ch != static_cast<int>(winH))
+            && std::abs(static_cast<int>(w) - cw) <= 16 && std::abs(static_cast<int>(h) - ch) <= 16;
+    }
+
     void LogReflectionRemap(const char* what, UINT fromW, UINT fromH, UINT toW, UINT toH)
     {
         static UINT s_lastFrom[3][2];
@@ -1569,6 +1588,27 @@ namespace
         D3DVIEWPORT9 vp{};
         const D3DVIEWPORT9* use = pViewport;
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+        {
+            // Every distinct viewport size issued on a grown reflection RT
+            // (first 16), to see what the reflection views ask for.
+            static int s_reflVpLog;
+            UINT rw = 0, rh = 0;
+            if (pViewport && vr && s_reflVpLog < 16 && Rt0IsGrownReflection(vr, rw, rh))
+            {
+                static UINT s_last[2];
+                if (s_last[0] != pViewport->Width || s_last[1] != pViewport->Height)
+                {
+                    s_last[0] = pViewport->Width;
+                    s_last[1] = pViewport->Height;
+                    UINT winW = 0, winH = 0;
+                    QueryGameClientSize(winW, winH);
+                    Game::logMsg("D3D reflection RT %ux%u: viewport %ux%u @%u,%u (window %ux%u, match %d)",
+                        rw, rh, pViewport->Width, pViewport->Height, pViewport->X, pViewport->Y,
+                        winW, winH, MatchesWindowOnReflectionRt(pViewport->Width, pViewport->Height, rw, rh) ? 1 : 0);
+                    ++s_reflVpLog;
+                }
+            }
+        }
         if (pViewport && vr && vr->D3dRt0IsMcRing())
         {
             int cx = 0, cy = 0, cw = 0, ch = 0;
@@ -1626,9 +1666,9 @@ namespace
             }
         }
         else if (use == pViewport && pViewport && vr
-            && ViewportMatchesWindow(pViewport->Width, pViewport->Height)
             && pViewport->X <= 16 && pViewport->Y <= 16
-            && Rt0IsGrownReflection(vr, reflW, reflH))
+            && Rt0IsGrownReflection(vr, reflW, reflH)
+            && MatchesWindowOnReflectionRt(pViewport->Width, pViewport->Height, reflW, reflH))
         {
             vp = *pViewport;
             vp.X = 0;
@@ -1693,9 +1733,10 @@ namespace
             const UINT h = static_cast<UINT>(pRect->bottom - pRect->top);
             int cx = 0, cy = 0, cw = 0, ch = 0;
             UINT reflW = 0, reflH = 0;
-            if (!vr->D3dRt0IsMcRing() && ViewportMatchesWindow(w, h)
+            if (!vr->D3dRt0IsMcRing()
                 && pRect->left <= 16 && pRect->top <= 16
-                && Rt0IsGrownReflection(vr, reflW, reflH))
+                && Rt0IsGrownReflection(vr, reflW, reflH)
+                && MatchesWindowOnReflectionRt(w, h, reflW, reflH))
             {
                 expanded.left = 0;
                 expanded.top = 0;
@@ -1781,7 +1822,7 @@ namespace
                 const LONG w = rects[0].x2 - rects[0].x1;
                 const LONG h = rects[0].y2 - rects[0].y1;
                 if (w > 0 && h > 0 && rects[0].x1 <= 16 && rects[0].y1 <= 16
-                    && ViewportMatchesWindow(static_cast<UINT>(w), static_cast<UINT>(h)))
+                    && MatchesWindowOnReflectionRt(static_cast<UINT>(w), static_cast<UINT>(h), reflW, reflH))
                 {
                     full.x1 = 0;
                     full.y1 = 0;
