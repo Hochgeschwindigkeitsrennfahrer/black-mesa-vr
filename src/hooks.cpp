@@ -3982,7 +3982,11 @@ namespace
     // Viewport rewrite, DoEnginePost eye w/h, and growing _rt_Small*FB* to
     // eye/N all failed (ghosts stayed, or the whole image zoomed/warped with
     // head movement). Keep the rest of post (bms_postprocess / xog / DOF /
-    // god rays).
+    // god rays). dev/bloomadd is the bloom add the engine draws instead of
+    // engine_post when mat_colorcorrection is 0: it sampled the stale
+    // window-sized 480x270 bloom buffer (BM's HUD glow) with eye/4 texel
+    // coordinates and smeared the HUD numbers over the top-left of each eye
+    // (2026-11-03).
     bool StereoBloomMaterial(const char* name)
     {
         if (!name || !name[0])
@@ -3993,7 +3997,8 @@ namespace
             || std::strstr(name, "lumcompare") != nullptr
             || std::strstr(name, "downsample") != nullptr
             || std::strstr(name, "blurfilter") != nullptr
-            || std::strstr(name, "blur_combine") != nullptr;
+            || std::strstr(name, "blur_combine") != nullptr
+            || std::strstr(name, "bloomadd") != nullptr;
     }
 
     // engine_post* is the final LDR composite (bloom add, tonemap, colour
