@@ -527,6 +527,14 @@ namespace
     constexpr int kAuditMaxLines = 6000;
     // Material the render thread bound last (IMatRenderContext::Bind hook).
     thread_local char t_AuditMaterial[96];
+    // Shadow copy of the shader constants (as the GPU gets them) while an
+    // audit runs; draws of a material containing $BMVR_AUDIT_CONSTS (env)
+    // log their non-zero VS c0-c47 / PS c0-c31.
+    bool DumpSurfaceBmp(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path, int step,
+        bool alphaOnly);
+    float g_AuditVsConst[256 * 4];
+    float g_AuditPsConst[224 * 4];
+    char g_AuditConstMat[64] = { 1 };  // { 1 } = env not read yet
 
     bool AuditLogging()
     {
@@ -706,6 +714,63 @@ namespace
             }
             ++g_AuditGroupDraws;
             g_AuditGroupPrims += prims;
+        }
+        if (AuditLogging() && g_AuditConstMat[0] == 1)
+        {
+            g_AuditConstMat[0] = 0;
+            GetEnvironmentVariableA("BMVR_AUDIT_CONSTS", g_AuditConstMat, sizeof(g_AuditConstMat));
+        }
+        if (AuditLogging() && g_AuditConstMat[0] && t_AuditMaterial[0]
+            && std::strstr(t_AuditMaterial, g_AuditConstMat) && g_AuditLines < kAuditMaxLines)
+        {
+            auto dumpConsts = [&](const char* tag, const float* c, int n) {
+                std::string out;
+                char b[96];
+                for (int i = 0; i < n; ++i)
+                {
+                    const float* v = c + i * 4;
+                    if (v[0] == 0.f && v[1] == 0.f && v[2] == 0.f && v[3] == 0.f)
+                        continue;
+                    std::snprintf(b, sizeof(b), " c%d=(%.4g,%.4g,%.4g,%.4g)", i, v[0], v[1], v[2], v[3]);
+                    out += b;
+                }
+                Game::logMsg("audit consts e%d %s %s:%s", eye, t_AuditMaterial, tag, out.c_str());
+                ++g_AuditLines;
+            };
+            AuditFlushGroup();
+            dumpConsts("VS", g_AuditVsConst, 48);
+            dumpConsts("PS", g_AuditPsConst, 32);
+            // Once per eye: the eye-sized textures this draw samples (light
+            // accumulation etc.) as VR/audit-<mat>-e<eye>-s<stage>.bmp.
+            static int s_dumped[3];
+            if (vr && (eye == 1 || eye == 2) && rw == vr->m_RenderWidth && !s_dumped[eye])
+            {
+                bool any = false;
+                for (DWORD stage = 0; stage < 16; ++stage)
+                {
+                    IDirect3DBaseTexture9* bt = nullptr;
+                    if (FAILED(device->GetTexture(stage, &bt)) || !bt)
+                        continue;
+                    if (bt->GetType() == D3DRTYPE_TEXTURE)
+                    {
+                        auto* tex = static_cast<IDirect3DTexture9*>(bt);
+                        D3DSURFACE_DESC d{};
+                        IDirect3DSurface9* surf = nullptr;
+                        if (SUCCEEDED(tex->GetLevelDesc(0, &d)) && (d.Usage & D3DUSAGE_RENDERTARGET)
+                            && d.Width == vr->m_RenderWidth && SUCCEEDED(tex->GetSurfaceLevel(0, &surf)) && surf)
+                        {
+                            char name[96];
+                            std::snprintf(name, sizeof(name), "audit-e%d-s%lu.bmp", eye, stage);
+                            DumpSurfaceBmp(device, surf, bmvr::VrFilePath(name), 2, false);
+                            surf->Release();
+                            any = true;
+                        }
+                    }
+                    bt->Release();
+                }
+                if (any)
+                    s_dumped[eye] = 1;
+            }
         }
         AuditMarkWritten(vr, rtKey, rw, rh, eye);
     }
@@ -1570,6 +1635,24 @@ namespace
         }
         if (!orig)
             return D3DERR_INVALIDCALL;
+        if (use && g_AuditFramesLeft.load(std::memory_order_relaxed) > 0 && vec4Count <= 256)
+        {
+            const bool vs = tag && tag[0] == 'V';
+            // Who writes VS c14-c17 (a view-projection the inside-light pass reads).
+            if (vs && start <= 17 && start + vec4Count > 14 && AuditLogging() && g_AuditLines < kAuditMaxLines)
+            {
+                const float* r = use + (14 > start ? (14 - start) * 4 : 0);
+                Game::logMsg("audit vsc14 e%d start=%u n=%u mat=%s c14=(%.4g,%.4g,%.4g,%.4g)",
+                    GpuTimerEye(vr), start, vec4Count, t_AuditMaterial, r[0], r[1], r[2], r[3]);
+                ++g_AuditLines;
+            }
+            const UINT cap = vs ? 256u : 224u;
+            if (start < cap)
+            {
+                const UINT n = (std::min)(vec4Count, cap - start);
+                std::memcpy((vs ? g_AuditVsConst : g_AuditPsConst) + start * 4, use, n * 4 * sizeof(float));
+            }
+        }
         return orig(device, start, use, vec4Count);
     }
 
@@ -4209,7 +4292,8 @@ namespace
         const bool f16 = d.Format == D3DFMT_A16B16G16R16F;
         const bool bgra = d.Format == D3DFMT_A8R8G8B8 || d.Format == D3DFMT_X8R8G8B8;
         const bool rgba = d.Format == D3DFMT_A8B8G8R8 || d.Format == D3DFMT_X8B8G8R8;
-        if (!f16 && !bgra && !rgba)
+        const bool a2r10 = d.Format == D3DFMT_A2R10G10B10;
+        if (!f16 && !bgra && !rgba && !a2r10)
         {
             Game::logMsg("debug dump %s: format %u not handled (%ux%u)", path.c_str(), d.Format, d.Width, d.Height);
             return false;
@@ -4238,6 +4322,15 @@ namespace
                         r = c(HalfToFloat(p[0])); g = c(HalfToFloat(p[1])); b = c(HalfToFloat(p[2]));
                         if (alphaOnly)
                             r = g = b = c(HalfToFloat(p[3]));
+                    }
+                    else if (a2r10)
+                    {
+                        const uint32_t v = *reinterpret_cast<const uint32_t*>(row + static_cast<size_t>(x * step) * 4);
+                        b = static_cast<uint8_t>((v & 0x3FF) >> 2);
+                        g = static_cast<uint8_t>(((v >> 10) & 0x3FF) >> 2);
+                        r = static_cast<uint8_t>(((v >> 20) & 0x3FF) >> 2);
+                        if (alphaOnly)
+                            r = g = b = static_cast<uint8_t>((v >> 30) * 85);
                     }
                     else
                     {
