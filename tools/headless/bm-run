@@ -29,7 +29,14 @@ for f in "${DLLS[@]}"; do
 	[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || { echo "$f is not the expected installed DLL; refusing" >&2; exit 1; }
 done
 cp "$GAME/d3d9.dll" "$out/orig-d3d9.dll"
-# -w/-h are saved by the game into bms/videoconfig.cfg (the player's resolution); put it back afterwards
+# -w/-h are saved by the game into bms/videoconfig.cfg (the player's resolution); put it back afterwards.
+# A live file already at the test size means an earlier run leaked it (2026-11-03: the player's own VR
+# sessions then ran at 1280x640, and every later run "restored" that); refuse instead of saving it as orig.
+vc_size() { sed -n 's/^[[:space:]]*"Screen\(Width\|Height\)"[[:space:]]*"\([0-9]*\)".*/\2/p' "$1" | paste -sd x; }
+if [[ $(vc_size "$GAME/bms/videoconfig.cfg") == "${BMVR_W:-1280}x${BMVR_H:-640}" ]]; then
+	echo "bms/videoconfig.cfg is already at the test size ${BMVR_W:-1280}x${BMVR_H:-640}: leaked from an earlier run? fix it first" >&2
+	exit 1
+fi
 cp -a "$GAME/bms/videoconfig.cfg" "$out/orig-videoconfig.cfg" 2>/dev/null || true
 # The game also writes every archived cvar a test sets (e.g. cl_csm_enabled, np_gr_quality) into
 # bms/cfg/config.cfg on exit, and Steam Cloud keeps a copy in userdata/*/362890/remote/cfg (2026-10-25:
@@ -45,14 +52,17 @@ restore() {
 		cp "$out/orig-d3d9.dll" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
 		[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || ok=0
 	done
+	chmod u+w "$GAME/bms/videoconfig.cfg" 2>/dev/null || true
 	[[ -f $out/orig-videoconfig.cfg ]] && cp -a "$out/orig-videoconfig.cfg" "$GAME/bms/videoconfig.cfg"
 	[[ -f $out/orig-config.cfg ]] && cp -a "$out/orig-config.cfg" "$GAME/bms/cfg/config.cfg"
+	[[ ! -f $out/orig-videoconfig.cfg ]] || cmp -s "$out/orig-videoconfig.cfg" "$GAME/bms/videoconfig.cfg" || ok=0
+	[[ ! -f $out/orig-config.cfg ]] || cmp -s "$out/orig-config.cfg" "$GAME/bms/cfg/config.cfg" || ok=0
 	local i
 	for i in "${!CLOUD_CFGS[@]}"; do
 		[[ -f $out/orig-cloud-config-$i.cfg ]] && cp -a "$out/orig-cloud-config-$i.cfg" "${CLOUD_CFGS[$i]}"
 	done
 	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified) + videoconfig/config.cfg" >> "$out/run.log" \
-		|| echo "RESTORE FAILED" | tee -a "$out/run.log" >&2
+		|| echo "RESTORE FAILED (DLLs or settings differ from the saved originals in $out)" | tee -a "$out/run.log" >&2
 }
 cleanup() {
 	[[ -n ${game_pid:-} ]] && kill "$game_pid" 2>/dev/null || true
@@ -63,6 +73,8 @@ cleanup() {
 	restore
 }
 trap cleanup EXIT
+# The game cannot write the player's resolution at all during the run (restore() makes it writable again).
+chmod a-w "$GAME/bms/videoconfig.cfg"
 for f in "${DLLS[@]}"; do
 	cp "$BMVR_DLL" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
 done
