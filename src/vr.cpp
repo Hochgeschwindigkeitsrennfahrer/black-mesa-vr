@@ -7833,12 +7833,15 @@ namespace
 
 // Cubemap reflection strength per material class, as one-time material
 // state: $envmaptint = its own value x the class scale (the shaders read it
-// per draw). The list is walked when the map or a scale changes, and when
-// the material count changes or one scaled material reads back unscaled
-// (checked every 2 s; reloads such as mat_specular); other frames pay a few
-// compares. Each material keeps its
-// original tint and the value written; a tint that no longer matches what
-// was written was reloaded by the game and becomes the new original.
+// per draw). The whole list is walked when the map or a scale changes, or
+// when one scaled material reads back unscaled (reloads such as
+// mat_specular). A changed material count (checked every 2 s) only visits
+// materials not seen before: firing and breaking props load materials
+// mid-map, and a full walk of ~7000 cost 0.2-0.5 s on the game thread each
+// time (stutter, 2026-11-03). Other frames pay a few compares. Each material
+// keeps its original tint and the value written; a tint that no longer
+// matches what was written was reloaded by the game and becomes the new
+// original.
 void VR::UpdateEnvmapScale()
 {
     if (!m_Game || !m_Game->m_MaterialSystem)
@@ -7855,22 +7858,27 @@ void VR::UpdateEnvmapScale()
     }
     void* matsys = m_Game->m_MaterialSystem;
     const unsigned long long now = GetTickCount64();
+    bool newOnly = false;
     if (!scalesChanged && !mapChanged)
     {
         if (now < m_EnvmapNextWalkMs)
             return;
         m_EnvmapNextWalkMs = now + 2000;
         const int count = SehNumMaterials(matsys);
-        if (count == m_EnvmapMaterialCount)
+        // mat_specular and other reloads keep the count but rebuild the
+        // vars: read one scaled material back.
+        bool reloaded = false;
+        if (!m_EnvmapTints.empty())
         {
-            // mat_specular and other reloads keep the count but rebuild the
-            // vars: read one scaled material back.
-            if (m_EnvmapTints.empty())
-                return;
             const auto& probe = *m_EnvmapTints.begin();
             float cur[3];
-            if (SehFindEnvmapTint(probe.first, cur) && std::memcmp(cur, probe.second.written, sizeof(cur)) == 0)
+            reloaded = !SehFindEnvmapTint(probe.first, cur) || std::memcmp(cur, probe.second.written, sizeof(cur)) != 0;
+        }
+        if (!reloaded)
+        {
+            if (count == m_EnvmapMaterialCount)
                 return;
+            newOnly = count > m_EnvmapMaterialCount && !m_EnvmapKnown.empty();
         }
     }
     m_EnvmapNextWalkMs = now + 2000;
@@ -7884,8 +7892,14 @@ void VR::UpdateEnvmapScale()
         float scale[3];
         EnvmapWalkStats stats;
         std::unordered_map<IMaterial*, EnvmapTintEntry> seen;
-    } ctx{ this, { 1.f, wantWorld, wantModels }, {}, {} };
-    ctx.seen.reserve(m_EnvmapTints.size() + 256);
+        std::unordered_set<IMaterial*> known;
+        bool newOnly;
+    } ctx{ this, { 1.f, wantWorld, wantModels }, {}, {}, {}, newOnly };
+    if (newOnly)
+        ctx.seen = m_EnvmapTints;
+    else
+        ctx.seen.reserve(m_EnvmapTints.size() + 256);
+    ctx.known.reserve(m_EnvmapKnown.size() + 256);
 
     LARGE_INTEGER f{}, t0{}, t1{};
     QueryPerformanceFrequency(&f);
@@ -7893,6 +7907,9 @@ void VR::UpdateEnvmapScale()
     int count = 0;
     const bool ok = SehWalkMaterials(matsys, [](void* p, IMaterial* m, const char* name) {
         auto& c = *static_cast<Ctx*>(p);
+        c.known.insert(m);
+        if (c.newOnly && c.vr->m_EnvmapKnown.count(m))
+            return;
         const int cls = EnvmapClass(name);
         auto it = c.vr->m_EnvmapTints.find(m);
         // Unscaled class and nothing to restore: do not touch (FindVar
@@ -7917,17 +7934,21 @@ void VR::UpdateEnvmapScale()
             ++c.stats.changed;
         }
         if (c.scale[cls] != 1.f)
-            c.seen.emplace(m, e);
+            c.seen[m] = e;
     }, &ctx, &count);
     QueryPerformanceCounter(&t1);
     m_EnvmapTints.swap(ctx.seen);
+    m_EnvmapKnown.swap(ctx.known);
     m_EnvmapMaterialCount = ok ? SehNumMaterials(matsys) : -1;
     const double ms = f.QuadPart ? 1000.0 * (t1.QuadPart - t0.QuadPart) / f.QuadPart : 0.0;
-    if (ctx.stats.changed || scalesChanged || mapChanged)
+    static int s_newOnlyLog;
+    if ((ctx.stats.changed || scalesChanged || mapChanged || ms > 20.0) && (!newOnly || s_newOnlyLog < 20))
     {
-        Game::logMsg("Envmap scale world %.2f models %.2f: %d materials, tinted world %d models %d, %d changed (%.2f ms)%s",
-            wantWorld, wantModels, count, ctx.stats.tinted[1], ctx.stats.tinted[2], ctx.stats.changed, ms,
-            ok ? "" : " WALK FAULTED");
+        if (newOnly)
+            ++s_newOnlyLog;
+        Game::logMsg("Envmap scale world %.2f models %.2f: %d materials%s, tinted world %d models %d, %d changed (%.2f ms)%s",
+            wantWorld, wantModels, count, newOnly ? " (new only)" : "", ctx.stats.tinted[1], ctx.stats.tinted[2],
+            ctx.stats.changed, ms, ok ? "" : " WALK FAULTED");
     }
 }
 

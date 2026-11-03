@@ -15,6 +15,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstring>
 #include <chrono>
 #include <d3d9.h>
@@ -729,6 +730,9 @@ public:
         float written[3];
     };
     std::unordered_map<IMaterial*, EnvmapTintEntry> m_EnvmapTints;
+    // Every material the last walks visited, so a count change (new gibs,
+    // decals, effects mid-map) only looks at the new ones.
+    std::unordered_set<IMaterial*> m_EnvmapKnown;
     std::string m_EnvmapMap;
     int m_EnvmapMaterialCount = -1;
     float m_EnvmapAppliedWorld = 1.f;
