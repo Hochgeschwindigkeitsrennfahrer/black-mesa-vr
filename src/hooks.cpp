@@ -9650,16 +9650,41 @@ void bmvr::InstallEarlyFramebufferHook()
 
 namespace
 {
-    // Set while the server spawns a frag the local VR player threw, so the
-    // throw-position hook (also used by NPC and other grenades) only moves that one.
-    bool g_VrFragSpawn = false;
+    // Set while the server spawns a grenade of the local VR player (a thrown
+    // frag or an MP5 launcher grenade), so the throw-position hook (also used
+    // by NPC and other grenades) only moves that one, to g_VrSpawnPoint.
+    bool g_VrGrenadeSpawn = false;
+    Vector g_VrSpawnPoint{};
+    const char* g_VrSpawnWhat = "";
 }
 
 void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode)
 {
+    constexpr int kGrenadeTypeMp5 = 0;   // CWeapon_MP5 secondary fire (contact grenade)
     constexpr int kGrenadeTypeFrag = 1;
+    // Mode 0 (used by both) places the grenade at the owner's EyePosition and
+    // ignores the throw position, 1 at the middle of the two; any other value
+    // uses the throw position, which dGrenadeThrowPosition moves to g_VrSpawnPoint.
+    constexpr int kSpawnAtThrowPosition = 2;
     if (!hkGrenadeCreate.fOriginal)
         return nullptr;
+    // MP5 grenade: launch from the drawn launcher tube instead of the eye.
+    // Velocity already follows the controller (GetShootAngles).
+    if (type == kGrenadeTypeMp5 && m_VR && m_Game && bmvr::g_VrShotOriginFix && ShouldRewriteShootAngles(owner))
+    {
+        C_BaseEntity* vm = m_Game->GetViewModelEntity();
+        Vector tube{};
+        QAngle unused{};
+        if (vm && m_Game->GetEntityAttachment(vm, "grenade", tube, unused) && tube.LengthSqr() > 1.f)
+        {
+            g_VrSpawnPoint = tube;
+            g_VrSpawnWhat = "MP5 grenade";
+            g_VrGrenadeSpawn = true;
+            void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, kSpawnAtThrowPosition);
+            g_VrGrenadeSpawn = false;
+            return grenade;
+        }
+    }
     Vector hand{};
     if (type != kGrenadeTypeFrag || !bmvr::g_VrHandThrow || !velocity || !m_VR
         || !ShouldRewriteShootAngles(owner) || !m_VR->TryGetThrowVelocity(hand))
@@ -9681,13 +9706,10 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
     *velocity = hand + playerVel;
     Game::logMsg("VR frag throw: hand %.0f u/s -> (%.0f,%.0f,%.0f) (game %.0f u/s)",
         hand.Length(), velocity->x, velocity->y, velocity->z, before.Length());
-    // Mode 0 (the frag's) places the grenade at the owner's EyePosition and
-    // ignores the throw position, 1 at the middle of the two; any other value
-    // uses the throw position, which dGrenadeThrowPosition moves to the hand.
-    constexpr int kSpawnAtThrowPosition = 2;
-    g_VrFragSpawn = true;
+    g_VrSpawnWhat = "VR frag throw";
+    g_VrGrenadeSpawn = m_VR->TryGetThrowOrigin(g_VrSpawnPoint);
     void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, kSpawnAtThrowPosition);
-    g_VrFragSpawn = false;
+    g_VrGrenadeSpawn = false;
     return grenade;
 }
 
@@ -9696,14 +9718,14 @@ bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* an
     if (!hkGrenadeThrowPosition.fOriginal)
         return false;
     const bool ok = hkGrenadeThrowPosition.fOriginal(grenade, pos, ang, owner);
-    Vector hand{};
-    if (!ok || !g_VrFragSpawn || !pos || !m_VR || !m_VR->TryGetThrowOrigin(hand))
+    if (!ok || !g_VrGrenadeSpawn || !pos || !m_VR)
         return ok;
+    const Vector hand = g_VrSpawnPoint;
     // The game's point is a little ahead of the eye after a trace from the
     // eye; a hand far from it (arm through a wall, stale pose) keeps it.
     if ((hand - *pos).LengthSqr() > 60.f * 60.f)
     {
-        Game::logMsg("VR frag throw: hand %.0f units from the game's point, kept the game's", (hand - *pos).Length());
+        Game::logMsg("%s: spawn point %.0f units from the game's point, kept the game's", g_VrSpawnWhat, (hand - *pos).Length());
         return ok;
     }
     // The game's point passed its own trace from the eye. A hand reaching
@@ -9722,11 +9744,11 @@ bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* an
         m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT_HULL, &filter, &tr);
         if (tr.startsolid || tr.fraction < 1.f)
         {
-            Game::logMsg("VR frag throw: hand behind geometry (fraction %.2f), kept the game's point", tr.fraction);
+            Game::logMsg("%s: spawn point behind geometry (fraction %.2f), kept the game's point", g_VrSpawnWhat, tr.fraction);
             return ok;
         }
     }
-    Game::logMsg("VR frag throw: spawned at the hand, %.0f units from the game's point", (hand - *pos).Length());
+    Game::logMsg("%s: spawned at the VR point, %.0f units from the game's point", g_VrSpawnWhat, (hand - *pos).Length());
     *pos = hand;
     return ok;
 }

@@ -6270,7 +6270,8 @@ bool VR::TryGetRawMuzzleWorld(Vector& origin) const
 
     C_BaseEntity* vm = m_Game->GetViewModelEntity();
     QAngle ang{};
-    static const char* kNames[] = { "muzzle", "Fire01", "Fire02" };
+    // v_crossbow has no "muzzle": its bolt leaves from "bolt_spawn".
+    static const char* kNames[] = { "muzzle", "Fire01", "Fire02", "bolt_spawn" };
     if (vm)
     {
         for (const char* name : kNames)
