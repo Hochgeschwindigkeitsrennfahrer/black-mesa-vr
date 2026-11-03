@@ -30,6 +30,14 @@ ReflectionRtScale=0.5
 # ReflectionRtScale=0. -1 (or unset) = same as ReflectionRtScale, 0 = 1024x1024.
 RefractCopyRtScale=0.5
 
+# Cubemap reflection strength (0..1, default 1 = as the game). Lower values
+# calm shiny surfaces that shimmer in the headset, without mat_specular 0
+# losing all shine. World = walls, floors, glass; Models = props and NPCs.
+# Your own weapons and hands are never changed. Also in the VR panel and as
+# bmvr_envmap_scale_world / bmvr_envmap_scale_models (live).
+EnvmapScaleWorld=1
+EnvmapScaleModels=1
+
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
 WorldRenderAtEyeSize=true

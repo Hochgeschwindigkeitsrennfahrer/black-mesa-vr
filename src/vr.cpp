@@ -7579,6 +7579,208 @@ void VR::UpdateScreenEffectNoDraw()
     Game::logMsg("Screen effects (stun / intro blur) %s in VR", want ? "off" : "on");
 }
 
+namespace
+{
+    // 0 = leave alone (own weapons/hands, effects, UI), 1 = world, 2 = models.
+    // Cubemap-patched map materials are named maps/<map>/<original name>.
+    int EnvmapClass(const char* name)
+    {
+        if (_strnicmp(name, "maps/", 5) == 0)
+        {
+            const char* slash = std::strchr(name + 5, '/');
+            if (!slash)
+                return 0;
+            name = slash + 1;
+        }
+        if (_strnicmp(name, "models/weapons/", 15) == 0)
+            return 0;
+        if (_strnicmp(name, "models/", 7) == 0)
+            return 2;
+        static const char* const kSkip[] = { "_", "sprites/", "effects/", "particle/", "particles/", "vgui/",
+            "engine/", "debug/", "dev/", "tools/", "console/", "hud/", "overlays/", "decals/" };
+        for (const char* p : kSkip)
+        {
+            if (_strnicmp(name, p, std::strlen(p)) == 0)
+                return 0;
+        }
+        return 1;
+    }
+
+    // $envmaptint as a vector var, or null.
+    void* SehFindEnvmapTint(IMaterial* m, float* rgb)
+    {
+        __try
+        {
+            using tFindVar = void*(__thiscall*)(IMaterial*, const char*, bool*, bool);
+            bool found = false;
+            void* var = reinterpret_cast<tFindVar>((*reinterpret_cast<void***>(m))[Offsets::kIMaterial_FindVarVt])(
+                m, "$envmaptint", &found, false);
+            if (!found || !var)
+                return nullptr;
+            const auto* bytes = reinterpret_cast<const unsigned char*>(var);
+            if ((bytes[Offsets::kIMaterialVar_TypeOffset] & 0xf) != 2)
+                return nullptr;
+            std::memcpy(rgb, bytes + Offsets::kIMaterialVar_VecValOffset, 3 * sizeof(float));
+            return var;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+    }
+
+    void SehSetVec3(void* var, const float* rgb)
+    {
+        __try
+        {
+            using tSet = void(__thiscall*)(void*, float, float, float);
+            reinterpret_cast<tSet>((*reinterpret_cast<void***>(var))[Offsets::kIMaterialVar_SetVecValue3Vt])(
+                var, rgb[0], rgb[1], rgb[2]);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
+    struct EnvmapWalkStats
+    {
+        int materials = 0;
+        int tinted[3] = {};
+        int changed = 0;
+    };
+
+    using EnvmapVisit = void (*)(void* ctx, IMaterial* m, const char* name);
+
+    bool SehWalkMaterials(void* matsys, EnvmapVisit visit, void* ctx, int* count)
+    {
+        __try
+        {
+            void** vt = *reinterpret_cast<void***>(matsys);
+            using tFirst = unsigned short(__thiscall*)(void*);
+            using tNext = unsigned short(__thiscall*)(void*, unsigned short);
+            using tGet = IMaterial*(__thiscall*)(void*, unsigned short);
+            const auto first = reinterpret_cast<tFirst>(vt[Offsets::kIMaterialSystem_FirstMaterialVt]);
+            const auto next = reinterpret_cast<tNext>(vt[Offsets::kIMaterialSystem_NextMaterialVt]);
+            const auto invalid = reinterpret_cast<tFirst>(vt[Offsets::kIMaterialSystem_InvalidMaterialVt]);
+            const auto get = reinterpret_cast<tGet>(vt[Offsets::kIMaterialSystem_GetMaterialVt]);
+            const unsigned short end = invalid(matsys);
+            for (unsigned short h = first(matsys); h != end; h = next(matsys, h))
+            {
+                IMaterial* m = get(matsys, h);
+                const char* name = m ? m->GetName() : nullptr;
+                ++*count;
+                if (name)
+                    visit(ctx, m, name);
+            }
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+}
+
+// Cubemap reflection strength per material class, as one-time material
+// state: $envmaptint = its own value x the class scale (the shaders read it
+// per draw). The list is walked when the map or a scale changes, and when
+// the material count changes or one scaled material reads back unscaled
+// (checked every 2 s; reloads such as mat_specular); other frames pay a few
+// compares. Each material keeps its
+// original tint and the value written; a tint that no longer matches what
+// was written was reloaded by the game and becomes the new original.
+void VR::UpdateEnvmapScale()
+{
+    if (!m_Game || !m_Game->m_MaterialSystem)
+        return;
+    const float wantWorld = m_IsVREnabled ? bmvr::g_EnvmapScaleWorld : 1.f;
+    const float wantModels = m_IsVREnabled ? bmvr::g_EnvmapScaleModels : 1.f;
+    const bool scalesChanged = wantWorld != m_EnvmapAppliedWorld || wantModels != m_EnvmapAppliedModels;
+    const bool mapChanged = m_EnvmapMap != m_CurrentMapName;
+    const bool idle = wantWorld == 1.f && wantModels == 1.f && m_EnvmapTints.empty();
+    if (idle && !scalesChanged)
+    {
+        m_EnvmapMap = m_CurrentMapName;
+        return;
+    }
+    void* matsys = m_Game->m_MaterialSystem;
+    const unsigned long long now = GetTickCount64();
+    if (!scalesChanged && !mapChanged)
+    {
+        if (now < m_EnvmapNextWalkMs)
+            return;
+        m_EnvmapNextWalkMs = now + 2000;
+        const int count = SehNumMaterials(matsys);
+        if (count == m_EnvmapMaterialCount)
+        {
+            // mat_specular and other reloads keep the count but rebuild the
+            // vars: read one scaled material back.
+            if (m_EnvmapTints.empty())
+                return;
+            const auto& probe = *m_EnvmapTints.begin();
+            float cur[3];
+            if (SehFindEnvmapTint(probe.first, cur) && std::memcmp(cur, probe.second.written, sizeof(cur)) == 0)
+                return;
+        }
+    }
+    m_EnvmapNextWalkMs = now + 2000;
+    m_EnvmapMap = m_CurrentMapName;
+    m_EnvmapAppliedWorld = wantWorld;
+    m_EnvmapAppliedModels = wantModels;
+
+    struct Ctx
+    {
+        VR* vr;
+        float scale[3];
+        EnvmapWalkStats stats;
+        std::unordered_map<IMaterial*, EnvmapTintEntry> seen;
+    } ctx{ this, { 1.f, wantWorld, wantModels }, {}, {} };
+    ctx.seen.reserve(m_EnvmapTints.size() + 256);
+
+    LARGE_INTEGER f{}, t0{}, t1{};
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    int count = 0;
+    const bool ok = SehWalkMaterials(matsys, [](void* p, IMaterial* m, const char* name) {
+        auto& c = *static_cast<Ctx*>(p);
+        const int cls = EnvmapClass(name);
+        auto it = c.vr->m_EnvmapTints.find(m);
+        // Unscaled class and nothing to restore: do not touch (FindVar
+        // precaches the material's vars).
+        if (cls == 0 || (c.scale[cls] == 1.f && it == c.vr->m_EnvmapTints.end()))
+            return;
+        float cur[3];
+        void* var = SehFindEnvmapTint(m, cur);
+        if (!var)
+            return;
+        ++c.stats.tinted[cls];
+        EnvmapTintEntry e{};
+        if (it != c.vr->m_EnvmapTints.end() && std::memcmp(cur, it->second.written, sizeof(cur)) == 0)
+            std::memcpy(e.orig, it->second.orig, sizeof(e.orig));
+        else
+            std::memcpy(e.orig, cur, sizeof(e.orig));
+        for (int i = 0; i < 3; ++i)
+            e.written[i] = e.orig[i] * c.scale[cls];
+        if (std::memcmp(cur, e.written, sizeof(cur)) != 0)
+        {
+            SehSetVec3(var, e.written);
+            ++c.stats.changed;
+        }
+        if (c.scale[cls] != 1.f)
+            c.seen.emplace(m, e);
+    }, &ctx, &count);
+    QueryPerformanceCounter(&t1);
+    m_EnvmapTints.swap(ctx.seen);
+    m_EnvmapMaterialCount = ok ? SehNumMaterials(matsys) : -1;
+    const double ms = f.QuadPart ? 1000.0 * (t1.QuadPart - t0.QuadPart) / f.QuadPart : 0.0;
+    if (ctx.stats.changed || scalesChanged || mapChanged)
+    {
+        Game::logMsg("Envmap scale world %.2f models %.2f: %d materials, tinted world %d models %d, %d changed (%.2f ms)%s",
+            wantWorld, wantModels, count, ctx.stats.tinted[1], ctx.stats.tinted[2], ctx.stats.changed, ms,
+            ok ? "" : " WALK FAULTED");
+    }
+}
+
 void VR::UpdateTitleHud()
 {
     const bool was = m_TitleHudActive;

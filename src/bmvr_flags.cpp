@@ -121,6 +121,8 @@ namespace bmvr
     float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
     bool g_VrSkipScreenEffects = true;
+    float g_EnvmapScaleWorld = 1.f;
+    float g_EnvmapScaleModels = 1.f;
     bool g_StereoEnginePost = true;
     uint32_t g_MaxEyeSize = 4096;
     float g_ReflectionRtScale = 0.5f;
@@ -635,6 +637,10 @@ namespace bmvr
                 g_VrSkipMotionBlur = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSkipScreenEffects") == 0)
                 g_VrSkipScreenEffects = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "EnvmapScaleWorld") == 0)
+                g_EnvmapScaleWorld = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "EnvmapScaleModels") == 0)
+                g_EnvmapScaleModels = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "StereoEnginePost") == 0)
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassTiming") == 0)

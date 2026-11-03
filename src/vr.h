@@ -14,6 +14,7 @@
 #include <mutex>
 #include <vector>
 #include <string>
+#include <unordered_map>
 #include <cstring>
 #include <chrono>
 #include <d3d9.h>
@@ -722,6 +723,17 @@ public:
     IMaterial* m_ScreenFxMaterials[3] = {};
     bool m_ScreenFxNoDraw = false;
     int m_ScreenFxMaterialCount = -1;
+    struct EnvmapTintEntry
+    {
+        float orig[3];
+        float written[3];
+    };
+    std::unordered_map<IMaterial*, EnvmapTintEntry> m_EnvmapTints;
+    std::string m_EnvmapMap;
+    int m_EnvmapMaterialCount = -1;
+    float m_EnvmapAppliedWorld = 1.f;
+    float m_EnvmapAppliedModels = 1.f;
+    unsigned long long m_EnvmapNextWalkMs = 0;
     bool m_FrameCopyLatched = false;
     uint32_t m_FrameCopyWidth = 0;
     uint32_t m_FrameCopyHeight = 0;
@@ -1039,6 +1051,7 @@ public:
     int IsolateTitleHudPanels(unsigned int* hidden, int cap);
     void RestoreTitleHudPanels(const unsigned int* hidden, int count);
     void UpdateScreenEffectNoDraw();
+    void UpdateEnvmapScale();
     void SetHudPaintTitle(bool title) { m_HudPaintTitle.store(title, std::memory_order_release); }
     bool GameUiVisible() const { return m_GameUiVisible; }
     // WM_ACTIVATEAPP. Default true so the first frames publish before any

@@ -6933,6 +6933,7 @@ void __fastcall Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
     {
         m_VR->UpdateTitleHud();
         m_VR->UpdateScreenEffectNoDraw();
+        m_VR->UpdateEnvmapScale();
     }
     if (inGame && eligible && m_VR && m_VR->WantHudLayer()
         && !m_VR->Want2dMenuPanel())

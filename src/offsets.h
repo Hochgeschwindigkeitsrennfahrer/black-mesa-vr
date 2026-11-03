@@ -560,6 +560,15 @@ public:
     // 31 SetMaterialVarFlag(flag, on), 32 GetMaterialVarFlag. Two slots past
     // sdk.h's IMaterial (its SetMaterialVarFlag lands on AlphaModulate).
     static constexpr int kIMaterial_SetMaterialVarFlagVt = 31;
+    // CMaterial 11 = FindVar(name, bool* found, bool complain) (precaches the
+    // vars, scans m_pShaderParams by symbol). CMaterialVar (RTTI, 26234270):
+    // SetVecValue overloads in reverse order, 10 (x,y,z,w), 11 (x,y,z),
+    // 12 (x,y), 13 (const float*, int). m_VecVal at +0xC, type nibble at
+    // +0x1C (2 = vector).
+    static constexpr int kIMaterial_FindVarVt = 11;
+    static constexpr int kIMaterialVar_SetVecValue3Vt = 11;
+    static constexpr int kIMaterialVar_VecValOffset = 0xC;
+    static constexpr int kIMaterialVar_TypeOffset = 0x1C;
     static constexpr int kIMaterialSystem_SetRTFBOverrideVt = 142; // +0x238
     static constexpr int kIMaterialSystem_GetRTFBDimensionsVt = 143; // +0x23C
 

@@ -273,6 +273,11 @@ namespace bmvr
     extern float g_ThrowScale;           // hand speed x 2/3 x this, capped at 1000 u/s (Lambda1VR vr_throw_scale)
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
     extern bool g_VrSkipScreenEffects;   // skip env_screeneffect overlays (stun / intro blur) in VR
+    // EnvmapScaleWorld / EnvmapScaleModels (0..1, default 1): cubemap reflection
+    // strength ($envmaptint) of brush materials / model materials in VR.
+    // models/weapons/* (view models, hands) are never scaled.
+    extern float g_EnvmapScaleWorld;
+    extern float g_EnvmapScaleModels;
     extern bool g_StereoEnginePost;      // run engine_post (tonemap / colour correction / FXAA) on eyes, bloom zeroed
     // MaxEyeSize (default 4096, 2048..8192): largest eye RT side. Both axes
     // shrink by one factor when RenderScale asks for more. MulticoreMode also
