@@ -344,6 +344,11 @@ public:
         kVmFlagMp5 = 1u << 5,
     };
     bool ViewmodelIsMp5() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagMp5) != 0; }
+    // Viewmodel sequence is a reload/draw/holster/pump-style action: the
+    // gun moves away from the aim, so the laser beam is hidden.
+    void NoteViewmodelBeamHidden(bool hide) { m_ViewmodelBeamHidden.store(hide, std::memory_order_relaxed); }
+    // Muzzle in the gun frame, from the bones as drawn (viewmodel DME).
+    void NoteDrawnMuzzleLocal(const Vector& local);
     bool ViewmodelIsRpg() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagRpg) != 0; }
     bool ViewmodelIsGluon() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGluon) != 0; }
     bool ViewmodelIsScoped() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagScoped) != 0; }
@@ -1395,6 +1400,10 @@ private:
     Vector m_AimBeamLocal{};          // muzzle in the gun model frame (fwd, right, up)
     bool m_AimBeamLocalValid = false;
     std::string m_AimBeamLocalKey;
+    std::atomic<bool> m_ViewmodelBeamHidden{ false };
+    Vector m_DrawnMuzzleLocal{};
+    bool m_DrawnMuzzleLocalValid = false;
+    std::string m_DrawnMuzzleLocalKey;
     float m_AimShootAlong = 0.f;      // shot origin along the aim from the controller
     float m_AimHitDist = 0.f;         // shot origin -> marker
     bool m_HasHevSuit = true;

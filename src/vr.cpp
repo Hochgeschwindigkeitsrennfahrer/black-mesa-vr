@@ -6250,12 +6250,34 @@ void VR::UpdateMuzzleLocal(const std::string& weaponKey)
     // VR), so keep following it: the first sample is taken during the draw
     // animation, and the old "near the view centre only" refine left that
     // low sample in place while the gun was held off-centre.
+    // Preferred: the muzzle as the viewmodel DME drew it, in that draw's own
+    // gun frame. The raw attachment above comes from bones set up for the
+    // previous pose, so against this frame's gun pose it trails a moving gun
+    // (laser start a frame or two behind the barrel).
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        if (m_DrawnMuzzleLocalValid && m_DrawnMuzzleLocalKey == weaponKey)
+        {
+            m_AimBeamLocal = m_DrawnMuzzleLocal;
+            m_AimBeamLocalKey = weaponKey;
+            m_AimBeamLocalValid = true;
+            return;
+        }
+    }
     if (fresh)
         m_AimBeamLocal = local;
     else
         m_AimBeamLocal = m_AimBeamLocal + (local - m_AimBeamLocal) * 0.3f;
     m_AimBeamLocalKey = weaponKey;
     m_AimBeamLocalValid = true;
+}
+
+void VR::NoteDrawnMuzzleLocal(const Vector& local)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    m_DrawnMuzzleLocal = local;
+    m_DrawnMuzzleLocalKey = m_VmClass.numpadKey;
+    m_DrawnMuzzleLocalValid = true;
 }
 
 bool VR::TryGetRawMuzzleWorld(Vector& origin) const
@@ -9850,7 +9872,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
             Vector beamA{}, beamB{}, dotNow{};
             const bool havePoints = AimOverlayPointsNow(beamA, beamB, dotNow);
-            if (m_AimBeamValid && havePoints && (beamB - beamA).LengthSqr() > 1.f)
+            const bool beamHidden = m_ViewmodelBeamHidden.load(std::memory_order_relaxed);
+            if (m_AimBeamValid && !beamHidden && havePoints && (beamB - beamA).LengthSqr() > 1.f)
             {
                 // Clip to just in front of the eye, then a quad whose width is
                 // a fixed world size at each end (perspective taper), never
@@ -9893,13 +9916,42 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                         const D3DCOLOR ca = D3DCOLOR_ARGB(170, 255, 40, 25);
                         const D3DCOLOR cb = m_AimBeamHit
                             ? D3DCOLOR_ARGB(110, 255, 40, 25) : D3DCOLOR_ARGB(0, 255, 40, 25);
+                        // Depth-test against the eye's scene depth (world +
+                        // gun, as for the gloves) so the gun hides the part
+                        // of the beam inside and behind it. Depth as the
+                        // eye projection writes it: f/(f-n) - n*f/((f-n)*z).
+                        const float zn = (m_StereoZNear > 0.01f) ? m_StereoZNear : 7.f;
+                        const float zf = (m_StereoZFar > zn + 1.f) ? m_StereoZFar : 28377.f;
+                        auto depthAt = [&](float z) { return zf / (zf - zn) - (zn * zf) / ((zf - zn) * z); };
+                        const bool sceneDepth = gloveDepth
+                            && (gloveDepth == oldDepth
+                                || (stereoEye == 1 && gloveDepth == m_D9LeftEyeDepthSurface)
+                                || (stereoEye == 2 && gloveDepth == m_D9RightEyeDepthSurface));
+                        IDirect3DSurface9* depthBefore = nullptr;
+                        if (sceneDepth)
+                        {
+                            device->GetDepthStencilSurface(&depthBefore);
+                            device->SetDepthStencilSurface(gloveDepth);
+                            device->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);
+                            device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+                            device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+                        }
+                        const float da = sceneDepth ? depthAt(az) : 0.f;
+                        const float db = sceneDepth ? depthAt(bz) : 0.f;
                         Vert v[4] = {
-                            { ax + nx * wa, ay + ny * wa, 0.f, 1.f, ca },
-                            { ax - nx * wa, ay - ny * wa, 0.f, 1.f, ca },
-                            { bx + nx * wb, by + ny * wb, 0.f, 1.f, cb },
-                            { bx - nx * wb, by - ny * wb, 0.f, 1.f, cb },
+                            { ax + nx * wa, ay + ny * wa, da, 1.f / az, ca },
+                            { ax - nx * wa, ay - ny * wa, da, 1.f / az, ca },
+                            { bx + nx * wb, by + ny * wb, db, 1.f / bz, cb },
+                            { bx - nx * wb, by - ny * wb, db, 1.f / bz, cb },
                         };
                         device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vert));
+                        if (sceneDepth)
+                        {
+                            device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+                            device->SetDepthStencilSurface(depthBefore);
+                            if (depthBefore)
+                                depthBefore->Release();
+                        }
                     }
                 }
             }

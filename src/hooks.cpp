@@ -1297,6 +1297,43 @@ namespace
     thread_local float g_ScaledViewmodelBones[kVmDrawSlots][kMaxStudioBones][3][4];
     thread_local float g_ScaledViewmodelModelToWorld[kVmDrawSlots][3][4];
     thread_local unsigned char g_ScaledViewmodelInfo[kVmDrawSlots][sizeof(ModelRenderInfo_t)];
+
+    // World position of the viewmodel's muzzle attachment from bone matrices
+    // (the ones handed to DrawModelExecute). Same names as VR::TryGetRawMuzzleWorld.
+    bool DrawnAttachmentPoint(unsigned char* hdr, const float* bones, int nBones, Vector& out)
+    {
+        static const char* kNames[] = { "muzzle", "Fire01", "Fire02", "bolt_spawn" };
+        if (!hdr || !bones)
+            return false;
+        __try
+        {
+            const int n = *reinterpret_cast<const int*>(hdr + 0xF0);           // numlocalattachments
+            const int idx = *reinterpret_cast<const int*>(hdr + 0xF4);         // localattachmentindex
+            for (const char* want : kNames)
+            {
+                for (int i = 0; i < n && i < 64; ++i)
+                {
+                    const unsigned char* att = hdr + idx + i * 0x5C;           // mstudioattachment_t
+                    const char* name = reinterpret_cast<const char*>(att + *reinterpret_cast<const int*>(att));
+                    if (_stricmp(name, want) != 0)
+                        continue;
+                    const int bone = *reinterpret_cast<const int*>(att + 8);
+                    if (bone < 0 || bone >= nBones)
+                        return false;
+                    const float* m = bones + bone * 12;
+                    const float* l = reinterpret_cast<const float*>(att + 12);
+                    out.x = m[0] * l[3] + m[1] * l[7] + m[2] * l[11] + m[3];
+                    out.y = m[4] * l[3] + m[5] * l[7] + m[6] * l[11] + m[7];
+                    out.z = m[8] * l[3] + m[9] * l[7] + m[10] * l[11] + m[11];
+                    return true;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return false;
+    }
     // DT_LocalPlayerExclusive RecvTable (Ghidra FUN_100b7240): m_vecVelocity[0]
     // at +0xF8, not the L4D2 C_BasePlayer +0x100 (that is only .z here).
     constexpr int kLocalPlayerVecVelocity = 0xF8;
@@ -1551,7 +1588,7 @@ namespace
         // Classify once per sequence change instead of three lowercase passes
         // + ~30 strstr on every CalcViewModelView. The label is a copy, so the
         // header + sequence index identify it.
-        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; };
+        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; };
         static LabelClass s_lc{ nullptr, -1 };
         if (!label || hdr != s_lc.hdr || seq != s_lc.seq
             || std::strncmp(s_lc.text, label, sizeof(s_lc.text) - 1) != 0)
@@ -1564,12 +1601,26 @@ namespace
             s_lc.action = SequenceLabelLooksLikeWeaponAction(label);
             s_lc.loco = SequenceLabelLooksLikeLocomotionOnly(label);
             s_lc.equip = SequenceLabelLooksLikeEquipOnly(label);
+            // Laser beam off while the animation swings the gun off the aim
+            // (reload, draw, holster, pump...); kept while firing.
+            s_lc.beamHide = false;
+            if (s_lc.action && label)
+            {
+                char lb[96]{};
+                for (int i = 0; i < 95 && label[i]; ++i)
+                    lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+                s_lc.beamHide = !(std::strstr(lb, "fire") || std::strstr(lb, "shoot") || std::strstr(lb, "attack"));
+            }
             if (bmvr::g_AimDebug)
                 Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d tick=%lu",
                     seq, label ? label : "?", s_lc.action ? 1 : 0, s_lc.loco ? 1 : 0, GetTickCount());
         }
         const bool isAction = s_lc.action;
         const bool isLoco = s_lc.loco;
+        // Black Mesa runs a second viewmodel that idles all the time; only
+        // the weapon's own viewmodel decides.
+        if (Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
+            Hooks::m_VR->NoteViewmodelBeamHidden(s_lc.beamHide);
         // Lock-free class flag from the weapon model dCalcViewModelView just
         // classified; replaces a model-info lookup + four strstr per call (this
         // runs twice per CalcViewModelView) and an unlocked read of the
@@ -6039,6 +6090,19 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             {
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
+                Vector drawnMuzzle{};
+                if (DrawnAttachmentPoint(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, drawnMuzzle))
+                {
+                    // Gun frame of this draw: scaled origin + target angles
+                    // (VR::GunFrameNow at the same instant).
+                    Vector o = targetOrigin;
+                    if (needScale)
+                        o = pivot + (targetOrigin - pivot) * scale;
+                    Vector gf, gr, gu;
+                    QAngle::AngleVectors(targetAng, &gf, &gr, &gu);
+                    const Vector d = drawnMuzzle - o;
+                    m_VR->NoteDrawnMuzzleLocal(Vector(d.Dot(gf), d.Dot(gr), d.Dot(gu)));
+                }
                 SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
             }
             else if (needScale)
