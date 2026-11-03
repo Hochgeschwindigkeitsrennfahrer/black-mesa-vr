@@ -344,7 +344,6 @@ public:
         kVmFlagMp5 = 1u << 5,
     };
     bool ViewmodelIsMp5() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagMp5) != 0; }
-    void NoteViewmodelIdleSeq(bool idle) { m_ViewmodelIdleSeq.store(idle, std::memory_order_relaxed); }
     bool ViewmodelIsRpg() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagRpg) != 0; }
     bool ViewmodelIsGluon() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGluon) != 0; }
     bool ViewmodelIsScoped() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagScoped) != 0; }
@@ -1180,7 +1179,7 @@ public:
     bool UpdateWeaponFireHaptics();
     void AfterCreateMoveFireHaptics();
     bool TryGetVrMuzzleWorld(Vector& origin) const;
-    bool TryGetRawMuzzleWorld(Vector& origin, QAngle* angles = nullptr) const;
+    bool TryGetRawMuzzleWorld(Vector& origin) const;
     void UpdateMuzzleLocal(const std::string& weaponKey);
     bool TryGetVrShootOrigin(Vector& origin) const;
     // Visual beam/laser segment: muzzle start, aim-ray impact end.
@@ -1302,7 +1301,6 @@ private:
     void RecenterPosition(const char* why);
     void RefreshHeldWeaponState();
     void ApplyViewmodelBasisOffsets();
-    void AlignBarrelToAim();
     void ApplyTwoHandWeaponAim();
     float LeftSupportGripValue() const;
     bool UpdateShoulderGestures(bool paused);
@@ -1397,14 +1395,6 @@ private:
     Vector m_AimBeamLocal{};          // muzzle in the gun model frame (fwd, right, up)
     bool m_AimBeamLocalValid = false;
     std::string m_AimBeamLocalKey;
-    // Barrel axis (the muzzle attachment's forward) in the gun model frame,
-    // sampled while the viewmodel plays an idle sequence; ApplyViewmodelBasis-
-    // Offsets rotates the model so this axis lies on the aim ray.
-    Vector m_BarrelLocal{};
-    bool m_BarrelLocalValid = false;
-    int m_BarrelSamples = 0;            // idle samples since the weapon switch
-    std::string m_BarrelLocalKey;
-    std::atomic<bool> m_ViewmodelIdleSeq{ false };
     float m_AimShootAlong = 0.f;      // shot origin along the aim from the controller
     float m_AimHitDist = 0.f;         // shot origin -> marker
     bool m_HasHevSuit = true;
