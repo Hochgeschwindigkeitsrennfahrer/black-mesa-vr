@@ -104,6 +104,7 @@ typedef void(__thiscall* tGetShootAngles)(void* thisptr, QAngle* out);
 typedef void*(__cdecl* tGrenadeCreate)(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode);
 typedef bool(__cdecl* tGrenadeThrowPosition)(void* grenade, Vector* pos, QAngle* ang, void* owner);
 typedef int(__thiscall* tGetAttachmentVec)(void* thisptr, int number, Vector* origin, QAngle* angles);
+typedef void(__cdecl* tFormatViewModelAttachment)(Vector* origin, bool inverse);
 typedef int(__thiscall* tGetAttachmentMatrix)(void* thisptr, int number, float* matrix);
 typedef void(__thiscall* tTauBeamView)(void* thisptr, Vector* startEnd, void* a2, float a3, int a4, int a5);
 typedef void(__thiscall* tTauBeamWorld)(void* thisptr, Vector* impact, Vector* normal, float width);
@@ -193,6 +194,7 @@ public:
     static inline Hook<tGrenadeCreate> hkGrenadeCreate;
     static inline Hook<tGrenadeThrowPosition> hkGrenadeThrowPosition;
     static inline Hook<tGetAttachmentVec> hkGetAttachmentVec;
+    static inline Hook<tFormatViewModelAttachment> hkFormatViewModelAttachment;
     static inline Hook<tGetAttachmentMatrix> hkGetAttachmentMatrix;
     static inline Hook<tTauBeamView> hkTauBeamView;
     static inline Hook<tTauBeamWorld> hkTauBeamWorld;
@@ -275,6 +277,7 @@ public:
     static void* __cdecl dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode);
     static bool __cdecl dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* ang, void* owner);
     static int __fastcall dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles);
+    static void __cdecl dFormatViewModelAttachment(Vector* origin, bool inverse);
     static int __fastcall dGetAttachmentMatrix(void* ecx, void* edx, int number, float* matrix);
     static void __fastcall dTauBeamView(void* ecx, void* edx, Vector* startEnd, void* a2, float a3, int a4, int a5);
     static void __fastcall dTauBeamWorld(void* ecx, void* edx, Vector* impact, Vector* normal, float width);

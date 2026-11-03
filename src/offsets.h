@@ -187,6 +187,12 @@ public:
     // Vec: FUN_10097a80 (index, Vector*, QAngle*). Matrix: FUN_100979b0.
     static constexpr int kCBaseAnimating_GetAttachmentVec = 0x89C40; // beta 26234270 (25844216: 0x89B80)
     static constexpr int kCBaseAnimating_GetAttachmentMatrix = 0x89B70; // beta 26234270 (25844216: 0x89AB0)
+    // client.dll ::FormatViewModelAttachment(Vector&, bool bInverse), cdecl (FUN_100afab0).
+    // Scales a viewmodel attachment's offset from the player view axis by
+    // tan(fov/2)/tan(fovViewmodel/2) of GetPlayerViewSetup(); called by
+    // C_BaseViewModel::FormatViewModelAttachment (vtable slot 223) when the
+    // attachment cache is built, and by UncorrectViewModelAttachment.
+    static constexpr int kFormatViewModelAttachment = 0xAFAB0; // beta 26234270
 
     // IClientRenderable (entity+4) vtable: LookupAttachment +0x90, GetAttachment
     // origin/angles +0x98. Ghidra TAU Fire02 path (FUN_10234330).

@@ -7575,6 +7575,26 @@ void Hooks::EnsureWeaponShootOriginHooks()
             hkGetAttachmentVec.pTarget = p;
         }
     }
+    if (client && !hkFormatViewModelAttachment.pTarget)
+    {
+        auto* p = reinterpret_cast<unsigned char*>(client) + Offsets::kFormatViewModelAttachment;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            && CodeBytesMatch(p, "558BEC83EC188B0D????????56578B01FF5030"))
+        {
+            if (hkFormatViewModelAttachment.createHook(p, &dFormatViewModelAttachment) == 0
+                && hkFormatViewModelAttachment.enableHook() == 0)
+                Game::logMsg("Hook enabled: FormatViewModelAttachment rva=0x%X (VR: viewmodel attachments stay where the gun is drawn)", Offsets::kFormatViewModelAttachment);
+            else
+                Game::logMsg("FormatViewModelAttachment hook failed");
+        }
+        else
+        {
+            Game::logMsg("FormatViewModelAttachment skipped (bytes/rva 0x%X)", Offsets::kFormatViewModelAttachment);
+            Game::noteMissingOffset("FormatViewModelAttachment");
+            hkFormatViewModelAttachment.pTarget = p;
+        }
+    }
     if (client && !hkGetAttachmentMatrix.pTarget)
     {
         auto* p = reinterpret_cast<unsigned char*>(client) + Offsets::kCBaseAnimating_GetAttachmentMatrix;
@@ -7903,6 +7923,21 @@ namespace
     // the point is pulled toward the controller twice (scale^2: ~6 cm short
     // of the muzzle at ViewmodelScale 0.68).
     thread_local int t_InAttachmentVec = 0;
+}
+
+// Source moves viewmodel attachments (muzzle, shell eject, ...) from the
+// viewmodel's own projection into the world's: the offset from the player
+// view axis is scaled by tan(fov/2)/tan(fovViewmodel/2). In VR the gun is a
+// world-space mesh drawn with the eye's projection, so that correction only
+// pulls muzzle flashes and other attachment effects toward the engine eye's
+// axis: off the barrel, more the further the gun is from that axis (gun held
+// to the side, playing seated). Leave the point where the bones put it.
+void __cdecl Hooks::dFormatViewModelAttachment(Vector* origin, bool inverse)
+{
+    if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame())
+        return;
+    if (hkFormatViewModelAttachment.fOriginal)
+        hkFormatViewModelAttachment.fOriginal(origin, inverse);
 }
 
 int __fastcall Hooks::dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles)

@@ -6199,9 +6199,10 @@ bool VR::TryGetVrMuzzleWorld(Vector& origin) const
 {
     // The muzzle offset measured while the gun was near the view centre
     // (UpdateMuzzleLocal), placed on this frame's gun pose. The raw
-    // attachment drifts toward the view edges: Source's viewmodel attachment
-    // FOV correction (FormatViewModelAttachment) runs against a FOV that is
-    // not our per-eye one, so shots and laser swung around the barrel.
+    // attachment drifted toward the view edges: Source's viewmodel attachment
+    // FOV correction (FormatViewModelAttachment) ran against a FOV that is
+    // not our per-eye one, so shots and laser swung around the barrel. That
+    // correction is now skipped in VR (Hooks::dFormatViewModelAttachment).
     if (bmvr::g_VrShootFromMuzzle && m_AimBeamLocalValid)
     {
         std::string key;
@@ -6245,9 +6246,13 @@ void VR::UpdateMuzzleLocal(const std::string& weaponKey)
         Game::logMsg("Muzzle local %s offCentre=%.1fdeg rawDrift=%.2fHU local=(%.2f,%.2f,%.2f)",
             weaponKey.c_str(), offCentreDeg, drift, local.x, local.y, local.z);
     }
+    // The raw attachment is right anywhere in view now (no FOV correction in
+    // VR), so keep following it: the first sample is taken during the draw
+    // animation, and the old "near the view centre only" refine left that
+    // low sample in place while the gun was held off-centre.
     if (fresh)
         m_AimBeamLocal = local;
-    else if (offCentreDeg < 10.f)
+    else
         m_AimBeamLocal = m_AimBeamLocal + (local - m_AimBeamLocal) * 0.3f;
     m_AimBeamLocalKey = weaponKey;
     m_AimBeamLocalValid = true;
