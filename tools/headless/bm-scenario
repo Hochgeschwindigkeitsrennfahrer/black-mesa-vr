@@ -45,9 +45,10 @@ set_fake() {
 window_shot() {
 	local display id
 	display=$(cat "$out/display")
-	id=$(DISPLAY=$display xwininfo -root -tree | awk -v g="${BMVR_W:-1280}x${BMVR_H:-640}+" 'index($0, g) { print $1; exit }')
-	[[ -n $id ]] || { echo "no ${BMVR_W:-1280}x${BMVR_H:-640} window" >&2; return 1; }
-	DISPLAY=$display import -window "$id" "$1"
+	# the game window by title and size (1920x1080 is also the monitor size); never import without an id
+	id=$(DISPLAY=$display xwininfo -root -tree | awk -v g="${BMVR_W:-1920}x${BMVR_H:-1080}+" 'index($0, g) && index($0, "\"Black Mesa\"") { print $1; exit }')
+	[[ -n $id ]] || { echo "no ${BMVR_W:-1920}x${BMVR_H:-1080} Black Mesa window" >&2; return 1; }
+	DISPLAY=$display timeout 20 import -window "$id" "$1"
 }
 projcheck() {
 	local eyes=${1:-both} deg=${2:-12} base e turn line n rc=0 shots

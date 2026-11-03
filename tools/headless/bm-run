@@ -9,7 +9,7 @@
 # nowhere), and the run is killed if a vrserver ever shows up.
 #
 # env: BMVR_DLL (test d3d9.dll, required)  BMVR_ORIG_SHA (sha256 of the installed d3d9.dll, required)
-#      BMVR_PREFIX (prefix copy, default <scratch>/compatdata)  BMVR_DISPLAY (:78)  BMVR_W/BMVR_H (1280x640)
+#      BMVR_PREFIX (prefix copy, default <scratch>/compatdata)  BMVR_DISPLAY (:78)  BMVR_W/BMVR_H (window, default 1920x1080 = the player's own setup)
 #      BMVR_LAVAPIPE (dir with a 32-bit lavapipe ICD)  BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0; no Xvfb)
 #      BMVR_NEWUI=1 (no -oldgameui)  BMVR_XVFB_GPU=1 (real GPU into the private Xvfb via MESA_VK_WSI_DEBUG=sw; fine with the desktop locked)
 set -euo pipefail
@@ -29,12 +29,18 @@ for f in "${DLLS[@]}"; do
 	[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || { echo "$f is not the expected installed DLL; refusing" >&2; exit 1; }
 done
 cp "$GAME/d3d9.dll" "$out/orig-d3d9.dll"
+# Window size: the player's own 1920x1080 by default (window-vs-RT size bugs only show when the window is
+# larger than an RT; 1280x640 hid the water reflection bug, 2026-11-03).
+W=${BMVR_W:-1920}
+H=${BMVR_H:-1080}
 # -w/-h are saved by the game into bms/videoconfig.cfg (the player's resolution); put it back afterwards.
-# A live file already at the test size means an earlier run leaked it (2026-11-03: the player's own VR
-# sessions then ran at 1280x640, and every later run "restored" that); refuse instead of saving it as orig.
+# A live file at a test size other than the player's pinned resolution means an earlier run leaked it
+# (2026-11-03: the player's own VR sessions then ran at 1280x640, and every later run "restored" that);
+# refuse instead of saving it as orig.
 vc_size() { sed -n 's/^[[:space:]]*"Screen\(Width\|Height\)"[[:space:]]*"\([0-9]*\)".*/\2/p' "$1" | paste -sd x; }
-if [[ $(vc_size "$GAME/bms/videoconfig.cfg") == "${BMVR_W:-1280}x${BMVR_H:-640}" ]]; then
-	echo "bms/videoconfig.cfg is already at the test size ${BMVR_W:-1280}x${BMVR_H:-640}: leaked from an earlier run? fix it first" >&2
+pinned=$(tr ' ' x < "$GAME/.bmvr-settings/resolution" 2>/dev/null | tr -d '\n' || true)
+if [[ $(vc_size "$GAME/bms/videoconfig.cfg") == "${W}x${H}" && "${W}x${H}" != "$pinned" ]]; then
+	echo "bms/videoconfig.cfg is already at the test size ${W}x${H}: leaked from an earlier run? fix it first" >&2
 	exit 1
 fi
 cp -a "$GAME/bms/videoconfig.cfg" "$out/orig-videoconfig.cfg" 2>/dev/null || true
@@ -135,7 +141,7 @@ ui_arg=-oldgameui
 cd "$GAME"
 "$SLR/_v2-entry-point" --verb=waitforexitandrun -- "$PROTON/proton" waitforexitandrun \
 	"$GAME/bms.exe" -steam -heapsize 524288 -processheap -novid -windowed -noborder $ui_arg -enabledxvk -nosound \
-	-w ${BMVR_W:-1280} -h ${BMVR_H:-640} "$@" >"$out/game.log" 2>&1 &
+	-w $W -h $H "$@" >"$out/game.log" 2>&1 &
 game_pid=$!
 while kill -0 $game_pid 2>/dev/null; do
 	if pgrep -x vrserver >/dev/null || pgrep -x vrmonitor >/dev/null; then
