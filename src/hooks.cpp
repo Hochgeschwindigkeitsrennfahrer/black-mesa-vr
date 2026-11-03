@@ -1602,18 +1602,23 @@ namespace
             s_lc.loco = SequenceLabelLooksLikeLocomotionOnly(label);
             s_lc.equip = SequenceLabelLooksLikeEquipOnly(label);
             // Laser beam off while the animation swings the gun off the aim
-            // (reload, draw, holster, pump...); kept while firing.
+            // (reload, draw, holster...); kept while firing and for the
+            // shotgun pump between shots (gun stays on the aim). The shotgun
+            // reload starts/ends with idletoshell / shelltoidle, which the
+            // action words miss.
             s_lc.beamHide = false;
-            if (s_lc.action && label)
+            if (label)
             {
                 char lb[96]{};
                 for (int i = 0; i < 95 && label[i]; ++i)
                     lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
-                s_lc.beamHide = !(std::strstr(lb, "fire") || std::strstr(lb, "shoot") || std::strstr(lb, "attack"));
+                if (s_lc.action || std::strstr(lb, "shell"))
+                    s_lc.beamHide = !(std::strstr(lb, "fire") || std::strstr(lb, "shoot") || std::strstr(lb, "attack")
+                        || std::strstr(lb, "pump"));
             }
             if (bmvr::g_AimDebug)
-                Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d tick=%lu",
-                    seq, label ? label : "?", s_lc.action ? 1 : 0, s_lc.loco ? 1 : 0, GetTickCount());
+                Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d beamHide=%d tick=%lu",
+                    seq, label ? label : "?", s_lc.action ? 1 : 0, s_lc.loco ? 1 : 0, s_lc.beamHide ? 1 : 0, GetTickCount());
         }
         const bool isAction = s_lc.action;
         const bool isLoco = s_lc.loco;

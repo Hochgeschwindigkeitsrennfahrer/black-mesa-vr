@@ -1437,7 +1437,8 @@ private:
     QAngle m_LastFireAim{};
     bool m_HasLastFireAim = false;
     void DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) const;
-    void DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radiusPx) const;
+    // depth: z-buffer value (0 = in front of everything).
+    void DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radiusPx, float depth = 0.f) const;
     DWORD m_WeaponActionAnimUntilMs = 0;
     int m_LatchedViewmodelIdleSeq = -1;
     bool m_CrouchToggled = false;

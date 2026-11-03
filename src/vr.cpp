@@ -9176,7 +9176,7 @@ void VR::DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) 
 // Laser dot: a red disc with a dark rim. The caller sizes it like a real
 // laser spot (fixed world size, so it shrinks with distance) with a floor
 // that keeps it visible across a hangar.
-void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radius) const
+void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radius, float depth) const
 {
     if (!device)
         return;
@@ -9188,11 +9188,11 @@ void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radius) 
     constexpr int kSegs = 16;
     auto disc = [&](float r, D3DCOLOR centre, D3DCOLOR rim) {
         Vert v[kSegs + 2];
-        v[0] = { sx, sy, 0.f, 1.f, centre };
+        v[0] = { sx, sy, depth, 1.f, centre };
         for (int i = 0; i <= kSegs; ++i)
         {
             const float a = static_cast<float>(i) * (6.2831853f / kSegs);
-            v[i + 1] = { sx + cosf(a) * r, sy + sinf(a) * r, 0.f, 1.f, rim };
+            v[i + 1] = { sx + cosf(a) * r, sy + sinf(a) * r, depth, 1.f, rim };
         }
         device->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, kSegs, v, sizeof(Vert));
     };
@@ -10075,6 +10075,35 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             Vector beamA{}, beamB{}, dotNow{};
             const bool havePoints = AimOverlayPointsNow(beamA, beamB, dotNow);
             const bool beamHidden = m_ViewmodelBeamHidden.load(std::memory_order_relaxed);
+            // Beam and dot are depth-tested against the eye's scene depth
+            // (world + gun, as for the gloves), so the gun hides them. Depth
+            // as the eye projection writes it: f/(f-n) - n*f/((f-n)*z).
+            const float zn = (m_StereoZNear > 0.01f) ? m_StereoZNear : 7.f;
+            const float zf = (m_StereoZFar > zn + 1.f) ? m_StereoZFar : 28377.f;
+            auto depthAt = [&](float z) { return zf / (zf - zn) - (zn * zf) / ((zf - zn) * z); };
+            const bool sceneDepth = gloveDepth
+                && (gloveDepth == oldDepth
+                    || (stereoEye == 1 && gloveDepth == m_D9LeftEyeDepthSurface)
+                    || (stereoEye == 2 && gloveDepth == m_D9RightEyeDepthSurface));
+            IDirect3DSurface9* depthBefore = nullptr;
+            auto beginSceneDepth = [&]() {
+                if (!sceneDepth)
+                    return;
+                device->GetDepthStencilSurface(&depthBefore);
+                device->SetDepthStencilSurface(gloveDepth);
+                device->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);
+                device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+                device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+            };
+            auto endSceneDepth = [&]() {
+                if (!sceneDepth)
+                    return;
+                device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+                device->SetDepthStencilSurface(depthBefore);
+                if (depthBefore)
+                    depthBefore->Release();
+                depthBefore = nullptr;
+            };
             if (m_AimBeamValid && !beamHidden && havePoints && (beamB - beamA).LengthSqr() > 1.f)
             {
                 // Clip to just in front of the eye, then a quad whose width is
@@ -10118,26 +10147,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                         const D3DCOLOR ca = D3DCOLOR_ARGB(170, 255, 40, 25);
                         const D3DCOLOR cb = m_AimBeamHit
                             ? D3DCOLOR_ARGB(110, 255, 40, 25) : D3DCOLOR_ARGB(0, 255, 40, 25);
-                        // Depth-test against the eye's scene depth (world +
-                        // gun, as for the gloves) so the gun hides the part
-                        // of the beam inside and behind it. Depth as the
-                        // eye projection writes it: f/(f-n) - n*f/((f-n)*z).
-                        const float zn = (m_StereoZNear > 0.01f) ? m_StereoZNear : 7.f;
-                        const float zf = (m_StereoZFar > zn + 1.f) ? m_StereoZFar : 28377.f;
-                        auto depthAt = [&](float z) { return zf / (zf - zn) - (zn * zf) / ((zf - zn) * z); };
-                        const bool sceneDepth = gloveDepth
-                            && (gloveDepth == oldDepth
-                                || (stereoEye == 1 && gloveDepth == m_D9LeftEyeDepthSurface)
-                                || (stereoEye == 2 && gloveDepth == m_D9RightEyeDepthSurface));
-                        IDirect3DSurface9* depthBefore = nullptr;
-                        if (sceneDepth)
-                        {
-                            device->GetDepthStencilSurface(&depthBefore);
-                            device->SetDepthStencilSurface(gloveDepth);
-                            device->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);
-                            device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-                            device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
-                        }
+                        beginSceneDepth();
                         const float da = sceneDepth ? depthAt(az) : 0.f;
                         const float db = sceneDepth ? depthAt(bz) : 0.f;
                         Vert v[4] = {
@@ -10147,13 +10157,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                             { bx - nx * wb, by - ny * wb, db, 1.f / bz, cb },
                         };
                         device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vert));
-                        if (sceneDepth)
-                        {
-                            device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
-                            device->SetDepthStencilSurface(depthBefore);
-                            if (depthBefore)
-                                depthBefore->Release();
-                        }
+                        endSceneDepth();
                     }
                 }
             }
@@ -10171,7 +10175,13 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                     const float z = (std::max)(4.f, (dotWorld - eyeOrig).Dot(fwd));
                     const float pxPerHu = static_cast<float>(w) * 0.5f * ocSx / tanHalf;
                     const float floorPx = 1.25f * static_cast<float>(h) / 1440.f * scale;
-                    DrawAimDot(device, cx, cy, (std::max)(floorPx, 0.25f * scale * pxPerHu / z));
+                    // Pulled a little toward the eye so the surface it lies
+                    // on does not cover it; the gun in front still does.
+                    const float pulled = (std::max)(zn + 0.5f, z - (1.5f + 0.01f * z));
+                    beginSceneDepth();
+                    DrawAimDot(device, cx, cy, (std::max)(floorPx, 0.25f * scale * pxPerHu / z),
+                        sceneDepth ? depthAt(pulled) : 0.f);
+                    endSceneDepth();
                 }
                 else
                     DrawAimCrosshair(device, cx, cy, h);
