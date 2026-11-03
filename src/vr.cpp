@@ -5218,8 +5218,13 @@ void VR::ProcessInput()
         m_CrossbowZoomLatched = !m_CrossbowZoomLatched;
     if (zoomFlag >= 0)
         m_CrossbowZoomLatched = (zoomFlag == 1);
+    // Once the engine's zoomed CViewSetup FOV has been seen it decides (the
+    // m_bZooming read stays 0 on beta 26234270 while scoped, which cleared
+    // the zoom NoteEngineScopeFov had just set, every frame).
+    const bool engineZoom = m_SawEngineZoomFov && m_EngineViewFov > 1.f && m_EngineViewFov < 45.f;
     m_ScopeZoomActive = bmvr::g_ScopeUsesHmdAim && scopedWeapon
-        && (zoomFlag == 1 || (zoomFlag < 0 && m_CrossbowZoomLatched));
+        && (m_SawEngineZoomFov ? engineZoom
+            : (zoomFlag == 1 || (zoomFlag < 0 && m_CrossbowZoomLatched)));
     {
         static int s_zoomLog;
         static bool s_lastZoom = false;
@@ -10933,8 +10938,8 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     // Plan §7: L4D2 empirical position tables (HMD-tuned starting point).
     // DME bake rest is logged via NoteViewmodelWeaponBake for pivot diagnosis
     // only — not 1:1 with L4D2 offsets (implementation-plan §7 evidence).
-    // 2026-11-03: glock/357/MP5/shotgun angles re-tuned in the HMD so the
-    // iron sights line up with the aim dot (laser beam on, right eye).
+    // 2026-11-03: glock/357/MP5/shotgun/crossbow angles re-tuned in the HMD
+    // so the sights line up with the aim dot (laser beam on, right eye).
     // 2026-08-28 HMD-saved numpad extras baked into this table. Live
     // extras in VR/viewmodel_offsets.txt still add on top.
     if (has("crowbar") || has("wrench"))
@@ -10953,7 +10958,7 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     else if (has("shotgun") || has("spas") || has("pump"))
     { out.ox = 9.f; out.oy = 8.f; out.oz = -9.5f; out.ax = -1.5f; out.ay = -4.5f; out.numpadKey = "shotgun"; }
     else if (has("crossbow"))
-    { out.ox = 12.5f; out.oy = 11.5f; out.oz = -13.f; out.ax = -4.5f; out.ay = -5.f; out.numpadKey = "crossbow"; }
+    { out.ox = 12.5f; out.oy = 11.35f; out.oz = -13.f; out.ax = 1.5f; out.ay = -3.5f; out.az = -3.f; out.numpadKey = "crossbow"; }
     else if (has("rpg") || has("rocket"))
     { out.ox = 12.f; out.oy = 10.5f; out.oz = -6.5f; out.ax = -1.f; out.numpadKey = "rpg"; }
     else if (has("gauss") || has("tau"))
@@ -12154,10 +12159,11 @@ void VR::NoteEngineScopeFov(float engineFov)
     m_EngineViewFov = engineFov;
     if (!ViewmodelIsScoped() || !bmvr::g_ScopeUsesHmdAim)
         return;
-    // Black Mesa writes the 2D zoom FOV (~20) into CViewSetup. Once we have
-    // seen that, trust it to turn VR magnification off as well — a stuck
-    // m_bZooming / latch cannot keep the HMD zoomed after unscope.
-    if (engineFov > 10.f && engineFov < 45.f)
+    // Black Mesa writes the 2D zoom FOV into CViewSetup (7.4 when fully
+    // zoomed on beta 26234270). Once we have seen that, trust it to turn VR
+    // magnification off as well — a stuck m_bZooming / latch cannot keep the
+    // HMD zoomed after unscope.
+    if (engineFov > 1.f && engineFov < 45.f)
     {
         if (!m_SawEngineZoomFov)
             Game::logMsg("Engine scope FOV %.1f — VR zoom will follow CViewSetup", engineFov);
