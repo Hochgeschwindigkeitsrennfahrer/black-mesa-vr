@@ -5978,6 +5978,21 @@ QAngle VR::GetAimAngles() const
             // az) on top of the aim. Undo them in reverse order so two-handed
             // aim matches one-handed aim (shotgun ay=-4 put the dot right of
             // the barrel, 2026-10-15).
+            if (m_BarrelLocalValid && m_BarrelSamples >= 10 && m_BarrelLocalKey == m_VmClass.numpadKey)
+            {
+                // The hands place the gun: aim where its barrel points.
+                QAngle basisAng{};
+                QAngle::VectorAngles(m_ViewmodelForward, m_ViewmodelUp, basisAng);
+                Vector bf, br, bu;
+                QAngle::AngleVectors(basisAng, &bf, &br, &bu);
+                const Vector barrel = bf * m_BarrelLocal.x + br * m_BarrelLocal.y + bu * m_BarrelLocal.z;
+                QAngle::VectorAngles(barrel, bu, aim);
+                if (aim.x > 180.f) aim.x -= 360.f;
+                if (aim.x > 89.f) aim.x = 89.f;
+                if (aim.x < -89.f) aim.x = -89.f;
+                aim.z = 0.f;
+                return aim;
+            }
             float ox = 0.f, oy = 0.f, oz = 0.f, ax = 0.f, ay = 0.f, az = 0.f;
             ResolveWeaponViewmodelPose(ox, oy, oz, ax, ay, az);
             Vector f = m_ViewmodelForward, r = m_ViewmodelRight, u = m_ViewmodelUp;
@@ -6223,8 +6238,54 @@ bool VR::TryGetVrMuzzleWorld(Vector& origin) const
 void VR::UpdateMuzzleLocal(const std::string& weaponKey)
 {
     Vector raw{}, vo{}, vf{}, vr{}, vu{};
+    QAngle muzzleAng{};
     if (!TryGetRawMuzzleWorld(raw) || !GunFrameNow(vo, vf, vr, vu))
         return;
+    // Barrel axis: only from idle sequences (frozen, the model's rest pose),
+    // so reload/fire/draw animations are not "corrected" back onto the aim.
+    // The idle flag can still be the previous weapon's for the first frames
+    // after a switch (the new draw sequence is classified a little later).
+    static std::string s_axisKey;
+    static DWORD s_axisKeyMs;
+    if (s_axisKey != weaponKey)
+    {
+        s_axisKey = weaponKey;
+        s_axisKeyMs = GetTickCount();
+    }
+    Vector rawAxisPos{};
+    if (GetTickCount() - s_axisKeyMs > 300 && m_ViewmodelIdleSeq.load(std::memory_order_relaxed)
+        && TryGetRawMuzzleWorld(rawAxisPos, &muzzleAng))
+    {
+        Vector af{};
+        QAngle::AngleVectors(muzzleAng, &af, nullptr, nullptr);
+        if (VectorNormalize(af) > 0.5f)
+        {
+            Vector b(af.Dot(vf), af.Dot(vr), af.Dot(vu));
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            const bool freshAxis = !m_BarrelLocalValid || m_BarrelLocalKey != weaponKey;
+            if (freshAxis)
+                m_BarrelSamples = 0;
+            // The first samples after a switch can still be the draw pose:
+            // take the latest as-is until 10 idle samples, then smooth.
+            if (++m_BarrelSamples > 10)
+                b = m_BarrelLocal + (b - m_BarrelLocal) * 0.3f;
+            if (VectorNormalize(b) > 0.5f)
+            {
+                static DWORD s_axisLogMs;
+                if (freshAxis || (bmvr::g_AimDebug && GetTickCount() - s_axisLogMs > 2000))
+                {
+                    s_axisLogMs = GetTickCount();
+                    const float pitch = asinf(std::clamp(b.z, -1.f, 1.f)) * 57.29578f;
+                    const float yaw = atan2f(-b.y, b.x) * 57.29578f;
+                    Game::logMsg("Barrel axis %s: %.2f deg up, %.2f deg left of the gun frame forward",
+                        weaponKey.c_str(), pitch, yaw);
+                }
+                m_BarrelLocal = b;
+                m_BarrelLocalKey = weaponKey;
+                m_BarrelLocalValid = true;
+            }
+        }
+    }
     const Vector d = raw - vo;
     const Vector local(d.Dot(vf), d.Dot(vr), d.Dot(vu));
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
@@ -6258,7 +6319,7 @@ void VR::UpdateMuzzleLocal(const std::string& weaponKey)
     m_AimBeamLocalValid = true;
 }
 
-bool VR::TryGetRawMuzzleWorld(Vector& origin) const
+bool VR::TryGetRawMuzzleWorld(Vector& origin, QAngle* angles) const
 {
     if (!m_IsVREnabled || !m_ControllerPoseValid || !m_Game)
         return false;
@@ -6277,10 +6338,16 @@ bool VR::TryGetRawMuzzleWorld(Vector& origin) const
         for (const char* name : kNames)
         {
             if (m_Game->GetEntityAttachment(vm, name, origin, ang) && origin.LengthSqr() > 1.f)
+            {
+                if (angles)
+                    *angles = ang;
                 return true;
+            }
         }
     }
 
+    if (angles)
+        return false;   // no attachment: no barrel axis either
     origin = GetRecommendedViewmodelAbsPos(body);
     ApplyViewmodelVisualScale(origin);
     const QAngle aim = GetRecommendedViewmodelAbsAngle();
@@ -10813,7 +10880,47 @@ void VR::ApplyViewmodelBasisOffsets()
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelRight, ax);
     m_ViewmodelRight = VectorRotate(m_ViewmodelRight, m_ViewmodelForward, az);
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, az);
+    AlignBarrelToAim();
     ApplyTwoHandWeaponAim();
+}
+
+void VR::AlignBarrelToAim()
+{
+    // Caller holds m_ControllerMutex. The per-weapon pose angles above are
+    // hand-tuned, so a model's barrel is a few degrees off the aim ray
+    // (shots, dot and laser): MP5 up and right, shotgun down. Rotate the
+    // model by the smallest rotation that puts its measured barrel axis on
+    // the aim. Two-handed holds then aim along the barrel (GetAimAngles).
+    if (!m_BarrelLocalValid || m_BarrelSamples < 10 || m_BarrelLocalKey != m_VmClass.numpadKey)
+        return;
+    QAngle basisAng{};
+    QAngle::VectorAngles(m_ViewmodelForward, m_ViewmodelUp, basisAng);
+    Vector f, r, u;
+    QAngle::AngleVectors(basisAng, &f, &r, &u);
+    Vector barrel = f * m_BarrelLocal.x + r * m_BarrelLocal.y + u * m_BarrelLocal.z;
+    QAngle aimAng = m_RightControllerAngAbs;
+    aimAng.x -= bmvr::g_AimPitchOffset;
+    aimAng.z = 0.f;
+    Vector aim;
+    QAngle::AngleVectors(aimAng, &aim, nullptr, nullptr);
+    if (VectorNormalize(barrel) < 0.5f || VectorNormalize(aim) < 0.5f)
+        return;
+    Vector axis;
+    CrossProduct(barrel, aim, axis);
+    const float s = VectorNormalize(axis);
+    const float deg = atan2f(s, barrel.Dot(aim)) * 57.29578f;
+    static DWORD s_logMs;
+    if (bmvr::g_AimDebug && GetTickCount() - s_logMs > 2000)
+    {
+        s_logMs = GetTickCount();
+        Game::logMsg("Barrel align %s: model rotated %.2f deg onto the aim", m_BarrelLocalKey.c_str(), deg);
+    }
+    // A barrel axis far off the aim means a bad attachment, not a tilt.
+    if (deg < 0.01f || deg > 15.f)
+        return;
+    m_ViewmodelForward = VectorRotate(m_ViewmodelForward, axis, deg);
+    m_ViewmodelRight = VectorRotate(m_ViewmodelRight, axis, deg);
+    m_ViewmodelUp = VectorRotate(m_ViewmodelUp, axis, deg);
 }
 
 void VR::ApplyTwoHandWeaponAim()

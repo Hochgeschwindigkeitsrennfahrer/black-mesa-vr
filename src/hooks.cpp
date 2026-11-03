@@ -1570,6 +1570,10 @@ namespace
         }
         const bool isAction = s_lc.action;
         const bool isLoco = s_lc.loco;
+        // Rest pose for the barrel-axis measurement: plain idle only (not
+        // sprint/walk, whose frozen first frame can hold the gun lowered).
+        Hooks::m_VR->NoteViewmodelIdleSeq(isLoco && !isAction && label
+            && (std::strstr(s_lc.text, "idle") || std::strstr(s_lc.text, "Idle") || std::strstr(s_lc.text, "IDLE")));
         // Lock-free class flag from the weapon model dCalcViewModelView just
         // classified; replaces a model-info lookup + four strstr per call (this
         // runs twice per CalcViewModelView) and an unlocked read of the
