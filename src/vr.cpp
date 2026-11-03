@@ -6358,6 +6358,17 @@ bool VR::TryGetRawMuzzleWorld(Vector& origin) const
     return origin.LengthSqr() > 1.f;
 }
 
+// Scoped crossbow: the bolt flies along the head's view angles. Start it at
+// the ScopeEye eye so it lands on that eye's reticle at any distance (the
+// scoped eyes are centred on straight ahead, see EyeRenderRect).
+bool VR::TryGetScopeShootOrigin(Vector& origin) const
+{
+    if (!m_ScopeZoomActive || bmvr::g_ScopeEye == 0)
+        return false;
+    origin = bmvr::g_ScopeEye == 1 ? GetViewOriginLeft(m_SetupOrigin) : GetViewOriginRight(m_SetupOrigin);
+    return std::isfinite(origin.x) && std::isfinite(origin.y) && std::isfinite(origin.z);
+}
+
 bool VR::TryGetVrShootOrigin(Vector& origin) const
 {
     Vector muzzle{};
@@ -12298,6 +12309,22 @@ bool VR::EyeRenderRect(int stereoEye, float rect[4], float rtAspect) const
     }
     if (stereoEye == 1)
         rect[1] += LeftEyeCullPadTan();
+    // Scoped: Black Mesa draws the crossbow eyepiece, lens and reticle at the
+    // image centre. With off-centre eyes that centre is a different direction
+    // in each eye (±0.317 NDC on the PS VR2), so each eye showed its own scope
+    // aimed elsewhere. Same size, centred on straight ahead: both copies land
+    // on the head-forward ray the scoped bolt follows. Render and submit both
+    // use this rectangle (OpenXR helper only: the OpenVR backend sets its
+    // texture bounds once at start).
+    if (m_ScopeZoomActive && m_OpenXrHelperBridgeActive)
+    {
+        const float hx = 0.5f * (rect[1] - rect[0]);
+        const float hy = 0.5f * (rect[3] - rect[2]);
+        rect[0] = -hx;
+        rect[1] = hx;
+        rect[2] = -hy;
+        rect[3] = hy;
+    }
     return true;
 }
 

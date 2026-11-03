@@ -7580,7 +7580,21 @@ namespace
             return out;
         }
         if (Hooks::m_VR->ScopeZoomActive())
+        {
+            if (Hooks::m_VR->TryGetScopeShootOrigin(muzzle))
+            {
+                static int s_scopeLog;
+                if (s_scopeLog < 8)
+                {
+                    Game::logMsg("Weapon_ShootPosition scope eye (%.1f,%.1f,%.1f) was (%.1f,%.1f,%.1f)",
+                        muzzle.x, muzzle.y, muzzle.z, out->x, out->y, out->z);
+                    ++s_scopeLog;
+                }
+                if (!MuzzleBehindGeometry(*out, muzzle))
+                    *out = muzzle;
+            }
             return out;
+        }
         if (!Hooks::m_VR->TryGetVrShootOrigin(muzzle))
             return out;
         static int s_log;

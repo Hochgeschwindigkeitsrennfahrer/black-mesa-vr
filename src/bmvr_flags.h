@@ -344,6 +344,10 @@ namespace bmvr
     // zoomed. Compositor / OpenXR submit keep the real HMD FOV, so the
     // narrower render is magnified in the lenses. 0.28 ≈ 3.5× (HL2 20/75).
     extern float g_ScopeZoomFovScale;
+    // Eye the scoped crossbow bolt starts from (1 left, 2 right = default,
+    // 0 = between the eyes). A scope is one-eyed: from the head centre the
+    // bolt hit half an IPD beside the reticle in both eyes (2026-11-03).
+    extern int g_ScopeEye;
     // LeftEyeCullPad (default 0 = off since 2026-10-30, max 0.25): the left eye's right
     // edge is pushed out by this fraction of the half-FOV tangent (off-centre
     // CViewSetup) and submitted at that FOV (OpenXR explicit tangents, OpenVR

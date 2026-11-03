@@ -1200,6 +1200,7 @@ public:
     bool TryGetRawMuzzleWorld(Vector& origin) const;
     void UpdateMuzzleLocal(const std::string& weaponKey);
     bool TryGetVrShootOrigin(Vector& origin) const;
+    bool TryGetScopeShootOrigin(Vector& origin) const;
     // Visual beam/laser segment: muzzle start, aim-ray impact end.
     // Cached per frame so tau/gluon hooks get the same result.
     bool TryGetVrBeamSegment(Vector& start, Vector& end, Vector* outNormal = nullptr) const;
