@@ -10669,6 +10669,8 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     // Plan §7: L4D2 empirical position tables (HMD-tuned starting point).
     // DME bake rest is logged via NoteViewmodelWeaponBake for pivot diagnosis
     // only — not 1:1 with L4D2 offsets (implementation-plan §7 evidence).
+    // 2026-11-03: glock/357/MP5/shotgun angles re-tuned in the HMD so the
+    // iron sights line up with the aim dot (laser beam on, right eye).
     // 2026-08-28 HMD-saved numpad extras baked into this table. Live
     // extras in VR/viewmodel_offsets.txt still add on top.
     if (has("crowbar") || has("wrench"))
@@ -10679,13 +10681,13 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
         out.ox = 12.5f; out.oy = 8.f; out.oz = -12.f; out.ax = -24.5f; out.ay = -6.5f; out.az = -6.f; out.numpadKey = "crowbar"; out.crowbar = true;
     }
     else if (has("glock") || has("pistol") || has("9mm") || has("beretta"))
-    { out.ox = 16.5f; out.oy = 4.f; out.oz = -7.f; out.ax = -1.f; out.numpadKey = "glock"; }
+    { out.ox = 16.5f; out.oy = 4.f; out.oz = -7.f; out.ax = 0.f; out.numpadKey = "glock"; }
     else if (has("357") || has("python") || has("revolver"))
-    { out.ox = 10.f; out.oy = 3.5f; out.oz = -5.5f; out.ax = -0.5f; out.numpadKey = "357"; }
+    { out.ox = 10.f; out.oy = 3.5f; out.oz = -5.5f; out.ax = 0.5f; out.numpadKey = "357"; }
     else if (has("mp5") || has("smg") || has("mp5k"))
-    { out.ox = 9.f; out.oy = 4.5f; out.oz = -9.f; out.ax = -0.5f; out.numpadKey = "mp5"; }
+    { out.ox = 9.f; out.oy = 4.5f; out.oz = -9.f; out.ax = 2.f; out.ay = -1.5f; out.numpadKey = "mp5"; }
     else if (has("shotgun") || has("spas") || has("pump"))
-    { out.ox = 9.f; out.oy = 8.f; out.oz = -9.5f; out.ax = -0.5f; out.ay = -4.f; out.numpadKey = "shotgun"; }
+    { out.ox = 9.f; out.oy = 8.f; out.oz = -9.5f; out.ax = -1.5f; out.ay = -4.5f; out.numpadKey = "shotgun"; }
     else if (has("crossbow"))
     { out.ox = 12.5f; out.oy = 11.5f; out.oz = -13.f; out.ax = -4.5f; out.ay = -5.f; out.numpadKey = "crossbow"; }
     else if (has("rpg") || has("rocket"))
