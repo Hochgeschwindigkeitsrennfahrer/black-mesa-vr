@@ -24,11 +24,14 @@
 namespace
 {
     constexpr float kPi = 3.14159265f;
-    constexpr int kTexW = 1024;
+    // Two columns of kColW with a divider: one tall column had grown to
+    // ~1.2 m and was pushed far back to fit the view.
+    constexpr int kColW = 1024;
+    constexpr int kTexW = 2 * kColW;
     constexpr int kHeaderPx = 96;
     constexpr int kRowPx = 64;
     constexpr int kSectionPx = 48;
-    constexpr float kPanelWidthHu = 20.f;      // ~51 cm; the panel is ~1.6x taller than wide
+    constexpr float kPanelWidthHu = 40.f;      // ~1 m: two ~51 cm columns, same text size as before
     constexpr float kPanelMinDistanceHu = 44.f;  // ~1.12 m in front of the eyes, near the game menu
     constexpr float kPanelHalfFovDeg = 22.f;      // pushed back until the panel is about +-22 deg tall
     constexpr float kPanelDropHu = 3.f;        // a little below eye height
@@ -110,31 +113,73 @@ namespace
     }
 
     int RowHeight(const Row& r) { return r.kind == RowKind::Section ? kSectionPx : kRowPx; }
-    int RowTop(int index)
+
+    // Rows split into two columns at the section heading that best halves
+    // the height. The row table is fixed, so this is built once.
+    struct Layout
     {
-        int y = kHeaderPx;
-        for (int i = 0; i < index; ++i)
-            y += RowHeight(Rows()[i]);
-        return y;
+        std::vector<int> col, top;
+        int bottom = 0;
+    };
+    const Layout& GetLayout()
+    {
+        static Layout l = [] {
+            const auto& rows = Rows();
+            const int n = static_cast<int>(rows.size());
+            int total = 0;
+            for (const Row& r : rows)
+                total += RowHeight(r);
+            int split = n, best = total, acc = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                if (i > 0 && rows[i].kind == RowKind::Section)
+                {
+                    const int worst = acc > total - acc ? acc : total - acc;
+                    if (worst < best)
+                    {
+                        best = worst;
+                        split = i;
+                    }
+                }
+                acc += RowHeight(rows[i]);
+            }
+            Layout out;
+            out.col.resize(n);
+            out.top.resize(n);
+            int y[2] = { kHeaderPx, kHeaderPx };
+            for (int i = 0; i < n; ++i)
+            {
+                const int c = i < split ? 0 : 1;
+                out.col[i] = c;
+                out.top[i] = y[c];
+                y[c] += RowHeight(rows[i]);
+            }
+            out.bottom = y[0] > y[1] ? y[0] : y[1];
+            return out;
+        }();
+        return l;
     }
-    // Row under texture y, or -1 (headings are not interactive).
-    int RowAt(int py)
+    int RowTop(int index) { return GetLayout().top[index]; }
+    int RowX(int index) { return GetLayout().col[index] * kColW; }
+    // Row under texture x/y, or -1 (headings are not interactive).
+    int RowAt(int px, int py)
     {
         const auto& rows = Rows();
-        int y = kHeaderPx;
+        const Layout& l = GetLayout();
+        const int c = px < kColW ? 0 : 1;
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
         {
-            const int h = RowHeight(rows[i]);
-            if (py >= y && py < y + h)
+            if (l.col[i] != c)
+                continue;
+            if (py >= l.top[i] && py < l.top[i] + RowHeight(rows[i]))
                 return rows[i].kind == RowKind::Section ? -1 : i;
-            y += h;
         }
         return -1;
     }
-    int TexH() { return RowTop(static_cast<int>(Rows().size())) + 16; }
+    int TexH() { return GetLayout().bottom + 16; }
     float PanelHeightHu() { return kPanelWidthHu * static_cast<float>(TexH()) / kTexW; }
     // The panel grows with every row, so it moves back instead of making you
-    // look far up and down (29 rows = ~1.24 m tall, ~1.5 m away).
+    // look far up and down (two columns keep it near the minimum distance).
     float PanelDistanceHu()
     {
         const float fit = PanelHeightHu() * 0.5f / tanf(kPanelHalfFovDeg * kPi / 180.f);
@@ -321,48 +366,51 @@ namespace
         c.fill(0, 0, c.w, 6, kAmber);
         c.text("VR SETTINGS", 40, 10, c.w - 40, kHeaderPx - 10, kAmber, 46, true, DT_LEFT);
         c.text("trigger: change   circle: close", 40, 10, c.w - 40, kHeaderPx - 10, kDim, 24, false, DT_RIGHT);
+        // Column divider.
+        c.fill(kColW - 1, kHeaderPx, kColW + 1, c.h - 16, RGB(90, 70, 20));
         const auto& rows = Rows();
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
         {
             const Row& r = rows[i];
             const int y0 = RowTop(i), y1 = y0 + RowHeight(r);
+            const int x = RowX(i), cw = kColW, mid = x + cw / 2;
             const bool hover = (i == hoverRow);
             if (r.kind == RowKind::Section)
             {
-                c.text(r.label, 40, y0 + 8, c.w - 40, y1, kAmber, 26, true, DT_LEFT);
-                c.fill(40, y1 - 4, c.w - 40, y1 - 2, RGB(90, 70, 20));
+                c.text(r.label, x + 40, y0 + 8, x + cw - 40, y1, kAmber, 26, true, DT_LEFT);
+                c.fill(x + 40, y1 - 4, x + cw - 40, y1 - 2, RGB(90, 70, 20));
                 continue;
             }
             if (hover)
-                c.fill(16, y0 + 2, c.w - 16, y1 - 2, kRowHover);
+                c.fill(x + 16, y0 + 2, x + cw - 16, y1 - 2, kRowHover);
             if (r.kind == RowKind::Close)
             {
-                c.fill(c.w / 2 - 120, y0 + 8, c.w / 2 + 120, y1 - 8, hover ? kBtnHover : kBtn);
-                c.text("Close", 0, y0, c.w, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
+                c.fill(mid - 120, y0 + 8, mid + 120, y1 - 8, hover ? kBtnHover : kBtn);
+                c.text("Close", x, y0, x + cw, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
                 continue;
             }
             if (r.kind == RowKind::Button)
             {
-                c.fill(c.w / 2 - 180, y0 + 8, c.w / 2 + 180, y1 - 8, hover ? kBtnHover : kBtn);
-                c.text(r.label, 0, y0, c.w, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
+                c.fill(mid - 180, y0 + 8, mid + 180, y1 - 8, hover ? kBtnHover : kBtn);
+                c.text(r.label, x, y0, x + cw, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
                 continue;
             }
-            c.text(r.label, 40, y0, kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
+            c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
             if (r.kind == RowKind::Toggle)
             {
                 const bool on = r.b && *r.b;
-                c.fill(kPillX0, y0 + 10, kPillX1, y1 - 10, on ? kOn : kOff);
-                c.text(on ? "ON" : "OFF", kPillX0, y0, kPillX1, y1, RGB(255, 255, 255), 30, true, DT_CENTER);
+                c.fill(x + kPillX0, y0 + 10, x + kPillX1, y1 - 10, on ? kOn : kOff);
+                c.text(on ? "ON" : "OFF", x + kPillX0, y0, x + kPillX1, y1, RGB(255, 255, 255), 30, true, DT_CENTER);
             }
             else
             {
                 char val[32]{};
                 _snprintf(val, sizeof(val) - 1, r.fmt, r.f ? *r.f : 0.f);
-                c.fill(kMinusX0, y0 + 10, kMinusX1 - 8, y1 - 10, (hover && hoverZone == 0) ? kBtnHover : kBtn);
-                c.fill(kPlusX0 + 8, y0 + 10, kPlusX1, y1 - 10, (hover && hoverZone == 2) ? kBtnHover : kBtn);
-                c.text("-", kMinusX0, y0, kMinusX1 - 8, y1 - 4, kText, 44, true, DT_CENTER);
-                c.text("+", kPlusX0 + 8, y0, kPlusX1, y1 - 2, kText, 40, true, DT_CENTER);
-                c.text(val, kValueX0, y0, kValueX1, y1, kText, 34, true, DT_CENTER);
+                c.fill(x + kMinusX0, y0 + 10, x + kMinusX1 - 8, y1 - 10, (hover && hoverZone == 0) ? kBtnHover : kBtn);
+                c.fill(x + kPlusX0 + 8, y0 + 10, x + kPlusX1, y1 - 10, (hover && hoverZone == 2) ? kBtnHover : kBtn);
+                c.text("-", x + kMinusX0, y0, x + kMinusX1 - 8, y1 - 4, kText, 44, true, DT_CENTER);
+                c.text("+", x + kPlusX0 + 8, y0, x + kPlusX1, y1 - 2, kText, 40, true, DT_CENTER);
+                c.text(val, x + kValueX0, y0, x + kValueX1, y1, kText, 34, true, DT_CENTER);
             }
         }
         c.setAlpha(238);
@@ -523,11 +571,12 @@ void VR::UpdateSettingsPanel()
                 m_SettingsHitValid = true;
                 const int px = static_cast<int>((x / kPanelWidthHu + 0.5f) * kTexW);
                 const int py = static_cast<int>((0.5f - y / PanelHeightHu()) * TexH());
-                const int r = RowAt(py);
+                const int r = RowAt(px, py);
                 if (r >= 0)
                 {
                     row = r;
-                    zone = (px >= kMinusX0 && px < kMinusX1) ? 0 : (px >= kPlusX0 && px < kPlusX1) ? 2 : 1;
+                    const int cx = px - RowX(r);
+                    zone = (cx >= kMinusX0 && cx < kMinusX1) ? 0 : (cx >= kPlusX0 && cx < kPlusX1) ? 2 : 1;
                 }
             }
         }
