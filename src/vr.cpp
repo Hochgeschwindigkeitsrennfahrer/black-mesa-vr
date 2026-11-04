@@ -724,23 +724,29 @@ namespace
         if (AuditLogging() && g_AuditConstMat[0] && t_AuditMaterial[0]
             && std::strstr(t_AuditMaterial, g_AuditConstMat) && g_AuditLines < kAuditMaxLines)
         {
+            // Non-zero constants, 8 registers per line (log lines are capped
+            // at 1 KB; a single line cut off the higher registers).
             auto dumpConsts = [&](const char* tag, const float* c, int n) {
-                std::string out;
-                char b[96];
-                for (int i = 0; i < n; ++i)
+                for (int base = 0; base < n; base += 8)
                 {
-                    const float* v = c + i * 4;
-                    if (v[0] == 0.f && v[1] == 0.f && v[2] == 0.f && v[3] == 0.f)
-                        continue;
-                    std::snprintf(b, sizeof(b), " c%d=(%.4g,%.4g,%.4g,%.4g)", i, v[0], v[1], v[2], v[3]);
-                    out += b;
+                    std::string out;
+                    char b[112];
+                    for (int i = base; i < base + 8 && i < n; ++i)
+                    {
+                        const float* v = c + i * 4;
+                        if (v[0] == 0.f && v[1] == 0.f && v[2] == 0.f && v[3] == 0.f)
+                            continue;
+                        std::snprintf(b, sizeof(b), " c%d=(%.6g,%.6g,%.6g,%.6g)", i, v[0], v[1], v[2], v[3]);
+                        out += b;
+                    }
+                    if (!out.empty())
+                        Game::logMsg("audit consts e%d %s %s:%s", eye, t_AuditMaterial, tag, out.c_str());
                 }
-                Game::logMsg("audit consts e%d %s %s:%s", eye, t_AuditMaterial, tag, out.c_str());
                 ++g_AuditLines;
             };
             AuditFlushGroup();
             dumpConsts("VS", g_AuditVsConst, 48);
-            dumpConsts("PS", g_AuditPsConst, 32);
+            dumpConsts("PS", g_AuditPsConst, 64);
             // The bound shaders' bytecode, once per shader, as
             // VR/audit-<vs|ps>-<ptr>.dxso (match against DXVK_SHADER_DUMP_PATH).
             {
