@@ -66,7 +66,7 @@ namespace
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -60.f, 60.f, "%+.0f\xB0" },
+            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
             { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
             { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Frame cap (0 off, 1 +10, 2 x2)", RowKind::Number, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "%.0f" },

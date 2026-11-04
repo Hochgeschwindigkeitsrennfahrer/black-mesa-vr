@@ -800,11 +800,16 @@ bool BmVrGloves::DrawForEye(
         }
         // Hands around a grip sit thumb-up, not palm-down: roll the drawn
         // glove (only) around the controller's forward axis, mirrored per
-        // hand. Index poses are already rolled 90 deg upstream; a hand posed
-        // on a weapon stays aligned with the weapon.
+        // hand. One setting for every controller: Index poses already carry
+        // VrHandsIndexRollDeg (that roll also feeds crowbar/flashlight), so
+        // the glove only adds the difference. A hand posed on a weapon stays
+        // aligned with the weapon.
         QAngle gloveAngles = *angles[i];
-        if (family != L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES && !gripCurl)
-            gloveAngles.z += rightHand ? bmvr::g_VrHandsRollDeg : -bmvr::g_VrHandsRollDeg;
+        float gloveRoll = bmvr::g_VrHandsRollDeg;
+        if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES)
+            gloveRoll -= bmvr::g_VrHandsIndexRollDeg;
+        if (!gripCurl && gloveRoll != 0.f)
+            gloveAngles.z += rightHand ? gloveRoll : -gloveRoll;
         const VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
             *origins[i],
             gloveAngles,

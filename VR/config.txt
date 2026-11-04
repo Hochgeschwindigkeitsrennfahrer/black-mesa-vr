@@ -71,10 +71,10 @@ ControllerPitchTiltVive=-45.0
 # (negative = gun points lower). Also in the VR settings panel (bmvr_gun_pitch).
 GunPitchOffset=0
 # Hand models rolled thumb-up around the controller, in degrees, to match a
-# hand around a grip instead of lying flat. Mirrored per hand; not used on
-# Index (already rolled) or for a hand on a weapon. Also in the VR settings
-# panel (bmvr_hand_roll).
-VrHandsRollDeg=25
+# hand around a grip instead of lying flat (90 = palms facing each other).
+# Mirrored per hand, all controllers (Index included); not for a hand on a
+# weapon. Also in the VR settings panel (bmvr_hand_roll).
+VrHandsRollDeg=90
 # While the G-Man is in front of you, grip extends only the middle finger.
 VrGmanGesture=true
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.

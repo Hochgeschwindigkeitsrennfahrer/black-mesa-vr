@@ -418,9 +418,11 @@ namespace bmvr
     extern float g_VrHandsIndexRollDeg;
     // Glove-only roll around the controller's forward axis so the drawn hands
     // match a hand wrapped around the grip (thumb up) instead of lying flat.
-    // Left = -deg, right = +deg, same convention as the Index roll. Not applied
-    // to Index (already rolled above) nor to a hand posed on a weapon; never
-    // touches the tracked pose, so guns and aim are unaffected.
+    // Left = -deg, right = +deg, same convention as the Index roll. One value
+    // for every controller: on Index the pose already carries
+    // g_VrHandsIndexRollDeg, so the glove adds only the difference (90 = as
+    // before). Not applied to a hand posed on a weapon; never touches the
+    // tracked pose, so guns and aim are unaffected.
     extern float g_VrHandsRollDeg;
     // Gesture easter egg: while the G-Man is in front of you, grip shows only
     // the middle finger extended.
