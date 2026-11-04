@@ -3532,6 +3532,29 @@ namespace
         return false;
     }
 
+    // EyeBloom: the bloom pyramid binds its window-proportional targets
+    // (_rt_Small2FB0 960x540 ...) with SetRenderTarget and a viewport that
+    // covers exactly that target. ClampStereoViewport grew such a viewport to
+    // the eye, so DrawScreenSpaceRectangle (dest relative to the viewport)
+    // drew the bright-pass into the top-left 960/eyeW x 540/eyeH of its
+    // target and engine_post stretched it into a scene stamp in the eye's
+    // top-left corner (bm_c2a5a, 2026-11-04). A viewport that is the whole
+    // bound target, smaller than the window and not the eye, stays as is.
+    bool EyeBloomOwnRtViewport(void* ctx, int x, int y, int width, int height)
+    {
+        if (!bmvr::g_EyeBloom || !Hooks::m_VR || x != 0 || y != 0 || width <= 0 || height <= 0)
+            return false;
+        int rtW = 0, rtH = 0;
+        if (!QueryContextColorRtSize(ctx, rtW, rtH, nullptr) || rtW != width || rtH != height)
+            return false;
+        if (rtW == static_cast<int>(Hooks::m_VR->m_RenderWidth) && rtH == static_cast<int>(Hooks::m_VR->m_RenderHeight))
+            return false;
+        uint32_t winW = 0, winH = 0;
+        if (!bmvr::QueryWindowClientSize(winW, winH))
+            return false;
+        return rtW + 32 < static_cast<int>(winW) && rtH + 32 < static_cast<int>(winH);
+    }
+
     void ClampStereoViewport(int& x, int& y, int& width, int& height)
     {
         if (!Hooks::m_VR)
@@ -5782,7 +5805,8 @@ void __fastcall Hooks::dViewport(void* ecx, void* edx, int x, int y, int width, 
 {
     NoteMatContext(ecx);
     const int trW = width, trH = height;
-    ClampStereoViewport(x, y, width, height);
+    if (!EyeBloomOwnRtViewport(ecx, x, y, width, height))
+        ClampStereoViewport(x, y, width, height);
     if (bmvr::g_PassTraceFrames > 0)
         Game::logMsg("trace: Viewport %dx%d -> %d,%d %dx%d", trW, trH, x, y, width, height);
     if (hkViewport.fOriginal)
@@ -5794,7 +5818,8 @@ void __fastcall Hooks::dGetViewport(void* ecx, void* edx, int& x, int& y, int& w
     (void)edx;
     NoteMatContext(ecx);
     CallOriginalGetViewport(ecx, x, y, width, height);
-    ClampStereoViewport(x, y, width, height);
+    if (!EyeBloomOwnRtViewport(ecx, x, y, width, height))
+        ClampStereoViewport(x, y, width, height);
 }
 
 void __fastcall Hooks::dGetRenderTargetDimensions(void* ecx, void* edx, int& width, int& height)
