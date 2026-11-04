@@ -394,6 +394,11 @@ namespace bmvr
     // dark over spotlit walls (normal-offset shadow bias into their own
     // shadow). false = stock rows (A/B aid). No effect on centred eyes.
     extern bool g_ViewProjNormalFix;
+    // EyeBloom (default false, cvar bmvr_eye_bloom): test switch. true lets
+    // the stock bloom chain (downsample / blur pyramid / bloomadd), the
+    // auto-exposure histogram (lumcompare) and engine_post's bloom var run
+    // on the eyes unchanged. false = the eye skip (2026-09-03 ghosts).
+    extern bool g_EyeBloom;
     // GlowHold (seconds, default 0 = off, cvar bmvr_glow_hold): a glow
     // that dims keeps its brightest recent value this long, then fades over
     // the same time, so partial occlusion (dirty glass, the edge of an eye's

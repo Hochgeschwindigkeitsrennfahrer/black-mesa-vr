@@ -155,6 +155,7 @@ namespace bmvr
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
     bool g_ViewProjNormalFix = true;
+    bool g_EyeBloom = false;
     float g_GlowHold = 0.f;
     bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;
@@ -699,6 +700,8 @@ namespace bmvr
                 g_PixelVisPerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ViewProjNormalFix") == 0)
                 g_ViewProjNormalFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "EyeBloom") == 0)
+                g_EyeBloom = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "OccluderViewPerEye") == 0)
                 g_OccluderViewPerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RightEyeFirst") == 0)

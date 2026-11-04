@@ -6450,7 +6450,7 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             ++s_gatedPost;
         }
     }
-    if (StereoBloomMaterial(matName) && stereoEyePost && !eyeEnginePost)
+    if (!bmvr::g_EyeBloom && StereoBloomMaterial(matName) && stereoEyePost && !eyeEnginePost)
     {
         static int s_skipBloom;
         if (s_skipBloom < 12)
@@ -6650,7 +6650,14 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
     {
         const char* varName = "none";
         float bloomOrig = 0.f;
-        const bool bloomSet = ZeroEnginePostBloomForEye(material, matName, varName, bloomOrig);
+        bool bloomSet = false;
+        if (bmvr::g_EyeBloom)
+        {
+            RestoreEnginePostBloom();
+            varName = "kept (EyeBloom)";
+        }
+        else
+            bloomSet = ZeroEnginePostBloomForEye(material, matName, varName, bloomOrig);
         CallOriginalGetViewport(ecx, vpX, vpY, vpW, vpH);
         int rtW = 0, rtH = 0;
         QueryContextColorRtSize(ecx, rtW, rtH, nullptr);
