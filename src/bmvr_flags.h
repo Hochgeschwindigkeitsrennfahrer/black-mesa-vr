@@ -441,8 +441,8 @@ namespace bmvr
     // the middle finger extended.
     extern bool g_VrGmanGesture;
     // How far past the glove's rest pose the gesture finger bends back
-    // (curl units, 0 = rest pose with its natural bend, 0.15 ~ 10 degrees per
-    // joint). Config VrGmanFingerStraight, cvar bmvr_gman_finger_straight.
+    // (curl units, 0 = rest pose with its natural bend, default 0.3 ~ 20 degrees
+    // per joint, tuned in the headset 2026-11-04). Config VrGmanFingerStraight, cvar bmvr_gman_finger_straight.
     extern float g_VrGmanFingerStraight;
     // Test aid (cvar bmvr_gman_gesture_force, not saved): gesture on without a G-Man in view.
     extern bool g_VrGmanGestureForce;
