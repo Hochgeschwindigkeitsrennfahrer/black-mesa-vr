@@ -444,6 +444,8 @@ namespace bmvr
     // (curl units, 0 = rest pose with its natural bend, 0.15 ~ 10 degrees per
     // joint). Config VrGmanFingerStraight, cvar bmvr_gman_finger_straight.
     extern float g_VrGmanFingerStraight;
+    // Test aid (cvar bmvr_gman_gesture_force, not saved): gesture on without a G-Man in view.
+    extern bool g_VrGmanGestureForce;
     // L4D2VR BuildControllerWorld local translation (meters, before model
     // scale). Controller basis Z is -forward, so a negative local Z moves the
     // mesh further along aim. HEV gloves sat behind the controller; -0.10 m

@@ -756,7 +756,7 @@ bool BmVrGloves::DrawForEye(
             // G-Man in view: grip folds every finger but the middle one.
             // Grip drives the middle/ring/pinky curls, so their max is the
             // grip pull; the gesture follows it in and out.
-            if (!gripCurl && g_Game && g_Game->m_VR && g_Game->m_VR->GmanGestureActive())
+            if (!gripCurl && g_Game && g_Game->m_VR && (g_Game->m_VR->GmanGestureActive() || bmvr::g_VrGmanGestureForce))
             {
                 const float grip = std::max({ summary.flFingerCurl[2], summary.flFingerCurl[3], summary.flFingerCurl[4] });
                 if (grip > 0.05f)

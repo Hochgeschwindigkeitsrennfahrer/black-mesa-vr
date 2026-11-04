@@ -167,6 +167,7 @@ namespace bmvr
     float g_VrHandsRollDeg = 90.f;
     bool g_VrGmanGesture = true;
     float g_VrGmanFingerStraight = 0.15f;
+    bool g_VrGmanGestureForce = false;
     // ~one hand-length back along aim after yaw 180 (user: gloves sat ahead
     // of the controller). Flip the Z sign in VR/config.txt if this goes the
     // wrong way on a given headset.
