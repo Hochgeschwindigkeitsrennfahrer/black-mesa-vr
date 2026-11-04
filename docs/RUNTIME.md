@@ -390,7 +390,7 @@ Failed fix (user 2026-09-03): run bloom, draw `engine_post_nxtgen` at eye dest (
 
 Keep skipping that bloom chain on stereo eyes. Do not disable the rest of post. Do not retry dest/UV/viewport rescale of `engine_post` without a new integration point (shader constants / bloom RT contents, not dest size).
 
-**Later (2026-10-29/30):** that new integration point exists. `StereoEnginePost` (default true) draws `engine_post*` on the eyes with `$bloomenable` zeroed for the draw, so FXAA, tonemap and colour correction run in the HMD; the rest of the bloom chain stays skipped. Headset: no cafeteria ghosts. See `fxaa-headset.md`. Side effect still open: `dev/lumcompare` is in the skipped chain, so auto-exposure is probably frozen on the eyes (bright lamps look toned down vs flat).
+**Later (2026-10-29/30):** that new integration point exists. `StereoEnginePost` (default true) draws `engine_post*` on the eyes with `$bloomenable` zeroed for the draw, so FXAA, tonemap and colour correction run in the HMD; the rest of the bloom chain stays skipped. Headset: no cafeteria ghosts. See `fxaa-headset.md`. Still open: the rest of the chain, including `dev/lumcompare` (auto-exposure), is skipped on the eyes, so VR has no bloom and auto-exposure is probably frozen (unmeasured). The 09-03 verdicts were measured on the window-sized path and need a re-check on the eye-sized path before they are taken as final.
 
 **Verified fail 2026-09-03 (user):** grow `_rt_Small*FB*` to eye/N — ghosts gone but the **entire picture zoomed and warped with head movement**. Same after reverting the `DoEnginePostProcessing` eye w/h override. Do not grow bloom scratch RTs. Skip bloom on stereo eyes.
 
