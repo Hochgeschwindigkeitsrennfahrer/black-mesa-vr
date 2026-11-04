@@ -416,6 +416,15 @@ namespace bmvr
     // Applied only to hand poses around aim forward (weapons stay unrolled).
     // Left = -deg, right = +deg. Flip the sign if palms go the wrong way.
     extern float g_VrHandsIndexRollDeg;
+    // Glove-only roll around the controller's forward axis so the drawn hands
+    // match a hand wrapped around the grip (thumb up) instead of lying flat.
+    // Left = -deg, right = +deg, same convention as the Index roll. Not applied
+    // to Index (already rolled above) nor to a hand posed on a weapon; never
+    // touches the tracked pose, so guns and aim are unaffected.
+    extern float g_VrHandsRollDeg;
+    // Gesture easter egg: while the G-Man is in front of you, grip shows only
+    // the middle finger extended.
+    extern bool g_VrGmanGesture;
     // L4D2VR BuildControllerWorld local translation (meters, before model
     // scale). Controller basis Z is -forward, so a negative local Z moves the
     // mesh further along aim. HEV gloves sat behind the controller; -0.10 m

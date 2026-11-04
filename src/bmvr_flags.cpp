@@ -162,6 +162,8 @@ namespace bmvr
     float g_VrHandsPoseRotY = 180.f;
     float g_VrHandsPoseRotZ = 0.f;
     float g_VrHandsIndexRollDeg = 90.f;
+    float g_VrHandsRollDeg = 25.f;
+    bool g_VrGmanGesture = true;
     // ~one hand-length back along aim after yaw 180 (user: gloves sat ahead
     // of the controller). Flip the Z sign in VR/config.txt if this goes the
     // wrong way on a given headset.
@@ -720,6 +722,14 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrHandsIndexRollDeg") == 0)
                 g_VrHandsIndexRollDeg = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "VrHandsRollDeg") == 0)
+            {
+                const float s = static_cast<float>(atof(val));
+                if (s >= -90.f && s <= 90.f)
+                    g_VrHandsRollDeg = s;
+            }
+            else if (std::strcmp(n, "VrGmanGesture") == 0)
+                g_VrGmanGesture = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsPoseOffsetMeters") == 0)
             {
                 float x = 0.f, y = 0.f, z = -0.20f;

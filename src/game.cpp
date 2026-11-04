@@ -1027,6 +1027,86 @@ bool Game::GetEntityAbsOrigin(C_BaseEntity* entity, Vector& out)
     return out.LengthSqr() > 0.f;
 }
 
+int Game::ModelPrecacheIndex(const char* name)
+{
+    if (!m_ModelInfo || !name || !name[0])
+        return -1;
+    __try
+    {
+        return m_ModelInfo->GetModelIndex(name);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1;
+    }
+}
+
+namespace
+{
+    int ReadEntityModelIndexRaw(const void* entity)
+    {
+        __try
+        {
+            return *reinterpret_cast<const short*>(reinterpret_cast<uintptr_t>(entity) + 0x94);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    }
+}
+
+int Game::CollectEntitiesWithModelIndex(const int* modelIndexes, int modelCount, int* out, int maxOut)
+{
+    if (!m_ClientEntityList || !modelIndexes || modelCount <= 0 || !out || maxOut <= 0)
+        return 0;
+    int n = 0;
+    const int hi = m_ClientEntityList->GetHighestEntityIndex();
+    for (int e = 1; e <= hi && n < maxOut; ++e)
+    {
+        const void* ent = m_ClientEntityList->GetClientEntity(e);
+        if (!ent)
+            continue;
+        const int mi = ReadEntityModelIndexRaw(ent);
+        if (mi <= 0)
+            continue;
+        for (int m = 0; m < modelCount; ++m)
+        {
+            if (modelIndexes[m] > 0 && mi == modelIndexes[m])
+            {
+                out[n++] = e;
+                break;
+            }
+        }
+    }
+    return n;
+}
+
+int Game::VisibleEntityModelIndex(int entityIndex, Vector& origin)
+{
+    if (!m_ClientEntityList || entityIndex <= 0)
+        return -1;
+    void* ent = m_ClientEntityList->GetClientEntity(entityIndex);
+    if (!ent)
+        return -1;
+    __try
+    {
+        // Dormancy (out of PVS, stale origin) is not checked here: the caller
+        // traces line of sight instead of calling an unverified vtable slot.
+        const int fx = *reinterpret_cast<const int*>(
+            reinterpret_cast<const char*>(ent) + Offsets::kCBaseEntity_fEffects);
+        if (fx & Offsets::kEF_NODRAW)
+            return -1;
+        origin = *reinterpret_cast<const Vector*>(
+            reinterpret_cast<const char*>(ent) + Offsets::kCBaseEntity_AbsOrigin);
+        return *reinterpret_cast<const short*>(reinterpret_cast<const char*>(ent) + 0x94);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1;
+    }
+}
+
 bool Game::LocalPlayerHasSuit()
 {
     ScanWristHudNetVars();

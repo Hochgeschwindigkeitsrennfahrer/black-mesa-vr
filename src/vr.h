@@ -1230,6 +1230,9 @@ public:
     bool WantsRightGloveVisible() const;
     bool WantsRightGloveWeaponGripCurl() const;
     bool WantsOffhandGloveWeaponGripCurl() const;
+    // True while a G-Man is in front of the player (see UpdateGmanGesture).
+    // Written on the game thread, read by the glove draw.
+    bool GmanGestureActive() const { return m_GmanGestureActive.load(std::memory_order_relaxed); }
     bool TwoHandGripActive() const { return m_TwoHandActive; }
     // Live L_Wrist (or L_Hand) world origin from DrawModelExecute bone matrices.
     void NoteViewmodelOffhandWorld(const Vector& worldOrigin);
@@ -1525,6 +1528,19 @@ private:
     bool m_LastGrabHandLeft = true;
     bool m_GrabHoldingPhysics = false;
     bool m_GrabUseEntityHeld = false;
+    // G-Man gesture: the map's G-Man model indexes are looked up a few
+    // times right after map start; maps without one never scan entities.
+    // On his maps the entity list is rescanned at most once a second and
+    // only the cached entities are checked per frame.
+    void UpdateGmanGesture();
+    int m_GmanModelIndex[2] = { -1, -1 };
+    int m_GmanMapState = 0;            // 0 unknown, 1 has a G-Man, 2 none
+    int m_GmanMapChecks = 0;
+    DWORD m_GmanMapCheckMs = 0;
+    DWORD m_GmanScanMs = 0;
+    int m_GmanEntities[4] = {};
+    int m_GmanEntityCount = 0;
+    std::atomic<bool> m_GmanGestureActive{ false };
     bool m_OnGun = false;
     int m_GunPropIndex = 0;
     // Right hand within reach of a gun's mount while not on it: R2 grabs

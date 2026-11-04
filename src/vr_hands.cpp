@@ -753,6 +753,21 @@ bool BmVrGloves::DrawForEye(
             || (!rightHand && g_Game->m_VR->WantsOffhandGloveWeaponGripCurl()));
         if (TryGetSummary(input, actions[i], summary))
         {
+            // G-Man in view: grip folds every finger but the middle one.
+            // Grip drives the middle/ring/pinky curls, so their max is the
+            // grip pull; the gesture follows it in and out.
+            if (!gripCurl && g_Game && g_Game->m_VR && g_Game->m_VR->GmanGestureActive())
+            {
+                const float grip = std::max({ summary.flFingerCurl[2], summary.flFingerCurl[3], summary.flFingerCurl[4] });
+                if (grip > 0.05f)
+                {
+                    summary.flFingerCurl[0] = std::max(summary.flFingerCurl[0], grip);
+                    summary.flFingerCurl[1] = std::max(summary.flFingerCurl[1], grip);
+                    summary.flFingerCurl[2] = 0.f;
+                    summary.flFingerCurl[3] = grip;
+                    summary.flFingerCurl[4] = grip;
+                }
+            }
             if (!BuildSummaryCurlPalette(hand.asset, hand.rig, summary, hand.palette, gripCurl ? 0.40f : 0.f))
                 BuildBindPosePalette(hand.asset, hand.palette);
         }
@@ -783,9 +798,16 @@ bool BmVrGloves::DrawForEye(
             posOffset.y += bmvr::g_VrHandsRightPoseOffY;
             posOffset.z += bmvr::g_VrHandsRightPoseOffZ;
         }
+        // Hands around a grip sit thumb-up, not palm-down: roll the drawn
+        // glove (only) around the controller's forward axis, mirrored per
+        // hand. Index poses are already rolled 90 deg upstream; a hand posed
+        // on a weapon stays aligned with the weapon.
+        QAngle gloveAngles = *angles[i];
+        if (family != L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES && !gripCurl)
+            gloveAngles.z += rightHand ? bmvr::g_VrHandsRollDeg : -bmvr::g_VrHandsRollDeg;
         const VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
             *origins[i],
-            *angles[i],
+            gloveAngles,
             sourceUnitsPerMeter,
             scale,
             posOffset,

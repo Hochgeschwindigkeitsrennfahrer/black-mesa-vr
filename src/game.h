@@ -104,6 +104,15 @@ public:
     // Rescanned at most once a second.
     int CollectMountedGunProps(int* indexes, int maxProps);
     bool GetEntityAbsOrigin(C_BaseEntity* entity, Vector& out);
+    // Client model precache index of a model path, -1 if the map does not use it.
+    int ModelPrecacheIndex(const char* name);
+    // Entity indexes whose model index is one of modelIndexes (no strings
+    // compared; a full entity-list pass, so call it sparingly).
+    int CollectEntitiesWithModelIndex(const int* modelIndexes, int modelCount, int* out, int maxOut);
+    // Model index of the entity at entityIndex if it exists and is not
+    // EF_NODRAW; -1 otherwise. Fills its abs origin (may be stale while the
+    // entity is dormant, so check line of sight).
+    int VisibleEntityModelIndex(int entityIndex, Vector& origin);
     int RpgLaserOnOffset() const;
     int RpgLaserDotOffset() const;
     C_BaseEntity* FindEntityByNetworkNameContains(const char* token);

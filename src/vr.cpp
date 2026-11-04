@@ -2987,6 +2987,13 @@ void VR::OnLevelInit(const char* newmap)
     m_MenuPanelPoseValid = false;
     m_WeaponMenuPrevEntity = 0;
     m_WeaponMenuPrevKind = 0;
+    m_GmanModelIndex[0] = m_GmanModelIndex[1] = -1;
+    m_GmanMapState = 0;
+    m_GmanMapChecks = 0;
+    m_GmanMapCheckMs = 0;
+    m_GmanScanMs = 0;
+    m_GmanEntityCount = 0;
+    m_GmanGestureActive.store(false, std::memory_order_relaxed);
     Game::logMsg("LevelInit map=%s eligible=%d", m_CurrentMapName.c_str(), m_GameplayEligible ? 1 : 0);
     m_PhysicalCrowbarModel = nullptr;
     m_PhysicalCrowbarLoadTries = 0;
@@ -12117,6 +12124,7 @@ void VR::TickMatQueueFromRenderView()
         UpdateAimCrosshair();
         UpdateRpgLaserPoint();
     }
+    UpdateGmanGesture();
     // Glove lighting samples GetLightForPoint here, not in the draw path.
     if (m_GameplayEligible && m_HmdPoseValid)
     {
@@ -12135,6 +12143,119 @@ void VR::TickMatQueueFromRenderView()
     // QoL SetValue(mat_vsync) crashed the first RenderView (2026-08-26).
     // Crosshair stays in bmvr.cfg. Only mat_queue_mode is written after warmup.
     UpdateAutoMatQueueMode();
+}
+
+namespace
+{
+    // World only (no entities, so the G-Man himself never blocks the ray).
+    class CTraceFilterWorldOnlyBmvr : public CTraceFilter
+    {
+    public:
+        CTraceFilterWorldOnlyBmvr() : CTraceFilter(nullptr, 0) {}
+        bool ShouldHitEntity(IHandleEntity*, int) override { return false; }
+        TraceType GetTraceType() const override { return TraceType::TRACE_WORLD_ONLY; }
+    };
+}
+
+void VR::UpdateGmanGesture()
+{
+    auto setActive = [&](bool on) {
+        if (m_GmanGestureActive.load(std::memory_order_relaxed) != on)
+        {
+            m_GmanGestureActive.store(on, std::memory_order_relaxed);
+            static int s_log;
+            if (s_log < 16)
+            {
+                ++s_log;
+                Game::logMsg("G-Man gesture %s", on ? "armed (G-Man in view)" : "off");
+            }
+        }
+    };
+    if (!bmvr::g_VrGmanGesture || !m_Game || !m_GameplayEligible || !m_HmdPoseValid || PauseUiActive())
+    {
+        setActive(false);
+        return;
+    }
+    const DWORD now = GetTickCount();
+
+    // Map start: is a G-Man model precached at all? The precache table can
+    // still be filling during the first frames, so ask up to 10 times, once
+    // a second; after that maps without him cost nothing.
+    if (m_GmanMapState == 0)
+    {
+        if (m_GmanMapCheckMs != 0 && now - m_GmanMapCheckMs < 1000)
+            return;
+        m_GmanMapCheckMs = now;
+        ++m_GmanMapChecks;
+        m_GmanModelIndex[0] = m_Game->ModelPrecacheIndex("models/gman.mdl");
+        m_GmanModelIndex[1] = m_Game->ModelPrecacheIndex("models/gman_high.mdl");
+        if (m_GmanModelIndex[0] > 0 || m_GmanModelIndex[1] > 0)
+        {
+            m_GmanMapState = 1;
+            Game::logMsg("G-Man gesture: map %s uses the G-Man (model index %d/%d)",
+                m_CurrentMapName.c_str(), m_GmanModelIndex[0], m_GmanModelIndex[1]);
+        }
+        else if (m_GmanMapChecks >= 10)
+        {
+            m_GmanMapState = 2;
+        }
+        return;
+    }
+    if (m_GmanMapState != 1)
+        return;
+
+    // He can enter the PVS (be created on the client) at any time.
+    if (m_GmanScanMs == 0 || now - m_GmanScanMs >= 1000)
+    {
+        m_GmanScanMs = now;
+        m_GmanEntityCount = m_Game->CollectEntitiesWithModelIndex(m_GmanModelIndex, 2, m_GmanEntities, 4);
+    }
+
+    const Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    if (body.LengthSqr() <= 1.f)
+    {
+        setActive(false);
+        return;
+    }
+    const Vector eye = GetViewOrigin(body);
+    Vector fwd{}, right{}, up{};
+    GetViewBasis(&fwd, &right, &up);
+    if (VectorNormalize(fwd) <= 0.01f)
+    {
+        setActive(false);
+        return;
+    }
+    // ~40 m covers him behind the far windows; the cone is about the
+    // headset's view (cos 50 deg).
+    constexpr float kMaxDist = 1600.f;
+    constexpr float kMinCos = 0.64f;
+    bool seen = false;
+    for (int i = 0; i < m_GmanEntityCount && !seen; ++i)
+    {
+        Vector origin{};
+        const int mi = m_Game->VisibleEntityModelIndex(m_GmanEntities[i], origin);
+        if (mi <= 0 || (mi != m_GmanModelIndex[0] && mi != m_GmanModelIndex[1]))
+            continue;
+        const Vector head = origin + Vector(0.f, 0.f, 60.f);
+        Vector to = head - eye;
+        const float dist = VectorNormalize(to);
+        if (dist < 1.f || dist > kMaxDist || to.Dot(fwd) < kMinCos)
+            continue;
+        // Line of sight against solid world only: glass and grates let it
+        // through, walls do not (also covers a stale origin out of the PVS).
+        if (m_Game->m_EngineTrace)
+        {
+            CTraceFilterWorldOnlyBmvr filter;
+            Ray_t ray;
+            ray.Init(eye, head);
+            CGameTrace tr{};
+            m_Game->m_EngineTrace->TraceRay(ray, CONTENTS_SOLID, &filter, &tr);
+            if (tr.fraction < 0.98f && !tr.startsolid)
+                continue;
+        }
+        seen = true;
+    }
+    setActive(seen);
 }
 
 void VR::UpdateAutoMatQueueMode()
