@@ -3539,7 +3539,9 @@ namespace
     // drew the bright-pass into the top-left 960/eyeW x 540/eyeH of its
     // target and engine_post stretched it into a scene stamp in the eye's
     // top-left corner (bm_c2a5a, 2026-11-04). A viewport that is the whole
-    // bound target, smaller than the window and not the eye, stays as is.
+    // bound target, when that target is neither the eye nor the window, stays
+    // as is.
+    bool LooksLikeWindowExtent(int w, int h);
     bool EyeBloomOwnRtViewport(void* ctx, int x, int y, int width, int height)
     {
         if (!bmvr::g_EyeBloom || !Hooks::m_VR || x != 0 || y != 0 || width <= 0 || height <= 0)
@@ -3549,10 +3551,20 @@ namespace
             return false;
         if (rtW == static_cast<int>(Hooks::m_VR->m_RenderWidth) && rtH == static_cast<int>(Hooks::m_VR->m_RenderHeight))
             return false;
-        uint32_t winW = 0, winH = 0;
-        if (!bmvr::QueryWindowClientSize(winW, winH))
+        // Real sessions size the pyramid from the eye (_rt_Small2FB0
+        // 1736x1768 for a 3472x3536 eye; the harness gets window/2), so the
+        // test is "not the eye and not the window", not "smaller than the
+        // window": a 1736x1768 viewport grown to the eye put the bright-pass
+        // in the top-left quarter (headset, On A Rail / c2a5a, 2026-11-04).
+        if (LooksLikeWindowExtent(rtW, rtH))
             return false;
-        return rtW + 32 < static_cast<int>(winW) && rtH + 32 < static_cast<int>(winH);
+        static int s_keepLog;
+        if (s_keepLog < 6)
+        {
+            ++s_keepLog;
+            Game::logMsg("EyeBloom: viewport kept at its own target %dx%d", rtW, rtH);
+        }
+        return true;
     }
 
     void ClampStereoViewport(int& x, int& y, int& width, int& height)
