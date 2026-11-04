@@ -2,7 +2,7 @@
 
 **Symptom (user, 2026-10-29):** the headset image shimmers. The desktop view looks fine. Toggling `mat_fxaa_enabled` 1 / 0 with `Msaa=0` makes no visible difference in the HMD. Not tied to multicore.
 
-**Status:** cause confirmed in the code and consistent with the user's log; fix implemented (below), not yet compiled or headset-tested.
+**Status (2026-11-04): done and shipped.** `StereoEnginePost` (default true) runs `engine_post` on the eyes with `$bloomenable` zeroed. Headset 2026-10-30: the FXAA toggle is visible in the HMD, the cafeteria bloom ghosts did not come back, colours match the desktop. FXAA only helps a little against the remaining shimmer; the larger gains came from `ReflectionRtScale`, `RefractCopyRtScale`, the helper box downsample and `EnvmapScale*` (see `open-work-2026-10.md`, status table). The load-screen zoom below is fixed by the gameplay gate (5ce0683). The sections below are the investigation record.
 
 Log note (user's local check, 2026-10-29): `dev/engine_post_nxtgen` does reach `dDrawScreenSpaceRectangle` on eye passes, but the `DSSR skip bloom` line is capped at 12 and the bloom stages use all 12. Its absence from that log line proves nothing.
 

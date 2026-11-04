@@ -2,6 +2,8 @@
 
 Install: `C:\Program Files (x86)\Steam\steamapps\common\Black Mesa`
 
+> **Current build: public-beta 26234270 (2026-10-27).** It is not written up here; its RVAs are in `src/offsets.h` (comments name the 25844216 values they replaced). The sections below cover the two earlier betas and the pre-beta scan.
+
 ## public-beta buildid 25607072 (2026-10-02)
 
 Anomalous Improvements rebuilt `client.dll`, `server.dll`, `engine.dll`, and `materialsystem.dll`. `steam.inf` PatchVersion is still `100002`. Interface names did not change (`VEngineClient015`, `VMaterialSystem081`, `VEngineModel016`). `-oldgameui` is still a command-line string in `engine.dll`.

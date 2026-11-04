@@ -19,7 +19,7 @@ World reconstruct uses the same call. Leaving HWND 16:9 here while the eye RT is
 
 Hardware `GetViewport` (`materialsystem+0x68A70`) and `GetRenderTargetDimensions` (`+0x68840`) are different functions from the queued context.
 
-- Queued GetRTDimensions (`materialsystem+0x5F890`) is `ret 8` and **never writes** the out sizes. Flares then WorldToScreen with HWND leftovers or uninit stack.
+- Queued GetRTDimensions (`materialsystem+0x5F890`) is `ret 8` and **never writes** the out sizes. Flares then WorldToScreen with HWND leftovers or uninit stack. *(Pre-beta build. Since public beta 25607072 the queued GetRenderTargetDimensions reads the RT stack and returns real sizes; see `OFFSETS.md`.)*
 - Queued GetViewport (`+0x5F8C0`) is also not the hardware hook, so `ClampStereoViewport` did not run on the record thread.
 
 Hook both. HWND-only remap on the hardware function; on the queued stub, fill eye size during the stereo pair (not HUD, not leftover, not nested, not sub-640×360).

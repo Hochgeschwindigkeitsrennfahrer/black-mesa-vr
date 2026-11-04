@@ -4,6 +4,30 @@ Running list for the `fxaa-troubleshooting` branch and the HMD issues discussed 
 
 Status words follow `AGENTS.md` rule 17.
 
+## Status update (2026-11-04)
+
+The sections below are kept as the working record. This table gives the outcome of each item. Builds up to `c1097b5` (release `.6`).
+
+| Item (section) | Outcome |
+| --- | --- |
+| FXAA / `engine_post` on the eyes (§1) | **Done, shipped.** `StereoEnginePost` (9a0994e, 0db7d66) is on by default. Headset 2026-10-30: FXAA toggle visible, no cafeteria bloom ghosts back. Optional stronger preset `bmvr_aa_strong.cfg` ships since `.3`. |
+| Load screen zoomed / clipped (§1, §7) | **Fixed, confirmed.** The zoom was the eye `engine_post` path (gated on gameplay, 5ce0683). The clipped pause-menu load screen that remained was a different cause: client UI roots laid out at eye size (2575932). |
+| Helper resample as shimmer source (§2, §7) | **Ruled out.** Helper fill fit (13695af) and 1:1 swapchains (bae6915) stay. |
+| Box downsample (§9) | **Done.** Visible AA gain in the headset; shipped as `OpenXRHelperDownsample=box` option (off by default). |
+| Mirror-floor / wall-edge stair-steps (§8, §10–12) | **Fixed, shipped.** 1024² reflection RTs were the cause. `ReflectionRtScale` (default 0.5) with the reflection G-buffer and viewport fixes (55e0e8e, d4a8fe0); `RefractCopyRtScale` (a37609c, default 0.5) for the `_rt_PowerOfTwoFB` copy. |
+| Shine shimmer on walls/floors | **Reduced, shipped.** Cubemap strength `EnvmapScaleWorld` / `EnvmapScaleModels` (b9c786c; stutter fix c1097b5). `dxvk.conf` AF and LOD bias 0.5 had no effect. |
+| Outdoor shimmer (terrain, rock, foliage) | **Open.** Little or no cubemap there, so plain texture/edge aliasing; EnvmapScale does not help. |
+| Door glass / small window reflections (§8) | **Not a mod bug.** Stock flat Black Mesa shows the same reflections (map cubemaps). EnvmapScale tones them down. |
+| Light / glow / monitor flicker (§3, §7) | **Fixed, confirmed.** Per-eye pixel-visibility queries plus a few frames of query grace (8952630, `PixelVisPerEye`, cvar `bmvr_pixelvis_per_eye`). Headset A/B: lighting much worse with it off. |
+| Seeing through walls (§4) | **Explained, mitigated.** Head offset after walking around while paused. `AutoRecenterOnResume` works (headset 2026-10-30). No hull trace for the eye was added. |
+| Right-eye pop-in (§12) | **Fixed, confirmed.** Per-eye occlusion tracker ids (73de657) plus the off-centre shift dropped from the occluder projection (a2d4255). The glow changes do not add pop-in (headset A/B 2026-11-02). The view-id 3/4 lead was not needed. |
+| Left-eye flashlight shadow choppy (§7) | **Fixed, confirmed.** Shadow matrix rebuilt from the current light constants (54df47c). |
+| Monitor-cluster "shadow" above the screens (§7) | **Open, cause narrowed.** Gone with `mat_colorcorrection 0`; same family as the TV and helicopter ghosts. Waiting on a stock flat-game comparison. |
+| MulticoreMode copy fallback (§5, §7) | **Closed.** 46 fallbacks in 27 min. |
+| `MaxEyeSize` above 4096 (§7, §8) | **Option shipped (default 4096).** 5456 with RenderScale 1.75 ran, then the game exited with code 1 after ~5 min (likely 32-bit address space). Treat as unsafe with MulticoreMode. |
+| Lobby GPU cost of bigger reflections (§12) | **Accepted** at `ReflectionRtScale` 0.5 (user, 2026-11-01). `GpuPassTiming` stays opt-in. |
+| Gesture quick-save stores the player facing 180° (§11–12) | **Open, parked.** Menu saves are fine. |
+
 ## 1. FXAA / engine_post on the eyes
 
 | Item | Commit | Status |

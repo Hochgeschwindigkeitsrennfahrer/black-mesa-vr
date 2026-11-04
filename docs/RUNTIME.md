@@ -390,6 +390,8 @@ Failed fix (user 2026-09-03): run bloom, draw `engine_post_nxtgen` at eye dest (
 
 Keep skipping that bloom chain on stereo eyes. Do not disable the rest of post. Do not retry dest/UV/viewport rescale of `engine_post` without a new integration point (shader constants / bloom RT contents, not dest size).
 
+**Later (2026-10-29/30):** that new integration point exists. `StereoEnginePost` (default true) draws `engine_post*` on the eyes with `$bloomenable` zeroed for the draw, so FXAA, tonemap and colour correction run in the HMD; the rest of the bloom chain stays skipped. Headset: no cafeteria ghosts. See `fxaa-headset.md`. Side effect still open: `dev/lumcompare` is in the skipped chain, so auto-exposure is probably frozen on the eyes (bright lamps look toned down vs flat).
+
 **Verified fail 2026-09-03 (user):** grow `_rt_Small*FB*` to eye/N — ghosts gone but the **entire picture zoomed and warped with head movement**. Same after reverting the `DoEnginePostProcessing` eye w/h override. Do not grow bloom scratch RTs. Skip bloom on stereo eyes.
 
 ## Water (2026-09-03; FPS verified 2026-09-04)
@@ -401,6 +403,8 @@ Refraction-only (user): surface better. Full water retry: `r_WaterDrawReflection
 **Verified 2026-09-04 (user):** that full-water set was the GitHub 47 FPS vs local 32 FPS regression in the same spot. Hands and menu were not the cause. Do not retry stereo **full** water (reflection + expensive + gbuffer reflection).
 
 **Verified 2026-09-06 (user):** `r_WaterDrawRefraction 1` alone costs no noticeable performance and looks better than the fog fill. Default is refraction-only again (`waterrefract1`). `nr_gbuffer_for_refraction_enabled` stays 0. Do not grow Water/Refract RTs to the eye.
+
+**Later (2026-10-30/11-01):** growing them to a *fraction* of the eye works when the whole reflection set is grown together: `ReflectionRtScale` (default 0.5) grows `_rt_Water*`, `*Reflect*`/`*Refract*` and the reflection G-buffer `_rt_gb*2`, and maps window-sized viewports, scissors, clears and texel constants inside those passes to the RT size. `RefractCopyRtScale` (default 0.5) sizes the `_rt_PowerOfTwoFB` copy separately. That removed the mirror-floor stair-steps at headset resolution. The earlier failure was the G-buffer grown to the eye while the water RTs stayed at 1024. Details: `open-work-2026-10.md` §10–12.
 
 ## OpenXR Simulator HWND blit (2026-09-09 / 2026-09-13)
 
@@ -433,8 +437,10 @@ Fix (compiled; pause+tab not HMD-verified): skip Present **eye** StretchRect whe
 
 **Symptom (HMD, PSVR2, OffCenterEyes on and off):** mugs, chairs, railings, vending machines appear late at the far right edge while turning the head. The world itself is there. Strafing did not show it.
 
-**Cause (inferred from the fix, engine site not located):** Black Mesa culls props for the right eye with what it computed for the left eye's view. Our stereo pair calls `RenderView` once per eye with its own `CViewSetup`, so the reuse is inside the engine. The right eye sees about IPD/z further right than the left eye, which only matters for near objects.
+**Cause (inferred from the fix, engine site not located):** *(Located 2026-10-30, see the update at the end of this section.)* Black Mesa culls props for the right eye with what it computed for the left eye's view. Our stereo pair calls `RenderView` once per eye with its own `CViewSetup`, so the reuse is inside the engine. The right eye sees about IPD/z further right than the left eye, which only matters for near objects.
 
 **Verified:** rendering the left eye wider (experiment `LeftEyeCullPad=0.05`, symmetric widening) removed the pop-in.
 
 **What the code does (`LeftEyeCullPad`, default 0.05, 0 = off):** only the left eye's right edge moves out, by that fraction of `tan(m_Fov/2)`. `VR::EyeRenderRect` gives each eye's rendered rectangle in tangent space; an eye that is not the plain symmetric frustum is rendered off-centre (`EyeOffCenterView` → `CViewSetup` `m_bOffCenter`, the same path as `OffCenterEyes`). The areaportal `ComputeViewMatrices` hook and `GetScreenAspectRatio` follow the eye. Overlays and gloves remap through `OffCenterNdc`. Submit: OpenVR texture bounds per eye from the rectangle; OpenXR bridge v15 `tanLeft/Right/Down/Up` on the eye desc, which the helper submits as the layer FOV, uncropped. The game DLL and `OpenXRHelper64` must be installed together (the helper refuses a v14/v15 mismatch). HMD-tested in this form by the user (2026-10-26: "works well").
+
+**Update (2026-10-28/30):** the engine site is the occlusion system. The occlusion tracker kept one result per view id, shared by both eyes (fixed with per-eye tracker ids, `OcclusionTrackerPerEye`, 73de657), and the occluder projection applied the off-centre eye shift (a2d4255). With both fixes the pop-in is gone in the headset without widening the left eye, so `LeftEyeCullPad` defaults to 0 (6cc0009) and stays available as a knob.

@@ -505,6 +505,8 @@ render pose time is 0–40 ms behind this WaitFrame, `xrEndFrame.displayTime` is
 that pose time. Helper log field `poseSkewMs` is the correction. The desktop
 counter will still read ~150.
 
+**Reverted 2026-10-15 (161266c):** SteamVR rejects an `xrEndFrame.displayTime` older than the current WaitFrame with `XR_ERROR_TIME_INVALID`; the helper exited (code 26) and the headset lost the picture after the first map load. `xrEndFrame` uses the WaitFrame's predicted time again. Timewarp still gets the render pose through each projection view's pose. `poseSkewMs` in the helper log is always 0.00 now.
+
 ## Status
 
 Defects 1-5 are implemented and confirmed live in the game/helper logs (publish

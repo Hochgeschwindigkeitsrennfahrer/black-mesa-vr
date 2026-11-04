@@ -8,7 +8,7 @@ This is **not** one-eye 2D sky holes (`hl2vr_pixelvis` / EyeToHead visleaf), HUD
 
 CreateMove writes **controller aim** into `cmd->viewangles`. Stereo `CViewSetup.angles` is **HMD pitch/yaw**. Until 2026-09-07 we never `SetViewAngles` from RenderView (comment feared rubberband from a *permanent* overwrite).
 
-On `mat_queue_mode 0` (required; BM stays single-thread), Source areaportals, leaf vis, and HW occlusion still read **IEngineClient viewangles**. Nodding the HMD while the controller points forward culls ceilings/floors as if you were still looking ahead. The 3D skybox already filled those pixels, so asteroids appear inside the room.
+On `mat_queue_mode 0` (required; BM stays single-thread) *(2026-11: no longer true — `MulticoreMode=true` is the default and runs gameplay at `mat_queue_mode 2`; the vis-read scope runs on the main thread either way)*, Source areaportals, leaf vis, and HW occlusion still read **IEngineClient viewangles**. Nodding the HMD while the controller points forward culls ceilings/floors as if you were still looking ahead. The 3D skybox already filled those pixels, so asteroids appear inside the room.
 
 Secondary (same symptom at the top/bottom of the HMD): `WorldRenderAtEyeSize=true` makes a **square** eye RT. Engine `ClearBuffers` after `CSkyboxView` still used a **16:9 HWND** viewport/rect. Leftover skybox depth/color sat in the extra vertical band; pitching looks into that band.
 
