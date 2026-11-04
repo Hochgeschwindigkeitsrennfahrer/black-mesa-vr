@@ -26,6 +26,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <set>
 #include <new>
 #include <string>
 #include <vector>
@@ -740,6 +741,36 @@ namespace
             AuditFlushGroup();
             dumpConsts("VS", g_AuditVsConst, 48);
             dumpConsts("PS", g_AuditPsConst, 32);
+            // The bound shaders' bytecode, once per shader, as
+            // VR/audit-<vs|ps>-<ptr>.dxso (match against DXVK_SHADER_DUMP_PATH).
+            {
+                static std::set<const void*> s_savedShaders;
+                IDirect3DVertexShader9* vsh = nullptr;
+                IDirect3DPixelShader9* psh = nullptr;
+                device->GetVertexShader(&vsh);
+                device->GetPixelShader(&psh);
+                Game::logMsg("audit shaders e%d %s vs=%p ps=%p", eye, t_AuditMaterial, (void*)vsh, (void*)psh);
+                auto save = [&](const char* kind, const void* key, auto* sh) {
+                    UINT size = 0;
+                    if (!sh || s_savedShaders.count(key) || FAILED(sh->GetFunction(nullptr, &size)) || !size)
+                        return;
+                    std::vector<char> buf(size);
+                    if (FAILED(sh->GetFunction(buf.data(), &size)))
+                        return;
+                    char name[64];
+                    std::snprintf(name, sizeof(name), "audit-%s-%p.dxso", kind, key);
+                    if (FILE* f = std::fopen(bmvr::VrFilePath(name).c_str(), "wb"))
+                    {
+                        std::fwrite(buf.data(), 1, size, f);
+                        std::fclose(f);
+                    }
+                    s_savedShaders.insert(key);
+                };
+                save("vs", vsh, vsh);
+                save("ps", psh, psh);
+                if (vsh) vsh->Release();
+                if (psh) psh->Release();
+            }
             // Once per eye: the eye-sized textures this draw samples (light
             // accumulation etc.) as VR/audit-<mat>-e<eye>-s<stage>.bmp.
             static int s_dumped[3];
