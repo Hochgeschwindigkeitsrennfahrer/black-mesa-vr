@@ -75,6 +75,8 @@ namespace bmvr
               Kind::Float, -135.f, 135.f, nullptr, &g_VrHandsRollDeg },
             { "bmvr_gman_gesture", "VR: grip shows a different gesture while the G-Man is in front of you",
               Kind::Bool, 0.f, 1.f, &g_VrGmanGesture, nullptr },
+            { "bmvr_gman_finger_straight", "VR: how far the G-Man gesture finger bends back past the glove's relaxed pose (0 = relaxed, slightly curved)",
+              Kind::Float, 0.f, 0.5f, nullptr, &g_VrGmanFingerStraight },
             { "bmvr_snap_turn", "VR: snap turning (0 = smooth)",
               Kind::Bool, 0.f, 1.f, &g_SnapTurning, nullptr },
             { "bmvr_snap_angle", "VR: snap turn angle in degrees",

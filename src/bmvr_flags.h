@@ -440,6 +440,10 @@ namespace bmvr
     // Gesture easter egg: while the G-Man is in front of you, grip shows only
     // the middle finger extended.
     extern bool g_VrGmanGesture;
+    // How far past the glove's rest pose the gesture finger bends back
+    // (curl units, 0 = rest pose with its natural bend, 0.15 ~ 10 degrees per
+    // joint). Config VrGmanFingerStraight, cvar bmvr_gman_finger_straight.
+    extern float g_VrGmanFingerStraight;
     // L4D2VR BuildControllerWorld local translation (meters, before model
     // scale). Controller basis Z is -forward, so a negative local Z moves the
     // mesh further along aim. HEV gloves sat behind the controller; -0.10 m

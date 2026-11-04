@@ -207,7 +207,7 @@ namespace
         float curls[vr::VRFinger_Count];
         for (int finger = 0; finger < vr::VRFinger_Count; ++finger)
         {
-            float curl = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
+            float curl = std::clamp(summary.flFingerCurl[finger], -0.5f, 1.0f);
             if (gripCurlMin > 0.f)
             {
                 // Thumb (finger 0): keep nearly open so it does not clip into
@@ -763,7 +763,9 @@ bool BmVrGloves::DrawForEye(
                 {
                     summary.flFingerCurl[0] = std::max(summary.flFingerCurl[0], grip);
                     summary.flFingerCurl[1] = std::max(summary.flFingerCurl[1], grip);
-                    summary.flFingerCurl[2] = 0.f;
+                    // Negative curl = bent back past the rest pose's
+                    // natural bend (BuildSummaryCurlPalette allows it).
+                    summary.flFingerCurl[2] = -bmvr::g_VrGmanFingerStraight * std::min(1.f, grip / 0.5f);
                     summary.flFingerCurl[3] = grip;
                     summary.flFingerCurl[4] = grip;
                 }
