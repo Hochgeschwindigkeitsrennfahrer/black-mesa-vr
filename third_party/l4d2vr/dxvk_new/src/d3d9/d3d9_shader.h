@@ -172,6 +172,10 @@ namespace dxvk {
             uint32_t             BytecodeLength)
       : D3D9Shader<IDirect3DVertexShader9>( pDevice, pAllocator, CommonShader, pShaderBytecode, BytecodeLength ) { }
 
+    // BMVR: the module was built from bytecode whose cViewProj-turned normals
+    // read c253-c255 instead of c8-c10 (filled per draw by the device).
+    bool bmvrViewProjNormals = false;
+
   };
 
   class D3D9PixelShader final : public D3D9Shader<IDirect3DPixelShader9> {

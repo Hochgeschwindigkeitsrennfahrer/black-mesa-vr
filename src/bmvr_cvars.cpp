@@ -95,6 +95,8 @@ namespace bmvr
               Kind::Float, 0.01f, 0.5f, nullptr, &g_VrLaserWidth },
             { "bmvr_pixelvis_per_eye", "VR: each eye keeps its own glow visibility queries (0 = stock: the eyes share one, glows can drop out)",
               Kind::Bool, 0.f, 1.f, &g_PixelVisPerEye, nullptr },
+            { "bmvr_viewproj_normal_fix", "VR: ropes get the same normals in both off-centre eyes (0 = stock: one eye's ropes can sit in their own shadow)",
+              Kind::Bool, 0.f, 1.f, &g_ViewProjNormalFix, nullptr },
             { "bmvr_follow_scripted_camera", "VR: cutscene cameras (drag scene, tram) turn the view; the head turns relative to them (0 = head only)",
               Kind::Bool, 0.f, 1.f, &g_FollowScriptedCamera, nullptr },
             { "bmvr_glow_hold", "VR: seconds a dimming light glow keeps its brightness before it fades (0 = off; stops flicker behind dirty glass / at the view edge)",

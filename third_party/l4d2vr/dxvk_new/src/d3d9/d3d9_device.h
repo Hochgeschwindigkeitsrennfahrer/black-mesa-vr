@@ -630,6 +630,10 @@ namespace dxvk {
 
     void BmvrFixFlashlightShadowMatrix();
 
+    // Off-centre eyes: shaders that turn normals with cViewProj rows (see d3d9_device.cpp).
+    bool BmvrViewProjNormalsBegin(float saved[12]);
+    void BmvrViewProjNormalsEnd(const float saved[12]);
+
     HRESULT STDMETHODCALLTYPE SetPixelShaderConstantF(
             UINT   StartRegister,
       const float* pConstantData,

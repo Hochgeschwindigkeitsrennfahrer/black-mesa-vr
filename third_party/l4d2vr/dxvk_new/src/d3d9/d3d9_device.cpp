@@ -4341,6 +4341,114 @@ namespace dxvk {
   }
 
 
+  // Off-centre eyes (OffCenterEyes) put the projection's m02/m12 terms into
+  // cViewProj rows 0/1 (c8/c9): row0 = m00 * right + m02 * forward. Black
+  // Mesa's rope g-buffer shader (cable) turns its tangent frame into view space
+  // with dp3 against those rows, so the normal it writes gets m02 * its forward
+  // component added sideways: about 24 degrees on the PS VR2, opposite per eye.
+  // The deferred spotlight's normal-offset shadow bias then moved one eye's
+  // rope samples into the rope's own shadow (left eye: ropes dark over a lit
+  // wall, right eye lit). Such shaders read c253-c255 instead of c8-c10 for
+  // those dp3s; per draw they get the rows without their forward part, which
+  // is exactly c8-c10 on a centred projection.
+  namespace {
+    constexpr uint32_t kBmvrVpnReg = 253;
+
+    uint32_t BmvrRegType(uint32_t tok) {
+      return ((tok >> 28) & 0x7u) | ((tok >> 8) & 0x18u);
+    }
+
+    // Returns the patched copy, or an empty vector when the shader has no
+    // "dp3 oN, x, c8|c9|c10" or already uses c253-c255.
+    std::vector<DWORD> BmvrPatchViewProjNormals(const DWORD* code, uint32_t& patched) {
+      patched = 0;
+      std::vector<DWORD> out;
+      if (!code || (code[0] & 0xFFFF0000u) != 0xFFFE0000u || ((code[0] >> 8) & 0xFFu) < 3)
+        return out;
+      constexpr uint32_t kConst = 2, kOutput = 6;  // D3DSPR_CONST, D3DSPR_OUTPUT (vs_3_0)
+      // Pass 1: find dp3s to patch; give up if c253-c255 are already in use.
+      std::vector<size_t> sites;
+      size_t i = 1;
+      for (int guard = 0; guard < 65536; ++guard) {
+        const DWORD tok = code[i];
+        if (tok == 0x0000FFFFu)
+          break;
+        const uint32_t op = tok & 0xFFFFu;
+        if (op == 0xFFFEu) {  // comment
+          i += 1 + ((tok >> 16) & 0x7FFFu);
+          continue;
+        }
+        const uint32_t len = (tok >> 24) & 0xFu;
+        // def/defi/defb: only the destination is a register token, the rest are values.
+        const uint32_t regTokens = (op == 0x51 || op == 0x30 || op == 0x2F) ? (len ? 1u : 0u) : len;
+        for (uint32_t k = 1; k <= regTokens; ++k) {
+          const DWORD t = code[i + k];
+          if ((t & 0x80000000u) && BmvrRegType(t) == kConst && (t & 0x7FFu) >= kBmvrVpnReg && (t & 0x7FFu) <= kBmvrVpnReg + 2)
+            return out;
+        }
+        if (op == 8 /* dp3 */ && len == 3) {
+          const DWORD dst = code[i + 1];
+          if (BmvrRegType(dst) == kOutput && !(dst & (1u << 13))) {
+            for (uint32_t k = 2; k <= 3; ++k) {
+              const DWORD t = code[i + k];
+              const uint32_t reg = t & 0x7FFu;
+              if (BmvrRegType(t) == kConst && !(t & (1u << 13)) && reg >= 8 && reg <= 10)
+                sites.push_back(i + k);
+            }
+          }
+        }
+        i += 1 + len;
+      }
+      if (sites.empty())
+        return out;
+      out.assign(code, code + i + 1);
+      for (size_t at : sites)
+        out[at] = (out[at] & ~0x7FFu) | (kBmvrVpnReg + ((out[at] & 0x7FFu) - 8));
+      patched = uint32_t(sites.size());
+      return out;
+    }
+  }
+
+  bool D3D9DeviceEx::BmvrViewProjNormalsBegin(float saved[12]) {
+    auto* vs = m_state.vertexShader.ptr();
+    if (likely(!vs || !vs->bmvrViewProjNormals))
+      return false;
+    const auto& c = m_state.vsConsts->fConsts;
+    for (uint32_t r = 0; r < 3; r++)
+      for (uint32_t k = 0; k < 4; k++)
+        saved[r * 4 + k] = c[kBmvrVpnReg + r].data[k];
+    float rows[3][4] = {};
+    for (uint32_t r = 0; r < 3; r++)
+      for (uint32_t k = 0; k < 4; k++)
+        rows[r][k] = c[8 + r].data[k];
+    const float* f = c[11].data;
+    const float ff = f[0] * f[0] + f[1] * f[1] + f[2] * f[2];
+    if (bmvr::g_ViewProjNormalFix && ff > 1e-6f) {
+      for (uint32_t r = 0; r < 2; r++) {
+        const float d = (rows[r][0] * f[0] + rows[r][1] * f[1] + rows[r][2] * f[2]) / ff;
+        for (uint32_t k = 0; k < 3; k++)
+          rows[r][k] -= d * f[k];
+      }
+    }
+    SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(kBmvrVpnReg, &rows[0][0], 3);
+    return true;
+  }
+
+  void D3D9DeviceEx::BmvrViewProjNormalsEnd(const float saved[12]) {
+    SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(kBmvrVpnReg, saved, 3);
+  }
+
+  namespace {
+    struct BmvrViewProjNormalScope {
+      D3D9DeviceEx* dev;
+      bool on;
+      float saved[12];
+      explicit BmvrViewProjNormalScope(D3D9DeviceEx* d) : dev(d) { on = dev->BmvrViewProjNormalsBegin(saved); }
+      ~BmvrViewProjNormalScope() { if (on) dev->BmvrViewProjNormalsEnd(saved); }
+    };
+  }
+
+
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::DrawPrimitive(
           D3DPRIMITIVETYPE PrimitiveType,
           UINT             StartVertex,
@@ -4352,6 +4460,8 @@ namespace dxvk {
 
     if (unlikely(!PrimitiveCount))
       return D3D_OK;
+
+    BmvrViewProjNormalScope bmvrVpn(this);
 
     if (unlikely(g_BmvrD3dDrawTrace)) {
       const auto& rs = m_state.renderStates;
@@ -4428,6 +4538,8 @@ namespace dxvk {
 
     BmvrFixFlashlightShadowMatrix();
 
+    BmvrViewProjNormalScope bmvrVpn(this);
+
     if (unlikely(g_BmvrD3dDrawTrace)) {
       const auto& rs = m_state.renderStates;
       const RECT& sc = m_state.scissorRect;
@@ -4503,6 +4615,8 @@ namespace dxvk {
     if (unlikely(!PrimitiveCount))
       return D3D_OK;
 
+    BmvrViewProjNormalScope bmvrVpn(this);
+
     PrepareDraw(PrimitiveType, false, false);
 
     uint32_t vertexCount = GetVertexCount(PrimitiveType, PrimitiveCount);
@@ -4559,6 +4673,8 @@ namespace dxvk {
 
     if (unlikely(!PrimitiveCount || !NumVertices))
       return D3D_OK;
+
+    BmvrViewProjNormalScope bmvrVpn(this);
 
     PrepareDraw(PrimitiveType, false, false);
 
@@ -4882,18 +4998,29 @@ namespace dxvk {
     D3D9CommonShader module;
     uint32_t bytecodeLength;
 
+    uint32_t bmvrPatched = 0;
+    const std::vector<DWORD> bmvrCode = BmvrPatchViewProjNormals(pFunction, bmvrPatched);
+    const DWORD* compileFrom = bmvrCode.empty() ? pFunction : bmvrCode.data();
+
     if (FAILED(this->CreateShaderModule(&module,
       &bytecodeLength,
       VK_SHADER_STAGE_VERTEX_BIT,
-      pFunction,
+      compileFrom,
       &moduleInfo)))
       return D3DERR_INVALIDCALL;
 
-    *ppShader = ref(new D3D9VertexShader(this,
+    // GetFunction keeps returning the game's own bytecode (same length).
+    auto* vs = new D3D9VertexShader(this,
       &m_shaderAllocator,
       module,
       pFunction,
-      bytecodeLength));
+      bytecodeLength);
+    if (!bmvrCode.empty()) {
+      vs->bmvrViewProjNormals = true;
+      bmvr::Log("ViewProjNormalFix: VS %p turns normals with cViewProj (%u dp3 sources -> c%u-c%u)",
+        (void*)vs, bmvrPatched, kBmvrVpnReg, kBmvrVpnReg + 2);
+    }
+    *ppShader = ref(vs);
 
     return D3D_OK;
   }
