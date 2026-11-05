@@ -9838,8 +9838,6 @@ void bmvr::InstallEarlyFramebufferHook()
     if (attempted)
         return;
     attempted = true;
-    if (!TryHmdFramebuffer())
-        return;
 
     const MH_STATUS mh = MH_Initialize();
     if (mh != MH_OK && mh != MH_ERROR_ALREADY_INITIALIZED)
@@ -9856,6 +9854,26 @@ void bmvr::InstallEarlyFramebufferHook()
         Log("Framebuffer hook: materialsystem.dll not loaded yet");
         return;
     }
+    // CreateDevice runs on the engine's thread, with the eye size known, and the engine
+    // allocates its full-frame targets right after it returns. Hook the allocator here
+    // rather than from the Game thread: that thread gets there only after client.dll
+    // and the helper's first located views, so on a fast start (seen with SteamVR on
+    // Windows) both allocation passes had finished, FullFrame stayed at the window size
+    // and the whole session ran on the window-blit fallback.
+    {
+        const Offset createRt{ "materialsystem.dll", Offsets::kCreateNamedRTExRva, Offsets::kCreateNamedRTExSig };
+        if (createRt.valid && !Hooks::hkCreateNamedRTEx.pTarget)
+        {
+            if (Hooks::hkCreateNamedRTEx.createHook((LPVOID)createRt.address, &Hooks::dCreateNamedRTEx) != 0
+                || Hooks::hkCreateNamedRTEx.enableHook() != 0)
+                Log("CreateNamedRTEx early hook failed rva=0x%X", createRt.offset);
+            else
+                Log("Hook enabled: CreateNamedRTEx rva=0x%X (before the first render target)", createRt.offset);
+        }
+    }
+
+    if (!TryHmdFramebuffer())
+        return;
 
     int off = SigScanner::VerifyOffset("materialsystem.dll", 0x53EF0,
         "55 8B EC 8B 0D ? ? ? ? 8B 01 8B 80 58 04 00 00 5D FF E0");

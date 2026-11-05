@@ -444,8 +444,11 @@ public:
         "80 B9 C8 2A 00 00 00 75 62" };
     // Real CreateNamedRenderTargetTextureEx. Distinct from Ex2, which ends
     // the shared prologue with `mov eax,[ecx]`. Lock flag is this+0x2AC4.
-    Offset CreateNamedRTEx{ "materialsystem.dll", 0x49A30,
-        "55 8B EC 83 B9 C4 2A 00 00 00 75 14 68 ? ? ? ? FF 15 ? ? ? ? 83 C4 04 33 C0 5D C2 20 00 8B 0D" };
+    // Also hooked early from CreateDevice (InstallEarlyFramebufferHook).
+    static constexpr int kCreateNamedRTExRva = 0x49A30;
+    static constexpr const char* kCreateNamedRTExSig =
+        "55 8B EC 83 B9 C4 2A 00 00 00 75 14 68 ? ? ? ? FF 15 ? ? ? ? 83 C4 04 33 C0 5D C2 20 00 8B 0D";
+    Offset CreateNamedRTEx{ "materialsystem.dll", kCreateNamedRTExRva, kCreateNamedRTExSig };
     // CreateNamedRenderTargetTextureEx2 (Begin+Ex+End). Same args as Ex.
     Offset CreateNamedRTEx2{ "materialsystem.dll", 0x499D0,
         "55 8B EC 83 B9 C4 2A 00 00 00 75 14 68 ? ? ? ? FF 15 ? ? ? ? 83 C4 04 33 C0 5D C2 20 00 8B 01" };
