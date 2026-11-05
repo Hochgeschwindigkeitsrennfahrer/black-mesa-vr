@@ -918,7 +918,6 @@ public:
     bool IsQueuedHudFresh() const { return false; }
     void OnLevelInit(const char* newmap);
     void OnLevelShutdown();
-    void ApplyRenderTargetFramebufferOverride(void* materialSystem = nullptr);
     void LogFullFrameSizeIfReady();
     bool IsGameplayEligible() const { return m_GameplayEligible; }
     bool HasEngineMap() const { return !m_CurrentMapName.empty(); }

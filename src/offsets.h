@@ -569,7 +569,6 @@ public:
     static constexpr int kIMaterialVar_SetVecValue3Vt = 11;
     static constexpr int kIMaterialVar_VecValOffset = 0xC;
     static constexpr int kIMaterialVar_TypeOffset = 0x1C;
-    static constexpr int kIMaterialSystem_SetRTFBOverrideVt = 142; // +0x238
     static constexpr int kIMaterialSystem_GetRTFBDimensionsVt = 143; // +0x23C
 
     // CBlackMesaPlayer (server). Impulse int +0xe44; flashlight virtuals.

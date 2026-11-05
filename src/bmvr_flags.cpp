@@ -271,7 +271,6 @@ namespace bmvr
     static bool g_TryVguiPaint = true;
     static bool g_TryGameUiActivate = true;
     static bool g_TryMeleeTrace = true;
-    static bool g_TryFbOverride = true;
     // Keep stereo CViewSetup/viewport at 2560 GB size so deferred flashlight
     // apply runs; HMD fov+aspect+IPD; squash-blit into 1584 eyes. Not an RT
     // resize (ff_hmdfit / ff_gbfit). Sticky fl_gbmatch. Default on; leftover
@@ -976,8 +975,6 @@ namespace bmvr
         }
         else if (name == "melee_vm")
             g_TryMeleeTrace = false;
-        else if (name == "fb_override")
-            g_TryFbOverride = false;
         else if (name == "fl_gbmatch")
             g_TryFlashlightGbMatch = false;
         else if (name == "gb_leftskip")
@@ -1703,8 +1700,6 @@ namespace bmvr
         // does not permanently disable the researched path.
         ConsumeIfStuck(L"melee_vm", g_TryMeleeTrace, "melee_vm",
             "crowbar TraceRay viewmodel-origin rewrite");
-        ConsumeIfStuck(L"fb_override", g_TryFbOverride, "fb_override",
-            "IMaterialSystem::SetRenderTargetFrameBufferSizeOverrides");
         // Skip-file already ignores fl_gbmatch. ConsumeIfStuck still disabled
         // it from leftover bmvr_in_fl_gbmatch.flag (BeginRisky held when the
         // first simulator pair died). Next launch then double-RVed 1280 into
@@ -1840,7 +1835,6 @@ namespace bmvr
     bool TryVguiPaint() { return g_TryVguiPaint; }
     bool TryGameUiActivate() { return g_TryGameUiActivate; }
     bool TryMeleeTrace() { return g_TryMeleeTrace; }
-    bool TryFramebufferOverride() { return g_TryFbOverride; }
     bool TryFlashlightGbMatch() { return g_TryFlashlightGbMatch; }
     bool TryGbLeftSkip() { return g_TryGbLeftSkip; }
     bool TryDrawHud() { return g_TryDrawHud; }
@@ -2273,20 +2267,34 @@ namespace bmvr
         return true;
     }
 
-    bool ComputeWorldRtOverrideSize(uint32_t& width, uint32_t& height)
+    // Bloom chain, sized from the current eye size at creation instead of the
+    // engine's frame buffer size. Divisors are the engine's own ratios for these
+    // targets. Targets not listed and not grown elsewhere keep the engine's
+    // window-based size (_rt_Hud, _rt_DofBlur).
+    bool EyeScaledRtSize(const char* name, uint32_t& width, uint32_t& height)
     {
-        if (!g_TryOffscreenWorldGrow || !g_TryOffscreenHmd)
+        struct Entry { const char* name; uint32_t divisor; };
+        static const Entry kTable[] = {
+            { "_rt_Small2FB0", 2 }, { "_rt_Small2FB1", 2 },
+            { "_rt_SmallFB0", 4 }, { "_rt_SmallFB1", 4 }, { "_rt_SmallFB2", 4 }, { "_rt_SmallFB3", 4 },
+            { "_rt_Small8FB0", 8 }, { "_rt_Small8FB1", 8 },
+            { "_rt_Small16FB0", 16 }, { "_rt_Small16FB1", 16 },
+            { "_rt_Small32FB0", 32 }, { "_rt_Small32FB1", 32 },
+        };
+        if (!name)
             return false;
-        uint32_t eyeW = 0, eyeH = 0;
-        if (!ComputeOffscreenEyeSize(eyeW, eyeH))
-            return false;
-        if (g_FullFrameActualWidth < 640 || g_FullFrameActualHeight < 360)
-            return false;
-        if (!SizesNear(g_FullFrameActualWidth, eyeW) || !SizesNear(g_FullFrameActualHeight, eyeH))
-            return false;
-        width = eyeW;
-        height = eyeH;
-        return true;
+        for (const Entry& entry : kTable)
+        {
+            if (std::strcmp(name, entry.name) != 0)
+                continue;
+            uint32_t eyeW = 0, eyeH = 0;
+            if (!ComputeGrownWorldFramebuffer(eyeW, eyeH))
+                return false;
+            width = eyeW / entry.divisor;
+            height = eyeH / entry.divisor;
+            return true;
+        }
+        return false;
     }
 
     bool ComputeGrownWorldGbuffer(uint32_t& width, uint32_t& height)

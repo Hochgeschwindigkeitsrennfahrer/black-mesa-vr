@@ -679,6 +679,22 @@ namespace
                 std::snprintf(sb, sizeof(sb), " sc %ld,%ld-%ld,%ld", sc.left, sc.top, sc.right, sc.bottom);
                 line += sb;
             }
+            {
+                DWORD zOn = 0, zWrite = 0, stencilOn = 0;
+                device->GetRenderState(D3DRS_ZENABLE, &zOn);
+                device->GetRenderState(D3DRS_ZWRITEENABLE, &zWrite);
+                device->GetRenderState(D3DRS_STENCILENABLE, &stencilOn);
+                IDirect3DSurface9* depthSurface = nullptr;
+                D3DSURFACE_DESC depthDesc{};
+                if (SUCCEEDED(device->GetDepthStencilSurface(&depthSurface)) && depthSurface)
+                {
+                    depthSurface->GetDesc(&depthDesc);
+                    depthSurface->Release();
+                }
+                char zb[64];
+                std::snprintf(zb, sizeof(zb), " z=%lu zw=%lu st=%lu ds=%ux%u", zOn, zWrite, stencilOn, depthDesc.Width, depthDesc.Height);
+                line += zb;
+            }
             std::string reads;
             for (DWORD stage = 0; stage < 16; ++stage)
             {
@@ -3042,7 +3058,6 @@ void VR::OnLevelInit(const char* newmap)
         bmvr::EndRisky(L"menu_vr");
         bmvr::KickHudIconPreload();
     }
-    ApplyRenderTargetFramebufferOverride();
 }
 
 bool VR::ShouldCompositorSubmit() const
@@ -3090,108 +3105,6 @@ void VR::OnLevelShutdown()
     m_MenuLastVisibleMs = 0;
     m_MenuPanelPoseValid = false;
     Game::logMsg("LevelShutdown");
-}
-
-void VR::ApplyRenderTargetFramebufferOverride(void* materialSystem)
-{
-    if (!bmvr::TryFramebufferOverride())
-        return;
-    void* mat = materialSystem;
-    if (!mat && m_Game)
-        mat = m_Game->m_MaterialSystem;
-    if (!mat)
-        return;
-
-    static uint32_t s_setW = 0;
-    static uint32_t s_setH = 0;
-
-    uint32_t w = 0, h = 0;
-    static bool s_latchedOffscreen = false;
-    if (bmvr::TryOffscreenWorldGrow() && bmvr::ComputeWorldRtOverrideSize(w, h))
-    {
-        if (s_latchedOffscreen && s_setW != 0)
-        {
-            // Do not follow live SteamVR SS. G-buffers are sized at map load.
-            return;
-        }
-    }
-    else if (bmvr::TryOffscreenWorldGrow())
-    {
-        // Pin HWND until FullFrame itself is eye-sized. Advertising the eye
-        // size here is what created 3168 G-buffers behind a 2560 FullFrame
-        // (flashlight missing, ghost world, 2026-09-01).
-        s_latchedOffscreen = false;
-        uint32_t winW = 0, winH = 0;
-        if (!bmvr::QueryWindowClientSize(winW, winH))
-            return;
-        w = winW;
-        h = winH;
-        static uint32_t s_pinFfW, s_pinFfH;
-        if (s_pinFfW != bmvr::g_FullFrameActualWidth || s_pinFfH != bmvr::g_FullFrameActualHeight)
-        {
-            s_pinFfW = bmvr::g_FullFrameActualWidth;
-            s_pinFfH = bmvr::g_FullFrameActualHeight;
-            uint32_t eyeW = 0, eyeH = 0;
-            bmvr::ComputeOffscreenEyeSize(eyeW, eyeH);
-            Game::logMsg(
-                "RT FB override pin HWND %ux%u (FullFrame %ux%u != eye %ux%u; G-buffer must not outgrow FullFrame)",
-                w, h, s_pinFfW, s_pinFfH, eyeW, eyeH);
-        }
-    }
-    else
-    {
-        s_latchedOffscreen = false;
-        uint32_t winW = 0, winH = 0;
-        if (s_setW != 0 && bmvr::QueryWindowClientSize(winW, winH)
-            && (s_setW != winW || s_setH != winH))
-        {
-            w = winW;
-            h = winH;
-        }
-        else
-            return;
-    }
-
-    void** vt = nullptr;
-    __try
-    {
-        vt = *reinterpret_cast<void***>(mat);
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        vt = nullptr;
-    }
-    if (!vt || !vt[Offsets::kIMaterialSystem_SetRTFBOverrideVt]
-        || !vt[Offsets::kIMaterialSystem_GetRTFBDimensionsVt])
-        return;
-
-    if (s_setW == w && s_setH == h)
-        return;
-
-    using SetFn = void(__thiscall*)(void*, int, int);
-    using GetFn = void(__thiscall*)(void*, int&, int&);
-    int gotW = 0;
-    int gotH = 0;
-    __try
-    {
-        bmvr::BeginRisky(L"fb_override");
-        reinterpret_cast<SetFn>(vt[Offsets::kIMaterialSystem_SetRTFBOverrideVt])(
-            mat, static_cast<int>(w), static_cast<int>(h));
-        reinterpret_cast<GetFn>(vt[Offsets::kIMaterialSystem_GetRTFBDimensionsVt])(
-            mat, gotW, gotH);
-        s_setW = w;
-        s_setH = h;
-        uint32_t offW = 0, offH = 0;
-        s_latchedOffscreen = bmvr::ComputeWorldRtOverrideSize(offW, offH);
-        bmvr::EndRisky(L"fb_override");
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        Game::logMsg("SetRenderTargetFrameBufferSizeOverrides SEH %ux%u", w, h);
-        return;
-    }
-    Game::logMsg("SetRenderTargetFrameBufferSizeOverrides %ux%u (Get %dx%d) HWND unchanged",
-        w, h, gotW, gotH);
 }
 
 void VR::LogFullFrameSizeIfReady()
@@ -3333,7 +3246,6 @@ bool VR::InitOpenVR()
     }
     Game::logMsg("OpenVR recommended RT %ux%u (eye size %ux%u)",
         recW, recH, m_RenderWidth, m_RenderHeight);
-    ApplyRenderTargetFramebufferOverride();
     RefreshIpdFromHmd();
 
     float l_left = 0, l_right = 0, l_top = 0, l_bottom = 0;
@@ -16767,8 +16679,6 @@ void VR::Update()
         ++m_EligiblePresents;
     if (m_GameplayEligible && inGame && m_EligiblePresents == 120 && bmvr::TryHmdFramebuffer())
         bmvr::EndRisky(L"hmd_fb");
-    if (m_GameplayEligible && inGame && m_EligiblePresents == 120 && bmvr::TryFramebufferOverride())
-        bmvr::EndRisky(L"fb_override");
     if (m_GameplayEligible && inGame && m_EligiblePresents == 120 && bmvr::TryDrawHud())
         bmvr::EndRisky(L"drawhud");
     if (m_GameplayEligible && inGame && m_EligiblePresents == 120 && bmvr::TryHmdNative())

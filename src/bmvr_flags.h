@@ -124,7 +124,7 @@ namespace bmvr
     // caller pins HWND — advertising 3168 here before FullFrame grew is what
     // created 3168 G-buffers behind a 2560 FullFrame (flashlight + ghost world,
     // 2026-09-01).
-    bool ComputeWorldRtOverrideSize(uint32_t& width, uint32_t& height);
+    bool EyeScaledRtSize(const char* name, uint32_t& width, uint32_t& height);
     bool HaveHmdFramebufferSize(uint32_t& width, uint32_t& height);
     // Cached game HWND (Valve001 / "Black Mesa"). Null while the window is
     // missing; re-searched at most every 250 ms. Never call FindWindow per
@@ -542,7 +542,6 @@ namespace bmvr
     bool TryVguiPaint();
     bool TryGameUiActivate();
     bool TryMeleeTrace();
-    bool TryFramebufferOverride();
     // Stereo view stays 2560 (G-buffer size) with HMD fov/aspect/IPD so the
     // deferred flashlight apply runs, then squash-blit into 1584 eyes.
     // Sticky fl_gbmatch.

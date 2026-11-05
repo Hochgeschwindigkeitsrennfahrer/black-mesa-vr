@@ -3551,11 +3551,10 @@ namespace
             return false;
         if (rtW == static_cast<int>(Hooks::m_VR->m_RenderWidth) && rtH == static_cast<int>(Hooks::m_VR->m_RenderHeight))
             return false;
-        // Real sessions size the pyramid from the eye (_rt_Small2FB0
-        // 1736x1768 for a 3472x3536 eye; the harness gets window/2), so the
-        // test is "not the eye and not the window", not "smaller than the
-        // window": a 1736x1768 viewport grown to the eye put the bright-pass
-        // in the top-left quarter (headset, On A Rail / c2a5a, 2026-11-04).
+        // The pyramid is sized from the eye (_rt_Small2FB0 1736x1768 for a
+        // 3472x3536 eye), so the test is "not the eye and not the window": a
+        // 1736x1768 viewport grown to the eye put the bright-pass in the
+        // top-left quarter (headset, On A Rail / c2a5a, 2026-11-04).
         if (LooksLikeWindowExtent(rtW, rtH))
             return false;
         static int s_keepLog;
@@ -4694,10 +4693,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
 
     EnsureServerFlashlightHook();
     if (m_VR)
-    {
-        m_VR->ApplyRenderTargetFramebufferOverride();
         m_VR->LogFullFrameSizeIfReady();
-    }
 
     const bool queued = m_Game && m_Game->GetMatQueueMode() != 0;
     SourceRenderQueueBuildScope sourceRenderQueueBuildScope(m_VR, queued);
@@ -5713,7 +5709,6 @@ void __fastcall Hooks::dLevelInit(void* ecx, void* edx, const char* newmap)
     if (m_VR)
     {
         m_VR->OnLevelInit(newmap);
-        m_VR->ApplyRenderTargetFramebufferOverride();
     }
     if (hkLevelInit.fOriginal)
         hkLevelInit.fOriginal(ecx, newmap);
@@ -6673,13 +6668,16 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             matName, origX, origY, origW, origH, destX, destY, width, height, srcWidth, srcHeight,
             srcX0, srcY0, srcX1, srcY1, rtName, rtW, rtH);
     }
-    // engine_post on an eye. Its src texture is the window/4 small FB
+    // engine_post on an eye. With the bloom chain sized from the eye the src
+    // rect already matches and the composite is 1:1 (measured 2026-11-05); the
+    // remap below is for the small-eye fallback, where the chain stays window
+    // sized. It stretched the eye up to 10 px and softened it by about 20 %.
+    // Its src texture is the window/4 small FB
     // (320x160 for 1280x640), but the engine sizes the src rect from the eye
     // (287x295 for 1152x1184), so v ran to 1.84 and the composite, which also
     // samples _rt_FullFrameFB through those texcoords, landed in the top 54 %
     // (headless bm_c1a0a, MulticoreMode, 2026-10-30). Map the rect onto the
-    // whole src texture whenever dest covers the eye. Growing _rt_Small*FB*
-    // instead zoomed and warped the picture (RUNTIME.md, 2026-09-03).
+    // whole src texture whenever dest covers the eye.
     // If the context viewport is not the eye on a 1x eye RT, pin it too.
     int vpX = 0, vpY = 0, vpW = 0, vpH = 0;
     bool vpPinned = false;
@@ -9017,7 +9015,7 @@ namespace
     }
 
     // One line per render target the engine creates (first 256).
-    void LogRtTrace(const char* name, int reqW, int reqH, int mode, ITexture* tex, void* caller)
+    void LogRtTrace(void* materialSystem, const char* name, int reqW, int reqH, int mode, ITexture* tex, void* caller)
     {
         static int s_count;
         if (s_count >= 256)
@@ -9030,8 +9028,19 @@ namespace
         char bbCallerText[96];
         DescribeCodeAddress(caller, callerText, sizeof(callerText));
         DescribeCodeAddress(bb.caller, bbCallerText, sizeof(bbCallerText));
-        Game::logMsg("RtTrace %s req=%dx%d mode=%d actual=%dx%d thread=%lu stereo=%d caller=%s lastBB=%dx%d(orig %dx%d) bbStereo=%d bbCaller=%s",
-            name ? name : "null", reqW, reqH, mode, aw, ah, GetCurrentThreadId(),
+        int fbW = 0, fbH = 0;
+        __try
+        {
+            using GetFn = void(__thiscall*)(void*, int&, int&);
+            void** vt = *reinterpret_cast<void***>(materialSystem);
+            reinterpret_cast<GetFn>(vt[Offsets::kIMaterialSystem_GetRTFBDimensionsVt])(materialSystem, fbW, fbH);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            fbW = fbH = 0;
+        }
+        Game::logMsg("RtTrace %s req=%dx%d mode=%d fb=%dx%d actual=%dx%d thread=%lu stereo=%d caller=%s lastBB=%dx%d(orig %dx%d) bbStereo=%d bbCaller=%s",
+            name ? name : "null", reqW, reqH, mode, fbW, fbH, aw, ah, GetCurrentThreadId(),
             Hooks::m_VR && Hooks::m_VR->StereoWorldPassActive() ? 1 : 0, callerText,
             bb.w, bb.h, bb.origW, bb.origH, bb.stereo ? 1 : 0, bbCallerText);
     }
@@ -9441,8 +9450,6 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
         if (map && map[0])
             bmvr::NoteEngineMapName(map);
     }
-    if (m_VR)
-        m_VR->ApplyRenderTargetFramebufferOverride(ecx);
 
     uint32_t fbW = 0, fbH = 0;
     const bool haveFb = bmvr::TryHmdFramebuffer() && bmvr::HaveHmdFramebufferSize(fbW, fbH);
@@ -9554,6 +9561,25 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
             }
         }
     }
+    uint32_t tableW = 0, tableH = 0;
+    if (bmvr::EyeScaledRtSize(name, tableW, tableH))
+    {
+        static int s_tableLog;
+        if (s_tableLog < 32)
+        {
+            ++s_tableLog;
+            Game::logMsg("CreateNamedRT %s mode=%d depth=%d -> %ux%u LITERAL, own depth (eye size table)",
+                name, sizeMode, depth, tableW, tableH);
+        }
+        w = static_cast<int>(tableW);
+        h = static_cast<int>(tableH);
+        sizeMode = RT_SIZE_LITERAL;
+        // Own depth buffer of the same size. With the engine's shared depth the
+        // viewport on a target taller than the window is cut to the window's
+        // height: the bright pass filled only the top of the target and left
+        // stale pixels below, which engine_post then showed as a ghost.
+        depth = MATERIAL_RT_DEPTH_SEPARATE;
+    }
     const int oldW = w;
     const int oldH = h;
     if (wantGrow && oldW >= 640 && oldH >= 360
@@ -9663,7 +9689,7 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
         --bmvr::Hl2vrMsaaScope::Depth();
     if (msaaScope && s_msaaArmed)
         bmvr::EndRisky(L"msaa");
-    LogRtTrace(name, rtReqW, rtReqH, rtReqMode, tex, rtCaller);
+    LogRtTrace(ecx, name, rtReqW, rtReqH, rtReqMode, tex, rtCaller);
     if (tex && name && (fullMode || namedFb || namedGb || wantGrow))
     {
         int aw = 0, ah = 0;
