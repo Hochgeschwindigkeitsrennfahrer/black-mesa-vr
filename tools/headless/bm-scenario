@@ -81,7 +81,7 @@ projcheck() {
 # Guard: the game must really run with the settings profile. Ask it for the values of the cvars that change the
 # picture and stop before any test if one differs (2026-11-05: a whole session of "VR" runs had flat settings).
 verify_settings() {
-	local exp=$out/expected-settings.cfg cv want got bad=0
+	local exp=$out/expected-settings.cfg cv want got bad=0 reasons=
 	[[ -f $exp && -z ${BMVR_FLAT:-} ]] || return 0
 	for cv in cl_csm_enabled cl_csm_qualitymode cl_csm_memoryusage np_gr_quality mat_motion_blur_enabled mat_fxaa_enabled r_occlusion mat_hdr_level; do
 		want=$(tr -d '\r' < "$exp" | sed -n "s/^$cv \"\(.*\)\"\$/\1/p" | head -1)
@@ -94,12 +94,17 @@ verify_settings() {
 			[[ -n $got ]] && break
 		done
 		echo "$cv want=$want got=${got:-no answer}" >> "$out/effective-settings.txt"
-		[[ $got == "$want" || ( -n $got && $(python3 -Ic "print(float('$got')==float('$want'))" 2>/dev/null) == True ) ]] || bad=1
+		if ! [[ $got == "$want" || ( -n $got && $(python3 -Ic "print(float('$got')==float('$want'))" 2>/dev/null) == True ) ]]; then
+			bad=1
+			reasons+="  $cv: profile wants '$want', game has '${got:-no answer}'"$'\n'
+		fi
 	done
-	[[ -s $out/effective-settings.txt ]] || bad=1
+	[[ -s $out/effective-settings.txt ]] || { bad=1; reasons+="  no cvar could be checked: $exp lists none of them"$'\n'; }
 	if (( bad )); then
-		echo "SETTINGS MISMATCH, run stopped, results would be invalid:" | tee -a "$out/run.log" >&2
-		cat "$out/effective-settings.txt" >&2 2>/dev/null
+		{
+			echo "SETTINGS MISMATCH, run stopped, results would be invalid:"
+			printf '%s' "$reasons"
+		} | tee -a "$out/run.log" >&2
 		exit 3
 	fi
 	echo "settings verified in the running game: $(wc -l < "$out/effective-settings.txt") cvars" | tee -a "$out/run.log"
