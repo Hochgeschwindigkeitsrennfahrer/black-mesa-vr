@@ -88,9 +88,9 @@ verify_settings() {
 		[[ -n $want ]] || continue
 		echo "$cv" >> "$out/VR/cmd.txt"
 		got=
-		for _ in 1 2 3 4 5 6 7 8 9 10; do
+		for _ in $(seq 1 120); do   # the game may still be loading: up to 60 s
 			sleep 0.5
-			got=$(tr -d '\r' < "$CONSOLE" | sed -n "s/^\"$cv\" = \"\([^\"]*\)\".*/\1/p" | tail -1)
+			got=$(tr -d '\r' < "$CONSOLE" | grep -aoE "\"$cv\" = \"[^\"]*\"" | tail -1 | sed 's/.* = "//; s/"$//')   # other output can share the line
 			[[ -n $got ]] && break
 		done
 		echo "$cv want=$want got=${got:-no answer}" >> "$out/effective-settings.txt"
