@@ -44,6 +44,12 @@ if [[ $(vc_size "$GAME/bms/videoconfig.cfg") == "${W}x${H}" && "${W}x${H}" != "$
 	exit 1
 fi
 cp -a "$GAME/bms/videoconfig.cfg" "$out/orig-videoconfig.cfg" 2>/dev/null || true
+# Map starts autosave into the player's save folder and rotate their autosaves, and Steam Cloud picks that up.
+# Keep autosaves, quicksaves and map state files, and put exactly those back afterwards. Named saves are left alone.
+SAVES=$GAME/bms/save
+save_state_files() { find "$1" -maxdepth 1 -type f \( -name 'autosave*' -o -name 'quick*' -o -name '*.hl[123]' \) -print0; }
+mkdir -p "$out/orig-save"
+save_state_files "$SAVES" | xargs -0 -r cp -a -t "$out/orig-save/"
 # The game also writes every archived cvar a test sets (e.g. cl_csm_enabled, np_gr_quality) into
 # bms/cfg/config.cfg on exit, and Steam Cloud keeps a copy in userdata/*/362890/remote/cfg (2026-10-25:
 # a test's cl_csm_enabled 1 ended up in the player's config). Put both back afterwards.
@@ -54,6 +60,10 @@ for i in "${!CLOUD_CFGS[@]}"; do
 done
 restore() {
 	local f ok=1
+	save_state_files "$SAVES" | xargs -0 -r rm -f --
+	save_state_files "$out/orig-save" | xargs -0 -r cp -a -t "$SAVES/"
+	diff -q <(cd "$SAVES" && save_state_files . | sort -z | xargs -0 -r sha256sum) \
+		<(cd "$out/orig-save" && save_state_files . | sort -z | xargs -0 -r sha256sum) >/dev/null || ok=0
 	for f in "${DLLS[@]}"; do
 		cp "$out/orig-d3d9.dll" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
 		[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || ok=0
@@ -67,7 +77,7 @@ restore() {
 	for i in "${!CLOUD_CFGS[@]}"; do
 		[[ -f $out/orig-cloud-config-$i.cfg ]] && cp -a "$out/orig-cloud-config-$i.cfg" "${CLOUD_CFGS[$i]}"
 	done
-	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified) + videoconfig/config.cfg" >> "$out/run.log" \
+	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified) + videoconfig/config.cfg + autosaves" >> "$out/run.log" \
 		|| echo "RESTORE FAILED (DLLs or settings differ from the saved originals in $out)" | tee -a "$out/run.log" >&2
 }
 cleanup() {
@@ -111,7 +121,7 @@ if [[ -n ${BMVR_GPU:-} ]]; then
 	echo "$display" > "$out/display"
 else
 	display=:${BMVR_DISPLAY:-78}
-	Xvfb "$display" -screen 0 ${BMVR_SCREEN:-1600x900x24} -nolisten tcp >"$out/xvfb.log" 2>&1 &
+	Xvfb "$display" -screen 0 ${BMVR_SCREEN:-${W}x${H}x24} -nolisten tcp >"$out/xvfb.log" 2>&1 &
 	xvfb_pid=$!
 	sleep 1
 	export DISPLAY=$display
