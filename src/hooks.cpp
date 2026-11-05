@@ -9074,14 +9074,13 @@ void Hooks::ApplyFxaaParams()
     }
     if (!s_console || !s_quality)
         return;
+    // The shader reads only this block: x sub-pixel, z edge, w dark edge. The
+    // game's own filler puts the dark edge value in the console block instead,
+    // which no shader register reads. Off restores the zeros the game runs with.
     const bool on = bmvr::g_FxaaApply;
-    // Off restores the zeros the game runs with. The console-path slots keep
-    // FXAA's defaults while on; the PC shader reads quality and the dark threshold.
-    s_console[0] = on ? 0.5f : 0.f;
-    s_console[2] = on ? 0.125f : 0.f;
-    s_console[3] = on ? bmvr::g_FxaaEdgeThresholdMin : 0.f;
     s_quality[0] = on ? bmvr::g_FxaaSubpixel : 0.f;
     s_quality[2] = on ? bmvr::g_FxaaEdgeThreshold : 0.f;
+    s_quality[3] = on ? bmvr::g_FxaaEdgeThresholdMin : 0.f;
 }
 
 void __fastcall Hooks::dGetBackBufferDimensions(void* ecx, void* edx, int& width, int& height)
