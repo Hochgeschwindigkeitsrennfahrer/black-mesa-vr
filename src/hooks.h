@@ -255,6 +255,7 @@ public:
     static void ReplayOccluderView(int eye);
     static bool __fastcall dOccluderIsOccluded(void* ecx, void* edx, const float* mins, const float* maxs);
     static void __fastcall dComputeViewMatrices(void* ecx, void* edx, void* worldToView, void* viewToProjection, void* worldToProjection);
+    static void ApplyFxaaParams();
     static ITexture* __fastcall dCreateNamedRTEx(void* ecx, void* edx, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags);
     static void __fastcall dEndRTAlloc(void* ecx, void* edx);
     static void __fastcall dDrawFilledRect(void* ecx, void* edx, int x0, int y0, int x1, int y1);

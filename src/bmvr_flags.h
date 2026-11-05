@@ -399,6 +399,13 @@ namespace bmvr
     // auto-exposure histogram (lumcompare) and engine_post's bloom var run
     // on the eyes unchanged. false = the eye skip (2026-09-03 ghosts).
     extern bool g_EyeBloom;
+    // FXAA quality parameters. The game never passes the mat_fxaa_* cvars to the
+    // shader, so it runs with all of them at 0. FxaaApply (default false = that
+    // stock behaviour) sends these instead. Values are FXAA 3.11's own terms.
+    extern bool g_FxaaApply;
+    extern float g_FxaaSubpixel;
+    extern float g_FxaaEdgeThreshold;
+    extern float g_FxaaEdgeThresholdMin;
     // GlowHold (seconds, default 0 = off, cvar bmvr_glow_hold): a glow
     // that dims keeps its brightest recent value this long, then fades over
     // the same time, so partial occlusion (dirty glass, the edge of an eye's

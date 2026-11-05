@@ -157,6 +157,10 @@ namespace bmvr
     bool g_PixelVisPerEye = true;
     bool g_ViewProjNormalFix = true;
     bool g_EyeBloom = false;
+    bool g_FxaaApply = false;
+    float g_FxaaSubpixel = 0.75f;
+    float g_FxaaEdgeThreshold = 0.166f;
+    float g_FxaaEdgeThresholdMin = 0.0833f;
     float g_GlowHold = 0.f;
     bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;
@@ -706,6 +710,14 @@ namespace bmvr
                 g_ViewProjNormalFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "EyeBloom") == 0)
                 g_EyeBloom = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "FxaaApply") == 0)
+                g_FxaaApply = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "FxaaSubpixel") == 0)
+                g_FxaaSubpixel = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "FxaaEdgeThreshold") == 0)
+                g_FxaaEdgeThreshold = std::clamp(static_cast<float>(atof(val)), 0.f, 0.5f);
+            else if (std::strcmp(n, "FxaaEdgeThresholdMin") == 0)
+                g_FxaaEdgeThresholdMin = std::clamp(static_cast<float>(atof(val)), 0.f, 0.1f);
             else if (std::strcmp(n, "OccluderViewPerEye") == 0)
                 g_OccluderViewPerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RightEyeFirst") == 0)

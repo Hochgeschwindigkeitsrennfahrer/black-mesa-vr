@@ -65,6 +65,15 @@ public:
     Offset g_pClientMode{ "client.dll", 0x15D576,
         "56 57 8B F9 8B 0D ? ? ? ? 8B 01 FF 50 24", 6 };
 
+    // engine_post material proxy bind: copies two global float[4]s into
+    // $FXAAInternalC and $FXAAInternalQ (the push imm32s at +15 and +34). Their
+    // only filler is skipped because every caller passes 0 for its enable
+    // argument, so the mat_fxaa_* cvars never reach the shader.
+    Offset EnginePostProxyBind{ "client.dll", 0x1F41F0,
+        "56 8B F1 8B 4E 04 85 C9 74 0C 8B 01 6A 04 68 ? ? ? ? FF 50 34 8B 4E 08 85 C9 74 0C 8B 01 6A 04 68 ? ? ? ? FF 50 34" };
+    static constexpr int kEnginePostBindFxaaC = 15;
+    static constexpr int kEnginePostBindFxaaQ = 34;
+
     Offset CreateMove{ "client.dll", 0x102590,
         "55 8B EC E8 ? ? ? ? 8B C8 85 C9 75 06 B0 01 5D C2 08 00" };
 

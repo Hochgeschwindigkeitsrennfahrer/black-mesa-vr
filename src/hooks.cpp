@@ -4694,6 +4694,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     EnsureServerFlashlightHook();
     if (m_VR)
         m_VR->LogFullFrameSizeIfReady();
+    ApplyFxaaParams();
 
     const bool queued = m_Game && m_Game->GetMatQueueMode() != 0;
     SourceRenderQueueBuildScope sourceRenderQueueBuildScope(m_VR, queued);
@@ -9044,6 +9045,43 @@ namespace
             Hooks::m_VR && Hooks::m_VR->StereoWorldPassActive() ? 1 : 0, callerText,
             bb.w, bb.h, bb.origW, bb.origH, bb.stereo ? 1 : 0, bbCallerText);
     }
+}
+
+void Hooks::ApplyFxaaParams()
+{
+    static float* s_console = nullptr;
+    static float* s_quality = nullptr;
+    static bool s_resolved = false;
+    if (!s_resolved)
+    {
+        s_resolved = true;
+        if (m_Game && m_Game->m_Offsets && m_Game->m_Offsets->EnginePostProxyBind.valid)
+        {
+            const auto* bind = reinterpret_cast<const uint8_t*>(
+                static_cast<uintptr_t>(m_Game->m_Offsets->EnginePostProxyBind.address));
+            s_console = *reinterpret_cast<float* const*>(bind + Offsets::kEnginePostBindFxaaC);
+            s_quality = *reinterpret_cast<float* const*>(bind + Offsets::kEnginePostBindFxaaQ);
+            // The two blocks are neighbours. Anything else means this is not the
+            // code we read, so leave the game's memory alone.
+            if (s_quality != s_console + 4)
+            {
+                s_console = s_quality = nullptr;
+                Game::noteMissingOffset("FXAA parameter blocks in the engine_post proxy");
+            }
+        }
+        Game::logMsg("FXAA parameters %s (FxaaApply=%d)", s_console ? "available" : "NOT available on this game build",
+            bmvr::g_FxaaApply ? 1 : 0);
+    }
+    if (!s_console || !s_quality)
+        return;
+    const bool on = bmvr::g_FxaaApply;
+    // Off restores the zeros the game runs with. The console-path slots keep
+    // FXAA's defaults while on; the PC shader reads quality and the dark threshold.
+    s_console[0] = on ? 0.5f : 0.f;
+    s_console[2] = on ? 0.125f : 0.f;
+    s_console[3] = on ? bmvr::g_FxaaEdgeThresholdMin : 0.f;
+    s_quality[0] = on ? bmvr::g_FxaaSubpixel : 0.f;
+    s_quality[2] = on ? bmvr::g_FxaaEdgeThreshold : 0.f;
 }
 
 void __fastcall Hooks::dGetBackBufferDimensions(void* ecx, void* edx, int& width, int& height)
