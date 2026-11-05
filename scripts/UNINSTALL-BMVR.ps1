@@ -125,6 +125,9 @@ foreach ($dir in @($GameRoot, $BinDir, $DxvkDir)) {
   Remove-Glob $dir "d3d9.dll.stock-dxvk"
   Remove-Glob $dir "bmvr_*"
   Remove-Glob $dir "bmvr_in_*.flag"
+  Remove-Glob $dir "bmvr_in_*.flag.old"
+  Remove-Glob $dir "bmvr_skip.txt*"
+  Remove-Glob $dir "bmvr_build_stamp.txt"
   Remove-Glob $dir "bms_d3d9.log"
 }
 

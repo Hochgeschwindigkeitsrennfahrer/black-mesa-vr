@@ -1,4 +1,5 @@
 #include "bmvr_flags.h"
+#include "bmvr_version.h"
 #include "openxr_bridge_protocol.h"
 
 #ifndef NOMINMAX
@@ -1545,6 +1546,94 @@ namespace bmvr
         return 0;
     }
 
+    // The folder bms.exe is in, also in a test run (ExeDir() is then the test folder).
+    static std::wstring GameDir()
+    {
+        wchar_t path[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        std::wstring full(path);
+        const size_t slash = full.find_last_of(L"\\/");
+        return slash == std::wstring::npos ? L"." : full.substr(0, slash);
+    }
+
+    // "<buildid> <engine.dll size>": the game build, from Steam's manifest when it is readable.
+    static std::string CurrentGameBuildId()
+    {
+        std::string id = "unknown";
+        FILE* f = nullptr;
+        _wfopen_s(&f, (GameDir() + L"\\..\\..\\appmanifest_362890.acf").c_str(), L"r");
+        if (f)
+        {
+            char line[256];
+            while (fgets(line, sizeof(line), f))
+            {
+                const char* k = std::strstr(line, "\"buildid\"");
+                if (!k)
+                    continue;
+                int build = 0;
+                if (sscanf_s(k + 9, " \"%d\"", &build) == 1)
+                    id = std::to_string(build);
+                break;
+            }
+            fclose(f);
+        }
+        WIN32_FILE_ATTRIBUTE_DATA info{};
+        if (GetFileAttributesExW((GameDir() + L"\\bin\\engine.dll").c_str(), GetFileExInfoStandard, &info))
+            id += " " + std::to_string(info.nFileSizeLow);
+        return id;
+    }
+
+    // Skip entries and crash flags record what died on one mod and game build. After either changes they say nothing
+    // (a wrong-version install would disable features for good), so move them aside and start clean. Runs before the
+    // skip file is read. A first run with no stamp counts as a change.
+    static void ClearSkipsOnBuildChange()
+    {
+        const std::string want = std::string("mod ") + BMVR_COMMIT + " " + __DATE__ + " " + __TIME__ + " game " + CurrentGameBuildId();
+        const std::wstring stampPath = GameDir() + L"\\bmvr_build_stamp.txt";
+        std::string have;
+        FILE* f = nullptr;
+        _wfopen_s(&f, stampPath.c_str(), L"r");
+        if (f)
+        {
+            char buf[256]{};
+            if (fgets(buf, sizeof(buf), f))
+                have = buf;
+            fclose(f);
+            while (!have.empty() && (have.back() == '\n' || have.back() == '\r'))
+                have.pop_back();
+        }
+        if (have == want)
+            return;
+        int moved = 0;
+        const auto moveAside = [&moved](const std::wstring& path) {
+            const std::wstring old = path + L".old";
+            DeleteFileW(old.c_str());
+            if (MoveFileW(path.c_str(), old.c_str()))
+                ++moved;
+        };
+        std::vector<std::wstring> dirs = FlagDirs();
+        dirs.push_back(GameDir());
+        dirs.push_back(GameDir() + L"\\bin");
+        dirs.push_back(ModuleDir());
+        std::sort(dirs.begin(), dirs.end());
+        dirs.erase(std::unique(dirs.begin(), dirs.end()), dirs.end());
+        for (const auto& dir : dirs)
+        {
+            moveAside(dir + L"\\bmvr_skip.txt");
+            WIN32_FIND_DATAW fd{};
+            HANDLE h = FindFirstFileW((dir + L"\\bmvr_in_*.flag").c_str(), &fd);
+            if (h == INVALID_HANDLE_VALUE)
+                continue;
+            do
+                moveAside(dir + L"\\" + fd.cFileName);
+            while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+        DeleteFileW(stampPath.c_str());
+        WriteUtf8File(stampPath, want.c_str(), true);
+        Log("Build changed (was '%s', now '%s'): moved %d skip/crash files aside as .old", have.c_str(), want.c_str(), moved);
+    }
+
     void InitFromDisk()
     {
         if (g_Inited)
@@ -1554,6 +1643,7 @@ namespace bmvr
         StartWatchdog();
         DetectCampaignSession();
         ReadUserConfig(ExeDir() + L"\\VR\\config.txt");
+        ClearSkipsOnBuildChange();
         ReadSkipFile(SkipPath());
         ReadSkipFile(ModuleDir() + L"\\bmvr_skip.txt");
         ConsumeIfStuck(L"msaa", g_MsaaAllowed, "msaa", "HL2VR scene MSAA");
