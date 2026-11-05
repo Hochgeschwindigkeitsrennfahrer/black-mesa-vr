@@ -199,6 +199,15 @@ static DWORD WINAPI InitBMVR(LPVOID param)
     GetModuleFileNameA(static_cast<HMODULE>(param), path, MAX_PATH);
     bmvr::Log("BMVR d3d9.dll loaded (L4D2VR architecture, Black Mesa offsets) from %s",
         path[0] ? path : "?");
+    // Test switch: hold back the hooks so the engine's first render target pass runs without them, the startup
+    // order some real launches get (bloom targets eye-sized). Harness: BMVR_TEST_INIT_DELAY_MS.
+    char delayText[16]{};
+    if (GetEnvironmentVariableA("BMVR_TEST_INIT_DELAY_MS", delayText, sizeof(delayText)) > 0)
+    {
+        const int delayMs = atoi(delayText);
+        bmvr::Log("Test: mod init held back %d ms", delayMs);
+        Sleep(delayMs > 0 ? delayMs : 0);
+    }
     g_Game = new Game();
     return 0;
 }
