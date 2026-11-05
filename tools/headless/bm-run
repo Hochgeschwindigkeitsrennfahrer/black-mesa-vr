@@ -10,8 +10,9 @@
 # env: BMVR_PREFIX (prefix copy, required)
 #      BMVR_DLL (test d3d9.dll; default the installed one)  BMVR_FLAT=1 (stock DXVK, no mod)
 #      BMVR_SETTINGS=vr|flat|live (settings profile; default vr, or flat with BMVR_FLAT)
-#      BMVR_XVFB_GPU=1 (real GPU into a private Xvfb, the normal way; fine with the desktop locked)
-#      BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0: window on the desktop, unlocks it, ask the user first)
+#      BMVR_XVFB_GPU=1 (real GPU into a private Xvfb, the normal way)
+#      BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0: window on the desktop, ask the user first)
+#      Every mode unlocks a locked desktop first (see below).
 #      BMVR_LAVAPIPE (dir with a 32-bit lavapipe ICD; crashes on map load since 2026-10-12)
 #      BMVR_DISPLAY (:78)  BMVR_SCREEN  BMVR_W/BMVR_H (window, default 1920x1080 = the player's own setup)
 #      BMVR_NEWUI=1 (no -oldgameui)
@@ -101,17 +102,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A locked or blanked desktop stalled GPU runs on :0 and spoiled window shots. Not yet tested on the private Xvfb
+# since the overlay rewrite, so keep unlocking in every mode until a locked run has passed. Logged in run.log.
+if command -v cinnamon-screensaver-command >/dev/null && cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active'; then
+	loginctl unlock-sessions 2>/dev/null || true
+	sleep 1
+	cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' && cinnamon-screensaver-command -d 2>/dev/null
+	sleep 1
+	DISPLAY=:0 xset dpms force on 2>/dev/null || true
+	echo "desktop was locked: unlocked $(date +%T)" >> "$out/run.log"
+fi
 if [[ -n ${BMVR_GPU:-} ]]; then
-	# real GPU on an existing X display (window appears there). A locked desktop stalls this and confuses window
-	# shots, so unlock it; only this mode needs that. Logged in run.log.
-	if command -v cinnamon-screensaver-command >/dev/null && cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active'; then
-		loginctl unlock-sessions 2>/dev/null || true
-		sleep 1
-		cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' && cinnamon-screensaver-command -d 2>/dev/null
-		sleep 1
-		DISPLAY=:0 xset dpms force on 2>/dev/null || true
-		echo "desktop was locked: unlocked $(date +%T)" >> "$out/run.log"
-	fi
+	# real GPU on an existing X display (window appears there)
 	display=${BMVR_DISPLAY:-:0}
 	export DISPLAY=$display
 	echo "$display" > "$out/display"
