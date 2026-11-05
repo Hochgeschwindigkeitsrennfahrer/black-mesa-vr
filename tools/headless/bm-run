@@ -1,17 +1,23 @@
 #!/bin/bash
-# bm-run <outdir> [game args...] — run Black Mesa (Proton build) headless with a test d3d9.dll and the fake VR
-# runtime: private Xvfb + lavapipe (CPU Vulkan; Xvfb has no DRI3), a COPY of the Proton prefix, the test VR dir
-# <outdir>/VR (config.txt with VRRuntimeBackend=fake, fake.txt, cmd.txt) via BMVR_TESTDIR, logs in <outdir>.
+# bm-run <outdir> [game args...]: run Black Mesa (Proton build) headless with the fake VR runtime, on an overlay.
 #
-# The game folder only gets the test DLL for the length of the run: the three installed d3d9.dll are
-# checked against $BMVR_ORIG_SHA (sha256 of the installed copies; refuses otherwise), replaced, and put back
-# (and re-verified) on exit, also on failure/^C. SteamVR is made unreachable (VR_PATHREG_OVERRIDE points
-# nowhere), and the run is killed if a vrserver ever shows up.
+# The game runs in a private user + mount namespace with an overlayfs over its folder. Everything it writes (test
+# DLL, settings, saves, autosaves, config, console.log) lands in <outdir>/overlay/upper. The real folder is never
+# written, so nothing needs restoring, a killed run leaks nothing, and Steam Cloud (outside the namespace) sees no
+# change. live-state.sha is compared at the end as a check. The Proton prefix is a copy (BMVR_PREFIX). SteamVR is
+# made unreachable, and the run is killed if a vrserver shows up.
 #
-# env: BMVR_DLL (test d3d9.dll, required)  BMVR_ORIG_SHA (sha256 of the installed d3d9.dll, required)
-#      BMVR_PREFIX (prefix copy, default <scratch>/compatdata)  BMVR_DISPLAY (:78)  BMVR_W/BMVR_H (window, default 1920x1080 = the player's own setup)
-#      BMVR_LAVAPIPE (dir with a 32-bit lavapipe ICD)  BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0; no Xvfb)
-#      BMVR_NEWUI=1 (no -oldgameui)  BMVR_XVFB_GPU=1 (real GPU into the private Xvfb via MESA_VK_WSI_DEBUG=sw; fine with the desktop locked)
+# env: BMVR_PREFIX (prefix copy, required)
+#      BMVR_DLL (test d3d9.dll; default the installed one)  BMVR_FLAT=1 (stock DXVK, no mod)
+#      BMVR_SETTINGS=vr|flat|live (settings profile; default vr, or flat with BMVR_FLAT)
+#      BMVR_XVFB_GPU=1 (real GPU into a private Xvfb, the normal way; fine with the desktop locked)
+#      BMVR_GPU=1 (real GPU on BMVR_DISPLAY, default :0: window on the desktop, unlocks it, ask the user first)
+#      BMVR_LAVAPIPE (dir with a 32-bit lavapipe ICD; crashes on map load since 2026-10-12)
+#      BMVR_DISPLAY (:78)  BMVR_SCREEN  BMVR_W/BMVR_H (window, default 1920x1080 = the player's own setup)
+#      BMVR_NEWUI=1 (no -oldgameui)
+#      BMVR_REAL_ARGS=1 (exactly the player's launch arguments: no -w/-h/-noborder/-nosound; the size comes from videoconfig)
+#      BMVR_PUT="src:game/relative/dst ..." (extra files for the run, e.g. a test cfg to +exec; never in the real folder)
+#      BMVR_KEEP_UPPER=1 (keep the overlay's written files, e.g. to read a save the run made)
 set -euo pipefail
 out=$(realpath -m "$1"); shift
 STEAM=~/.local/share/Steam
@@ -19,103 +25,93 @@ GAME="$STEAM/steamapps/common/Black Mesa"
 PROTON="$STEAM/steamapps/common/Proton - Experimental"
 SLR="$STEAM/steamapps/common/SteamLinuxRuntime_4"
 DLLS=(d3d9.dll bin/d3d9.dll bin/thirdparty/dxvk-windows-x86/d3d9.dll)
-: "${BMVR_DLL:?test d3d9.dll}" "${BMVR_ORIG_SHA:?sha256 of the installed d3d9.dll}" "${BMVR_PREFIX:?prefix copy}"
+: "${BMVR_PREFIX:?prefix copy}"
 [[ -d $BMVR_PREFIX/pfx ]] || { echo "no prefix copy at $BMVR_PREFIX" >&2; exit 1; }
 pgrep -x bms.exe >/dev/null && { echo "Black Mesa is already running" >&2; exit 1; }
 pgrep -x vrserver >/dev/null && { echo "SteamVR is running; not testing next to it" >&2; exit 1; }
 mkdir -p "$out"
-
-for f in "${DLLS[@]}"; do
-	[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || { echo "$f is not the expected installed DLL; refusing" >&2; exit 1; }
-done
-cp "$GAME/d3d9.dll" "$out/orig-d3d9.dll"
-# Window size: the player's own 1920x1080 by default (window-vs-RT size bugs only show when the window is
-# larger than an RT; 1280x640 hid the water reflection bug, 2026-11-03).
 W=${BMVR_W:-1920}
 H=${BMVR_H:-1080}
-# -w/-h are saved by the game into bms/videoconfig.cfg (the player's resolution); put it back afterwards.
-# A live file at a test size other than the player's pinned resolution means an earlier run leaked it
-# (2026-11-03: the player's own VR sessions then ran at 1280x640, and every later run "restored" that);
-# refuse instead of saving it as orig.
-vc_size() { sed -n 's/^[[:space:]]*"Screen\(Width\|Height\)"[[:space:]]*"\([0-9]*\)".*/\2/p' "$1" | paste -sd x; }
-pinned=$(tr ' ' x < "$GAME/.bmvr-settings/resolution" 2>/dev/null | tr -d '\n' || true)
-if [[ $(vc_size "$GAME/bms/videoconfig.cfg") == "${W}x${H}" && "${W}x${H}" != "$pinned" ]]; then
-	echo "bms/videoconfig.cfg is already at the test size ${W}x${H}: leaked from an earlier run? fix it first" >&2
-	exit 1
-fi
-cp -a "$GAME/bms/videoconfig.cfg" "$out/orig-videoconfig.cfg" 2>/dev/null || true
-# Map starts autosave into the player's save folder and rotate their autosaves, and Steam Cloud picks that up.
-# Keep autosaves, quicksaves and map state files, and put exactly those back afterwards. Named saves are left alone.
-SAVES=$GAME/bms/save
-save_state_files() { find "$1" -maxdepth 1 -type f \( -name 'autosave*' -o -name 'quick*' -o -name '*.hl[123]' \) -print0; }
-mkdir -p "$out/orig-save"
-save_state_files "$SAVES" | xargs -0 -r cp -a -t "$out/orig-save/"
-# The game also writes every archived cvar a test sets (e.g. cl_csm_enabled, np_gr_quality) into
-# bms/cfg/config.cfg on exit, and Steam Cloud keeps a copy in userdata/*/362890/remote/cfg (2026-10-25:
-# a test's cl_csm_enabled 1 ended up in the player's config). Put both back afterwards.
-CLOUD_CFGS=("$STEAM"/userdata/*/362890/remote/cfg/config.cfg)
-cp -a "$GAME/bms/cfg/config.cfg" "$out/orig-config.cfg" 2>/dev/null || true
-for i in "${!CLOUD_CFGS[@]}"; do
-	[[ -f ${CLOUD_CFGS[$i]} ]] && cp -a "${CLOUD_CFGS[$i]}" "$out/orig-cloud-config-$i.cfg"
-done
-restore() {
-	local f ok=1
-	save_state_files "$SAVES" | xargs -0 -r rm -f --
-	save_state_files "$out/orig-save" | xargs -0 -r cp -a -t "$SAVES/"
-	diff -q <(cd "$SAVES" && save_state_files . | sort -z | xargs -0 -r sha256sum) \
-		<(cd "$out/orig-save" && save_state_files . | sort -z | xargs -0 -r sha256sum) >/dev/null || ok=0
-	for f in "${DLLS[@]}"; do
-		cp "$out/orig-d3d9.dll" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
-		[[ $(sha256sum < "$GAME/$f" | cut -d' ' -f1) == "$BMVR_ORIG_SHA" ]] || ok=0
-	done
-	chmod u+w "$GAME/bms/videoconfig.cfg" 2>/dev/null || true
-	[[ -f $out/orig-videoconfig.cfg ]] && cp -a "$out/orig-videoconfig.cfg" "$GAME/bms/videoconfig.cfg"
-	[[ -f $out/orig-config.cfg ]] && cp -a "$out/orig-config.cfg" "$GAME/bms/cfg/config.cfg"
-	[[ ! -f $out/orig-videoconfig.cfg ]] || cmp -s "$out/orig-videoconfig.cfg" "$GAME/bms/videoconfig.cfg" || ok=0
-	[[ ! -f $out/orig-config.cfg ]] || cmp -s "$out/orig-config.cfg" "$GAME/bms/cfg/config.cfg" || ok=0
-	local i
-	for i in "${!CLOUD_CFGS[@]}"; do
-		[[ -f $out/orig-cloud-config-$i.cfg ]] && cp -a "$out/orig-cloud-config-$i.cfg" "${CLOUD_CFGS[$i]}"
-	done
-	(( ok )) && echo "restored installed d3d9.dll x3 (sha256 ${BMVR_ORIG_SHA:0:12}... verified) + videoconfig/config.cfg + autosaves" >> "$out/run.log" \
-		|| echo "RESTORE FAILED (DLLs or settings differ from the saved originals in $out)" | tee -a "$out/run.log" >&2
+
+# What the real folder must still be afterwards (the cloud copy lives outside it).
+live_state() {
+	(cd "$GAME" && find bms/save bms/cfg VR -maxdepth 2 -type f \( -path 'bms/save/*' -o -name '*.cfg' -o -name '*.txt' -o -name '*.json' \) \
+		! -name steam_autocloud.vdf -print0 | sort -z | xargs -0 -r sha256sum
+	 sha256sum bms/videoconfig.cfg "${DLLS[@]}" 2>/dev/null || true
+	 stat -c '%a %n' bms/save bms/videoconfig.cfg bms/cfg/config.cfg)
+	sha256sum "$STEAM"/userdata/*/362890/remote/cfg/config.cfg 2>/dev/null || true
 }
+live_state > "$out/live-state.sha"
+
+upper=$out/overlay/upper
+mkdir -p "$upper" "$out/overlay/work"
+put() { mkdir -p "$upper/$(dirname "$2")"; cp -p "$1" "$upper/$2"; }
+
+# Files for the run go straight into the upper layer; removals are done inside the namespace.
+remove=(bms/console.log)
+if [[ -n ${BMVR_FLAT:-} ]]; then
+	stock=$GAME/.bmvr-backup/bin/thirdparty/dxvk-windows-x86/d3d9.dll
+	[[ -f $stock ]] || { echo "stock DXVK missing: $stock" >&2; exit 1; }
+	put "$stock" bin/thirdparty/dxvk-windows-x86/d3d9.dll
+	remove+=(d3d9.dll bin/d3d9.dll)
+	echo "FLAT: stock DXVK $(sha256sum < "$stock" | cut -c1-12), no mod, $(date +%T)" > "$out/run.log"
+else
+	dll=${BMVR_DLL:-$GAME/d3d9.dll}
+	[[ -f $dll ]] || { echo "no mod d3d9.dll at $dll (set BMVR_DLL, or black-mesa-launch --files-vr)" >&2; exit 1; }
+	for f in "${DLLS[@]}"; do put "$dll" "$f"; done
+	echo "test DLL $(sha256sum < "$dll" | cut -c1-12) in overlay $(date +%T)" > "$out/run.log"
+fi
+profile=${BMVR_SETTINGS:-$([[ -n ${BMVR_FLAT:-} ]] && echo flat || echo vr)}
+if [[ $profile != live ]]; then
+	pdir=$GAME/.bmvr-settings/$profile
+	[[ -f $pdir/config.cfg && -f $pdir/videoconfig.cfg ]] || { echo "no settings profile $pdir" >&2; exit 1; }
+	put "$pdir/videoconfig.cfg" bms/videoconfig.cfg
+	put "$pdir/config.cfg" bms/cfg/config.cfg
+	# The game gets config.cfg from Steam Cloud through the Steam client, which is outside the namespace, so it would
+	# run with the live mode's settings (2026-11-05: CSM on in "VR" runs). With the mod in place, have the mod's
+	# bmvr_local.cfg exec the profile's values after that. A flat run sees the live cloud copy: check the live mode.
+	if [[ -z ${BMVR_FLAT:-} ]]; then
+		put "$pdir/config.cfg" bms/cfg/bmvr_harness_profile.cfg
+		{ printf 'exec bmvr_harness_profile\r\n'; cat "$GAME/bms/cfg/bmvr_local.cfg" 2>/dev/null || true; } > "$out/overlay/local.cfg"
+		put "$out/overlay/local.cfg" bms/cfg/bmvr_local.cfg
+	elif [[ $profile != "$(cat "$GAME/.bmvr-settings/live" 2>/dev/null)" ]]; then
+		echo "refusing: flat run with profile $profile, but the live settings (and so Steam Cloud's config) are not $profile" | tee -a "$out/run.log" >&2
+		exit 1
+	fi
+fi
+for kv in ${BMVR_PUT:-}; do put "${kv%%:*}" "${kv#*:}"; done
+echo "settings profile: $profile" >> "$out/run.log"
+[[ $profile == live ]] || cp -p "$pdir/config.cfg" "$out/expected-settings.cfg"
+
 cleanup() {
 	[[ -n ${game_pid:-} ]] && kill "$game_pid" 2>/dev/null || true
 	local p; for p in $(pgrep -x bms.exe); do kill "$p" 2>/dev/null || true; done
 	sleep 2
 	for p in $(pgrep -x bms.exe); do kill -9 "$p" 2>/dev/null || true; done
 	[[ -n ${xvfb_pid:-} ]] && kill "$xvfb_pid" 2>/dev/null || true
-	restore
-}
-trap cleanup EXIT
-# The game cannot write the player's resolution at all during the run (restore() makes it writable again).
-chmod a-w "$GAME/bms/videoconfig.cfg"
-for f in "${DLLS[@]}"; do
-	cp "$BMVR_DLL" "$GAME/$f.bmvrtest" && mv "$GAME/$f.bmvrtest" "$GAME/$f"
-done
-echo "test DLL $(sha256sum < "$BMVR_DLL" | cut -c1-12) installed $(date +%T)" > "$out/run.log"
-
-# A locked (or blanked) desktop stalls GPU runs on :0 and confuses window shots: unlock it first, every run.
-# loginctl's Unlock reaches cinnamon-screensaver; --deactivate is the fallback. Logged in run.log.
-unlock_desktop() {
-	command -v cinnamon-screensaver-command >/dev/null || return 0
-	cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' || return 0
-	loginctl unlock-sessions 2>/dev/null || true
-	sleep 1
-	cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' && cinnamon-screensaver-command -d 2>/dev/null
-	sleep 1
-	DISPLAY=:0 xset dpms force on 2>/dev/null || true
-	if cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active'; then
-		echo "desktop locked and could not be unlocked $(date +%T)" | tee -a "$out/run.log" >&2
+	# keep the run's console output, then drop the layer (work/ has a mode 000 dir)
+	cp "$upper/bms/console.log" "$out/console.log" 2>/dev/null || true
+	(cd "$upper" && find . -type f | sort) > "$out/overlay-files.txt" 2>/dev/null || true
+	if [[ -z ${BMVR_KEEP_UPPER:-} ]]; then chmod -R u+rwx "$out/overlay" 2>/dev/null || true; rm -rf "${out:?}/overlay"; fi
+	if cmp -s <(live_state) "$out/live-state.sha"; then
+		echo "real game folder + cloud config unchanged (verified)" >> "$out/run.log"
 	else
-		echo "desktop was locked: unlocked $(date +%T)" >> "$out/run.log"
+		echo "REAL GAME FOLDER CHANGED: compare $out/live-state.sha" | tee -a "$out/run.log" >&2
 	fi
 }
-unlock_desktop
+trap cleanup EXIT
 
 if [[ -n ${BMVR_GPU:-} ]]; then
-	# real GPU on an existing X display (window appears there); 32-bit lavapipe crashes on map load since 2026-10-12
+	# real GPU on an existing X display (window appears there). A locked desktop stalls this and confuses window
+	# shots, so unlock it; only this mode needs that. Logged in run.log.
+	if command -v cinnamon-screensaver-command >/dev/null && cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active'; then
+		loginctl unlock-sessions 2>/dev/null || true
+		sleep 1
+		cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' && cinnamon-screensaver-command -d 2>/dev/null
+		sleep 1
+		DISPLAY=:0 xset dpms force on 2>/dev/null || true
+		echo "desktop was locked: unlocked $(date +%T)" >> "$out/run.log"
+	fi
 	display=${BMVR_DISPLAY:-:0}
 	export DISPLAY=$display
 	echo "$display" > "$out/display"
@@ -127,11 +123,10 @@ else
 	export DISPLAY=$display
 	echo "$display" > "$out/display"
 	if [[ -n ${BMVR_XVFB_GPU:-} ]]; then
-		# real GPU, presented into the private Xvfb through Mesa's CPU-copy WSI (Xvfb has no DRI3). Works
-		# with the desktop locked, where a window on :0 never gets its first Present completed.
+		# real GPU, presented into the private Xvfb through Mesa's CPU-copy WSI (Xvfb has no DRI3).
 		export MESA_VK_WSI_DEBUG=sw
 	else
-		LVP=${BMVR_LAVAPIPE:?set BMVR_LAVAPIPE or use BMVR_GPU=1}
+		LVP=${BMVR_LAVAPIPE:?set BMVR_XVFB_GPU=1, BMVR_GPU=1 or BMVR_LAVAPIPE}
 		export VK_DRIVER_FILES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json VK_ICD_FILENAMES=$LVP/lvp_icd.json:$LVP/lvp_icd.i686.json
 	fi
 fi
@@ -148,10 +143,23 @@ export BMVR_TESTDIR="Z:${out//\//\\}"
 ui_arg=-oldgameui
 [[ -n ${BMVR_NEWUI:-} ]] && ui_arg=
 
-cd "$GAME"
-"$SLR/_v2-entry-point" --verb=waitforexitandrun -- "$PROTON/proton" waitforexitandrun \
-	"$GAME/bms.exe" -steam -heapsize 524288 -processheap -novid -windowed -noborder $ui_arg -enabledxvk -nosound \
-	-w $W -h $H "$@" >"$out/game.log" 2>&1 &
+if [[ -n ${BMVR_REAL_ARGS:-} ]]; then
+	launch_args=(-steam -heapsize 524288 -processheap -high -novid -windowed $ui_arg -enabledxvk)
+else
+	launch_args=(-steam -heapsize 524288 -processheap -novid -windowed -noborder $ui_arg -enabledxvk -nosound -w "$W" -h "$H")
+fi
+# Inside the namespace (uid 0 there): mount the overlay and make the removals, then a nested namespace maps back to
+# the real uid, because Wine and Steam refuse to run as root.
+ns_setup='
+	game=$1 upper=$2 work=$3 uid=$4 gid=$5 nrm=$6; shift 6
+	mount -t overlay overlay -o "lowerdir=$game,upperdir=$upper,workdir=$work,userxattr" "$game" || exit 90
+	for ((i = 0; i < nrm; i++)); do rm -f "${game:?}/${1:?}"; shift; done
+	cd "$game"
+	exec unshare -U --map-user="$uid" --map-group="$gid" "$@"
+'
+unshare -Urm --propagation private bash -c "$ns_setup" ns "$GAME" "$upper" "$out/overlay/work" "$(id -u)" "$(id -g)" "${#remove[@]}" "${remove[@]}" \
+	"$SLR/_v2-entry-point" --verb=waitforexitandrun -- "$PROTON/proton" waitforexitandrun \
+	"$GAME/bms.exe" "${launch_args[@]}" "$@" >"$out/game.log" 2>&1 &
 game_pid=$!
 while kill -0 $game_pid 2>/dev/null; do
 	if pgrep -x vrserver >/dev/null || pgrep -x vrmonitor >/dev/null; then

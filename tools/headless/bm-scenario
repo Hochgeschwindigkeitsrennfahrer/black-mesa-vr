@@ -2,6 +2,8 @@
 # bm-scenario <scenario file> <outdir> [game args...] — scripted headless VR test (bm-test / bm-run).
 # Typical game args: +sv_cheats 1 +map bm_c1a0a   (Steam must be running.)
 # Scenario lines, run in order once the mod logs its first stereo pair in a map ($BMVR_READY overrides):
+# With BMVR_FLAT=1 (stock game, no mod): only wait, shot and log work; readiness comes from bms/console.log. No live
+# console: put timed commands in a cfg with `wait <frames>`, then BMVR_PUT="my.cfg:bms/cfg/my.cfg" and +exec my.
 #   wait <seconds>
 #   cmd <console command>            appended to VR/cmd.txt (run on the engine thread within a frame or two)
 #   fake <fake.txt line>              replaces the line with the same first word in VR/fake.txt
@@ -24,16 +26,21 @@ out=$(realpath -m "$2")
 shift 2
 [[ -e $out ]] && { echo "$out exists; use a fresh dir" >&2; exit 1; }
 mkdir -p "$out/VR"
+CONSOLE=$out/overlay/upper/bms/console.log   # the game's console.log lands in the overlay; bm-run starts it empty
 "$here/bm-test" "$out" -condebug "$@" >"$out/bm-test.out" 2>&1 &
 runner=$!
 trap 'kill $runner 2>/dev/null || true; wait $runner 2>/dev/null || true' EXIT
-ready=${BMVR_READY:-Stereo HMD-fb pair done}
+ready=${BMVR_READY:-$([[ -n ${BMVR_FLAT:-} ]] && echo 'LevelInitPostEntity' || echo 'Stereo HMD-fb pair done')}
+is_ready() {
+	if [[ -n ${BMVR_FLAT:-} ]]; then grep -q "$ready" "$CONSOLE" 2>/dev/null
+	else grep -q "$ready" "$out/bmvr_log.txt" 2>/dev/null; fi
+}
 for i in $(seq 1 ${BMVR_LOAD_TIMEOUT:-300}); do
-	grep -q "$ready" "$out/bmvr_log.txt" 2>/dev/null && break
+	is_ready && break
 	kill -0 $runner 2>/dev/null || { echo "game exited before '$ready'"; exit 1; }
 	sleep 1
 done
-grep -q "$ready" "$out/bmvr_log.txt" 2>/dev/null || { echo "no '$ready' after ${i}s"; exit 1; }
+is_ready || { echo "no '$ready' after ${i}s"; exit 1; }
 echo "ready after ${i}s"
 
 set_fake() {
@@ -71,17 +78,44 @@ projcheck() {
 	done
 	return $rc
 }
+# Guard: the game must really run with the settings profile. Ask it for the values of the cvars that change the
+# picture and stop before any test if one differs (2026-11-05: a whole session of "VR" runs had flat settings).
+verify_settings() {
+	local exp=$out/expected-settings.cfg cv want got bad=0
+	[[ -f $exp && -z ${BMVR_FLAT:-} ]] || return 0
+	for cv in cl_csm_enabled cl_csm_qualitymode cl_csm_memoryusage np_gr_quality mat_motion_blur_enabled mat_fxaa_enabled r_occlusion mat_hdr_level; do
+		want=$(tr -d '\r' < "$exp" | sed -n "s/^$cv \"\(.*\)\"\$/\1/p" | head -1)
+		[[ -n $want ]] || continue
+		echo "$cv" >> "$out/VR/cmd.txt"
+		got=
+		for _ in 1 2 3 4 5 6 7 8 9 10; do
+			sleep 0.5
+			got=$(tr -d '\r' < "$CONSOLE" | sed -n "s/^\"$cv\" = \"\([^\"]*\)\".*/\1/p" | tail -1)
+			[[ -n $got ]] && break
+		done
+		echo "$cv want=$want got=${got:-no answer}" >> "$out/effective-settings.txt"
+		[[ $got == "$want" || ( -n $got && $(python3 -Ic "print(float('$got')==float('$want'))" 2>/dev/null) == True ) ]] || bad=1
+	done
+	[[ -s $out/effective-settings.txt ]] || bad=1
+	if (( bad )); then
+		echo "SETTINGS MISMATCH, run stopped, results would be invalid:" | tee -a "$out/run.log" >&2
+		cat "$out/effective-settings.txt" >&2 2>/dev/null
+		exit 3
+	fi
+	echo "settings verified in the running game: $(wc -l < "$out/effective-settings.txt") cvars" | tee -a "$out/run.log"
+}
+verify_settings
 failed=0
 while IFS= read -r line || [[ -n $line ]]; do
 	[[ -z $line || $line == \#* ]] && continue
 	verb=${line%% *}; arg=${line#* }
 	case $verb in
 		wait) sleep "$arg" ;;
-		cmd) echo "$arg" >> "$out/VR/cmd.txt" ;;
+		cmd) if [[ -n ${BMVR_FLAT:-} ]]; then echo "cmd needs the mod (flat: +exec a cfg): $arg"; else echo "$arg" >> "$out/VR/cmd.txt"; fi ;;
 		fake) set_fake "$arg" ;;
 		unfake) grep -v "^$arg " "$out/VR/fake.txt" > "$out/VR/fake.tmp" || true; mv "$out/VR/fake.tmp" "$out/VR/fake.txt" ;;
 		shot) if window_shot "$out/$arg.png"; then echo "shot $arg"; else echo "shot $arg FAILED"; fi ;;
-		log) cp "$out/bmvr_log.txt" "$out/log-$(date +%H%M%S).txt" ;;
+		log) if [[ -n ${BMVR_FLAT:-} ]]; then cp "$CONSOLE" "$out/console-$(date +%H%M%S).txt"; else cp "$out/bmvr_log.txt" "$out/log-$(date +%H%M%S).txt"; fi ;;
 		trace) echo "${arg:-2}" > "$out/VR/trace.txt"   # mod logs every RT push/pop/copy/viewport/screen rect for <arg> frames
 			sleep 1 ;;
 		audit) echo "${arg:-2}" > "$out/VR/audit.txt"   # render-target audit (sizes, viewports, which eye wrote each sampled RT) + trace for <arg> Presents
