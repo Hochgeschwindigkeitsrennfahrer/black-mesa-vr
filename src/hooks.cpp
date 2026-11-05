@@ -8960,11 +8960,89 @@ void __cdecl Hooks::dSpriteQuad(float* origin, float width, float height, unsign
         hkSpriteQuad.fOriginal(origin, width, height, color);
 }
 
+namespace
+{
+    // Last back-buffer size the engine asked for, printed with each render target it creates. Bloom targets are
+    // eye/2 in headset sessions and window/2 headless; this shows which size each creation saw, and who asked.
+    struct BackBufferTrace
+    {
+        int origW, origH, w, h;
+        void* caller;
+        bool stereo;
+    };
+    BackBufferTrace g_LastBackBuffer{};
+
+    struct BackBufferTraceScope
+    {
+        int& w;
+        int& h;
+        int origW;
+        int origH;
+        void* caller;
+        ~BackBufferTraceScope()
+        {
+            g_LastBackBuffer = { origW, origH, w, h, caller,
+                Hooks::m_VR && Hooks::m_VR->StereoWorldPassActive() };
+        }
+    };
+
+    // "client.dll+0x1234" for a code address, for log lines.
+    void DescribeCodeAddress(void* addr, char* out, size_t outSize)
+    {
+        HMODULE mod = nullptr;
+        char path[MAX_PATH] = "?";
+        if (addr && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                static_cast<LPCSTR>(addr), &mod) && mod)
+            GetModuleFileNameA(mod, path, MAX_PATH);
+        const char* base = std::strrchr(path, '\\');
+        base = base ? base + 1 : path;
+        sprintf_s(out, outSize, "%s+0x%X", base,
+            mod ? static_cast<unsigned>(reinterpret_cast<uintptr_t>(addr) - reinterpret_cast<uintptr_t>(mod)) : 0u);
+    }
+
+    void RtActualSize(ITexture* tex, int& w, int& h)
+    {
+        w = h = 0;
+        if (!tex)
+            return;
+        __try
+        {
+            w = tex->GetActualWidth();
+            h = tex->GetActualHeight();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            w = h = 0;
+        }
+    }
+
+    // One line per render target the engine creates (first 256).
+    void LogRtTrace(const char* name, int reqW, int reqH, int mode, ITexture* tex, void* caller)
+    {
+        static int s_count;
+        if (s_count >= 256)
+            return;
+        ++s_count;
+        int aw, ah;
+        RtActualSize(tex, aw, ah);
+        const BackBufferTrace bb = g_LastBackBuffer;
+        char callerText[96];
+        char bbCallerText[96];
+        DescribeCodeAddress(caller, callerText, sizeof(callerText));
+        DescribeCodeAddress(bb.caller, bbCallerText, sizeof(bbCallerText));
+        Game::logMsg("RtTrace %s req=%dx%d mode=%d actual=%dx%d thread=%lu stereo=%d caller=%s lastBB=%dx%d(orig %dx%d) bbStereo=%d bbCaller=%s",
+            name ? name : "null", reqW, reqH, mode, aw, ah, GetCurrentThreadId(),
+            Hooks::m_VR && Hooks::m_VR->StereoWorldPassActive() ? 1 : 0, callerText,
+            bb.w, bb.h, bb.origW, bb.origH, bb.stereo ? 1 : 0, bbCallerText);
+    }
+}
+
 void __fastcall Hooks::dGetBackBufferDimensions(void* ecx, void* edx, int& width, int& height)
 {
     (void)edx;
     if (hkGetBackBufferDimensions.fOriginal)
         hkGetBackBufferDimensions.fOriginal(ecx, width, height);
+    BackBufferTraceScope traceScope{ width, height, width, height, _ReturnAddress() };
     if (m_VR && m_VR->HudPaintActive())
     {
         int x = 0, y = 0, w = 0, h = 0;
@@ -9356,6 +9434,8 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
 ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags)
 {
     (void)edx;
+    void* const rtCaller = _ReturnAddress();
+    const int rtReqW = w, rtReqH = h, rtReqMode = sizeMode;
     {
         const char* map = PeekLevelName();
         if (map && map[0])
@@ -9583,6 +9663,7 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
         --bmvr::Hl2vrMsaaScope::Depth();
     if (msaaScope && s_msaaArmed)
         bmvr::EndRisky(L"msaa");
+    LogRtTrace(name, rtReqW, rtReqH, rtReqMode, tex, rtCaller);
     if (tex && name && (fullMode || namedFb || namedGb || wantGrow))
     {
         int aw = 0, ah = 0;
