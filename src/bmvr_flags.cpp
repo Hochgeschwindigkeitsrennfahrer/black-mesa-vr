@@ -167,6 +167,8 @@ namespace bmvr
     float g_VrHandsRollDeg = 90.f;
     bool g_VrGmanGesture = true;
     float g_VrGmanFingerStraight = 0.3f;
+    float g_VrGmanThumbCurl = 1.f;
+    float g_VrGmanThumbSwing = 0.6f;
     bool g_VrGmanGestureForce = false;
     // ~one hand-length back along aim after yaw 180 (user: gloves sat ahead
     // of the controller). Flip the Z sign in VR/config.txt if this goes the
@@ -743,6 +745,18 @@ namespace bmvr
                 const float v = static_cast<float>(atof(val));
                 if (v >= 0.f && v <= 0.5f)
                     g_VrGmanFingerStraight = v;
+            }
+            else if (std::strcmp(n, "VrGmanThumbCurl") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 0.f && v <= 2.f)
+                    g_VrGmanThumbCurl = v;
+            }
+            else if (std::strcmp(n, "VrGmanThumbSwing") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 0.f && v <= 1.5f)
+                    g_VrGmanThumbSwing = v;
             }
             else if (std::strcmp(n, "VrHandsPoseOffsetMeters") == 0)
             {

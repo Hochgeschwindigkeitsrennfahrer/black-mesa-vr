@@ -444,6 +444,12 @@ namespace bmvr
     // (curl units, 0 = rest pose with its natural bend, default 0.3 ~ 20 degrees
     // per joint, tuned in the headset 2026-11-04). Config VrGmanFingerStraight, cvar bmvr_gman_finger_straight.
     extern float g_VrGmanFingerStraight;
+    // Gesture thumb: g_VrGmanThumbCurl scales its joint angles (1 = rests on the
+    // folded fingers, more presses into them), g_VrGmanThumbSwing is the sideways
+    // swing at its root in radians (0 = plain curl, which goes through the fingers).
+    // Config VrGmanThumbCurl / VrGmanThumbSwing, cvars bmvr_gman_thumb_curl / _swing.
+    extern float g_VrGmanThumbCurl;
+    extern float g_VrGmanThumbSwing;
     // Test aid (cvar bmvr_gman_gesture_force, not saved): gesture on without a G-Man in view.
     extern bool g_VrGmanGestureForce;
     // L4D2VR BuildControllerWorld local translation (meters, before model
