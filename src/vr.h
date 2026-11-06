@@ -1229,6 +1229,8 @@ public:
     bool WantsRightGloveVisible() const;
     bool WantsRightGloveWeaponGripCurl() const;
     bool WantsOffhandGloveWeaponGripCurl() const;
+    // Support hand on the gun: tuned offset along the gun's own axes.
+    Vector GunGripHandOffset(bool rightHand, const QAngle& gunAngles) const;
     // True while a G-Man is in front of the player (see UpdateGmanGesture).
     // Written on the game thread, read by the glove draw.
     bool GmanGestureActive() const { return m_GmanGestureActive.load(std::memory_order_relaxed); }

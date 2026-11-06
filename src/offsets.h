@@ -545,6 +545,8 @@ public:
     static constexpr uint32_t kLensflareFractionRva = 0x222890;
     // CLensflare quad draw (thiscall: material, x, y, w, h, color, angle; pixels).
     static constexpr uint32_t kLensflareDrawQuadRva = 0x2221D0;
+    // CLensflare element draw (thiscall: scale, world pos by value, element, size).
+    static constexpr uint32_t kLensflareElementRva = 0x221DE0;
     static constexpr uint32_t kClientMaterialsPtrRva = 0x702A90;
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,

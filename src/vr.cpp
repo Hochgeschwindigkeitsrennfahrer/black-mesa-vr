@@ -10853,8 +10853,12 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         if (offOk)
         {
             HudPanel handPanel{};
+            // On the gun the glove sits at its tuned spot: the panel goes with it.
+            Vector handHudOrigin = rightDominant ? leftOrigin : rightOrigin;
+            if (rightDominant ? WantsOffhandGloveWeaponGripCurl() : WantsRightGloveWeaponGripCurl())
+                handHudOrigin = handHudOrigin + GunGripHandOffset(!rightDominant, rightDominant ? rightAng : leftAng);
             BuildHandHudPanel(
-                rightDominant ? leftOrigin : rightOrigin,
+                handHudOrigin,
                 rightDominant ? leftAng : rightAng,
                 !rightDominant, handPanel);
             if (handPanel.valid && !HudIsBackfacing(handPanel, eyeOrig))
@@ -11660,6 +11664,14 @@ bool VR::WantsRightGloveWeaponGripCurl() const
 bool VR::WantsOffhandGloveWeaponGripCurl() const
 {
     return m_TwoHandActive && !bmvr::g_LeftHanded;
+}
+
+Vector VR::GunGripHandOffset(bool rightHand, const QAngle& gunAngles) const
+{
+    Vector fwd, right, up;
+    QAngle::AngleVectors(gunAngles, &fwd, &right, &up);
+    return right * (rightHand ? -bmvr::g_VrHandsGunGripRight : bmvr::g_VrHandsGunGripRight)
+        + up * bmvr::g_VrHandsGunGripUp + fwd * bmvr::g_VrHandsGunGripForward;
 }
 
 namespace vm_numpad

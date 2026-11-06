@@ -277,6 +277,7 @@ static void* const* g_FlareMaterials = nullptr;
 static bool g_FlareLogOn = false;
 static float g_FlareAxisShiftX = 0.f;
 static float g_FlareAxisShiftY = 0.f;
+static bool g_FlareElementOnLight = true;
 
 // Diagnostic, BMVR_FLARE_LOG=1: what a lens flare's position is computed from.
 // One line per flare and eye when the projection or on-screen state changes,
@@ -364,29 +365,49 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
     }
 }
 
+// Element types 1 and 4 sit on the line from the light through the middle, at a
+// set fraction: 0 is on the light. The other types are always on the light.
+using FlareElementFn = void(__thiscall*)(void* flare, float scale, float x, float y, float z, const unsigned char* element, float* size);
+static FlareElementFn g_OrigFlareElement = nullptr;
+
+static void __fastcall FlareElementHook(void* ecx, void* edx, float scale, float x, float y, float z, const unsigned char* element, float* size)
+{
+    (void)edx;
+    const int type = *reinterpret_cast<const int*>(element);
+    const float along = *reinterpret_cast<const float*>(element + 0x30);
+    g_FlareElementOnLight = !(type == 1 || type == 4) || std::abs(along) < 0.01f;
+    g_OrigFlareElement(ecx, scale, x, y, z, element, size);
+    g_FlareElementOnLight = true;
+}
+
 static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, int x, int y, int w, int h, void* color, float angle)
 {
     (void)edx;
-    // The large layers wash out the whole view in a headset.
+    // Layers placed away from the light (see FlareElementHook) wash out the view
+    // in a headset: the large square ones most, the rest as moving ghosts.
     const int eyeH = Hooks::m_VR ? static_cast<int>(Hooks::m_VR->m_RenderHeight) : 0;
-    const bool haze = eyeH > 0 && (w > bmvr::g_FlareHazeMinSize * eyeH || h > bmvr::g_FlareHazeMinSize * eyeH);
-    if (g_FlareLogOn)
+    const bool onLight = g_FlareElementOnLight;
+    const bool square = std::abs(w - h) * 8 < (std::max)(w, h);
+    const bool haze = !onLight && square && w > bmvr::g_FlareHazeMinSize * eyeH;
+    const float scale = onLight ? 1.f : (haze ? bmvr::g_FlareHazeScale : bmvr::g_FlareGhostScale);
+    if (g_FlareLogOn && Hooks::m_VR && Hooks::m_VR->m_StereoEye != 0)
     {
         static int s_quads;
         if (s_quads < 120)
         {
             ++s_quads;
-            Game::logMsg("flarequad eye=%d mat=%p %dx%d at %d,%d haze=%d", Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0, material, w, h, x, y, haze ? 1 : 0);
+            Game::logMsg("flarequad eye=%d mat=%p %dx%d at %d,%d %s", Hooks::m_VR->m_StereoEye, material, w, h, x, y,
+                onLight ? "light" : (haze ? "haze" : "ghost"));
         }
     }
     unsigned char dim[4];
-    if (haze && color && bmvr::g_FlareHazeScale < 1.f)
+    if (color && scale < 1.f)
     {
-        if (bmvr::g_FlareHazeScale <= 0.f)
+        if (scale <= 0.f)
             return;
         std::memcpy(dim, color, 4);
         for (int i = 0; i < 3; ++i)
-            dim[i] = static_cast<unsigned char>(dim[i] * bmvr::g_FlareHazeScale);
+            dim[i] = static_cast<unsigned char>(dim[i] * scale);
         color = dim;
     }
     g_OrigFlareDrawQuad(ecx, material, x + static_cast<int>(g_FlareAxisShiftX), y + static_cast<int>(g_FlareAxisShiftY), w, h, color, angle);
@@ -472,6 +493,13 @@ static void InstallFlareHooks(uintptr_t client)
         Game::logMsg("Lens flare eye axis: position hook failed (off)");
         return;
     }
+    static const unsigned char kElementPrologue[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0x56, 0x57 };
+    auto* element = reinterpret_cast<unsigned char*>(client + Offsets::kLensflareElementRva);
+    if (std::memcmp(element, kElementPrologue, sizeof(kElementPrologue)) != 0
+        || MH_CreateHook(element, reinterpret_cast<LPVOID>(&FlareElementHook),
+            reinterpret_cast<LPVOID*>(&g_OrigFlareElement)) != MH_OK
+        || MH_EnableHook(element) != MH_OK)
+        Game::logMsg("Lens flare layers: element hook failed, all layers stay on");
     Game::logMsg("Lens flare eye axis hooks on (FlareEyeAxis=%d)", bmvr::g_FlareEyeAxis ? 1 : 0);
 
     char v[8] = {};

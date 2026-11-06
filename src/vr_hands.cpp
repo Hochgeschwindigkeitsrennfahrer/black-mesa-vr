@@ -860,13 +860,8 @@ bool BmVrGloves::DrawForEye(
             gloveAngles.z += rightHand ? gloveRoll : -gloveRoll;
         // Support hand on the gun: toward the gun, so the gun sits in the palm.
         Vector gloveOrigin = *origins[i];
-        if (gripCurl && (bmvr::g_VrHandsGunGripShift != 0.f || bmvr::g_VrHandsGunGripDown != 0.f))
-        {
-            Vector gripFwd, gripRight, gripUp;
-            QAngle::AngleVectors(*angles[i], &gripFwd, &gripRight, &gripUp);
-            gloveOrigin = gloveOrigin + gripRight * (rightHand ? -bmvr::g_VrHandsGunGripShift : bmvr::g_VrHandsGunGripShift)
-                - gripUp * bmvr::g_VrHandsGunGripDown;
-        }
+        if (gripCurl && g_Game && g_Game->m_VR)
+            gloveOrigin = gloveOrigin + g_Game->m_VR->GunGripHandOffset(rightHand, *angles[1 - i]);
         const VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
             gloveOrigin,
             gloveAngles,

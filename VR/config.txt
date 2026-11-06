@@ -75,10 +75,11 @@ GunPitchOffset=0
 # Mirrored per hand, all controllers (Index included); not for a hand on a
 # weapon. Also in the VR settings panel (bmvr_hand_roll).
 VrHandsRollDeg=90
-# Support hand on the gun: moved this many game units toward the gun (bmvr_hand_gun_shift).
-VrHandsGunGripShift=1.2
-# Same hand moved down (bmvr_hand_gun_down). Both are in the VR settings panel.
-VrHandsGunGripDown=0
+# Support hand on the gun, game units along the gun: right, up, toward the muzzle
+# (bmvr_hand_gun_right, _up, _forward). Also in the VR settings panel.
+VrHandsGunGripRight=1.2
+VrHandsGunGripUp=0
+VrHandsGunGripForward=0
 # While the G-Man is in front of you, grip extends only the middle finger.
 VrGmanGesture=true
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
@@ -174,10 +175,13 @@ VrSettingsPause=true
 FlareEyeAxis=true
 # Both eyes use one flare layout, from the point between them (bmvr_flare_shared).
 FlareSharedLayout=true
-# Strength of the large flare layers that wash out the view: 0 off, 1 stock (bmvr_flare_haze).
-# A layer this wide, as a fraction of the eye height, counts (bmvr_flare_haze_size).
+# Flare layers placed away from the light are off by default: they wash out the view in a headset.
+# Strength of the large square ones: 0 off, 1 stock (bmvr_flare_haze).
+# A square layer away from the light this wide, as a fraction of the eye height, counts (bmvr_flare_haze_size).
 FlareHazeScale=0
 FlareHazeMinSize=0.5
+# Strength of the other layers away from the light (bmvr_flare_ghosts). All three are in the VR settings panel.
+FlareGhostScale=0
 
 # FXAA settings, also in the VR settings panel and as bmvr_fxaa_* console commands.
 # The game never passes the mat_fxaa_* cvars to the shader and runs FXAA with all values at 0.

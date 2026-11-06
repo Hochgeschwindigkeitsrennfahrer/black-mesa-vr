@@ -159,6 +159,7 @@ namespace bmvr
     bool g_FlareSharedLayout = true;
     float g_FlareHazeScale = 0.f;
     float g_FlareHazeMinSize = 0.5f;
+    float g_FlareGhostScale = 0.f;
     bool g_ViewProjNormalFix = true;
     bool g_EyeBloom = false;
     bool g_FxaaApply = false;
@@ -174,8 +175,9 @@ namespace bmvr
     float g_VrHandsPoseRotZ = 0.f;
     float g_VrHandsIndexRollDeg = 90.f;
     float g_VrHandsRollDeg = 90.f;
-    float g_VrHandsGunGripShift = 1.2f;
-    float g_VrHandsGunGripDown = 0.f;
+    float g_VrHandsGunGripRight = 1.2f;
+    float g_VrHandsGunGripUp = 0.f;
+    float g_VrHandsGunGripForward = 0.f;
     bool g_VrGmanGesture = true;
     float g_VrGmanFingerStraight = 0.3f;
     float g_VrGmanThumbCurl = 1.f;
@@ -714,6 +716,8 @@ namespace bmvr
                 g_FlareSharedLayout = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlareHazeScale") == 0)
                 g_FlareHazeScale = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "FlareGhostScale") == 0)
+                g_FlareGhostScale = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "FlareHazeMinSize") == 0)
                 g_FlareHazeMinSize = std::clamp(static_cast<float>(atof(val)), 0.05f, 4.f);
             else if (std::strcmp(n, "FlareEyeAxis") == 0)
@@ -758,10 +762,12 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrHandsIndexRollDeg") == 0)
                 g_VrHandsIndexRollDeg = static_cast<float>(atof(val));
-            else if (std::strcmp(n, "VrHandsGunGripDown") == 0)
-                g_VrHandsGunGripDown = std::clamp(static_cast<float>(atof(val)), -6.f, 6.f);
-            else if (std::strcmp(n, "VrHandsGunGripShift") == 0)
-                g_VrHandsGunGripShift = std::clamp(static_cast<float>(atof(val)), -6.f, 6.f);
+            else if (std::strcmp(n, "VrHandsGunGripRight") == 0)
+                g_VrHandsGunGripRight = std::clamp(static_cast<float>(atof(val)), -8.f, 8.f);
+            else if (std::strcmp(n, "VrHandsGunGripUp") == 0)
+                g_VrHandsGunGripUp = std::clamp(static_cast<float>(atof(val)), -8.f, 8.f);
+            else if (std::strcmp(n, "VrHandsGunGripForward") == 0)
+                g_VrHandsGunGripForward = std::clamp(static_cast<float>(atof(val)), -12.f, 12.f);
             else if (std::strcmp(n, "VrHandsRollDeg") == 0)
             {
                 const float s = static_cast<float>(atof(val));
