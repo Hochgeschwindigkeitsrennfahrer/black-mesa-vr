@@ -79,7 +79,7 @@ namespace
             { "Haze from size", RowKind::Number, "FlareHazeMinSize", nullptr, &bmvr::g_FlareHazeMinSize, 0.05f, 0.05f, 4.f, "%.2f" },
             { "Ghosts away from light", RowKind::Number, "FlareGhostScale", nullptr, &bmvr::g_FlareGhostScale, 0.05f, 0.f, 1.f, "%.2f" },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Game default FXAA", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
+            { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
             { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
             { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
             { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
@@ -631,10 +631,9 @@ void VR::UpdateSettingsPanel()
         CloseSettingsPanel("close row");
         return;
     case RowKind::Button:
-        // The game's own FXAA: nothing sent, and the sliders back at their defaults.
+        // The FXAA values back at their defaults; on or off stays as it is.
         if (r.fmt && std::strcmp(r.fmt, "fxaa_default") == 0)
         {
-            bmvr::g_FxaaApply = false;
             bmvr::g_FxaaSubpixel = 0.25f;
             bmvr::g_FxaaEdgeThreshold = 0.166f;
             bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
