@@ -160,6 +160,8 @@ namespace bmvr
     float g_FlareHazeScale = 0.f;
     float g_FlareHazeMinSize = 0.5f;
     float g_FlareGhostScale = 0.f;
+    float g_FlareFadeAngle = 45.f;
+    float g_FlareLightScale = 1.f;
     bool g_ViewProjNormalFix = true;
     bool g_EyeBloom = false;
     bool g_FxaaApply = false;
@@ -716,6 +718,10 @@ namespace bmvr
                 g_FlareSharedLayout = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlareHazeScale") == 0)
                 g_FlareHazeScale = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "FlareFadeAngle") == 0)
+                g_FlareFadeAngle = std::clamp(static_cast<float>(atof(val)), 0.f, 90.f);
+            else if (std::strcmp(n, "FlareLightScale") == 0)
+                g_FlareLightScale = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "FlareGhostScale") == 0)
                 g_FlareGhostScale = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "FlareHazeMinSize") == 0)

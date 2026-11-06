@@ -278,6 +278,7 @@ static bool g_FlareLogOn = false;
 static float g_FlareAxisShiftX = 0.f;
 static float g_FlareAxisShiftY = 0.f;
 static bool g_FlareElementOnLight = true;
+static float g_FlareAngleFade = 1.f;
 
 // Diagnostic, BMVR_FLARE_LOG=1: what a lens flare's position is computed from.
 // One line per flare and eye when the projection or on-screen state changes,
@@ -363,6 +364,15 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
         out[0] -= g_FlareAxisShiftX;
         out[1] -= g_FlareAxisShiftY;
     }
+    // Fade by the angle off the view axis, seen from between the eyes.
+    g_FlareAngleFade = 1.f;
+    if (bmvr::g_FlareFadeAngle > 0.f && proj[0] > 0.01f && proj[5] > 0.01f && size[0] > 0.f && size[1] > 0.f)
+    {
+        const float tanX = (out[0] - size[0] * 0.5f) / (size[0] * 0.5f) / proj[0];
+        const float tanY = (out[1] - size[1] * 0.5f) / (size[1] * 0.5f) / proj[5];
+        const float deg = std::atan(std::sqrt(tanX * tanX + tanY * tanY)) * 57.29578f;
+        g_FlareAngleFade = (std::max)(0.f, 1.f - deg / bmvr::g_FlareFadeAngle);
+    }
 }
 
 // Element types 1 and 4 sit on the line from the light through the middle, at a
@@ -389,7 +399,13 @@ static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, i
     const bool onLight = g_FlareElementOnLight;
     const bool square = std::abs(w - h) * 8 < (std::max)(w, h);
     const bool haze = !onLight && square && w > bmvr::g_FlareHazeMinSize * eyeH;
-    const float scale = onLight ? 1.f : (haze ? bmvr::g_FlareHazeScale : bmvr::g_FlareGhostScale);
+    const float scale = (onLight ? bmvr::g_FlareLightScale : (haze ? bmvr::g_FlareHazeScale : bmvr::g_FlareGhostScale)) * g_FlareAngleFade;
+    // Smaller as well as dimmer, down to half size.
+    const float shrink = 0.5f + 0.5f * g_FlareAngleFade;
+    const int drawW = static_cast<int>(w * shrink);
+    const int drawH = static_cast<int>(h * shrink);
+    x += (w - drawW) / 2;
+    y += (h - drawH) / 2;
     if (g_FlareLogOn && Hooks::m_VR && Hooks::m_VR->m_StereoEye != 0)
     {
         static int s_quads;
@@ -410,7 +426,7 @@ static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, i
             dim[i] = static_cast<unsigned char>(dim[i] * scale);
         color = dim;
     }
-    g_OrigFlareDrawQuad(ecx, material, x + static_cast<int>(g_FlareAxisShiftX), y + static_cast<int>(g_FlareAxisShiftY), w, h, color, angle);
+    g_OrigFlareDrawQuad(ecx, material, x + static_cast<int>(g_FlareAxisShiftX), y + static_cast<int>(g_FlareAxisShiftY), drawW, drawH, color, angle);
 }
 
 // Same switch: how visible the flare is for each eye. Below the draw threshold

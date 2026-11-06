@@ -175,6 +175,12 @@ VrSettingsPause=true
 FlareEyeAxis=true
 # Both eyes use one flare layout, from the point between them (bmvr_flare_shared).
 FlareSharedLayout=true
+# A flat screen shows about 37 degrees up and down, so a flare leaves it and its built-in fade is done.
+# A headset shows far more, and a flat layer that far out looks tilted: fade out by this angle
+# off the view axis (bmvr_flare_fade_angle, 0 = no fade).
+FlareFadeAngle=45
+# Strength of the layers on the light (bmvr_flare_light).
+FlareLightScale=1
 # Flare layers placed away from the light are off by default: they wash out the view in a headset.
 # Strength of the large square ones: 0 off, 1 stock (bmvr_flare_haze).
 # A square layer away from the light this wide, as a fraction of the eye height, counts (bmvr_flare_haze_size).

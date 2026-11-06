@@ -391,6 +391,8 @@ namespace bmvr
     extern float g_FlareHazeScale;
     extern float g_FlareHazeMinSize;
     extern float g_FlareGhostScale;
+    extern float g_FlareFadeAngle;
+    extern float g_FlareLightScale;
     // ViewProjNormalFix (default true, cvar bmvr_viewproj_normal_fix): vertex
     // shaders that turn normals into view space with cViewProj rows (Black
     // Mesa's rope g-buffer shader) get those rows without the off-centre
