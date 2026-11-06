@@ -538,6 +538,10 @@ public:
     // GetFractionVisible 0xD48B0 and find-or-create query for a view 0xD4560.
     static constexpr uint32_t kPixelVisGetFractionRva = 0xD48B0;
     static constexpr uint32_t kPixelVisQueryForViewRva = 0xD4560;
+    // CLensflare's world-to-pixel helper (cdecl: world, size[2], out).  Reads the
+    // view and projection matrices from the render context; diagnostic hook only.
+    static constexpr uint32_t kLensflareWorldToScreenRva = 0x223960;
+    static constexpr uint32_t kClientMaterialsPtrRva = 0x702A90;
 
     Offset ProcessUsercmds{ "server.dll", 0x532D40,
         "55 8B EC B8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 08", 0, true };
