@@ -150,9 +150,11 @@ MenuCursorSmoothSec=0.05
 # (grip right away). Also in the VR settings panel (SHOULDER GESTURES).
 ShoulderGestures=true
 
-# Optional features, off by default:
 # Hold Triangle/Y 0.6 s = VR settings panel; a tap pauses on release.
-SettingsTriangleHold=false
+# false = Triangle/Y pauses on press; open the panel from the weapon menu's gear.
+SettingsTriangleHold=true
+
+# Optional features, off by default:
 # Weapon menu: VR gear slot below the crowbar (opens the VR settings panel).
 # false hides it, but only while SettingsTriangleHold=true (else the panel
 # could not be opened at all).

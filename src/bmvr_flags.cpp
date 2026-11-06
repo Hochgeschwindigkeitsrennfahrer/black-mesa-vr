@@ -137,7 +137,7 @@ namespace bmvr
     bool g_SprintAimedPose = true;
     // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = true;
-    bool g_SettingsTriangleHold = false;
+    bool g_SettingsTriangleHold = true;
     bool g_WeaponMenuSettingsGear = true;
     bool g_WeaponMenuTilt = true;
     bool g_CrouchStickHold = false;
