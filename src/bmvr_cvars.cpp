@@ -109,7 +109,7 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_EyeBloom, nullptr },
             { "bmvr_fxaa_apply", "VR: send the bmvr_fxaa_* values to FXAA (0 = stock: the game sends all 0, mat_fxaa_* have no effect)",
               Kind::Bool, 0.f, 1.f, &g_FxaaApply, nullptr },
-            { "bmvr_fxaa_subpixel", "VR: FXAA sub-pixel smoothing (0 = off, 0.75 = FXAA default, 1 = softest)",
+            { "bmvr_fxaa_subpixel", "VR: FXAA sub-pixel smoothing (0 = off, 0.25 = mod default, 0.75 = FXAA default, 1 = softest)",
               Kind::Float, 0.f, 1.f, nullptr, &g_FxaaSubpixel },
             { "bmvr_fxaa_edge", "VR: FXAA edge contrast needed to smooth (0.063 = most edges, 0.166 = FXAA default, 0.333 = fewest)",
               Kind::Float, 0.f, 0.5f, nullptr, &g_FxaaEdgeThreshold },

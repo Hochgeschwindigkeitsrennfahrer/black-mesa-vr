@@ -169,8 +169,8 @@ VrSettingsPause=true
 # The game never passes the mat_fxaa_* cvars to the shader and runs FXAA with all values at 0.
 # FxaaApply=true sends these values instead. false keeps the stock behaviour.
 FxaaApply=false
-# Sub-pixel smoothing: 0 off, 0.75 FXAA default, 1 softest.
-FxaaSubpixel=0.75
+# Sub-pixel smoothing: 0 off, 0.25 about as sharp as with FxaaApply=false, 0.75 FXAA's own default, 1 softest.
+FxaaSubpixel=0.25
 # Edge contrast needed to smooth: 0.063 most edges, 0.166 FXAA default, 0.333 fewest.
 FxaaEdgeThreshold=0.166
 # Darks below this contrast are skipped: 0.0312 treats most, 0.0833 FXAA default.

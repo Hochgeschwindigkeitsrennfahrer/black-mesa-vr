@@ -158,7 +158,7 @@ namespace bmvr
     bool g_ViewProjNormalFix = true;
     bool g_EyeBloom = false;
     bool g_FxaaApply = false;
-    float g_FxaaSubpixel = 0.75f;
+    float g_FxaaSubpixel = 0.25f;
     float g_FxaaEdgeThreshold = 0.166f;
     float g_FxaaEdgeThresholdMin = 0.0833f;
     float g_GlowHold = 0.f;
