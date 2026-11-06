@@ -9703,6 +9703,39 @@ void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a
             v->m_flOffCenterBottom, v->m_flOffCenterTop, v->origin.x, v->origin.y, v->origin.z,
             v->angles.x, v->angles.y, v->angles.z, view);
     }
+    // The light loop tests against the frame's frustum, built from the main view.
+    // In VR that view follows the gun aim, so a light behind the hand went out
+    // with the head facing it. Test against the view being rendered instead.
+    if (bmvr::g_LightCullEyeView && view && m_VR && m_VR->m_StereoEye != 0)
+    {
+        using GenerateFrustumFn = void(__cdecl*)(const void* origin, const void* angles, float, float, float, float, void*);
+        static GenerateFrustumFn s_generate = nullptr;
+        static void* s_frustum = nullptr;
+        static bool s_checked = false;
+        if (!s_checked)
+        {
+            s_checked = true;
+            static const unsigned char kPrologue[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x28, 0x8D, 0x45, 0xF0 };
+            const auto client = reinterpret_cast<uintptr_t>(GetModuleHandleA("client.dll"));
+            const auto* fn = reinterpret_cast<const unsigned char*>(client + Offsets::kGeneratePerspectiveFrustumRva);
+            if (client && std::memcmp(fn, kPrologue, sizeof(kPrologue)) == 0)
+            {
+                s_generate = reinterpret_cast<GenerateFrustumFn>(client + Offsets::kGeneratePerspectiveFrustumRva);
+                s_frustum = reinterpret_cast<void*>(client + Offsets::kClientFrameFrustumRva);
+                Game::logMsg("Light culling follows each eye's view (LightCullEyeView)");
+            }
+            else
+            {
+                Game::logMsg("Light culling: frustum builder client+0x%X MISMATCH (off)", Offsets::kGeneratePerspectiveFrustumRva);
+                Game::noteMissingOffset("Frame frustum builder (per-eye light culling)");
+            }
+        }
+        if (s_generate)
+        {
+            const auto* v = static_cast<const CViewSetup*>(view);
+            s_generate(&v->origin, &v->angles, v->zNear, v->zFar, v->fov, v->m_flAspectRatio, s_frustum);
+        }
+    }
     hkNewRendererUpdatePerCamera.fOriginal(ecx, a1, view, secondary, a4);
 }
 

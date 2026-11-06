@@ -387,6 +387,7 @@ namespace bmvr
     // (incl. floor/water reflections). false = stock (A/B aid).
     extern bool g_PixelVisPerEye;
     extern bool g_FlareEyeAxis;
+    extern bool g_LightCullEyeView;
     extern bool g_FlareSharedLayout;
     extern float g_FlareHazeScale;
     extern float g_FlareHazeMinSize;

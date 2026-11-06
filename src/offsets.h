@@ -541,6 +541,10 @@ public:
     // CLensflare's world-to-pixel helper (cdecl: world, size[2], out).  Reads the
     // view and projection matrices from the render context; diagnostic hook only.
     static constexpr uint32_t kLensflareWorldToScreenRva = 0x223960;
+    // The frame's view frustum, filled once a frame from the main view, and the
+    // function that builds one (cdecl: origin, angles, near, far, fov, aspect, out).
+    static constexpr uint32_t kClientFrameFrustumRva = 0x6C585C;
+    static constexpr uint32_t kGeneratePerspectiveFrustumRva = 0x2FF7C0;
     // CLensflare's visibility fraction (thiscall: pvs-related ptr, world pos).
     static constexpr uint32_t kLensflareFractionRva = 0x222890;
     // CLensflare quad draw (thiscall: material, x, y, w, h, color, angle; pixels).

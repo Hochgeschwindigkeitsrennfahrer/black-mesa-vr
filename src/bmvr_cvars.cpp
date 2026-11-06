@@ -119,6 +119,8 @@ namespace bmvr
               Kind::Float, 0.f, 1.f, nullptr, &g_FlareHazeScale },
             { "bmvr_flare_haze_size", "VR: a square flare layer away from the light this wide, as a fraction of the eye height, counts as haze",
               Kind::Float, 0.05f, 4.f, nullptr, &g_FlareHazeMinSize },
+            { "bmvr_light_cull_eye", "VR: deferred lights are culled from each eye's view, not the main view that follows the aim",
+              Kind::Bool, 0.f, 1.f, &g_LightCullEyeView, nullptr },
             { "bmvr_flare_eye_axis", "VR: lens flares lay out around each eye's view axis instead of the image centre",
               Kind::Bool, 0.f, 1.f, &g_FlareEyeAxis, nullptr },
             { "bmvr_pixelvis_per_eye", "VR: each eye keeps its own glow visibility queries (0 = stock: the eyes share one, glows can drop out)",

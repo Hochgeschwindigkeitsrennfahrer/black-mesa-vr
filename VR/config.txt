@@ -170,6 +170,10 @@ WeaponMenuTilt=true
 # The VR settings panel pauses the game while it is open.
 VrSettingsPause=true
 
+# Deferred lights are culled from each eye's view (bmvr_light_cull_eye). false = the main view,
+# which follows the gun aim: lights behind the hand go out.
+LightCullEyeView=true
+
 # Lens flares laid out around each eye's view axis, so both eyes show the same flare
 # (bmvr_flare_eye_axis). false = around the image centre, as on a flat screen.
 FlareEyeAxis=true
