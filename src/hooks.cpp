@@ -264,34 +264,28 @@ static unsigned __fastcall PixelVisQueryForViewStats(void* ecx, void* edx, void*
     return g_OrigPixelVisQueryForView(ecx, set, viewId);
 }
 
+// Lens flares lay out their ghosts and fade them by the distance from the middle
+// of the render target. On an off-centre eye that is not where the eye looks, so
+// the same light got different ghosts and brightness in each eye. The position
+// helper hands the layout coordinates relative to the eye's view axis; the quad
+// draw shifts them back.
+using FlareWorldToScreenFn = void(__cdecl*)(const float* world, const float* size, float* out);
+static FlareWorldToScreenFn g_OrigFlareWorldToScreen = nullptr;
+using FlareDrawQuadFn = void(__thiscall*)(void* flare, void* material, int x, int y, int w, int h, void* color, float angle);
+static FlareDrawQuadFn g_OrigFlareDrawQuad = nullptr;
+static void* const* g_FlareMaterials = nullptr;
+static bool g_FlareLogOn = false;
+static float g_FlareAxisShiftX = 0.f;
+static float g_FlareAxisShiftY = 0.f;
+
 // Diagnostic, BMVR_FLARE_LOG=1: what a lens flare's position is computed from.
 // One line per flare and eye when the projection or on-screen state changes,
 // otherwise once a second.
-using FlareWorldToScreenFn = void(__cdecl*)(const float* world, const float* size, float* out);
-static FlareWorldToScreenFn g_OrigFlareWorldToScreen = nullptr;
-static void* const* g_FlareMaterials = nullptr;
-
-static void __cdecl FlareWorldToScreenLog(const float* world, const float* size, float* out)
+static void FlareLogPosition(const float* world, const float* size, const float* out, const float* view, const float* proj)
 {
-    g_OrigFlareWorldToScreen(world, size, out);
     static int s_lines;
-    if (s_lines >= 20000 || !g_FlareMaterials || !*g_FlareMaterials)
+    if (s_lines >= 20000)
         return;
-    void* materials = *g_FlareMaterials;
-    using GetContextFn = void*(__thiscall*)(void*);
-    void* ctx = (*reinterpret_cast<GetContextFn**>(materials))[0x19C / 4](materials);
-    if (!ctx)
-        return;
-    using VoidFn = void(__thiscall*)(void*);
-    using GetMatrixFn = void(__thiscall*)(void*, int, float*);
-    void** vt = *reinterpret_cast<void***>(ctx);
-    reinterpret_cast<VoidFn>(vt[0x08 / 4])(ctx);
-    float view[16] = {}, proj[16] = {};
-    reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 0, view);
-    reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 1, proj);
-    reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
-    reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
-
     const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
     const bool onScreen = out[0] >= 0.f && out[1] >= 0.f && out[0] <= size[0] && out[1] <= size[1];
     const int sig = static_cast<int>(proj[0] * 100.f) * 31 + static_cast<int>(proj[2] * 100.f) * 17
@@ -321,6 +315,45 @@ static void __cdecl FlareWorldToScreenLog(const float* world, const float* size,
         proj[0], proj[1], proj[2], proj[3], proj[4], proj[5], proj[6], proj[7],
         proj[10], proj[11], proj[14], proj[15],
         view[8], view[9], view[10], cam[0], cam[1], cam[2], GetCurrentThreadId());
+}
+
+static void __cdecl FlareWorldToScreenHook(const float* world, const float* size, float* out)
+{
+    g_OrigFlareWorldToScreen(world, size, out);
+    g_FlareAxisShiftX = 0.f;
+    g_FlareAxisShiftY = 0.f;
+    if (!g_FlareMaterials || !*g_FlareMaterials)
+        return;
+    void* materials = *g_FlareMaterials;
+    using GetContextFn = void*(__thiscall*)(void*);
+    void* ctx = (*reinterpret_cast<GetContextFn**>(materials))[0x19C / 4](materials);
+    if (!ctx)
+        return;
+    using VoidFn = void(__thiscall*)(void*);
+    using GetMatrixFn = void(__thiscall*)(void*, int, float*);
+    void** vt = *reinterpret_cast<void***>(ctx);
+    reinterpret_cast<VoidFn>(vt[0x08 / 4])(ctx);
+    float view[16] = {}, proj[16] = {};
+    reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 0, view);
+    reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 1, proj);
+    reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
+    reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
+    if (g_FlareLogOn)
+        FlareLogPosition(world, size, out, view, proj);
+    // Where the view axis lands: NDC (-m02, -m12), screen y pointing down.
+    if (bmvr::g_FlareEyeAxis && g_OrigFlareDrawQuad)
+    {
+        g_FlareAxisShiftX = -proj[2] * size[0] * 0.5f;
+        g_FlareAxisShiftY = proj[6] * size[1] * 0.5f;
+        out[0] -= g_FlareAxisShiftX;
+        out[1] -= g_FlareAxisShiftY;
+    }
+}
+
+static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, int x, int y, int w, int h, void* color, float angle)
+{
+    (void)edx;
+    g_OrigFlareDrawQuad(ecx, material, x + static_cast<int>(g_FlareAxisShiftX), y + static_cast<int>(g_FlareAxisShiftY), w, h, color, angle);
 }
 
 // Same switch: how visible the flare is for each eye. Below the draw threshold
@@ -373,23 +406,43 @@ static float __fastcall FlareFractionLog(void* ecx, void* edx, void* leaf, const
     return f;
 }
 
-static void InstallFlareLog(uintptr_t client)
+static void InstallFlareHooks(uintptr_t client)
 {
-    char v[8] = {};
-    if (!GetEnvironmentVariableA("BMVR_FLARE_LOG", v, sizeof(v)) || v[0] != '1')
-        return;
-    static const unsigned char kPrologue[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xE4, 0x00, 0x00, 0x00 };
-    auto* fn = reinterpret_cast<unsigned char*>(client + Offsets::kLensflareWorldToScreenRva);
-    if (std::memcmp(fn, kPrologue, sizeof(kPrologue)) != 0)
+    static const unsigned char kPosPrologue[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xE4, 0x00, 0x00, 0x00 };
+    static const unsigned char kQuadPrologue[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x20, 0x02, 0x00, 0x00 };
+    auto* pos = reinterpret_cast<unsigned char*>(client + Offsets::kLensflareWorldToScreenRva);
+    auto* quad = reinterpret_cast<unsigned char*>(client + Offsets::kLensflareDrawQuadRva);
+    if (std::memcmp(pos, kPosPrologue, sizeof(kPosPrologue)) != 0
+        || std::memcmp(quad, kQuadPrologue, sizeof(kQuadPrologue)) != 0)
     {
-        Game::logMsg("flare log: client+0x%X MISMATCH (off)", Offsets::kLensflareWorldToScreenRva);
+        Game::logMsg("Lens flare eye axis: client+0x%X / +0x%X MISMATCH (off)",
+            Offsets::kLensflareWorldToScreenRva, Offsets::kLensflareDrawQuadRva);
+        Game::noteMissingOffset("Lens flare position + quad draw (per-eye flare layout)");
         return;
     }
     g_FlareMaterials = reinterpret_cast<void* const*>(client + Offsets::kClientMaterialsPtrRva);
-    if (MH_CreateHook(fn, reinterpret_cast<LPVOID>(&FlareWorldToScreenLog),
-            reinterpret_cast<LPVOID*>(&g_OrigFlareWorldToScreen)) == MH_OK
-        && MH_EnableHook(fn) == MH_OK)
-        Game::logMsg("flare log on (BMVR_FLARE_LOG)");
+    if (MH_CreateHook(quad, reinterpret_cast<LPVOID>(&FlareDrawQuadHook),
+            reinterpret_cast<LPVOID*>(&g_OrigFlareDrawQuad)) != MH_OK
+        || MH_EnableHook(quad) != MH_OK)
+    {
+        g_OrigFlareDrawQuad = nullptr;
+        Game::logMsg("Lens flare eye axis: quad hook failed (off)");
+        return;
+    }
+    if (MH_CreateHook(pos, reinterpret_cast<LPVOID>(&FlareWorldToScreenHook),
+            reinterpret_cast<LPVOID*>(&g_OrigFlareWorldToScreen)) != MH_OK
+        || MH_EnableHook(pos) != MH_OK)
+    {
+        Game::logMsg("Lens flare eye axis: position hook failed (off)");
+        return;
+    }
+    Game::logMsg("Lens flare eye axis hooks on (FlareEyeAxis=%d)", bmvr::g_FlareEyeAxis ? 1 : 0);
+
+    char v[8] = {};
+    if (!GetEnvironmentVariableA("BMVR_FLARE_LOG", v, sizeof(v)) || v[0] != '1')
+        return;
+    g_FlareLogOn = true;
+    Game::logMsg("flare log on (BMVR_FLARE_LOG)");
     static const unsigned char kFractionPrologue[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x83, 0xEC, 0x1C };
     auto* frac = reinterpret_cast<unsigned char*>(client + Offsets::kLensflareFractionRva);
     if (std::memcmp(frac, kFractionPrologue, sizeof(kFractionPrologue)) != 0)
@@ -455,7 +508,7 @@ static void InstallPixelVisPerEye()
     }
     g_ClientCurrentViewId = reinterpret_cast<ClientCurrentViewIdFn>(target);
     InstallPixelVisStats(client);
-    InstallFlareLog(client);
+    InstallFlareHooks(client);
     // Headless A/B aid: BMVR_PIXELVIS_NOGRACE=1 keeps the stock 1-frame age.
     char noGrace[8] = {};
     const bool grace = !(GetEnvironmentVariableA("BMVR_PIXELVIS_NOGRACE", noGrace, sizeof(noGrace)) && noGrace[0] == '1');

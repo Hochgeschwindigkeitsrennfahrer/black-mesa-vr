@@ -167,6 +167,10 @@ WeaponMenuTilt=true
 # The VR settings panel pauses the game while it is open.
 VrSettingsPause=true
 
+# Lens flares laid out around each eye's view axis, so both eyes show the same flare
+# (bmvr_flare_eye_axis). false = around the image centre, as on a flat screen.
+FlareEyeAxis=true
+
 # FXAA settings, also in the VR settings panel and as bmvr_fxaa_* console commands.
 # The game never passes the mat_fxaa_* cvars to the shader and runs FXAA with all values at 0.
 # FxaaApply=true sends these values instead. false keeps the stock behaviour.

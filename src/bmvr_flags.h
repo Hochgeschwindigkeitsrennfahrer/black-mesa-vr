@@ -386,6 +386,7 @@ namespace bmvr
     // the head moves). The right eye gets its own queries for all its views
     // (incl. floor/water reflections). false = stock (A/B aid).
     extern bool g_PixelVisPerEye;
+    extern bool g_FlareEyeAxis;
     // ViewProjNormalFix (default true, cvar bmvr_viewproj_normal_fix): vertex
     // shaders that turn normals into view space with cViewProj rows (Black
     // Mesa's rope g-buffer shader) get those rows without the off-centre

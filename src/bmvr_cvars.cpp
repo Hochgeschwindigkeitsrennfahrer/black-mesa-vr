@@ -103,6 +103,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrLaserBeam, nullptr },
             { "bmvr_laser_width", "VR: laser beam half width in game units (0.06 = ~3 mm beam)",
               Kind::Float, 0.01f, 0.5f, nullptr, &g_VrLaserWidth },
+            { "bmvr_flare_eye_axis", "VR: lens flares lay out around each eye's view axis instead of the image centre",
+              Kind::Bool, 0.f, 1.f, &g_FlareEyeAxis, nullptr },
             { "bmvr_pixelvis_per_eye", "VR: each eye keeps its own glow visibility queries (0 = stock: the eyes share one, glows can drop out)",
               Kind::Bool, 0.f, 1.f, &g_PixelVisPerEye, nullptr },
             { "bmvr_viewproj_normal_fix", "VR: ropes get the same normals in both off-centre eyes (0 = stock: one eye's ropes can sit in their own shadow)",
