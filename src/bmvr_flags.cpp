@@ -105,7 +105,7 @@ namespace bmvr
     float g_VrLaserStartForward = 0.f;
     bool g_AimDebug = false;
     bool g_OffCenterTest = false;
-    bool g_OffCenterEyes = false;
+    bool g_OffCenterEyes = true;
     bool g_FakeRuntime = false;
     bool g_MirrorBothEyes = false;
     // Fixes: on by default, a config key can turn each off.

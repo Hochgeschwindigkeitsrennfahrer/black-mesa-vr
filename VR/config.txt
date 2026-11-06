@@ -106,8 +106,8 @@ Msaa=0
 # frustum that covers both eyes. On asymmetric HMDs (PSVR2: 61.5 deg out,
 # 43.5 deg in) the symmetric frustum wastes ~46 % of the eye pixels, so the
 # same RenderScale gets much sharper. OpenXR helper submits the runtime's
-# per-eye FOV. Restart required.
-OffCenterEyes=false
+# per-eye FOV. Restart required. If something looks wrong on your headset, try false.
+OffCenterEyes=true
 
 Haptics=true
 HideCrosshair=true
