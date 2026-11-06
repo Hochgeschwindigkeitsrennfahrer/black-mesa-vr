@@ -387,6 +387,9 @@ namespace bmvr
     // (incl. floor/water reflections). false = stock (A/B aid).
     extern bool g_PixelVisPerEye;
     extern bool g_FlareEyeAxis;
+    extern bool g_FlareSharedLayout;
+    extern float g_FlareHazeScale;
+    extern float g_FlareHazeMinSize;
     // ViewProjNormalFix (default true, cvar bmvr_viewproj_normal_fix): vertex
     // shaders that turn normals into view space with cViewProj rows (Black
     // Mesa's rope g-buffer shader) get those rows without the off-centre
@@ -446,6 +449,7 @@ namespace bmvr
     // tracked pose, so guns and aim are unaffected.
     extern float g_VrHandsRollDeg;
     extern float g_VrHandsGunGripShift;
+    extern float g_VrHandsGunGripDown;
     // Gesture easter egg: while the G-Man is in front of you, grip shows only
     // the middle finger extended.
     extern bool g_VrGmanGesture;

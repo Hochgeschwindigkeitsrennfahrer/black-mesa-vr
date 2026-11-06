@@ -156,6 +156,9 @@ namespace bmvr
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
     bool g_FlareEyeAxis = true;
+    bool g_FlareSharedLayout = true;
+    float g_FlareHazeScale = 0.f;
+    float g_FlareHazeMinSize = 0.5f;
     bool g_ViewProjNormalFix = true;
     bool g_EyeBloom = false;
     bool g_FxaaApply = false;
@@ -172,6 +175,7 @@ namespace bmvr
     float g_VrHandsIndexRollDeg = 90.f;
     float g_VrHandsRollDeg = 90.f;
     float g_VrHandsGunGripShift = 1.2f;
+    float g_VrHandsGunGripDown = 0.f;
     bool g_VrGmanGesture = true;
     float g_VrGmanFingerStraight = 0.3f;
     float g_VrGmanThumbCurl = 1.f;
@@ -706,6 +710,12 @@ namespace bmvr
                 if (v >= 0.f && v <= 2.f)
                     g_GlowHold = v;
             }
+            else if (std::strcmp(n, "FlareSharedLayout") == 0)
+                g_FlareSharedLayout = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "FlareHazeScale") == 0)
+                g_FlareHazeScale = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "FlareHazeMinSize") == 0)
+                g_FlareHazeMinSize = std::clamp(static_cast<float>(atof(val)), 0.05f, 4.f);
             else if (std::strcmp(n, "FlareEyeAxis") == 0)
                 g_FlareEyeAxis = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PixelVisPerEye") == 0)
@@ -748,6 +758,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrHandsIndexRollDeg") == 0)
                 g_VrHandsIndexRollDeg = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "VrHandsGunGripDown") == 0)
+                g_VrHandsGunGripDown = std::clamp(static_cast<float>(atof(val)), -6.f, 6.f);
             else if (std::strcmp(n, "VrHandsGunGripShift") == 0)
                 g_VrHandsGunGripShift = std::clamp(static_cast<float>(atof(val)), -6.f, 6.f);
             else if (std::strcmp(n, "VrHandsRollDeg") == 0)

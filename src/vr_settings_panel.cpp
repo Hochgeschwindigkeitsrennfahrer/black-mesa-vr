@@ -67,6 +67,8 @@ namespace
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
+            { "Hand on gun: sideways", RowKind::Number, "VrHandsGunGripShift", nullptr, &bmvr::g_VrHandsGunGripShift, 0.25f, -6.f, 6.f, "%+.2f" },
+            { "Hand on gun: down", RowKind::Number, "VrHandsGunGripDown", nullptr, &bmvr::g_VrHandsGunGripDown, 0.25f, -6.f, 6.f, "%+.2f" },
             { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },

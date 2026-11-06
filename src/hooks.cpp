@@ -345,6 +345,20 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
     {
         g_FlareAxisShiftX = -proj[2] * size[0] * 0.5f;
         g_FlareAxisShiftY = proj[6] * size[1] * 0.5f;
+        // One layout for both eyes, from the point between them: the angle to
+        // the axis decides how the rays turn, and near the axis it differs a
+        // lot per eye. Each eye then gets that layout at its own view of the light.
+        const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
+        if (bmvr::g_FlareSharedLayout && (eye == 1 || eye == 2))
+        {
+            const float depth = -(view[8] * world[0] + view[9] * world[1] + view[10] * world[2] + view[11]);
+            if (depth > 1.f)
+            {
+                const float halfIpd = Hooks::m_VR->m_Ipd * Hooks::m_VR->m_IpdScale * Hooks::m_VR->m_VRScale * 0.5f;
+                const float parallax = proj[0] * halfIpd / depth * size[0] * 0.5f;
+                g_FlareAxisShiftX += eye == 1 ? parallax : -parallax;
+            }
+        }
         out[0] -= g_FlareAxisShiftX;
         out[1] -= g_FlareAxisShiftY;
     }
@@ -353,6 +367,28 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
 static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, int x, int y, int w, int h, void* color, float angle)
 {
     (void)edx;
+    // The large layers wash out the whole view in a headset.
+    const int eyeH = Hooks::m_VR ? static_cast<int>(Hooks::m_VR->m_RenderHeight) : 0;
+    const bool haze = eyeH > 0 && (w > bmvr::g_FlareHazeMinSize * eyeH || h > bmvr::g_FlareHazeMinSize * eyeH);
+    if (g_FlareLogOn)
+    {
+        static int s_quads;
+        if (s_quads < 120)
+        {
+            ++s_quads;
+            Game::logMsg("flarequad eye=%d mat=%p %dx%d at %d,%d haze=%d", Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0, material, w, h, x, y, haze ? 1 : 0);
+        }
+    }
+    unsigned char dim[4];
+    if (haze && color && bmvr::g_FlareHazeScale < 1.f)
+    {
+        if (bmvr::g_FlareHazeScale <= 0.f)
+            return;
+        std::memcpy(dim, color, 4);
+        for (int i = 0; i < 3; ++i)
+            dim[i] = static_cast<unsigned char>(dim[i] * bmvr::g_FlareHazeScale);
+        color = dim;
+    }
     g_OrigFlareDrawQuad(ecx, material, x + static_cast<int>(g_FlareAxisShiftX), y + static_cast<int>(g_FlareAxisShiftY), w, h, color, angle);
 }
 
