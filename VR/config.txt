@@ -170,6 +170,9 @@ WeaponMenuTilt=true
 # The VR settings panel pauses the game while it is open.
 VrSettingsPause=true
 
+# Bloom and auto-exposure on the eyes (bmvr_eye_bloom). Also in the VR settings panel.
+EyeBloom=true
+
 # Deferred lights are culled from each eye's view (bmvr_light_cull_eye). false = the main view,
 # which follows the gun aim: lights behind the hand go out.
 LightCullEyeView=true

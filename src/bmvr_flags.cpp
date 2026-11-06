@@ -164,7 +164,7 @@ namespace bmvr
     float g_FlareFadeAngle = 45.f;
     float g_FlareLightScale = 1.f;
     bool g_ViewProjNormalFix = true;
-    bool g_EyeBloom = false;
+    bool g_EyeBloom = true;
     bool g_FxaaApply = false;
     float g_FxaaSubpixel = 0.25f;
     float g_FxaaEdgeThreshold = 0.166f;

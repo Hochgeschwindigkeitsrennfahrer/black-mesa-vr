@@ -127,7 +127,7 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_PixelVisPerEye, nullptr },
             { "bmvr_viewproj_normal_fix", "VR: ropes get the same normals in both off-centre eyes (0 = stock: one eye's ropes can sit in their own shadow)",
               Kind::Bool, 0.f, 1.f, &g_ViewProjNormalFix, nullptr },
-            { "bmvr_eye_bloom", "VR test: bloom + auto-exposure passes run on the eyes unchanged (0 = skipped on the eyes)",
+            { "bmvr_eye_bloom", "VR: bloom + auto-exposure on the eyes (0 = skipped on the eyes)",
               Kind::Bool, 0.f, 1.f, &g_EyeBloom, nullptr },
             { "bmvr_fxaa_apply", "VR: send the bmvr_fxaa_* values to FXAA (0 = stock: the game sends all 0, mat_fxaa_* have no effect)",
               Kind::Bool, 0.f, 1.f, &g_FxaaApply, nullptr },
