@@ -71,6 +71,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_SprintToggle, nullptr },
             { "bmvr_gun_pitch", "VR: extra gun pitch in degrees on top of the controller's own tilt (negative = lower)",
               Kind::Float, -45.f, 45.f, nullptr, &g_GunPitchOffset },
+            { "bmvr_hand_gun_shift", "VR: support hand on the gun moved sideways toward the gun, game units",
+              Kind::Float, -6.f, 6.f, nullptr, &g_VrHandsGunGripShift },
             { "bmvr_hand_roll", "VR: hand models rolled thumb-up around the controller, degrees (90 = palms facing each other; not while holding a weapon)",
               Kind::Float, -135.f, 135.f, nullptr, &g_VrHandsRollDeg },
             { "bmvr_gman_gesture", "VR: grip shows a different gesture while the G-Man is in front of you",

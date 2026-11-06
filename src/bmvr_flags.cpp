@@ -170,6 +170,7 @@ namespace bmvr
     float g_VrHandsPoseRotZ = 0.f;
     float g_VrHandsIndexRollDeg = 90.f;
     float g_VrHandsRollDeg = 90.f;
+    float g_VrHandsGunGripShift = 1.2f;
     bool g_VrGmanGesture = true;
     float g_VrGmanFingerStraight = 0.3f;
     float g_VrGmanThumbCurl = 1.f;
@@ -744,6 +745,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrHandsIndexRollDeg") == 0)
                 g_VrHandsIndexRollDeg = static_cast<float>(atof(val));
+            else if (std::strcmp(n, "VrHandsGunGripShift") == 0)
+                g_VrHandsGunGripShift = std::clamp(static_cast<float>(atof(val)), -6.f, 6.f);
             else if (std::strcmp(n, "VrHandsRollDeg") == 0)
             {
                 const float s = static_cast<float>(atof(val));

@@ -75,6 +75,8 @@ GunPitchOffset=0
 # Mirrored per hand, all controllers (Index included); not for a hand on a
 # weapon. Also in the VR settings panel (bmvr_hand_roll).
 VrHandsRollDeg=90
+# Support hand on the gun: moved this many game units toward the gun (bmvr_hand_gun_shift).
+VrHandsGunGripShift=1.2
 # While the G-Man is in front of you, grip extends only the middle finger.
 VrGmanGesture=true
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.

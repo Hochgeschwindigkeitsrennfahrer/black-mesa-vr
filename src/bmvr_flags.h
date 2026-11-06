@@ -444,6 +444,7 @@ namespace bmvr
     // before). Not applied to a hand posed on a weapon; never touches the
     // tracked pose, so guns and aim are unaffected.
     extern float g_VrHandsRollDeg;
+    extern float g_VrHandsGunGripShift;
     // Gesture easter egg: while the G-Man is in front of you, grip shows only
     // the middle finger extended.
     extern bool g_VrGmanGesture;
