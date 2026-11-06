@@ -206,3 +206,8 @@ FxaaSubpixel=0.25
 FxaaEdgeThreshold=0.166
 # Darks below this contrast are skipped: 0.0312 treats most, 0.0833 FXAA default.
 FxaaEdgeThresholdMin=0.0833
+
+# Fallback path (ShouldHwndBlitStereo): draw the gloves/wrist HUD and use the
+# 2D GameUI pause panel. On by default; set false to restore the old fallback.
+HwndBlitHands=true
+Pause2dPanel=true

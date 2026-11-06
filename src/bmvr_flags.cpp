@@ -97,6 +97,11 @@ namespace bmvr
     float g_VrHandsModelScale = 0.85f;
     bool g_VrHandsDebugBoxes = false;
     bool g_HandHud = true;
+    // Fallback path (ShouldHwndBlitStereo): complete it with gloves/HUD and a
+    // 2D pause panel. On by default because that path is used when the optimal
+    // per-eye multicore path is unavailable; the keys are opt-outs.
+    bool g_HwndBlitHands = true;
+    bool g_Pause2dPanel = true;
     bool g_VrCrosshair = false;
     float g_VrCrosshairScale = 1.f;
     bool g_VrCrosshairDot = false;
@@ -500,6 +505,19 @@ namespace bmvr
                     *p = 0;
                     break;
                 }
+            }
+            // Handled before the main if/else-if chain: MSVC C1061 (blocks
+            // nested too deeply) fires near the end of that chain, so new keys
+            // go here instead of extending it.
+            if (std::strcmp(n, "HwndBlitHands") == 0)
+            {
+                g_HwndBlitHands = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                continue;
+            }
+            if (std::strcmp(n, "Pause2dPanel") == 0)
+            {
+                g_Pause2dPanel = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                continue;
             }
             if (std::strcmp(n, "RenderScale") == 0 || std::strcmp(n, "VRRenderScale") == 0)
             {
