@@ -10587,7 +10587,7 @@ namespace
         up = HudRotate(up, left, kPitch);
         left = HudRotate(left, fwd, kRoll);
         up = HudRotate(up, fwd, kRoll);
-        constexpr float kLift = 1.05f;
+        constexpr float kLift = 2.2f;
         constexpr float kAlong = -0.55f;
         constexpr float kAcross = 0.3f;
         const Vector center = ctrlPos + up * kLift + fwd * kAlong + left * kAcross;

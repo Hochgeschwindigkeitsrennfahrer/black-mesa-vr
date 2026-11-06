@@ -850,13 +850,13 @@ bool BmVrGloves::DrawForEye(
         // glove (only) around the controller's forward axis, mirrored per
         // hand. One setting for every controller: Index poses already carry
         // VrHandsIndexRollDeg (that roll also feeds crowbar/flashlight), so
-        // the glove only adds the difference. A hand posed on a weapon stays
-        // aligned with the weapon.
+        // the glove only adds the difference. Also on a hand holding the gun:
+        // rolled, it sits under the gun instead of on its side.
         QAngle gloveAngles = *angles[i];
         float gloveRoll = bmvr::g_VrHandsRollDeg;
         if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES)
             gloveRoll -= bmvr::g_VrHandsIndexRollDeg;
-        if (!gripCurl && gloveRoll != 0.f)
+        if (gloveRoll != 0.f)
             gloveAngles.z += rightHand ? gloveRoll : -gloveRoll;
         const VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
             *origins[i],
