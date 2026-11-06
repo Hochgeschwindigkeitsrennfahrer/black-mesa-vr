@@ -323,6 +323,56 @@ static void __cdecl FlareWorldToScreenLog(const float* world, const float* size,
         view[8], view[9], view[10], cam[0], cam[1], cam[2], GetCurrentThreadId());
 }
 
+// Same switch: how visible the flare is for each eye. Below the draw threshold
+// the position above is never computed, so this also covers hidden flares.
+using FlareFractionFn = float(__thiscall*)(void* flare, void* leaf, const float* pos);
+static FlareFractionFn g_OrigFlareFraction = nullptr;
+
+static float __fastcall FlareFractionLog(void* ecx, void* edx, void* leaf, const float* pos)
+{
+    (void)edx;
+    const float f = g_OrigFlareFraction(ecx, leaf, pos);
+    static int s_lines;
+    if (s_lines >= 30000)
+        return f;
+    const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
+    const int bucket = f <= 0.02f ? 0 : (f < 0.98f ? 1 : 2);
+    struct Seen { int bucket; ULONGLONG nextMs; };
+    static std::unordered_map<uint64_t, Seen> s_seen;
+    const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ecx)) << 2) | static_cast<uint32_t>(eye);
+    const ULONGLONG now = GetTickCount64();
+    auto [it, fresh] = s_seen.try_emplace(key, Seen{ bucket, 0 });
+    if (!fresh && it->second.bucket == bucket && now < it->second.nextMs)
+        return f;
+    const bool changed = !fresh && it->second.bucket != bucket;
+    it->second = Seen{ bucket, now + 500 };
+    ++s_lines;
+    float view[16] = {};
+    if (g_FlareMaterials && *g_FlareMaterials)
+    {
+        void* materials = *g_FlareMaterials;
+        using GetContextFn = void*(__thiscall*)(void*);
+        void* ctx = (*reinterpret_cast<GetContextFn**>(materials))[0x19C / 4](materials);
+        if (ctx)
+        {
+            using VoidFn = void(__thiscall*)(void*);
+            using GetMatrixFn = void(__thiscall*)(void*, int, float*);
+            void** vt = *reinterpret_cast<void***>(ctx);
+            reinterpret_cast<VoidFn>(vt[0x08 / 4])(ctx);
+            reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 0, view);
+            reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
+            reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
+        }
+    }
+    Game::logMsg("flarefrac %s t=%llu eye=%d view=%d f=%.3f world=(%.0f,%.0f,%.0f) cam=(%.1f,%.1f,%.1f)",
+        changed ? "CHANGE" : "state", now, eye, g_ClientCurrentViewId ? g_ClientCurrentViewId() : -1, f,
+        pos[0], pos[1], pos[2],
+        -(view[0] * view[3] + view[4] * view[7] + view[8] * view[11]),
+        -(view[1] * view[3] + view[5] * view[7] + view[9] * view[11]),
+        -(view[2] * view[3] + view[6] * view[7] + view[10] * view[11]));
+    return f;
+}
+
 static void InstallFlareLog(uintptr_t client)
 {
     char v[8] = {};
@@ -340,6 +390,13 @@ static void InstallFlareLog(uintptr_t client)
             reinterpret_cast<LPVOID*>(&g_OrigFlareWorldToScreen)) == MH_OK
         && MH_EnableHook(fn) == MH_OK)
         Game::logMsg("flare log on (BMVR_FLARE_LOG)");
+    static const unsigned char kFractionPrologue[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x83, 0xEC, 0x1C };
+    auto* frac = reinterpret_cast<unsigned char*>(client + Offsets::kLensflareFractionRva);
+    if (std::memcmp(frac, kFractionPrologue, sizeof(kFractionPrologue)) != 0)
+        Game::logMsg("flare log: fraction client+0x%X MISMATCH (off)", Offsets::kLensflareFractionRva);
+    else if (MH_CreateHook(frac, reinterpret_cast<LPVOID>(&FlareFractionLog),
+            reinterpret_cast<LPVOID*>(&g_OrigFlareFraction)) == MH_OK)
+        MH_EnableHook(frac);
 }
 
 static void InstallPixelVisStats(uintptr_t client)
