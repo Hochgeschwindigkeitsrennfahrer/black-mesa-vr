@@ -123,6 +123,7 @@ namespace
             { "Pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
             // Not saved (no key): always off after a restart.
             { "DEBUG", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
@@ -649,6 +650,17 @@ void VR::UpdateSettingsPanel()
             bmvr::g_FlareHazeMinSize = 0.5f;
             bmvr::g_FlareGhostScale = 0.f;
             break;
+        }
+        // Closes the panel; 2 s later one frame is captured (eyes, audit,
+        // water/fog inputs) into VR/, so a rare render bug can be looked at.
+        if (r.fmt && std::strcmp(r.fmt, "debug_capture") == 0)
+        {
+            bmvr::g_DebugCaptureAt = GetTickCount() + 2000;
+            if (!bmvr::g_DebugCaptureAt)
+                bmvr::g_DebugCaptureAt = 1;
+            Game::logMsg("debug capture: armed, in 2 s");
+            CloseSettingsPanel("debug capture");
+            return;
         }
         // Recenter (was a right-stick tap, now hands/weapon).
         Recenter("settings panel");

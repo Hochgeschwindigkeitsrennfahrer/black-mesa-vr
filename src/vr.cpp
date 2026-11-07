@@ -533,9 +533,12 @@ namespace
     // log their non-zero VS c0-c47 / PS c0-c31.
     bool DumpSurfaceBmp(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path, int step,
         bool alphaOnly);
+    bool DumpSurfaceRaw(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path);
     float g_AuditVsConst[256 * 4];
     float g_AuditPsConst[224 * 4];
     char g_AuditConstMat[64] = { 1 };  // { 1 } = env not read yet
+    char g_AuditTexPrefix[64];          // BMVR_AUDIT_TEXPREFIX, read at each audit start
+    std::set<std::pair<int, const void*>> g_AuditTexDumped;
 
     bool AuditLogging()
     {
@@ -737,8 +740,30 @@ namespace
             g_AuditConstMat[0] = 0;
             GetEnvironmentVariableA("BMVR_AUDIT_CONSTS", g_AuditConstMat, sizeof(g_AuditConstMat));
         }
-        if (AuditLogging() && g_AuditConstMat[0] && t_AuditMaterial[0]
-            && std::strstr(t_AuditMaterial, g_AuditConstMat) && g_AuditLines < kAuditMaxLines)
+        // '|' separates several material name parts.
+        auto constMatch = [&]() {
+            if (!g_AuditConstMat[0] || !t_AuditMaterial[0])
+                return false;
+            const char* p = g_AuditConstMat;
+            while (*p)
+            {
+                const char* e = std::strchr(p, '|');
+                const size_t n = e ? static_cast<size_t>(e - p) : std::strlen(p);
+                if (n && n < 64)
+                {
+                    char tok[64];
+                    std::memcpy(tok, p, n);
+                    tok[n] = 0;
+                    if (std::strstr(t_AuditMaterial, tok))
+                        return true;
+                }
+                if (!e)
+                    break;
+                p = e + 1;
+            }
+            return false;
+        };
+        if (AuditLogging() && constMatch() && g_AuditLines < kAuditMaxLines)
         {
             // Non-zero constants, 8 registers per line (log lines are capped
             // at 1 KB; a single line cut off the higher registers).
@@ -793,10 +818,60 @@ namespace
                 if (vsh) vsh->Release();
                 if (psh) psh->Release();
             }
+            // With BMVR_AUDIT_TEXPREFIX (panel capture): every render-target
+            // texture each matching draw samples, any size, once per texture
+            // and eye, as VR/<prefix>-e<eye>-<draw>-s<stage>-<tex>.bmp.
+            if (vr && (eye == 1 || eye == 2) && g_AuditTexPrefix[0])
+            {
+                for (DWORD stage = 0; stage < 16; ++stage)
+                {
+                    IDirect3DBaseTexture9* bt = nullptr;
+                    if (FAILED(device->GetTexture(stage, &bt)) || !bt)
+                        continue;
+                    if (bt->GetType() == D3DRTYPE_TEXTURE && g_AuditTexDumped.insert({ eye, bt }).second
+                        && g_AuditTexDumped.size() < 64)
+                    {
+                        auto* tex = static_cast<IDirect3DTexture9*>(bt);
+                        D3DSURFACE_DESC d{};
+                        IDirect3DSurface9* surf = nullptr;
+                        if (SUCCEEDED(tex->GetLevelDesc(0, &d)) && (d.Usage & D3DUSAGE_RENDERTARGET)
+                            && SUCCEEDED(tex->GetSurfaceLevel(0, &surf)) && surf)
+                        {
+                            char name[160];
+                            std::snprintf(name, sizeof(name), "%s-e%d-d%u-s%lu-%p.bmp", g_AuditTexPrefix, eye,
+                                g_AuditSeq, stage, (void*)bt);
+                            Game::logMsg("audit texdump e%d %s stage %lu %p %ux%u fmt=%u -> %s", eye,
+                                t_AuditMaterial, stage, (void*)bt, d.Width, d.Height, d.Format, name);
+                            const int texStep = d.Width > 2048 ? 2 : 1;
+                            const bool floatFmt = d.Format == D3DFMT_R16F || d.Format == D3DFMT_G16R16F
+                                || d.Format == D3DFMT_R32F || d.Format == D3DFMT_G32R32F
+                                || d.Format == D3DFMT_A32B32G32R32F;
+                            if (floatFmt)
+                            {
+                                // Raw rows as stored (depth etc. does not fit 8 bits); the
+                                // log line above has width, height and format.
+                                std::snprintf(name, sizeof(name), "%s-e%d-d%u-s%lu-%p-%ux%u-fmt%u.raw", g_AuditTexPrefix,
+                                    eye, g_AuditSeq, stage, (void*)bt, d.Width, d.Height, d.Format);
+                                DumpSurfaceRaw(device, surf, bmvr::VrFilePath(name));
+                            }
+                            else
+                                DumpSurfaceBmp(device, surf, bmvr::VrFilePath(name), texStep, false);
+                            if (d.Format == D3DFMT_A8R8G8B8)
+                            {
+                                std::snprintf(name, sizeof(name), "%s-e%d-d%u-s%lu-%p-alpha.bmp", g_AuditTexPrefix,
+                                    eye, g_AuditSeq, stage, (void*)bt);
+                                DumpSurfaceBmp(device, surf, bmvr::VrFilePath(name), texStep, true);
+                            }
+                            surf->Release();
+                        }
+                    }
+                    bt->Release();
+                }
+            }
             // Once per eye: the eye-sized textures this draw samples (light
             // accumulation etc.) as VR/audit-<mat>-e<eye>-s<stage>.bmp.
             static int s_dumped[3];
-            if (vr && (eye == 1 || eye == 2) && rw == vr->m_RenderWidth && !s_dumped[eye])
+            if (vr && (eye == 1 || eye == 2) && rw == vr->m_RenderWidth && !s_dumped[eye] && !g_AuditTexPrefix[0])
             {
                 bool any = false;
                 for (DWORD stage = 0; stage < 16; ++stage)
@@ -910,6 +985,10 @@ namespace
         g_AuditGroup.clear();
         g_AuditGroupLine.clear();
         g_AuditFramesLeft.store(frames + 1, std::memory_order_release);
+        g_AuditConstMat[0] = 1;   // re-read the env (the panel capture sets it)
+        g_AuditTexPrefix[0] = 0;
+        GetEnvironmentVariableA("BMVR_AUDIT_TEXPREFIX", g_AuditTexPrefix, sizeof(g_AuditTexPrefix));
+        g_AuditTexDumped.clear();
         AuditSetDrawHooks(true);
         Hooks::SetMatBindHooks(true);
         Game::logMsg("audit: %d frames (+1 warm-up), draw hooks %s", frames, g_AuditVtbl ? "on" : "missing");
@@ -4234,6 +4313,44 @@ namespace
         return s ? -v : v;
     }
 
+    // Read back a render-target surface and write its rows unchanged (no
+    // header; the caller's file name carries width, height and format).
+    bool DumpSurfaceRaw(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path)
+    {
+        D3DSURFACE_DESC d{};
+        if (!dev || !src || FAILED(src->GetDesc(&d)))
+            return false;
+        UINT bpp = 0;
+        switch (d.Format)
+        {
+        case D3DFMT_R16F: bpp = 2; break;
+        case D3DFMT_G16R16F: case D3DFMT_R32F: bpp = 4; break;
+        case D3DFMT_G32R32F: bpp = 8; break;
+        case D3DFMT_A32B32G32R32F: bpp = 16; break;
+        default: return false;
+        }
+        IDirect3DSurface9* sys = nullptr;
+        if (FAILED(dev->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || !sys)
+            return false;
+        bool ok = false;
+        D3DLOCKED_RECT lr{};
+        if (SUCCEEDED(dev->GetRenderTargetData(src, sys)) && SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
+        {
+            if (FILE* f = std::fopen(path.c_str(), "wb"))
+            {
+                for (UINT y = 0; y < d.Height; ++y)
+                    std::fwrite(static_cast<const uint8_t*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch, 1,
+                        static_cast<size_t>(d.Width) * bpp, f);
+                std::fclose(f);
+                ok = true;
+            }
+            sys->UnlockRect();
+        }
+        sys->Release();
+        Game::logMsg("debug dump %s: %s (%ux%u fmt=%u raw)", path.c_str(), ok ? "written" : "failed", d.Width, d.Height, d.Format);
+        return ok;
+    }
+
     // Read back a render-target surface and write every `step`th pixel as a
     // 24-bit BMP. 8888 and 16F formats; others are only logged.
     // alphaOnly: write the alpha channel as grey (layers blended by alpha).
@@ -4331,13 +4448,45 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
 {
     // Test aid: the trigger file is polled on the publish path, so players'
     // builds skip it (headless tests set BMVR_TESTDIR; DebugDumps=true opts in).
-    if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime && !bmvr::g_DebugDumps)
+    // The panel's "Capture debug frame" works in every build: it writes the
+    // same trigger files a test would, then this keeps polling until they
+    // are consumed.
+    static int s_capturePolls = 0;
+    if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime && !bmvr::g_DebugDumps
+        && !bmvr::g_DebugCaptureAt && s_capturePolls <= 0)
         return;
     static DWORD s_lastCheck = 0;
     const DWORD now = GetTickCount();
     if (now - s_lastCheck < 250)
         return;
     s_lastCheck = now;
+    if (s_capturePolls > 0)
+        --s_capturePolls;
+    if (bmvr::g_DebugCaptureAt && static_cast<LONG>(now - bmvr::g_DebugCaptureAt) >= 0)
+    {
+        bmvr::g_DebugCaptureAt = 0;
+        SYSTEMTIME st{};
+        GetLocalTime(&st);
+        char name[64];
+        std::snprintf(name, sizeof(name), "capture-%04u%02u%02u-%02u%02u%02u", st.wYear, st.wMonth, st.wDay,
+            st.wHour, st.wMinute, st.wSecond);
+        // Constants + sampled textures of the water and fog draws.
+        SetEnvironmentVariableA("BMVR_AUDIT_CONSTS", "liquids/|water|__gbxog");
+        SetEnvironmentVariableA("BMVR_AUDIT_TEXPREFIX", name);
+        if (FILE* af = std::fopen(bmvr::VrFilePath("audit.txt").c_str(), "wb"))
+        {
+            std::fputs("1", af);
+            std::fclose(af);
+        }
+        if (FILE* df = std::fopen(bmvr::VrFilePath("dump.txt").c_str(), "wb"))
+        {
+            std::fprintf(df, "%s 1", name);
+            std::fclose(df);
+        }
+        Game::logMsg("debug capture %s: eyes + audit of one frame, files VR/%s*", name, name);
+        s_capturePolls = 40;
+        return;
+    }
     // VR/trace.txt [frames]: log every RT push/pop, copy, viewport and
     // screen-space draw for that many frames (default 2).
     const std::string traceTrigger = bmvr::VrFilePath("trace.txt");

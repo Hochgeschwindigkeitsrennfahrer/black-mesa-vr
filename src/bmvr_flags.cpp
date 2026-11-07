@@ -116,6 +116,7 @@ namespace bmvr
     bool g_FlashlightLeftHand = false;
     float g_PauseMenuAlphaPasses = 3.f;
     bool g_PauseMenuColourFromFrame = true;
+    unsigned long g_DebugCaptureAt = 0;
     float g_DebugBlankEye = 0.f;
     float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;
