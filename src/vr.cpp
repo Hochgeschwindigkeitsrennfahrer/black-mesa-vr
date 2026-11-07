@@ -8100,6 +8100,10 @@ bool VR::WantPauseWorldOverlay() const
 {
     if (!m_IsVREnabled || !m_GameplayEligible || !PauseUiActive())
         return false;
+    // Fallback path: the in-world VGUI overlay cannot render there, so use the
+    // 2D GameUI capture instead.
+    if (bmvr::g_Pause2dPanel && ShouldHwndBlitStereo())
+        return false;
     if (!m_Game || !m_Game->m_EngineClient)
         return false;
     if (!m_Game->m_EngineClient->IsInGame())
@@ -8114,6 +8118,9 @@ bool VR::Want2dMenuPanel() const
 {
     if (!m_IsVREnabled)
         return false;
+    // Fallback path: use the real 2D GameUI capture for the in-game pause.
+    if (bmvr::g_Pause2dPanel && ShouldHwndBlitStereo() && m_GameplayEligible && PauseUiActive())
+        return true;
     if (!m_GameplayEligible)
         return true;
     if (!PauseUiActive())
@@ -9314,7 +9321,9 @@ void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radius, 
     };
     constexpr int kSegs = 16;
     auto disc = [&](float r, D3DCOLOR centre, D3DCOLOR rim) {
-        Vert v[kSegs + 2];
+        // Literal size: MSVC 19.44 rejects a lambda-local array sized from a
+        // local constexpr (C2131/C3863); it is kSegs + 2.
+        Vert v[18];
         v[0] = { sx, sy, depth, 1.f, centre };
         for (int i = 0; i <= kSegs; ++i)
         {
@@ -10346,10 +10355,13 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             // walls; WorldDepth writes still self-occlude fingers vs palm.
             // Only clear a leftover private buffer that did not receive the
             // eye pass (desktop blit / size mismatch).
-            const bool sceneEyeDepth =
-                gloveDepth == oldDepth
-                || (stereoEye == 1 && gloveDepth == m_D9LeftEyeDepthSurface)
-                || (stereoEye == 2 && gloveDepth == m_D9RightEyeDepthSurface);
+            // The HWND-blit path fills the color eyes from the window and
+            // never writes the private eye depth buffer. Do not treat that
+            // (stale) buffer as scene depth or the gloves are depth-rejected.
+            const bool sceneEyeDepth = !m_HwndBlitStereoActive
+                && (gloveDepth == oldDepth
+                    || (stereoEye == 1 && gloveDepth == m_D9LeftEyeDepthSurface)
+                    || (stereoEye == 2 && gloveDepth == m_D9RightEyeDepthSurface));
             if (!sceneEyeDepth)
             {
                 if (g_OrigClear)

@@ -751,6 +751,10 @@ public:
     bool m_LookApplyWanted = true;
     int m_OpenVRInitAttempts = 0;
     bool m_DirectEyeSubmit = false;
+    // True while ShouldHwndBlitStereo() fills the eyes. That path blits the
+    // HWND view and never writes the private eye depth buffer, so the glove
+    // renderer must clear that depth instead of treating it as scene depth.
+    bool m_HwndBlitStereoActive = false;
     bool m_UsedNamedRenderTargets = false;
     bool m_StereoRenderViewActive = false;
     bool m_StereoFramePoseActive = false;

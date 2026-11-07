@@ -213,6 +213,9 @@ namespace bmvr
     extern bool g_VrHandsDebugBoxes;
     // Wrist HUD: health+suit flat on the off-hand, ammo sideways beside the gun hand.
     extern bool g_HandHud;
+    // Fallback path (ShouldHwndBlitStereo): draw gloves/HUD and use the 2D pause panel.
+    extern bool g_HwndBlitHands;
+    extern bool g_Pause2dPanel;
     // World-space aim reticle at the controller firing ray. Off by default;
     // VrCrosshair=true in config.txt turns it on.
     extern bool g_VrCrosshair;
