@@ -1862,7 +1862,7 @@ namespace
         // Classify once per sequence change instead of three lowercase passes
         // + ~30 strstr on every CalcViewModelView. The label is a copy, so the
         // header + sequence index identify it.
-        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; };
+        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; bool lowered; };
         static LabelClass s_lc{ nullptr, -1 };
         if (!label || hdr != s_lc.hdr || seq != s_lc.seq
             || std::strncmp(s_lc.text, label, sizeof(s_lc.text) - 1) != 0)
@@ -1881,6 +1881,7 @@ namespace
             // reload starts/ends with idletoshell / shelltoidle, which the
             // action words miss.
             s_lc.beamHide = false;
+            s_lc.lowered = false;
             if (label)
             {
                 char lb[96]{};
@@ -1892,7 +1893,7 @@ namespace
                 // Weapon held down while aiming at a friendly: idletolow, lowidle,
                 // lowtoidle. Tested as names since their activities differ per model.
                 if (std::strstr(lb, "idletolow") || std::strstr(lb, "lowidle") || std::strstr(lb, "lowtoidle"))
-                    s_lc.beamHide = true;
+                    s_lc.beamHide = s_lc.lowered = true;
             }
             if (bmvr::g_AimDebug)
                 Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d beamHide=%d tick=%lu",
@@ -1902,8 +1903,18 @@ namespace
         const bool isLoco = s_lc.loco;
         // Black Mesa runs a second viewmodel that idles all the time; only
         // the weapon's own viewmodel decides.
+        // The idle after a raise fades in over 0.2 s from the raise's last
+        // frame. On the glock, MP5 and 357 the two transition clips carry
+        // swapped activities, so the raise plays the lowering clip and idle
+        // fades in from a lowered gun: keep the beam off a little longer.
         if (Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
-            Hooks::m_VR->NoteViewmodelBeamHidden(s_lc.beamHide);
+        {
+            static ULONGLONG s_loweredUntil = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (s_lc.lowered)
+                s_loweredUntil = now + 300;
+            Hooks::m_VR->NoteViewmodelBeamHidden(s_lc.beamHide || now < s_loweredUntil);
+        }
         // Lock-free class flag from the weapon model dCalcViewModelView just
         // classified; replaces a model-info lookup + four strstr per call (this
         // runs twice per CalcViewModelView) and an unlocked read of the
