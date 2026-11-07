@@ -7044,7 +7044,11 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     int grew = 0;
     const bool refractDest = DestLooksLikeRefractCopy(SafeTextureName(texture))
         || (destW >= 256 && destH >= 256 && destW == destH && destW <= 2048
-            && eyeW >= 640 && destW + 32 < eyeW);
+            && eyeW >= 640 && destW + 32 < eyeW)
+        // Grown by ReflectionRtScale, so no longer square. Under water the engine copies the eye
+        // into _rt_WaterRefraction for the surface seen from below: clipping that copy to the
+        // texture size kept only the eye's top-left corner.
+        || (ReflectionRtSized(destW, destH) && destW + 32 < eyeW);
     // Do not grow a HWND srcRect to eye size when the dest is the 1024
     // underwater / refract RT. That copy must downsample the whole view.
     if (srcRect && windowSrc && !destWindow && srcEye && OffscreenEyePassActive()
@@ -9501,6 +9505,53 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
             }
             hkComputeViewMatrices.fOriginal(&mirrored, worldToView, viewToProjection, worldToProjection);
             return;
+        }
+        // Water reflection views copy the eye's view with the camera below the surface and pitch and
+        // roll negated (no 180-degree roll). That makes the mirror image the eye image flipped
+        // top-bottom only, so the off-centre window has to flip the same way. Without it, a headset
+        // with a different up and down FOV reads the reflection at a fixed screen offset, and the
+        // reflection slides over the water as the head turns. Left and right stay.
+        const int eye = m_VR ? m_VR->m_StereoEye : 0;
+        if (view->m_bOffCenter && eye >= 0 && eye <= 2)
+        {
+            struct EyeView { bool valid; float x, y, z, pitch, yaw, roll; };
+            static EyeView s_eyeView[3];
+            const auto norm180 = [](float a) {
+                a = std::fmod(a, 360.f);
+                if (a > 180.f) a -= 360.f;
+                if (a < -180.f) a += 360.f;
+                return a;
+            };
+            const float pitch = norm180(view->angles.x);
+            const float yaw = norm180(view->angles.y);
+            EyeView& last = s_eyeView[eye];
+            constexpr float kAngleEps = 0.01f;
+            const bool sameXY = std::fabs(view->origin.x - last.x) < 0.01f && std::fabs(view->origin.y - last.y) < 0.01f;
+            const bool mirrored = last.valid
+                && std::fabs(pitch + last.pitch) < kAngleEps
+                && std::fabs(norm180(yaw - last.yaw)) < kAngleEps
+                && std::fabs(roll + last.roll) < kAngleEps
+                && (std::fabs(pitch) > kAngleEps || (sameXY && std::fabs(view->origin.z - last.z) > 1.f));
+            if (!mirrored)
+            {
+                last = { true, view->origin.x, view->origin.y, view->origin.z, pitch, yaw, roll };
+            }
+            else if (std::fabs(view->m_flOffCenterBottom + view->m_flOffCenterTop - 1.f) > 0.0005f)
+            {
+                CViewSetup flipped = *view;
+                flipped.m_flOffCenterBottom = 1.f - view->m_flOffCenterTop;
+                flipped.m_flOffCenterTop = 1.f - view->m_flOffCenterBottom;
+                static int s_log;
+                if (s_log < 4)
+                {
+                    Game::logMsg("Water mirror view: off-centre window flipped top-bottom B/T %.3f/%.3f -> %.3f/%.3f (%dx%d)",
+                        view->m_flOffCenterBottom, view->m_flOffCenterTop, flipped.m_flOffCenterBottom,
+                        flipped.m_flOffCenterTop, view->width, view->height);
+                    ++s_log;
+                }
+                hkComputeViewMatrices.fOriginal(&flipped, worldToView, viewToProjection, worldToProjection);
+                return;
+            }
         }
     }
     hkComputeViewMatrices.fOriginal(ecx, worldToView, viewToProjection, worldToProjection);
