@@ -7339,6 +7339,34 @@ void VR::ExecVrConfigsOnce()
     }
 }
 
+bool VR::HeadAimReadyForSave()
+{
+    const ULONGLONG now = GetTickCount64();
+    if (!m_HeadAimWanted)
+    {
+        if (!m_GameplayEligible || !m_HmdPoseValid || PauseUiActive())
+            return true;
+        m_HeadAimWanted = true;
+        m_HeadAimSent = 0;
+        m_HeadAimGiveUpMs = now + kHeadAimWaitMs;
+        return false;
+    }
+    if (m_HeadAimSent < kHeadAimCmds && now < m_HeadAimGiveUpMs)
+        return false;
+    Game::logMsg("Save angles: %d usercmds with the head's angles (yaw %.1f) before the save/pause%s",
+        m_HeadAimSent, GetViewAngle().y, m_HeadAimSent < kHeadAimCmds ? " (timed out)" : "");
+    m_HeadAimWanted = false;
+    return true;
+}
+
+bool VR::TakeHeadAimCmd()
+{
+    if (!m_HeadAimWanted)
+        return false;
+    ++m_HeadAimSent;
+    return true;
+}
+
 void VR::FlushPendingGameUi()
 {
     FlushPendingQuit();
@@ -7358,7 +7386,8 @@ void VR::FlushPendingGameUi()
         const bool ok = m_Game->ClientCmd_Unrestricted(cmd);
         Game::logMsg("VR settings %s ok=%d", cmd, ok ? 1 : 0);
     }
-    if (m_PendingQuickSave.exchange(false, std::memory_order_acq_rel) && m_Game)
+    if (m_PendingQuickSave.load(std::memory_order_acquire) && m_Game && HeadAimReadyForSave()
+        && m_PendingQuickSave.exchange(false, std::memory_order_acq_rel))
     {
         const bool ok = m_Game->ClientCmd_Unrestricted("save quick");
         Game::logMsg("Quick save ClientCmd_Unrestricted ok=%d", ok ? 1 : 0);
@@ -7367,6 +7396,11 @@ void VR::FlushPendingGameUi()
         if (!ok)
             ShowToast("SAVE FAILED");
     }
+    // Opening the pause menu: hold it until the head's angles reached the
+    // server, so a save from the menu faces where the player looked.
+    if (m_PendingGameUi.load(std::memory_order_acquire) == 1 && m_Game && m_SeenGameplay
+        && !HeadAimReadyForSave())
+        return;
     const int op = m_PendingGameUi.exchange(0, std::memory_order_acq_rel);
     if (op == 0 || !m_Game)
         return;

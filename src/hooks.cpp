@@ -5749,6 +5749,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             haveAppliedAim = true;
             m_VR->RememberFireAim(QAngle(a.x, a.y, 0.f));
         };
+        // Before a quick save / pause: the head's angles, so the save faces
+        // where the player looked (see VR::HeadAimReadyForSave).
+        if (m_VR->TakeHeadAimCmd())
+        {
+            const Vector hmdVa = m_VR->GetViewAngle();
+            apply(QAngle(hmdVa.x, hmdVa.y, 0.f));
+            return;
+        }
         // A live crowbar swing overrides the aim so the engine's melee trace
         // follows the blade instead of the controller's forward ray.
         Vector meleeOrigin{};

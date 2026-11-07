@@ -635,6 +635,19 @@ public:
     std::atomic<int> m_PendingInvDelta{ 0 };
     std::atomic<int> m_PendingWeaponSelect{ 0 };
     std::atomic<bool> m_PendingQuickSave{ false };
+    // Saves keep the player's view angles, and gameplay usercmds carry the
+    // controller aim, so a load faced where the gun pointed. Before a quick
+    // save or a pause (saves from the pause menu) a few usercmds send the head's
+    // angles instead; the action waits until the server has had them.
+    static constexpr int kHeadAimCmds = 3;
+    static constexpr ULONGLONG kHeadAimWaitMs = 300;
+    bool m_HeadAimWanted = false;
+    int m_HeadAimSent = 0;
+    ULONGLONG m_HeadAimGiveUpMs = 0;
+    // Main thread. True when the action may run now; otherwise starts or
+    // continues the head-aim hold.
+    bool HeadAimReadyForSave();
+    bool TakeHeadAimCmd();
     std::atomic<int> m_PendingPauseCmd{ 0 };   // 1 setpause, 2 unpause
     bool m_SettingsPausedGame = false;
     std::atomic<uint32_t> m_PendingWeaponSounds{ 0 };
