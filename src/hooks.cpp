@@ -93,85 +93,90 @@ static float __fastcall PixelVisQueryFractionHold(void* ecx, void* edx, float fa
     return h.shown;
 }
 
-// Save thumbnail from the pause menu: the game's grab of the desktop frame is
-// black behind the menu there, so the file it wrote gets the held left eye.
+// Save thumbnails. The game's writer grabs the bound render target with
+// ReadPixels, scales it and writes the file itself. In VR that target is not a
+// picture of the game: the desktop frame is black behind the pause menu, and in
+// gameplay it can be the eye, of which a window-sized corner gets read. So for
+// the length of the writer call the context's ReadPixels returns the left eye.
+// Sizes come from the game's call, so any window resolution works.
 using SaveShotWriterFn = void(__thiscall*)(void* view, const char* name, int w, int h, bool pow2, bool vtf);
 static SaveShotWriterFn g_OrigSaveShotWriter = nullptr;
-static const volatile unsigned char* g_SaveShotNow = nullptr;
+static volatile unsigned char* g_SaveShotNow = nullptr;
 
-// The game writes the file a little later; overwrite it once it is there.
-struct PendingSaveShot
-{
-    std::wstring path;
-    std::string name;
-    std::vector<unsigned char> bgr;
-    int size = 0;
-    ULONGLONG giveUpMs = 0;
-};
-static PendingSaveShot g_PendingSaveShot;
+using SaveShotReadPixelsFn = void(__thiscall*)(void* ctx, int x, int y, int w, int h, unsigned char* data, int format);
+static SaveShotReadPixelsFn g_RealSaveShotReadPixels = nullptr;
+static DWORD g_SaveShotThread = 0;
+static const char* g_SaveShotName = nullptr;
+static constexpr int kImageFormatRgb888 = 2;
 
-static bool WriteSaveShotPixels(const PendingSaveShot& p)
+static void __fastcall SaveShotReadPixels(void* ecx, void* edx, int x, int y, int w, int h, unsigned char* data, int format)
 {
-    FILE* f = _wfopen(p.path.c_str(), L"r+b");
-    if (!f)
-        return false;
-    bool ok = false;
-    unsigned char hdr[18] = {};
-    if (fread(hdr, 1, sizeof(hdr), f) == sizeof(hdr) && hdr[2] == 2 && hdr[16] == 24
-        && (hdr[12] | (hdr[13] << 8)) == p.size && (hdr[14] | (hdr[15] << 8)) == p.size)
+    (void)edx;
+    if (GetCurrentThreadId() == g_SaveShotThread && format == kImageFormatRgb888 && x == 0 && y == 0
+        && Hooks::m_VR && Hooks::m_VR->FillSaveThumbnail(data, w, h))
     {
-        // Bit 5 of the descriptor: top-left origin; otherwise rows go bottom-up.
-        const bool topDown = (hdr[17] & 0x20) != 0;
-        const size_t rowBytes = static_cast<size_t>(p.size) * 3;
-        fseek(f, 18 + hdr[0], SEEK_SET);
-        ok = true;
-        for (int y = 0; y < p.size && ok; ++y)
-        {
-            const int row = topDown ? y : p.size - 1 - y;
-            ok = fwrite(p.bgr.data() + static_cast<size_t>(row) * rowBytes, 1, rowBytes, f) == rowBytes;
-        }
+        Game::logMsg("Save thumbnail: %s <- left eye (grab %dx%d)", g_SaveShotName ? g_SaveShotName : "?", w, h);
+        return;
     }
-    fclose(f);
-    return ok;
+    g_RealSaveShotReadPixels(ecx, x, y, w, h, data, format);
 }
 
-static void FlushPendingSaveShot()
+static bool PatchSaveShotReadPixels(void** slot, void* fn)
 {
-    if (g_PendingSaveShot.path.empty())
-        return;
-    const bool ok = WriteSaveShotPixels(g_PendingSaveShot);
-    if (!ok && GetTickCount64() < g_PendingSaveShot.giveUpMs)
-        return;
-    Game::logMsg("Save thumbnail from the pause menu: %s <- held left eye (%s)",
-        g_PendingSaveShot.name.c_str(), ok ? "ok" : "file not ready in 3 s, the game's picture stays");
-    g_PendingSaveShot = PendingSaveShot();
+    DWORD old = 0;
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old))
+        return false;
+    *slot = fn;
+    VirtualProtect(slot, sizeof(void*), old, &old);
+    return true;
 }
 
 static void __fastcall SaveShotWriter(void* ecx, void* edx, const char* name, int w, int h, bool pow2, bool vtf)
 {
     (void)edx;
-    const bool now = g_SaveShotNow && *g_SaveShotNow != 0;
-    g_OrigSaveShotWriter(ecx, name, w, h, pow2, vtf);
-    std::vector<unsigned char> bgr;
-    if (!now || vtf || pow2 || !name || !Hooks::m_VR || !Hooks::m_VR->WantPauseWorldOverlay()
-        || w != VR::kPauseThumbSize || h != VR::kPauseThumbSize || !Hooks::m_VR->CopyPauseThumbnail(bgr))
+    const char* shown = name ? name : "?";
+    void* materials = (Hooks::m_VR && Hooks::m_Game && g_SaveShotNow && *g_SaveShotNow != 0
+        && Hooks::m_VR->WantsSaveThumbnail()) ? Hooks::m_Game->m_MaterialSystem : nullptr;
+    if (!materials)
+    {
+        g_OrigSaveShotWriter(ecx, name, w, h, pow2, vtf);
         return;
-    // name is relative to the mod folder (bms\\), e.g. save/bms-050.tga; "//MOD/" form too.
-    std::string rel = name;
-    if (rel.rfind("//MOD/", 0) == 0)
-        rel = rel.substr(6);
-    wchar_t exe[MAX_PATH] = {};
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    std::wstring path(exe);
-    path = path.substr(0, path.find_last_of(L"\\/") + 1) + L"bms\\";
-    for (char c : rel)
-        path += static_cast<wchar_t>(c == '/' ? '\\' : c);
-    g_PendingSaveShot.path = path;
-    g_PendingSaveShot.name = name;
-    g_PendingSaveShot.bgr.swap(bgr);
-    g_PendingSaveShot.size = w;
-    g_PendingSaveShot.giveUpMs = GetTickCount64() + 3000;
-    FlushPendingSaveShot();
+    }
+    const VR::SaveThumbState state = Hooks::m_VR->PollSaveThumbnail();
+    if (state == VR::SaveThumbState::Waiting)
+    {
+        // Not captured yet: with the flag clear the writer only queues the
+        // request again, and the game calls it back at the end of the next frame.
+        *g_SaveShotNow = 0;
+        g_OrigSaveShotWriter(ecx, name, w, h, pow2, vtf);
+        *g_SaveShotNow = 1;
+        return;
+    }
+    if (state == VR::SaveThumbState::Failed)
+    {
+        Game::logMsg("Save thumbnail: %s: no left eye captured, the game's picture stays", shown);
+        g_OrigSaveShotWriter(ecx, name, w, h, pow2, vtf);
+        return;
+    }
+    using GetContextFn = void*(__thiscall*)(void*);
+    using ReleaseFn = int(__thiscall*)(void*);
+    void* ctx = (*reinterpret_cast<GetContextFn**>(materials))[Offsets::kIMaterialSystem_GetRenderContext / 4](materials);
+    void** slot = ctx ? *reinterpret_cast<void***>(ctx) + Offsets::kIMatRenderContext_ReadPixels / 4 : nullptr;
+    void* real = slot ? *slot : nullptr;
+    g_RealSaveShotReadPixels = reinterpret_cast<SaveShotReadPixelsFn>(real);
+    g_SaveShotThread = GetCurrentThreadId();
+    g_SaveShotName = name;
+    const bool patched = slot && PatchSaveShotReadPixels(slot, reinterpret_cast<void*>(&SaveShotReadPixels));
+    if (!patched)
+        Game::logMsg("Save thumbnail: %s: no ReadPixels hook, the game's picture stays", shown);
+    g_OrigSaveShotWriter(ecx, name, w, h, pow2, vtf);
+    if (patched)
+        PatchSaveShotReadPixels(slot, real);
+    g_SaveShotThread = 0;
+    g_SaveShotName = nullptr;
+    if (ctx)
+        reinterpret_cast<ReleaseFn>((*reinterpret_cast<void***>(ctx))[Offsets::kIMatRenderContext_Release / 4])(ctx);
+    Hooks::m_VR->EndSaveThumbnail();
 }
 
 // Headless diagnostic (env BMVR_PIXELVIS_STATS=1): every 5 s, per eye, how
@@ -965,11 +970,11 @@ int Hooks::initSourceHooks()
                 reinterpret_cast<LPVOID*>(&g_OrigSaveShotWriter)) == MH_OK
             && MH_EnableHook(const_cast<unsigned char*>(fn)) == MH_OK)
         {
-            g_SaveShotNow = reinterpret_cast<const volatile unsigned char*>(flag);
-            Game::logMsg("Save thumbnail hook on (pause-menu saves get the held eye)");
+            g_SaveShotNow = reinterpret_cast<volatile unsigned char*>(flag);
+            Game::logMsg("Save thumbnail hook on (saves get the left eye)");
         }
         else
-            Game::noteMissingOffset("Save thumbnail writer (pause-menu save pictures)");
+            Game::noteMissingOffset("Save thumbnail writer (save pictures)");
     }
     if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && o.OccluderSetView.valid && !hkOccluderSetView.pTarget)
         hkOccluderSetView.createHook((LPVOID)o.OccluderSetView.address, &dOccluderSetView);
@@ -4962,7 +4967,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         m_VR->FlushPendingGameUi();
         m_VR->TickAudioFocusRecover();
     }
-    FlushPendingSaveShot();
 
     EnsureServerFlashlightHook();
     if (m_VR)

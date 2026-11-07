@@ -4956,11 +4956,11 @@ bool VR::PressedDigitalAction(vr::VRActionHandle_t handle, bool onChanged) const
     return data.bState;
 }
 
-void VR::CapturePauseThumbnail()
+void VR::CaptureSaveThumbnail()
 {
     {
-        std::lock_guard<std::mutex> lock(m_PauseThumbMutex);
-        if (m_PauseThumbReady)
+        std::lock_guard<std::mutex> lock(m_SaveThumbMutex);
+        if (m_SaveThumbReady)
             return;
     }
     if (!g_D3DVR9 || !m_D9LeftEyeSurface)
@@ -4968,24 +4968,31 @@ void VR::CapturePauseThumbnail()
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
         return;
-    const int n = kPauseThumbSize;
+    D3DSURFACE_DESC eye{};
+    int cw = 0, ch = 0;
+    if (SUCCEEDED(m_D9LeftEyeSurface->GetDesc(&eye)) && eye.Width > 0 && eye.Height > 0)
+    {
+        cw = (std::min)(kSaveThumbCaptureWidth, static_cast<int>(eye.Width));
+        ch = (std::max)(1, static_cast<int>(static_cast<float>(cw) * eye.Height / eye.Width + 0.5f));
+    }
     IDirect3DSurface9* scaled = nullptr;
     IDirect3DSurface9* sys = nullptr;
     std::vector<unsigned char> bgr;
-    if (SUCCEEDED(device->CreateRenderTarget(n, n, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &scaled, nullptr))
-        && SUCCEEDED(device->CreateOffscreenPlainSurface(n, n, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr))
+    if (cw > 0
+        && SUCCEEDED(device->CreateRenderTarget(cw, ch, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &scaled, nullptr))
+        && SUCCEEDED(device->CreateOffscreenPlainSurface(cw, ch, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr))
         && SUCCEEDED(device->StretchRect(m_D9LeftEyeSurface, nullptr, scaled, nullptr, D3DTEXF_LINEAR))
         && SUCCEEDED(device->GetRenderTargetData(scaled, sys)))
     {
         D3DLOCKED_RECT lr{};
         if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
         {
-            bgr.resize(static_cast<size_t>(n) * n * 3);
-            for (int y = 0; y < n; ++y)
+            bgr.resize(static_cast<size_t>(cw) * ch * 3);
+            for (int y = 0; y < ch; ++y)
             {
                 const auto* src = static_cast<const unsigned char*>(lr.pBits) + y * lr.Pitch;
-                unsigned char* dst = bgr.data() + static_cast<size_t>(y) * n * 3;
-                for (int x = 0; x < n; ++x)
+                unsigned char* dst = bgr.data() + static_cast<size_t>(y) * cw * 3;
+                for (int x = 0; x < cw; ++x)
                 {
                     dst[x * 3 + 0] = src[x * 4 + 0];
                     dst[x * 3 + 1] = src[x * 4 + 1];
@@ -5000,20 +5007,112 @@ void VR::CapturePauseThumbnail()
     if (scaled)
         scaled->Release();
     device->Release();
-    std::lock_guard<std::mutex> lock(m_PauseThumbMutex);
-    m_PauseThumbBgr.swap(bgr);
-    // Ready even when the copy failed: one try per pause, never per frame.
-    m_PauseThumbReady = true;
-    Game::logMsg("Pause thumbnail: held left eye scaled to %dx%d (%s)", n, n,
-        m_PauseThumbBgr.empty() ? "failed, the game's own grab stays" : "ok");
+    std::lock_guard<std::mutex> lock(m_SaveThumbMutex);
+    m_SaveThumbBgr.swap(bgr);
+    m_SaveThumbW = cw;
+    m_SaveThumbH = ch;
+    // Ready even when the copy failed: one try per pause or save, never per frame.
+    m_SaveThumbReady = true;
+    Game::logMsg("Save thumbnail: left eye scaled to %dx%d (%s)", cw, ch,
+        m_SaveThumbBgr.empty() ? "failed, the game's own grab stays" : "ok");
 }
 
-bool VR::CopyPauseThumbnail(std::vector<unsigned char>& bgr)
+void VR::UpdateSaveThumbnailCapture()
 {
-    std::lock_guard<std::mutex> lock(m_PauseThumbMutex);
-    if (!m_PauseThumbReady || m_PauseThumbBgr.empty())
+    const bool paused = WantPauseWorldOverlay();
+    bool wanted = false;
+    {
+        std::lock_guard<std::mutex> lock(m_SaveThumbMutex);
+        if (!paused && !m_SaveThumbPending)
+            m_SaveThumbReady = false;
+        wanted = !m_SaveThumbReady && (paused || m_SaveThumbPending);
+    }
+    // Copying the eyes while the window is deactivated crashed with the overlay
+    // being torn down (see SubmitVRTextures); no capture then.
+    if (wanted && m_AppActivated.load(std::memory_order_relaxed))
+        CaptureSaveThumbnail();
+}
+
+bool VR::WantsSaveThumbnail() const
+{
+    return m_IsVREnabled && m_GameplayEligible && m_SeenGameplay
+        && m_CreatedVRTextures.load(std::memory_order_acquire);
+}
+
+VR::SaveThumbState VR::PollSaveThumbnail()
+{
+    const bool paused = WantPauseWorldOverlay();
+    std::lock_guard<std::mutex> lock(m_SaveThumbMutex);
+    if (m_SaveThumbReady && (paused || m_SaveThumbPending))
+    {
+        if (!m_SaveThumbBgr.empty())
+            return SaveThumbState::Ready;
+        m_SaveThumbPending = false;
+        return SaveThumbState::Failed;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (!m_SaveThumbPending)
+    {
+        m_SaveThumbPending = true;
+        m_SaveThumbGiveUpMs = now + kSaveThumbWaitMs;
+        return SaveThumbState::Waiting;
+    }
+    if (now < m_SaveThumbGiveUpMs)
+        return SaveThumbState::Waiting;
+    m_SaveThumbPending = false;
+    return SaveThumbState::Failed;
+}
+
+void VR::EndSaveThumbnail()
+{
+    std::lock_guard<std::mutex> lock(m_SaveThumbMutex);
+    m_SaveThumbPending = false;
+}
+
+bool VR::FillSaveThumbnail(unsigned char* rgb, int w, int h)
+{
+    if (!rgb || w <= 0 || h <= 0)
         return false;
-    bgr = m_PauseThumbBgr;
+    // The part of the eye to show, in 0..1 of the capture: the widest rectangle
+    // of the grab's shape centred on straight ahead (eyes can be off-centre).
+    float u0 = 0.f, u1 = 1.f, v0 = 0.f, v1 = 1.f;
+    float rect[4]{};
+    if (EyeRenderRect(1, rect) && rect[0] < 0.f && rect[1] > 0.f && rect[2] < 0.f && rect[3] > 0.f)
+    {
+        const float aspect = static_cast<float>(w) / static_cast<float>(h);
+        float halfX = (std::min)(-rect[0], rect[1]);
+        float halfY = (std::min)(-rect[2], rect[3]);
+        if (halfX / halfY > aspect)
+            halfX = halfY * aspect;
+        else
+            halfY = halfX / aspect;
+        const float spanX = rect[1] - rect[0];
+        const float spanY = rect[3] - rect[2];
+        u0 = (-halfX - rect[0]) / spanX;
+        u1 = (halfX - rect[0]) / spanX;
+        v0 = (rect[3] - halfY) / spanY;
+        v1 = (rect[3] + halfY) / spanY;
+    }
+    std::lock_guard<std::mutex> lock(m_SaveThumbMutex);
+    if (!m_SaveThumbReady || m_SaveThumbBgr.empty())
+        return false;
+    const int cw = m_SaveThumbW;
+    const int ch = m_SaveThumbH;
+    for (int y = 0; y < h; ++y)
+    {
+        const float v = v0 + (v1 - v0) * (y + 0.5f) / h;
+        const int sy = (std::min)(ch - 1, (std::max)(0, static_cast<int>(v * ch)));
+        const unsigned char* row = m_SaveThumbBgr.data() + static_cast<size_t>(sy) * cw * 3;
+        unsigned char* dst = rgb + static_cast<size_t>(y) * w * 3;
+        for (int x = 0; x < w; ++x)
+        {
+            const float u = u0 + (u1 - u0) * (x + 0.5f) / w;
+            const int sx = (std::min)(cw - 1, (std::max)(0, static_cast<int>(u * cw)));
+            dst[x * 3 + 0] = row[sx * 3 + 2];
+            dst[x * 3 + 1] = row[sx * 3 + 1];
+            dst[x * 3 + 2] = row[sx * 3 + 0];
+        }
+    }
     return true;
 }
 
@@ -15955,11 +16054,7 @@ void VR::SubmitVRTextures()
     if (!m_CreatedVRTextures.load(std::memory_order_acquire))
         return;
 
-    if (!WantPauseWorldOverlay())
-    {
-        std::lock_guard<std::mutex> lock(m_PauseThumbMutex);
-        m_PauseThumbReady = false;
-    }
+    UpdateSaveThumbnailCapture();
     if (m_OpenXrHelperBridgeActive)
     {
         TickOpenXrHelperWatchdog();
@@ -15993,7 +16088,6 @@ void VR::SubmitVRTextures()
                 Game::logMsg("OpenXR pause: hold last eyes, HUD overlay only");
                 ++s_pauseHold;
             }
-            CapturePauseThumbnail();
             if (WantPauseWorldOverlay() && m_HudOverlayReady && m_D9HUDSurface)
             {
                 if (HudPaintedThisFrame())

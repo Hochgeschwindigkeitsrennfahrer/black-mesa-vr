@@ -702,17 +702,29 @@ public:
     bool ScriptedCameraActive() const;
     // Camera x head orientation for the eyes (pitch, yaw, roll), and its right vector.
     bool ScriptedCameraView(Vector& angles, Vector& right) const;
-    // Save thumbnails: Black Mesa grabs the desktop frame at the end of the
-    // frame render, and in the pause menu that frame is black behind the menu
-    // (the world is not rendered; the headset keeps the last eyes). When the
-    // pause starts, the held left eye is scaled to kPauseThumbSize² once on
-    // the Present thread; a save from the pause menu writes that instead.
-    static constexpr int kPauseThumbSize = 360;
-    std::mutex m_PauseThumbMutex;
-    std::vector<unsigned char> m_PauseThumbBgr;   // kPauseThumbSize² BGR, top row first
-    bool m_PauseThumbReady = false;
-    void CapturePauseThumbnail();
-    bool CopyPauseThumbnail(std::vector<unsigned char>& bgr);
+    // Save thumbnails: Black Mesa grabs whatever render target is bound at the
+    // end of the frame render, which in VR is not a picture of the game (black
+    // behind the pause menu; a corner of the eye in gameplay). So every save
+    // takes the left eye, scaled down once on the Present thread: when the pause
+    // starts, or on request for a gameplay save. FillSaveThumbnail cuts it to the
+    // shape of the game's grab around straight ahead.
+    static constexpr int kSaveThumbCaptureWidth = 1024;
+    static constexpr ULONGLONG kSaveThumbWaitMs = 500;
+    enum class SaveThumbState { Waiting, Ready, Failed };
+    std::mutex m_SaveThumbMutex;
+    std::vector<unsigned char> m_SaveThumbBgr;   // m_SaveThumbW x H, BGR, top row first
+    int m_SaveThumbW = 0;
+    int m_SaveThumbH = 0;
+    bool m_SaveThumbReady = false;
+    bool m_SaveThumbPending = false;   // a gameplay save waits for its capture
+    ULONGLONG m_SaveThumbGiveUpMs = 0;
+    void UpdateSaveThumbnailCapture();  // Present thread
+    void CaptureSaveThumbnail();
+    bool WantsSaveThumbnail() const;
+    SaveThumbState PollSaveThumbnail();
+    void EndSaveThumbnail();
+    // Fills w x h RGB rows, top row first (the game's ReadPixels layout).
+    bool FillSaveThumbnail(unsigned char* rgb, int w, int h);
     bool m_GameplayEligible = false;
     int m_GameplayFrames = 0;
     uint32_t m_PresentTick = 0;

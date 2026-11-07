@@ -409,6 +409,7 @@ public:
     static constexpr int kIMatRenderContext_Release = 0x4;
     static constexpr int kIMatRenderContext_BeginRender = 0x8;
     static constexpr int kIMatRenderContext_EndRender = 0xC;
+    static constexpr int kIMatRenderContext_ReadPixels = 0x34;
     static constexpr int kIMatRenderContext_SetRenderTarget = 0x18;
     static constexpr int kIMatRenderContext_GetRenderTarget = 0x1C;
     static constexpr int kIMatRenderContext_GetRenderTargetDimensions = 0x20;
@@ -531,7 +532,8 @@ public:
     static constexpr uint32_t kPixelVisQueryFractionRva = 0xD4650;
     // Save thumbnail writer (CViewRender, vtable +0x5C): (name, w, h, pow2, vtf),
     // ret 0x14. Deferred unless the byte kSaveShotNowRva is set (end of
-    // CViewRender::Render 0x1E50A0); then it box-scales the current RT into a TGA.
+    // CViewRender::Render 0x1E50A0); then it reads the current RT (context
+    // ReadPixels, RGB888), box-scales it and hands the TGA to the filesystem.
     static constexpr uint32_t kSaveShotWriterRva = 0x1E6350;
     static constexpr uint32_t kSaveShotNowRva = 0x6C5BA4;
     // Headless diagnostic only (BMVR_PIXELVIS_STATS): CPixelVisibilitySystem
