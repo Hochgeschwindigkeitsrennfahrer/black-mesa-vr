@@ -1884,6 +1884,10 @@ namespace
                 if (s_lc.action || std::strstr(lb, "shell"))
                     s_lc.beamHide = !(std::strstr(lb, "fire") || std::strstr(lb, "shoot") || std::strstr(lb, "attack")
                         || std::strstr(lb, "pump"));
+                // Weapon held down while aiming at a friendly: idletolow, lowidle,
+                // lowtoidle. Tested as names since their activities differ per model.
+                if (std::strstr(lb, "idletolow") || std::strstr(lb, "lowidle") || std::strstr(lb, "lowtoidle"))
+                    s_lc.beamHide = true;
             }
             if (bmvr::g_AimDebug)
                 Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d beamHide=%d tick=%lu",
