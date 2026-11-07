@@ -72,6 +72,7 @@ namespace
             { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
             { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
             { "LENS FLARES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Reset bloom/flare values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "flare_default" },
             { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
             { "Fade out at angle", RowKind::Number, "FlareFadeAngle", nullptr, &bmvr::g_FlareFadeAngle, 5.f, 0.f, 90.f, "%.0f\xB0" },
             { "Strength on the light", RowKind::Number, "FlareLightScale", nullptr, &bmvr::g_FlareLightScale, 0.05f, 0.f, 1.f, "%.2f" },
@@ -637,6 +638,16 @@ void VR::UpdateSettingsPanel()
             bmvr::g_FxaaSubpixel = 0.25f;
             bmvr::g_FxaaEdgeThreshold = 0.166f;
             bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
+            break;
+        }
+        // The bloom/flare values back at their defaults; on or off stays as it is.
+        if (r.fmt && std::strcmp(r.fmt, "flare_default") == 0)
+        {
+            bmvr::g_FlareFadeAngle = 45.f;
+            bmvr::g_FlareLightScale = 1.f;
+            bmvr::g_FlareHazeScale = 0.f;
+            bmvr::g_FlareHazeMinSize = 0.5f;
+            bmvr::g_FlareGhostScale = 0.f;
             break;
         }
         // Recenter (was a right-stick tap, now hands/weapon).
