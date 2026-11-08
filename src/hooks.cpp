@@ -9228,6 +9228,21 @@ int __fastcall Hooks::dEnvLaserDotDraw(void* ecx, void* edx, unsigned flags)
     }
     const bool retarget = ecx && m_VR && m_VR->m_IsVREnabled
         && (flags & 0x4E000000u) == 0;
+    // The local player's dot is not drawn at the entity origin: this draw
+    // traces from the main view origin along the view forward, so in VR it
+    // follows the head while the gun (aim marker, guidance lines) points
+    // elsewhere. Moving the entity cannot change that; skip it while the
+    // RPG is held. The aim marker and the guidance lines mark the gun aim.
+    if (retarget && RpgWeaponHeld())
+    {
+        static int s_hideLog;
+        if (s_hideLog < 2)
+        {
+            Game::logMsg("EnvLaserDot hidden in VR (view-traced dot)");
+            ++s_hideLog;
+        }
+        return 0;
+    }
     if (retarget)
     {
         m_VR->SetRpgLaserActive(true);
