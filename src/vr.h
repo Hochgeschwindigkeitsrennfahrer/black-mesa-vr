@@ -1178,6 +1178,7 @@ public:
     void NoteRpgLaserWorld(const Vector& world);
     bool TryGetRpgLaserWorld(Vector& out) const;
     bool RpgLaserVisible() const { return m_RpgLaserPointValid; }
+    bool RpgLockRingVisible() const { return m_RpgLockRing && m_RpgLaserPointValid; }
     bool WeaponMenuOpen() const { return m_WeaponMenuOpen; }
     bool WeaponMenuClickHeld() const { return m_WeaponMenuClickHeld; }
     bool WeaponMenuStickHeld() const;
@@ -1468,11 +1469,15 @@ private:
     bool m_RpgLaserActive = false;
     Vector m_RpgLaserWorld{};
     bool m_RpgLaserPointValid = false;
+    // Game's m_bLaserOn for the held RPG: flat draws rotating red lines
+    // around the crosshair while it is set; VR draws them at the laser point.
+    bool m_RpgLockRing = false;
     QAngle m_LastFireAim{};
     bool m_HasLastFireAim = false;
     void DrawAimCrosshair(IDirect3DDevice9* device, float sx, float sy, UINT h) const;
     // depth: z-buffer value (0 = in front of everything).
     void DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radiusPx, float depth = 0.f) const;
+    void DrawRpgLockRing(IDirect3DDevice9* device, float sx, float sy, UINT h) const;
     DWORD m_WeaponActionAnimUntilMs = 0;
     int m_LatchedViewmodelIdleSeq = -1;
     bool m_CrouchToggled = false;

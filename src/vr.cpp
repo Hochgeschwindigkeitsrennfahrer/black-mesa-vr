@@ -5542,9 +5542,13 @@ void VR::ProcessInput()
     const bool rpgWeapon = ViewmodelIsRpg();
     if (!scopedWeapon)
         m_CrossbowZoomLatched = false;
-    if (!paused && rpgWeapon && PressedDigitalAction(m_ActionSecondaryAttack, true))
+    // Software toggle only when m_bLaserOn was not found. With the netvar the
+    // game decides: both toggled on each press but drifted out of phase
+    // (game laser off, latch on), so the dot stayed on with guidance off.
+    if (!paused && rpgWeapon && !m_Game->RpgLaserOnResolved()
+        && PressedDigitalAction(m_ActionSecondaryAttack, true))
         m_RpgLaserLatched = !m_RpgLaserLatched;
-    if (!rpgWeapon)
+    if (!rpgWeapon || m_Game->RpgLaserOnResolved())
         m_RpgLaserLatched = false;
     // One source of truth. OR-ing netvar, a software latch, and "secondary
     // held" desynced from the engine's own toggle: once any one stayed 1,
@@ -9466,6 +9470,7 @@ void VR::AimDebugShootAngles(bool server, void* player, bool rewrote, const QAng
 
 void VR::UpdateRpgLaserPoint()
 {
+    m_RpgLockRing = m_RpgLockRing && ViewmodelIsRpg();
     if (!m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen || !m_Game || PauseUiActive())
     {
         m_RpgLaserPointValid = false;
@@ -9492,6 +9497,9 @@ void VR::UpdateRpgLaserPoint()
         if (laserOn)
             on = true;
         m_RpgLaserActive = on;
+        if ((laserOn != 0) != m_RpgLockRing)
+            Game::logMsg("RPG laser %s (game m_bLaserOn)", laserOn ? "on" : "off");
+        m_RpgLockRing = laserOn != 0;
     }
     else if (!m_RpgLaserLatched)
         m_RpgLaserActive = false;
@@ -9607,6 +9615,47 @@ void VR::DrawAimDot(IDirect3DDevice9* device, float sx, float sy, float radius, 
     };
     disc(radius + (std::max)(0.75f, radius * 0.3f), D3DCOLOR_ARGB(120, 0, 0, 0), D3DCOLOR_ARGB(120, 0, 0, 0));
     disc(radius, D3DCOLOR_ARGB(255, 255, 90, 70), D3DCOLOR_ARGB(235, 230, 20, 10));
+}
+
+// Four short red lines rotating around the laser point, about the size of
+// the flat game's: screen-space, so readable on a helicopter far away.
+void VR::DrawRpgLockRing(IDirect3DDevice9* device, float sx, float sy, UINT h) const
+{
+    if (!device)
+        return;
+    struct Vert
+    {
+        float x, y, z, rhw;
+        D3DCOLOR color;
+    };
+    float scale = bmvr::g_VrCrosshairScale;
+    if (!(scale > 0.05f) || scale > 8.f)
+        scale = 1.f;
+    // Floor so a small marker size does not shrink the ring into the dot.
+    const float px = ((h > 8) ? static_cast<float>(h) : 1440.f) / 1440.f * (std::max)(1.f, scale);
+    const float inner = 10.f * px;
+    const float outer = 18.f * px;
+    const float halfW = (std::max)(1.f, 1.5f * px);
+    const float spin = static_cast<float>(GetTickCount() % 2000u) * (6.2831853f / 2000.f);
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        const float grow = (pass == 0) ? 1.f : 0.f;
+        const D3DCOLOR c = (pass == 0) ? D3DCOLOR_ARGB(150, 0, 0, 0) : D3DCOLOR_ARGB(240, 255, 30, 20);
+        for (int i = 0; i < 4; ++i)
+        {
+            const float a = spin + static_cast<float>(i) * 1.5707963f;
+            const float dx = cosf(a), dy = sinf(a);
+            const float nx = -dy * (halfW + grow), ny = dx * (halfW + grow);
+            const float r0 = inner - grow, r1 = outer + grow;
+            const Vert v[4] = {
+                { sx + dx * r0 + nx, sy + dy * r0 + ny, 0.f, 1.f, c },
+                { sx + dx * r0 - nx, sy + dy * r0 - ny, 0.f, 1.f, c },
+                { sx + dx * r1 + nx, sy + dy * r1 + ny, 0.f, 1.f, c },
+                { sx + dx * r1 - nx, sy + dy * r1 - ny, 0.f, 1.f, c },
+            };
+            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vert));
+        }
+    }
 }
 
 bool VR::WantsWeaponActionAnim() const
@@ -10475,7 +10524,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             DrawSettingsPanel(device, stereoEye, w, h, eyeOrig, fwd, right, up);
         else if (WeaponMenuOpen())
             DrawWeaponMenu(device, stereoEye, w, h, eyeOrig, fwd, right, up);
-        else if (AimCrosshairVisible())
+        else if (AimCrosshairVisible() || RpgLockRingVisible())
         {
             device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
             device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
@@ -10595,6 +10644,13 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 else
                     DrawAimCrosshair(device, cx, cy, h);
             }
+            // The flat RPG crosshair spins red lines around the centre while
+            // the laser guides; here they spin around the laser point, on top
+            // of everything like the flat HUD.
+            Vector laserWorld{};
+            float lx = 0.f, ly = 0.f;
+            if (RpgLockRingVisible() && TryGetRpgLaserWorld(laserWorld) && project(laserWorld, lx, ly))
+                DrawRpgLockRing(device, lx, ly, h);
             device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         }
         if (ToastVisible())

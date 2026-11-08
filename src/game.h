@@ -114,6 +114,8 @@ public:
     // entity is dormant, so check line of sight).
     int VisibleEntityModelIndex(int entityIndex, Vector& origin);
     int RpgLaserOnOffset() const;
+    // True when m_bLaserOn was found in DT_Weapon_RPG (not the fallback offset).
+    bool RpgLaserOnResolved() const;
     int RpgLaserDotOffset() const;
     C_BaseEntity* FindEntityByNetworkNameContains(const char* token);
     // Networked bool at a scanned player offset. Retires the offset if it ever

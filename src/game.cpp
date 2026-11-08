@@ -1141,6 +1141,11 @@ int Game::RpgLaserOnOffset() const
     return g_nvRpgLaserOn > 0 ? g_nvRpgLaserOn : Offsets::kCWeaponRpg_bLaserOn;
 }
 
+bool Game::RpgLaserOnResolved() const
+{
+    return g_nvRpgLaserOn > 0;
+}
+
 int Game::RpgLaserDotOffset() const
 {
     return g_nvRpgLaserDot > 0 ? g_nvRpgLaserDot : Offsets::kCWeaponRpg_hLaserDot;
