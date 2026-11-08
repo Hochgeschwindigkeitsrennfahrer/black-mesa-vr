@@ -11404,6 +11404,7 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     // only — not 1:1 with L4D2 offsets (implementation-plan §7 evidence).
     // 2026-11-03: glock/357/MP5/shotgun/crossbow angles re-tuned in the HMD
     // so the sights line up with the aim dot (laser beam on, right eye).
+    // 2026-11-08: tau ax -1.5 -> -5.5 (tuned in the HMD).
     // 2026-08-28 HMD-saved numpad extras baked into this table. Live
     // extras in VR/viewmodel_offsets.txt still add on top.
     if (has("crowbar") || has("wrench"))
@@ -11426,7 +11427,7 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     else if (has("rpg") || has("rocket"))
     { out.ox = 12.f; out.oy = 10.5f; out.oz = -6.5f; out.ax = -1.f; out.numpadKey = "rpg"; }
     else if (has("gauss") || has("tau"))
-    { out.ox = 15.f; out.oy = 11.5f; out.oz = -16.5f; out.ax = -1.5f; out.ay = -8.f; out.numpadKey = "gauss"; }
+    { out.ox = 15.f; out.oy = 11.5f; out.oz = -16.5f; out.ax = -5.5f; out.ay = -8.f; out.numpadKey = "gauss"; }
     else if (has("egon") || has("gluon"))
     { out.ox = 19.f; out.oy = 8.f; out.oz = -2.f; out.ax = -1.5f; out.ay = -2.f; out.numpadKey = "gluon"; }
     else if (has("hgun") || has("hive") || has("hornet"))
