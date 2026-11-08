@@ -1843,37 +1843,6 @@ namespace
         return out;
     }
 
-    // After a weapon switch the new gun stays undrawn (and its laser off)
-    // until the idle pose has replaced the draw clip and the engine's blend
-    // out of the clip's first frame (idle fade-in 0.2 s) is over: that frame
-    // holds the tau and crossbow sideways. Written on the game thread
-    // (CalcViewModelView), read in DrawModelExecute.
-    constexpr ULONGLONG kVmSettleMs = 250;
-    std::atomic<ULONGLONG> g_VmSettleUntil{ 0 };
-    std::atomic<uint32_t> g_VmSettleModel{ 0 };
-
-    uint32_t ModelNameHash(const char* name)
-    {
-        if (!name || !name[0])
-            return 0;
-        uint32_t h = 2166136261u;
-        for (const char* c = name; *c; ++c)
-        {
-            const char ch = *c == '\\' ? '/' : static_cast<char>(tolower(static_cast<unsigned char>(*c)));
-            h = (h ^ static_cast<unsigned char>(ch)) * 16777619u;
-        }
-        return h ? h : 1u;
-    }
-
-    bool ViewmodelSettling(const char* modelName)
-    {
-        if (!bmvr::g_SkipDrawAnim)
-            return false;
-        if (GetTickCount64() >= g_VmSettleUntil.load(std::memory_order_relaxed))
-            return false;
-        return ModelNameHash(modelName) == g_VmSettleModel.load(std::memory_order_relaxed);
-    }
-
     // studiohdr_t::name (+12, 64 chars) is the path below models/, e.g.
     // "weapons\\v_gauss.mdl"; model names carry the "models/" prefix.
     bool StudioHdrMatchesModel(unsigned char* hdr, const char* model)
@@ -1973,37 +1942,7 @@ namespace
             const ULONGLONG now = GetTickCount64();
             if (s_lc.lowered)
                 s_loweredUntil = now + 300;
-            // New model: start the settle window; it is renewed while the
-            // header still lags (idle not forceable yet) and once more when
-            // the idle is first forced, so the blend out of the draw clip
-            // runs while the gun is hidden.
-            static uint32_t s_vmModel = 0;
-            static bool s_settleForced = false;
-            static bool s_prevEquip = false;
-            const uint32_t vmModel = ModelNameHash(
-                Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel)));
-            const bool equipStarts = s_lc.equip && !s_prevEquip;
-            s_prevEquip = s_lc.equip;
-            if (vmModel != s_vmModel || equipStarts)
-            {
-                s_vmModel = vmModel;
-                s_settleForced = false;
-                if (bmvr::g_SkipDrawAnim && vmModel)
-                {
-                    g_VmSettleModel.store(vmModel, std::memory_order_relaxed);
-                    g_VmSettleUntil.store(now + kVmSettleMs, std::memory_order_relaxed);
-                }
-            }
-            if (bmvr::g_SkipDrawAnim && s_lc.equip && !s_settleForced)
-            {
-                if (StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))
-                    s_settleForced = true;
-                g_VmSettleUntil.store(now + kVmSettleMs, std::memory_order_relaxed);
-            }
-            const bool settling = bmvr::g_SkipDrawAnim
-                && now < g_VmSettleUntil.load(std::memory_order_relaxed)
-                && vmModel == g_VmSettleModel.load(std::memory_order_relaxed);
-            Hooks::m_VR->NoteViewmodelBeamHidden(s_lc.beamHide || now < s_loweredUntil || settling);
+            Hooks::m_VR->NoteViewmodelBeamHidden(s_lc.beamHide || now < s_loweredUntil);
         }
         // Lock-free class flag from the weapon model dCalcViewModelView just
         // classified; replaces a model-info lookup + four strstr per call (this
@@ -6416,20 +6355,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     const bool vrViewmodelPass = m_VR && m_VR->PassThroughWarmupDone()
         && m_VR->StereoWorldPassActive();
     if (isViewmodel && vrViewmodelPass && m_VR->IsGameplayEligible() && EngineInGame())
-    {
         ApplyViewmodelStudioWork(state, modelName, body, skin, hideArms, pCustomBoneToWorld);
-        // After the header update above, so the idle can be forced next frame.
-        if (ViewmodelSettling(modelName))
-        {
-            static int s_settleLog;
-            if (s_settleLog < 6)
-            {
-                Game::logMsg("Viewmodel settle: %s hidden after switch", modelName ? modelName : "?");
-                ++s_settleLog;
-            }
-            return;
-        }
-    }
 
     void* bonesToDraw = pCustomBoneToWorld;
     const ModelRenderInfo_t* infoToDraw = &info;
