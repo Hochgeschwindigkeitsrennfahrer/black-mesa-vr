@@ -1843,6 +1843,35 @@ namespace
         return out;
     }
 
+    // studiohdr_t::name (+12, 64 chars) is the path below models/, e.g.
+    // "weapons\\v_gauss.mdl"; model names carry the "models/" prefix.
+    bool StudioHdrMatchesModel(unsigned char* hdr, const char* model)
+    {
+        if (!hdr || !model || !model[0])
+            return false;
+        char name[65]{};
+        __try
+        {
+            std::memcpy(name, hdr + 12, 64);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        // The header spells the path with backslashes, entity models with '/'.
+        auto norm = [](char c) {
+            return c == '\\' ? '/' : static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        };
+        const size_t ln = std::strlen(name), lm = std::strlen(model);
+        if (ln == 0 || ln > lm)
+            return false;
+        const char* tail = model + (lm - ln);
+        for (size_t i = 0; i < ln; ++i)
+            if (norm(tail[i]) != norm(name[i]))
+                return false;
+        return tail == model || norm(tail[-1]) == '/';
+    }
+
     void SuppressViewmodelMovementAnims(void* viewmodel)
     {
         if (!viewmodel || !Hooks::m_VR || !Hooks::m_VR->IsGameplayEligible())
@@ -1963,6 +1992,23 @@ namespace
             {
                 ForceViewmodelIdlePose(viewmodel, hdr);
             }
+            return;
+        }
+
+        // Draw / holster / first-pickup "admire": the gun is already in the
+        // hand, so show the idle pose at once. The clips swing the gun off
+        // the hand (the tau points up and back) and the idle fading in
+        // afterwards brought the laser back on a tilted gun. Firing still
+        // waits for the server's draw time, as in flat (~0.5 s).
+        // The header is the one last drawn, so right after a switch it can
+        // still be the previous gun's: only force when its name matches the
+        // active weapon's viewmodel, or the old model's idle index would land
+        // on the new model.
+        if (bmvr::g_SkipDrawAnim && s_lc.equip && Hooks::m_Game
+            && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
+            && StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))
+        {
+            ForceViewmodelIdlePose(viewmodel, hdr);
             return;
         }
 
