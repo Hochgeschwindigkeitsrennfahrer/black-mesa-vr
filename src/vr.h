@@ -1202,6 +1202,9 @@ public:
     bool ToastVisible() const;
     void DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
+    // Window-blit fallback: the hand renderer (which draws toasts) does not run
+    // there, so draw a visible toast straight onto an eye surface.
+    void DrawToastOnEyeSurface(IDirect3DSurface9* eyeSurf, int stereoEye);
     static constexpr DWORD kToastMs = 2500;
     char m_ToastText[32]{};
     char m_ToastDetail[64]{};

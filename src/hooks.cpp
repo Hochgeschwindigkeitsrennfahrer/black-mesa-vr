@@ -5626,6 +5626,12 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             m_VR->m_StereoEye = 2;
             callOriginal(rightEyeView, nClearFlags, whatToDraw);
             const bool rightOk = m_VR->BlitHmdViewFromBackbuffer(m_VR->m_D9RightEyeSurface, true);
+            if (leftOk && rightOk)
+            {
+                // "LOW-RES FALLBACK" toast (set in LogRenderPathIfChanged).
+                m_VR->DrawToastOnEyeSurface(m_VR->m_D9LeftEyeSurface, 1);
+                m_VR->DrawToastOnEyeSurface(m_VR->m_D9RightEyeSurface, 2);
+            }
             m_VR->m_StereoEye = 0;
             m_VR->m_DirectEyeSubmit = true;
             m_VR->FlushStereoBlitGpu();

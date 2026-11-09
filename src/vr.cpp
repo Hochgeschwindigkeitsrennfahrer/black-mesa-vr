@@ -14132,6 +14132,13 @@ void VR::LogRenderPathIfChanged()
                 ? "; MulticoreMode=true has no effect on this path (the game still switches its material "
                   "queue on, but no eye copies are queued, so mcPresentFallback/s equals the frame rate)"
                 : "");
+        // Players rarely read the log: say it in the headset too, and ask for
+        // a report so we can find out why this setup missed the per-eye path.
+        Game::logMsg("Render path: this is the low-resolution FALLBACK, not the intended per-eye path. "
+            "Please open an issue with this bmvr_log.txt at "
+            "https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr/issues so we can get your setup "
+            "onto the per-eye path.");
+        ShowToast("LOW-RES FALLBACK", 20000, "Please report it on GitHub with bmvr_log.txt");
         break;
     default:
         Game::logMsg("Render path: per-eye stereo without eye-sized world RTs; %s", why);
@@ -15264,6 +15271,66 @@ void VR::MirrorStereoToDesktopWindow()
     }
 
     bb->Release();
+    device->Release();
+}
+
+void VR::DrawToastOnEyeSurface(IDirect3DSurface9* eyeSurf, int stereoEye)
+{
+    if (!eyeSurf || !g_D3DVR9 || !ToastVisible())
+        return;
+    D3DSURFACE_DESC desc{};
+    if (FAILED(eyeSurf->GetDesc(&desc)) || desc.Width < 64 || desc.Height < 64)
+        return;
+    IDirect3DDevice9* device = nullptr;
+    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
+        return;
+    IDirect3DStateBlock9* saved = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
+    {
+        device->Release();
+        return;
+    }
+    IDirect3DSurface9* prevRt = nullptr;
+    IDirect3DSurface9* prevDs = nullptr;
+    device->GetRenderTarget(0, &prevRt);
+    device->GetDepthStencilSurface(&prevDs);
+    if (SUCCEEDED(device->SetRenderTarget(0, eyeSurf)))
+    {
+        device->SetDepthStencilSurface(nullptr);
+        D3DVIEWPORT9 vp{ 0, 0, desc.Width, desc.Height, 0.f, 1.f };
+        device->SetViewport(&vp);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+        device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+        device->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        Vector fwd, right, up;
+        GetViewBasis(&fwd, &right, &up);
+        const Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+        const Vector eyeOrig = (stereoEye == 1) ? GetViewOriginLeft(body)
+            : (stereoEye == 2) ? GetViewOriginRight(body) : GetViewOrigin(body);
+        DrawToast(device, stereoEye, desc.Width, desc.Height, eyeOrig, fwd, right, up);
+    }
+    saved->Apply();
+    saved->Release();
+    if (prevRt)
+    {
+        device->SetRenderTarget(0, prevRt);
+        prevRt->Release();
+    }
+    device->SetDepthStencilSurface(prevDs);
+    if (prevDs)
+        prevDs->Release();
     device->Release();
 }
 
