@@ -816,6 +816,7 @@ public:
     void ReleaseOpenXrPublishTextures();
     Vector GetViewAngle() const;
     void UpdateScopeZoomSmooth();
+    void UpdateScopeAimOffset();
     Vector GetViewOrigin(const Vector& setupOrigin) const;
     void GetViewBasis(Vector* forward, Vector* right, Vector* up) const;
     Vector GetViewOriginLeft(const Vector& setupOrigin) const;
@@ -1463,6 +1464,11 @@ private:
     float m_ZoomSmoothRoll = 0.f;
     bool m_ZoomSmoothValid = false;
     double m_ZoomSmoothMs = 0.0;
+    // Laser direction at zoom start, in head-local coordinates (forward,
+    // right, up). While zoomed the view keeps this offset from the head, so
+    // the scope opens on the spot the laser marked and the head still steers.
+    Vector m_ScopeAimLocal{ 1.f, 0.f, 0.f };
+    bool m_ScopeAimLocalValid = false;
     float m_EngineViewFov = 0.f;
     bool m_SawEngineZoomFov = false;
     bool m_RpgLaserLatched = false;

@@ -346,6 +346,9 @@ namespace bmvr
     // zoomed. Compositor / OpenXR submit keep the real HMD FOV, so the
     // narrower render is magnified in the lenses. 0.28 ≈ 3.5× (HL2 20/75).
     extern float g_ScopeZoomFovScale;
+    // Zoomed view starts on the laser's aim instead of straight ahead of the
+    // head, keeping that offset while zoomed (config ScopeKeepsAimOffset).
+    extern bool g_ScopeKeepsAimOffset;
     // Eye the scoped crossbow bolt starts from (1 left, 2 right = default,
     // 0 = between the eyes). A scope is one-eyed: from the head centre the
     // bolt hit half an IPD beside the reticle in both eyes (2026-11-03).

@@ -5567,6 +5567,7 @@ void VR::ProcessInput()
     m_ScopeZoomActive = bmvr::g_ScopeUsesHmdAim && scopedWeapon
         && (m_SawEngineZoomFov ? engineZoom
             : (zoomFlag == 1 || (zoomFlag < 0 && m_CrossbowZoomLatched)));
+    UpdateScopeAimOffset();
     {
         static int s_zoomLog;
         static bool s_lastZoom = false;
@@ -6107,9 +6108,61 @@ Vector VR::GetViewAngle() const
     }
     yaw += offset;
     yaw -= 360.f * floorf((yaw + 180.f) / 360.f);
+    // Zoomed: look along the laser direction captured at zoom start, kept
+    // relative to the head. The offset is constant while zoomed, so the
+    // compositor's reprojection (raw HMD pose) still sees only head motion.
+    if (m_ScopeZoomActive && m_ScopeAimLocalValid)
+    {
+        Vector f{}, r{}, u{};
+        QAngle::AngleVectors(QAngle(pitch, yaw, roll), &f, &r, &u);
+        const Vector& d = m_ScopeAimLocal;
+        const Vector dir = f * d.x + r * d.y + u * d.z;
+        QAngle out{};
+        QAngle::VectorAngles(dir, u, out);
+        if (std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z))
+        {
+            pitch = out.x;
+            yaw = out.y;
+            roll = out.z;
+            if (pitch > 180.f) pitch -= 360.f;
+            if (pitch < -180.f) pitch += 360.f;
+            yaw -= 360.f * floorf((yaw + 180.f) / 360.f);
+        }
+    }
     // L4D2VR GetViewAngle keeps HMD roll. Zeroing it here while OpenVR
     // Submit uses the full pose makes a head tilt rotate the world.
     return Vector(pitch, yaw, roll);
+}
+
+void VR::UpdateScopeAimOffset()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    if (!m_ScopeZoomActive || !bmvr::g_ScopeKeepsAimOffset)
+    {
+        m_ScopeAimLocalValid = false;
+        return;
+    }
+    if (m_ScopeAimLocalValid)
+        return;
+    // Head basis without the offset (still invalid here) and the laser's
+    // direction, which comes from the controller and the per-weapon sight.
+    const Vector va = GetViewAngle();
+    Vector f{}, r{}, u{};
+    QAngle::AngleVectors(QAngle(va.x, va.y, va.z), &f, &r, &u);
+    Vector aim{};
+    QAngle::AngleVectors(GetAimAngles(), &aim, nullptr, nullptr);
+    if (VectorNormalize(aim) < 0.01f)
+        return;
+    Vector local(DotProduct(aim, f), DotProduct(aim, r), DotProduct(aim, u));
+    // A laser pointing behind or far off to the side (gun held down, hand
+    // out of view) would swing the scope away from the head: stay centred.
+    if (local.x < 0.5f)
+        local = Vector(1.f, 0.f, 0.f);
+    m_ScopeAimLocal = local;
+    m_ScopeAimLocalValid = true;
+    Game::logMsg("Scope aim offset: local (%.3f %.3f %.3f) = %.1f deg off head forward",
+        local.x, local.y, local.z,
+        acosf((std::min)(1.f, (std::max)(-1.f, local.x))) * (180.f / 3.14159265358979323846f));
 }
 
 void VR::UpdateScopeZoomSmooth()
@@ -12757,6 +12810,7 @@ void VR::NoteEngineScopeFov(float engineFov)
         m_SawEngineZoomFov = true;
         m_ScopeZoomActive = true;
         m_CrossbowZoomLatched = true;
+        UpdateScopeAimOffset();
         return;
     }
     if (m_SawEngineZoomFov && engineFov >= 55.f)
@@ -13028,6 +13082,7 @@ void VR::BeginStereoFramePose()
     }
     m_StereoFramePoseActive = true;
     UpdateScopeZoomSmooth();
+    UpdateScopeAimOffset();
     if (m_OpenXrHelperBridgeActive)
     {
         m_OpenXrStereoRenderPose = m_OpenXrLastHmdPose;
@@ -16890,6 +16945,7 @@ void VR::UpdateTracking()
     UpdateControllerTracking(hmd);
 
     UpdateScopeZoomSmooth();
+    UpdateScopeAimOffset();
 
     if (m_GameplayEligible)
     {
