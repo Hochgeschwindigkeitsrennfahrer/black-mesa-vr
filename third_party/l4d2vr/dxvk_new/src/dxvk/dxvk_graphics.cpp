@@ -7,6 +7,9 @@
 #include "dxvk_pipemanager.h"
 #include "dxvk_state_cache.h"
 
+extern "C" volatile long g_BmvrPipelineInstances;
+extern "C" volatile long g_BmvrPipelineCompiles;
+
 namespace dxvk {
 
   VkPrimitiveTopology determineGsInputTopology(
@@ -1220,6 +1223,7 @@ namespace dxvk {
   DxvkGraphicsPipelineInstance* DxvkGraphicsPipeline::createInstance(
     const DxvkGraphicsPipelineStateInfo& state,
           bool                           doCreateBasePipeline) {
+    InterlockedIncrement(&g_BmvrPipelineInstances);
     VkPipeline baseHandle = VK_NULL_HANDLE;
     VkPipeline fastHandle = VK_NULL_HANDLE;
 
@@ -1441,6 +1445,7 @@ namespace dxvk {
 
   std::pair<VkResult, VkPipeline> DxvkGraphicsPipeline::createOptimizedPipeline(
     const DxvkGraphicsPipelineFastInstanceKey& key) const {
+    InterlockedIncrement(&g_BmvrPipelineCompiles);
     auto vk = m_device->vkd();
 
     DxvkShaderStageInfo stageInfo(m_device);

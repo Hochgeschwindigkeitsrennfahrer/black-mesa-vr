@@ -1,4 +1,5 @@
 #include "vr.h"
+#include "bmvr_prof.h"
 #include "game.h"
 #include "sdk.h"
 #include "offsets.h"
@@ -5346,6 +5347,7 @@ bool VR::ScriptedCameraActive() const
 
 void VR::UpdateScriptedCamera(const Vector& engineAngles)
 {
+    BMVR_PROF("vr UpdateScriptedCamera");
     if (!m_LastCmdYawValid || !std::isfinite(engineAngles.x) || !std::isfinite(engineAngles.y))
         return;
     // Only a cutscene camera (point_viewcontrol) sets the player's view
@@ -5497,6 +5499,7 @@ void VR::ApplyTurnStick(float stickX, float deltaMs)
 
 void VR::ProcessInput()
 {
+    BMVR_PROF("vr ProcessInput");
     if (!m_IsVREnabled || !m_ActionsReady.load(std::memory_order_acquire))
         return;
     if (m_RuntimeBackend != VrRuntimeBackend::OpenXR && !m_Input)
@@ -6167,6 +6170,7 @@ void VR::ChooseEyeRenderSize()
 
 Vector VR::GetViewAngle() const
 {
+    BMVR_PROF("vr GetViewAngle");
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     const QAngle& ang = m_StereoFramePoseActive ? m_StereoFrameAngles : m_HmdAngAbs;
     const float offset = m_RotationOffsetY.load(std::memory_order_acquire);
@@ -9511,6 +9515,7 @@ bool VR::TryGetMeleeAim(Vector& origin, QAngle& angles) const
 
 void VR::UpdateAimCrosshair()
 {
+    BMVR_PROF("vr UpdateAimCrosshair");
     m_AimCrosshairValid = false;
     m_AimBeamValid = false;
     // VrShootFromMuzzle needs the muzzle offset (UpdateMuzzleLocal) even with
@@ -9959,6 +9964,7 @@ bool VR::WantsWeaponActionAnim() const
 
 void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
 {
+    BMVR_PROF("vr UpdateControllerTracking");
     m_ControllerPoseValid = false;
     m_LeftControllerTrackingValid = false;
     m_PhysicalRightTrackingValid = false;
@@ -10386,6 +10392,7 @@ void VR::TryCompositorPostPresentHandoff(DWORD nowMs, DWORD poseAgeMs)
 
 bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, bool drawOverlays, bool drawGloves)
 {
+    BMVR_PROF("vr DrawIndependentHandMarkers");
     if (!eyeSurf || !m_IsVREnabled || !IsGameplayEligible() || !m_HmdPoseValid || !g_D3DVR9)
         return false;
     if (IsMenuUp())
@@ -11604,6 +11611,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
 
 void VR::DrawIndependentHandsOnDesktop()
 {
+    BMVR_PROF("vr DrawIndependentHandsOnDesktop");
     if (!(bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes))
         return;
     if (!g_D3DVR9)
@@ -11625,6 +11633,7 @@ void VR::DrawIndependentHandsOnDesktop()
 
 bool VR::DrawVrGlovesIntoBlitSource(int stereoEye)
 {
+    BMVR_PROF("vr DrawVrGlovesIntoBlitSource");
     if (!bmvr::TryVrGloves() || !bmvr::g_VrHandsGlovesEnabled || !g_D3DVR9)
         return false;
     IDirect3DDevice9* device = nullptr;
@@ -12726,6 +12735,7 @@ void VR::UpdateHl2vrMsaa()
 
 void VR::TickMatQueueFromRenderView()
 {
+    BMVR_PROF("vr TickMatQueueFromRenderView");
     UpdateHl2vrMsaa();
     bmvr::TickVrCvars(m_Game);
     // Entity attachments (muzzle) and traces belong on this thread.
@@ -13311,6 +13321,7 @@ float VR::HorizontalFovForAspect(float targetAspect) const
 
 void VR::BeginStereoFramePose()
 {
+    BMVR_PROF("vr BeginStereoFramePose");
     m_McEyeCopyQueued = false;
     m_McEyeCopyDone = false;
     m_VrGlovesDrawnIntoScene = false;
@@ -13363,6 +13374,7 @@ void VR::BeginStereoFramePose()
 
 void VR::EndStereoFramePose()
 {
+    BMVR_PROF("vr EndStereoFramePose");
     m_StereoFramePoseActive = false;
 }
 
@@ -13558,6 +13570,7 @@ void VR::LogOpenXrPublishRate()
 
 void VR::WaitPosesForStereoFrame(bool allowQueued)
 {
+    BMVR_PROF("vr WaitPosesForStereoFrame");
     if (m_PosesWaitedThisFrame)
         return;
     if (m_OpenXrHelperBridgeActive)
@@ -13921,6 +13934,7 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
 
 bool VR::QueueMcEyeBind(int stereoEye, bool flushGpu)
 {
+    BMVR_PROF("vr QueueMcEyeBind");
     auto* functor = new (std::nothrow) McMatFunctor(
         this, McMatFunctor::Kind::Bind, stereoEye, 0, flushGpu);
     if (!functor)
@@ -13940,6 +13954,7 @@ bool VR::QueueMcEyeBind(int stereoEye, bool flushGpu)
 
 bool VR::QueueMcCompositeToRing(uint32_t band)
 {
+    BMVR_PROF("vr QueueMcCompositeToRing");
     const L4D2VROpenXrPoseDesc* pose = m_OpenXrStereoRenderPoseValid
         ? &m_OpenXrStereoRenderPose : nullptr;
     auto* functor = new (std::nothrow) McMatFunctor(
@@ -14358,6 +14373,7 @@ void VR::ResetMcPipeline()
 
 void VR::FinishMcStereoPair()
 {
+    BMVR_PROF("vr FinishMcStereoPair");
     const uint32_t band = McWriteBand();
     if (m_OpenXrStereoRenderPoseValid)
         m_McPoses[band] = m_OpenXrStereoRenderPose;
@@ -15180,6 +15196,7 @@ void VR::BlitDesktopMirrorToBackbuffer()
 
 void VR::MirrorStereoToDesktopWindow()
 {
+    BMVR_PROF("vr MirrorStereoToDesktopWindow");
     if (!m_D9LeftEyeSurface || !g_D3DVR9)
         return;
     IDirect3DDevice9* device = nullptr;
@@ -15305,6 +15322,7 @@ void VR::MirrorStereoToDesktopWindow()
 
 void VR::DrawToastOnEyeSurface(IDirect3DSurface9* eyeSurf, int stereoEye)
 {
+    BMVR_PROF("vr DrawToastOnEyeSurface");
     if (!eyeSurf || !g_D3DVR9 || !ToastVisible())
         return;
     D3DSURFACE_DESC desc{};
@@ -15365,6 +15383,7 @@ void VR::DrawToastOnEyeSurface(IDirect3DSurface9* eyeSurf, int stereoEye)
 
 bool VR::BlitHmdViewFromBackbuffer(IDirect3DSurface9* dst, bool flushGpu)
 {
+    BMVR_PROF("vr BlitHmdViewFromBackbuffer");
     // Fallback only: when FullFrame == eye size the unbind StretchRect is 1:1.
     // If that miss fires, copy the top-left HMD-fit rectangle of the 16:9 BB.
     if (!dst || !g_D3DVR9)
@@ -16180,6 +16199,7 @@ void VR::CreateVRTextures()
 
 void VR::BeginStereoEyeBlit(IDirect3DSurface9* dst)
 {
+    BMVR_PROF("vr BeginStereoEyeBlit");
     m_StereoEyeBlitDest = dst;
     m_StereoEyeBlitActive = dst != nullptr;
     m_StereoEyeBlitOk = false;
@@ -16194,6 +16214,7 @@ void VR::BeginStereoEyeBlit(IDirect3DSurface9* dst)
 
 void VR::ClearStereoEyeSurfaces()
 {
+    BMVR_PROF("vr ClearStereoEyeSurfaces");
     // Engine nClearFlags on stereo eyes is DEPTH|STENCIL only, and that clear
     // still uses a 16:9 viewport/rect. Color in the extra square-eye pixels
     // then stacks previous frusta as the HMD moves. Wipe the actual D3D eye
@@ -16290,6 +16311,7 @@ void VR::ClearStereoEyeSurfaces()
 
 bool VR::EndStereoEyeBlit()
 {
+    BMVR_PROF("vr EndStereoEyeBlit");
     const bool ok = m_StereoEyeBlitOk;
     m_StereoEyeBlitActive = false;
     m_StereoEyeBlitDest = nullptr;
@@ -16308,6 +16330,7 @@ bool VR::StereoUnbindMatchesEye() const
 
 void VR::FlushStereoBlitGpu()
 {
+    BMVR_PROF("vr FlushStereoBlitGpu");
     // Both eyes share _rt_FullFrameFB. StretchRect is queued; the right-eye
     // RenderView overwrites that RT before the left copy lands, so both eyes
     // submit the same image and near field cannot fuse. Event-query flush is
@@ -16432,6 +16455,7 @@ void VR::CaptureGameColorOnUnbind(IDirect3DSurface9* oldRt, uint32_t vpX, uint32
 
 bool VR::BlitCurrentGameColorTo(IDirect3DSurface9* dst, bool flushGpu)
 {
+    BMVR_PROF("vr BlitCurrentGameColorTo");
     if (!dst || !g_D3DVR9)
         return false;
     IDirect3DDevice9* device = nullptr;
@@ -17222,6 +17246,7 @@ void VR::SubmitVRTextures()
 
 void VR::UpdateTracking()
 {
+    BMVR_PROF("vr UpdateTracking");
     m_HmdPoseValid = false;
     vr::TrackedDevicePose_t hmd{};
     const vr::EVRCompositorError err = static_cast<vr::EVRCompositorError>(
@@ -17297,6 +17322,7 @@ void VR::UpdateTracking()
 
 void VR::Update()
 {
+    BMVR_PROF("vr Update");
     if (!m_Game)
         return;
 

@@ -31,6 +31,7 @@
 #include "d3d9_vr.h"
 #include "d3d9_reshade_vr.h"
 #include "bmvr_flags.h"
+#include "bmvr_prof.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1712,6 +1713,7 @@ namespace dxvk {
     const RECT*    pDestRect,
           HWND     hDestWindowOverride,
     const RGNDATA* pDirtyRegion) {
+    BMVR_PROF("d3d9 Present");
     return PresentEx(
       pSourceRect,
       pDestRect,
@@ -2440,6 +2442,7 @@ namespace dxvk {
           IDirect3DSurface9*   pDestSurface,
     const RECT*                pDestRect,
           D3DTEXTUREFILTERTYPE Filter) {
+    BMVR_PROF("d3d9 StretchRect");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9Surface* dst = static_cast<D3D9Surface*>(pDestSurface);
@@ -2855,6 +2858,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderTarget(
           DWORD              RenderTargetIndex,
           IDirect3DSurface9* pRenderTarget) {
+    BMVR_PROF("d3d9 SetRenderTarget");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(pRenderTarget == nullptr && RenderTargetIndex == 0))
@@ -3110,6 +3114,7 @@ namespace dxvk {
           D3DCOLOR Color,
           float    Z,
           DWORD    Stencil) {
+    BMVR_PROF("d3d9 Clear");
     if (unlikely(!Count && pRects))
       return D3D_OK;
 
@@ -4063,6 +4068,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture) {
+    BMVR_PROF("d3d9 SetTexture");
     if (unlikely(InvalidSampler(Stage)))
       return D3D_OK;
 
@@ -4460,6 +4466,7 @@ namespace dxvk {
           D3DPRIMITIVETYPE PrimitiveType,
           UINT             StartVertex,
           UINT             PrimitiveCount) {
+    BMVR_PROF("d3d9 DrawPrimitive");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_state.vertexDecl == nullptr))
@@ -4535,6 +4542,7 @@ namespace dxvk {
           UINT             NumVertices,
           UINT             StartIndex,
           UINT             PrimitiveCount) {
+    BMVR_PROF("d3d9 DrawIndexedPrimitive");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_state.vertexDecl == nullptr))
@@ -4611,6 +4619,7 @@ namespace dxvk {
           UINT             PrimitiveCount,
     const void*            pVertexStreamZeroData,
           UINT             VertexStreamZeroStride) {
+    BMVR_PROF("d3d9 DrawPrimitiveUP");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(!VertexStreamZeroStride))
@@ -4670,6 +4679,7 @@ namespace dxvk {
           D3DFORMAT        IndexDataFormat,
     const void*            pVertexStreamZeroData,
           UINT             VertexStreamZeroStride) {
+    BMVR_PROF("d3d9 DrawIndexedPrimitiveUP");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(!VertexStreamZeroStride))
@@ -5094,6 +5104,7 @@ namespace dxvk {
           UINT   StartRegister,
     const float* pConstantData,
           UINT   Vector4fCount) {
+    BMVR_PROF("d3d9 SetVertexShaderConstantF");
     D3D9DeviceLock lock = LockDevice();
 
     return SetShaderConstants<
@@ -5481,6 +5492,7 @@ namespace dxvk {
     UINT   StartRegister,
     const float* pConstantData,
     UINT   Vector4fCount) {
+    BMVR_PROF("d3d9 SetPixelShaderConstantF");
     D3D9DeviceLock lock = LockDevice();
 
     return SetShaderConstants <

@@ -9,6 +9,7 @@ extern "C" volatile int g_BmvrD3dDrawTrace = 0;
 // d3d9 device: rebuild the flashlight shadow matrix from the current light pose (VR/config.txt FlashlightShadowMatrixFix).
 extern "C" volatile int g_BmvrFlashlightMatrixFix = 1;
 #include "bmvr_flags.h"
+#include "bmvr_prof.h"
 #include <intrin.h>
 #include <map>
 
@@ -5402,6 +5403,7 @@ namespace
 
 ITexture* __fastcall Hooks::dGetRenderTarget(void* ecx, void* edx)
 {
+    BMVR_PROF("hook GetRenderTarget");
     (void)edx;
     NoteMatContext(ecx);
     return hkGetRenderTarget.fOriginal(ecx);
@@ -5410,6 +5412,12 @@ ITexture* __fastcall Hooks::dGetRenderTarget(void* ecx, void* edx)
 void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int nClearFlags, int whatToDraw)
 {
     (void)edx;
+    struct ProfFrame
+    {
+        ProfFrame() { bmvr::prof::FrameRenderViewEnter(); }
+        ~ProfFrame() { bmvr::prof::FrameRenderViewLeave(); }
+    } profFrame;
+    BMVR_PROF("hook RenderView");
     RenderViewNestScope nest;
     CurrentViewScope curView(setup);
     if (!hkRenderView.fOriginal)
@@ -5429,6 +5437,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     }
 
     auto callOriginal = [&](CViewSetup& view, int clearFlags, int drawFlags) {
+        BMVR_PROF("RenderView eye pass (game)");
         if (m_VR)
             ReplayOccluderView(m_VR->m_StereoEye);
         hkRenderView.fOriginal(ecx, view, clearFlags, drawFlags);
@@ -6169,6 +6178,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
 
 bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime, CUserCmd* cmd)
 {
+    BMVR_PROF("hook CreateMove");
     (void)edx;
     if (!hkCreateMove.fOriginal)
         return false;
@@ -6518,6 +6528,7 @@ void __fastcall Hooks::dLevelShutdown(void* ecx, void* edx)
 
 void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, const Vector& eyePosition, const QAngle& eyeAngles)
 {
+    BMVR_PROF("hook CalcViewModelView");
     (void)edx;
     if (!hkCalcViewModelView.fOriginal)
         return;
@@ -6586,6 +6597,7 @@ BOOL WINAPI Hooks::dGetCursorPos(LPPOINT point)
 
 float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)
 {
+    BMVR_PROF("hook GetViewModelFOV");
     (void)edx;
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame() && m_VR->m_Fov > 10.f)
         return m_VR->EyeRenderFov(m_VR->m_StereoEye);
@@ -6596,6 +6608,7 @@ float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)
 
 void __fastcall Hooks::dAdjustEngineViewport(void* ecx, void* edx, int& x, int& y, int& width, int& height)
 {
+    BMVR_PROF("hook AdjustEngineViewport");
     if (hkAdjustEngineViewport.fOriginal)
         hkAdjustEngineViewport.fOriginal(ecx, x, y, width, height);
     ClampStereoViewport(x, y, width, height);
@@ -6603,6 +6616,7 @@ void __fastcall Hooks::dAdjustEngineViewport(void* ecx, void* edx, int& x, int& 
 
 void __fastcall Hooks::dViewport(void* ecx, void* edx, int x, int y, int width, int height)
 {
+    BMVR_PROF("hook Viewport");
     NoteMatContext(ecx);
     const int trW = width, trH = height;
     if (!EyeBloomOwnRtViewport(ecx, x, y, width, height))
@@ -6615,6 +6629,7 @@ void __fastcall Hooks::dViewport(void* ecx, void* edx, int x, int y, int width, 
 
 void __fastcall Hooks::dGetViewport(void* ecx, void* edx, int& x, int& y, int& width, int& height)
 {
+    BMVR_PROF("hook GetViewport");
     (void)edx;
     NoteMatContext(ecx);
     CallOriginalGetViewport(ecx, x, y, width, height);
@@ -6624,6 +6639,7 @@ void __fastcall Hooks::dGetViewport(void* ecx, void* edx, int& x, int& y, int& w
 
 void __fastcall Hooks::dGetRenderTargetDimensions(void* ecx, void* edx, int& width, int& height)
 {
+    BMVR_PROF("hook GetRenderTargetDimensions");
     (void)edx;
     NoteMatContext(ecx);
     const bool queuedStub = CallOriginalGetRenderTargetDimensions(ecx, width, height);
@@ -6658,6 +6674,7 @@ void Hooks::SetMatBindHooks(bool on)
 
 void __fastcall Hooks::dMatBind(void* ecx, void* edx, IMaterial* material, void* proxyData)
 {
+    BMVR_PROF("hook MatBind");
     (void)edx;
     // Enabled only while an audit runs: names the material of each draw.
     BmvrAuditNoteMaterial(SehMaterialName(material));
@@ -6683,6 +6700,7 @@ static bool IsGlowCountDepthRange(float zNear, float zFar)
 
 void __fastcall Hooks::dDepthRange(void* ecx, void* edx, float zNear, float zFar)
 {
+    BMVR_PROF("hook DepthRange");
     (void)edx;
     NoteMatContext(ecx);
     if (StereoViewmodelUsesWorldDepth() && IsCompressedViewmodelDepthRange(zNear, zFar)
@@ -7023,6 +7041,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
 void* __cdecl Hooks::dLightcacheFindNearest(int x, int y, int z, int flags)
 {
+    BMVR_PROF("hook LightcacheFindNearest");
     // public-beta lightcache nodes are not stride 0x1E0. The walker treated
     // a real next index (45106) as a cycle, wrote the sentinel into the pool,
     // and engine.dll faulted on bm_c1a0a. Call the engine lookup.
@@ -7043,6 +7062,7 @@ void Hooks::RestoreViewmodelArmHides()
 
 void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
 {
+    BMVR_PROF("hook EndFrame");
     (void)edx;
     if (hkEndFrame.fOriginal)
         hkEndFrame.fOriginal(ecx);
@@ -7059,6 +7079,7 @@ void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
 
 void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH)
 {
+    BMVR_PROF("hook PushRenderTargetAndViewport");
     NoteMatContext(ecx);
     const char* pushName = SafeTextureName(pTexture);
     const RtNameClass nameClass = ClassifyRtName(pushName);
@@ -7200,6 +7221,7 @@ void __fastcall Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITextu
 
 void __fastcall Hooks::dPopRenderTargetAndViewport(void* ecx, void* edx)
 {
+    BMVR_PROF("hook PopRenderTargetAndViewport");
     if (m_VR && m_VR->EngineHudRtPushed())
         m_VR->BlitEngineHudRtToOverlay();
     if (hkPopRenderTargetAndViewport.fOriginal)
@@ -7216,6 +7238,7 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
     float srcX0, float srcY0, float srcX1, float srcY1,
     int srcWidth, int srcHeight, void* clientRenderable, int xDice, int yDice)
 {
+    BMVR_PROF("hook DrawScreenSpaceRectangle");
     (void)edx;
     const int origX = destX;
     const int origY = destY;
@@ -7560,6 +7583,7 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
 void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITexture* texture,
     int renderTargetId, SourceRect_t* srcRect, SourceRect_t* dstRect)
 {
+    BMVR_PROF("hook CopyRenderTargetToTextureEx");
     (void)edx;
     SourceRect_t expanded{};
     SourceRect_t expandedDst{};
@@ -7761,6 +7785,7 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
 
 void __fastcall Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
 {
+    BMVR_PROF("hook VGui_Paint");
     (void)edx;
     if (g_VguiOverlayReentry)
     {
@@ -7814,6 +7839,7 @@ void __fastcall Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
 
 void __fastcall Hooks::dTraceRay(void* ecx, void* edx, const Ray_t& ray, unsigned int fMask, CTraceFilter* filter, CGameTrace* pTrace)
 {
+    BMVR_PROF("hook TraceRay");
     (void)edx;
     // 47777b5 / L4D2VR melee: do not rewrite TraceRay. Hit geometry is the
     // client Rodrigues fan from viewmodel abs origin in UpdateCrowbarMelee.
@@ -7964,6 +7990,7 @@ void Hooks::EnsureFogColorPatch()
 
 void __fastcall Hooks::dFogEyeVectors(void* ecx, void* edx, Vector* fwd, Vector* right, Vector* up)
 {
+    BMVR_PROF("hook FogEyeVectors");
     (void)edx;
     if (fwd && !right && !up && m_VR && m_VR->m_IsVREnabled && m_VR->m_HmdPoseValid)
     {
@@ -8736,6 +8763,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
 
 void __fastcall Hooks::dGetShootAngles(void* ecx, void* edx, QAngle* out)
 {
+    BMVR_PROF("hook GetShootAngles");
     (void)edx;
     if (!hkGetShootAngles.fOriginal)
         return;
@@ -8760,6 +8788,7 @@ void __fastcall Hooks::dGetShootAngles(void* ecx, void* edx, QAngle* out)
 
 void __fastcall Hooks::dClientGetShootAngles(void* ecx, void* edx, QAngle* out)
 {
+    BMVR_PROF("hook ClientGetShootAngles");
     (void)edx;
     if (hkClientGetShootAngles.fOriginal)
         hkClientGetShootAngles.fOriginal(ecx, out);
@@ -8887,6 +8916,7 @@ namespace
 // to the side, playing seated). Leave the point where the bones put it.
 void __cdecl Hooks::dFormatViewModelAttachment(Vector* origin, bool inverse)
 {
+    BMVR_PROF("hook FormatViewModelAttachment");
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame())
         return;
     if (hkFormatViewModelAttachment.fOriginal)
@@ -8895,6 +8925,7 @@ void __cdecl Hooks::dFormatViewModelAttachment(Vector* origin, bool inverse)
 
 int __fastcall Hooks::dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles)
 {
+    BMVR_PROF("hook GetAttachmentVec");
     (void)edx;
     int result = 0;
     ++t_InAttachmentVec;
@@ -8908,6 +8939,7 @@ int __fastcall Hooks::dGetAttachmentVec(void* ecx, void* edx, int number, Vector
 
 int __fastcall Hooks::dGetAttachmentMatrix(void* ecx, void* edx, int number, float* matrix)
 {
+    BMVR_PROF("hook GetAttachmentMatrix");
     (void)edx;
     int result = 0;
     if (hkGetAttachmentMatrix.fOriginal)
@@ -9281,6 +9313,7 @@ bool Hooks::EnsureWeaponVfxHooks()
 
 void __fastcall Hooks::dTauBeamView(void* ecx, void* edx, Vector* startEnd, void* a2, float a3, int a4, int a5)
 {
+    BMVR_PROF("hook TauBeamView");
     (void)edx;
     Vector local[2]{};
     Vector* seg = startEnd;
@@ -9375,6 +9408,7 @@ void __fastcall Hooks::dGluonImpactTrace(void* ecx, void* edx, void* player, CGa
 
 void __fastcall Hooks::dGluonBeamUpdate(void* ecx, void* edx)
 {
+    BMVR_PROF("hook GluonBeamUpdate");
     (void)edx;
     NoteGluonFx();
     PatchGluonImpactParticleDefs();
@@ -9424,6 +9458,7 @@ int __fastcall Hooks::dGluonBeamFxDraw(void* ecx, void* edx, unsigned flags)
 
 void __fastcall Hooks::dParticleSetControlPoint(void* ecx, void* edx, int index, Vector* origin)
 {
+    BMVR_PROF("hook ParticleSetControlPoint");
     (void)edx;
     const bool gluonImpact = IsGluonImpactParticleName(ParticleDefName(ParticleEffectDef(ecx)));
     if (gluonImpact)
@@ -9448,6 +9483,7 @@ void __fastcall Hooks::dParticleSetControlPoint(void* ecx, void* edx, int index,
 
 void __fastcall Hooks::dParticleMgrAddEffect(void* ecx, void* edx, void* effect)
 {
+    BMVR_PROF("hook ParticleMgrAddEffect");
     (void)edx;
     if (m_VR && m_VR->m_IsVREnabled && effect)
     {
@@ -9539,6 +9575,7 @@ void __fastcall Hooks::dRpgUpdateLaser(void* ecx, void* edx)
 
 void __fastcall Hooks::dHudCrosshairPaint(void* ecx, void* edx)
 {
+    BMVR_PROF("hook HudCrosshairPaint");
     (void)edx;
     const bool skip = m_VR && m_VR->m_IsVREnabled && RpgWeaponHeld();
     static int s_paint;
@@ -9561,6 +9598,7 @@ int __fastcall Hooks::dSpriteRendererDraw(void* ecx, void* edx, void* entity, vo
     float* origin, float* angles, float scale, void* attach, int a7, int a8, int a9,
     unsigned a10, unsigned a11, unsigned a12, unsigned a13, float frame, int a15)
 {
+    BMVR_PROF("hook SpriteRendererDraw");
     (void)edx;
     const bool rpgLaser = hkSpriteRendererDraw.fOriginal && m_VR && m_VR->m_IsVREnabled
         && m_Game && m_Game->m_ModelInfo && m_VR->RpgLaserActive();
@@ -9627,6 +9665,7 @@ int __fastcall Hooks::dSpriteRendererDraw(void* ecx, void* edx, void* entity, vo
 
 void __fastcall Hooks::dViewRenderBeamsDraw(void* ecx, void* edx, void* beam)
 {
+    BMVR_PROF("hook ViewRenderBeamsDraw");
     (void)edx;
     static int s_enter;
     if (s_enter < 8 && m_VR && m_VR->RpgLaserActive())
@@ -9692,6 +9731,7 @@ int __stdcall Hooks::dSpriteRenderableDraw(void* renderable, float scale, float 
 
 int __fastcall Hooks::dEnvLaserDotDraw(void* ecx, void* edx, unsigned flags)
 {
+    BMVR_PROF("hook EnvLaserDotDraw");
     (void)edx;
     static int s_dot;
     if (s_dot < 12)
@@ -9732,6 +9772,7 @@ int __fastcall Hooks::dEnvLaserDotDraw(void* ecx, void* edx, unsigned flags)
 
 void __cdecl Hooks::dSpriteQuad(float* origin, float width, float height, unsigned color)
 {
+    BMVR_PROF("hook SpriteQuad");
     Vector parked{};
     const bool rpg = m_VR && m_VR->m_IsVREnabled && m_VR->RpgLaserActive();
     const bool gluon = GluonFxLive();
@@ -9921,6 +9962,7 @@ void Hooks::ApplyFxaaParams()
 
 void __fastcall Hooks::dGetBackBufferDimensions(void* ecx, void* edx, int& width, int& height)
 {
+    BMVR_PROF("hook GetBackBufferDimensions");
     (void)edx;
     if (hkGetBackBufferDimensions.fOriginal)
         hkGetBackBufferDimensions.fOriginal(ecx, width, height);
@@ -9953,6 +9995,7 @@ void __fastcall Hooks::dGetBackBufferDimensions(void* ecx, void* edx, int& width
 
 void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& height)
 {
+    BMVR_PROF("hook GetScreenSize");
     (void)edx;
     if (hkGetScreenSize.fOriginal)
         hkGetScreenSize.fOriginal(ecx, width, height);
@@ -10005,6 +10048,7 @@ void __fastcall Hooks::dGetScreenSize(void* ecx, void* edx, int& width, int& hei
 // union contains both eyes, so culling stays conservative.
 void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToView, void* viewToProjection, void* worldToProjection)
 {
+    BMVR_PROF("hook ComputeViewMatrices");
     (void)edx;
     static const uintptr_t s_engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
     const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
@@ -10131,12 +10175,14 @@ void __fastcall Hooks::dComputeViewMatrices(void* ecx, void* edx, void* worldToV
 // visibility: keep the previous state.
 void __cdecl Hooks::dClientUpdatePvsNotifiers()
 {
+    BMVR_PROF("hook ClientUpdatePvsNotifiers");
     m_PvsSeenSinceCheck = true;
     hkClientUpdatePvsNotifiers.fOriginal();
 }
 
 void __cdecl Hooks::dClientPvsNotifierCheck()
 {
+    BMVR_PROF("hook ClientPvsNotifierCheck");
     const bool skip = m_SkippedViewSinceCheck && !m_PvsSeenSinceCheck;
     m_SkippedViewSinceCheck = false;
     m_PvsSeenSinceCheck = false;
@@ -10155,6 +10201,7 @@ void __cdecl Hooks::dClientPvsNotifierCheck()
 // also special-cased inside the tracker's visibility test.
 void __fastcall Hooks::dOcclusionBeginView(void* ecx, void* edx, int viewId, int a2, const float* plane, bool a4)
 {
+    BMVR_PROF("hook OcclusionBeginView");
     (void)edx;
     constexpr int kRightEyeViewIdOffset = 0x100;
     const int id = viewId & 0xFFFF;
@@ -10227,6 +10274,7 @@ namespace
 void __fastcall Hooks::dOccluderSetView(void* ecx, void* edx, const float* origin, float fov, const float* worldToView,
     const float* viewToProjection, const float* nearPlane)
 {
+    BMVR_PROF("hook OccluderSetView");
     (void)edx;
     const int eye = m_VR ? m_VR->m_StereoEye : 0;
     // The occluder system projects its occluders with only the symmetric scales of this matrix
@@ -10289,6 +10337,7 @@ void Hooks::ReplayOccluderView(int eye)
 // origin (this+0x98), with the edge list still dirty (this+4) or not, and the result.
 bool __fastcall Hooks::dOccluderIsOccluded(void* ecx, void* edx, const float* mins, const float* maxs)
 {
+    BMVR_PROF("hook OccluderIsOccluded");
     (void)edx;
     if (bmvr::g_PassTraceFrames <= 0 || !ecx || !mins || !maxs)
         return hkOccluderIsOccluded.fOriginal(ecx, mins, maxs);
@@ -10304,6 +10353,7 @@ bool __fastcall Hooks::dOccluderIsOccluded(void* ecx, void* edx, const float* mi
 
 void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a1, void* view, bool secondary, void* a4)
 {
+    BMVR_PROF("hook NewRendererUpdatePerCamera");
     (void)edx;
     if (bmvr::g_PassTraceFrames > 0 && view)
     {
@@ -10355,6 +10405,7 @@ void __fastcall Hooks::dNewRendererUpdatePerCamera(void* ecx, void* edx, void* a
 
 float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
 {
+    BMVR_PROF("hook GetScreenAspectRatio");
     (void)edx;
     float aspect = 0.f;
     if (hkGetScreenAspectRatio.fOriginal)
@@ -10395,6 +10446,7 @@ float __fastcall Hooks::dGetScreenAspectRatio(void* ecx, void* edx)
 
 ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags)
 {
+    BMVR_PROF_COUNT("render target created");
     (void)edx;
     void* const rtCaller = _ReturnAddress();
     const int rtReqW = w, rtReqH = h, rtReqMode = sizeMode;
