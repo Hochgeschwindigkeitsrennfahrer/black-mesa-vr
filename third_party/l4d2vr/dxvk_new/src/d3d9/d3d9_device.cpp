@@ -3359,7 +3359,14 @@ namespace dxvk {
       // Source DrawViewModels uses DepthRange 0..0.1 so the gun always wins
       // against world Z. Gloves use the world range, so a hand in front of
       // the weapon still lost. Keep the full 0..1 range in stereo.
+      // Not the glow queries' "pixels possible" draw (0..0.01, must pass the
+      // depth test; see IsGlowCountDepthRange in hooks.cpp).
+      const bool glowCountRange = bmvr::g_GlowCountDepthFix
+          && effectiveViewport.MinZ == 0.0f
+          && effectiveViewport.MaxZ > 0.0099f
+          && effectiveViewport.MaxZ < 0.0101f;
       if (vr->m_StereoEye != 0
+          && !glowCountRange
           && effectiveViewport.MaxZ > 0.0f
           && effectiveViewport.MaxZ <= 0.15f) {
         static int s_vmZLog = 0;

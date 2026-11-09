@@ -6668,11 +6668,25 @@ void __fastcall Hooks::dMatBind(void* ecx, void* edx, IMaterial* material, void*
         hkMatBind.fOriginal(ecx, material, proxyData);
 }
 
+// Glow occlusion queries count the proxy's "possible" pixels under
+// DepthRange(0, 0.01) (client CPixelVisibilitySystem, client+0xD42B2), which
+// keeps them in front of everything. The viewmodel rewrite below (Source's
+// viewmodel range is 0..0.1) turned that into 0..1 as well, so the count was
+// depth-tested like the visible query, visible == possible, and a glow showed
+// at full brightness as soon as any sliver of its proxy peeked out (police car
+// rear light through the car, bm_c2a5a). Matched by value, because with
+// MulticoreMode the call reaches this hook again from the queue's playback.
+static bool IsGlowCountDepthRange(float zNear, float zFar)
+{
+    return zNear == 0.f && zFar > 0.0099f && zFar < 0.0101f;
+}
+
 void __fastcall Hooks::dDepthRange(void* ecx, void* edx, float zNear, float zFar)
 {
     (void)edx;
     NoteMatContext(ecx);
-    if (StereoViewmodelUsesWorldDepth() && IsCompressedViewmodelDepthRange(zNear, zFar))
+    if (StereoViewmodelUsesWorldDepth() && IsCompressedViewmodelDepthRange(zNear, zFar)
+        && !(bmvr::g_GlowCountDepthFix && IsGlowCountDepthRange(zNear, zFar)))
     {
         static int s_drLog;
         if (s_drLog < 8)

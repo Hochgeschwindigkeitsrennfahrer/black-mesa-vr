@@ -165,6 +165,7 @@ namespace bmvr
     bool g_RightEyeFirst = false;
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
+    bool g_GlowCountDepthFix = true;
     bool g_FlareEyeAxis = true;
     bool g_FlareLevel = true;
     bool g_LightCullEyeView = true;
@@ -764,6 +765,8 @@ namespace bmvr
                 g_FlareEyeAxis = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PixelVisPerEye") == 0)
                 g_PixelVisPerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "GlowCountDepthFix") == 0)
+                g_GlowCountDepthFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ViewProjNormalFix") == 0)
                 g_ViewProjNormalFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "EyeBloom") == 0)
