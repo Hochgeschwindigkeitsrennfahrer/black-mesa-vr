@@ -150,6 +150,19 @@ if [[ -n ${BMVR_REAL_ARGS:-} ]]; then
 else
 	launch_args=(-steam -heapsize 524288 -processheap -novid -windowed -noborder $ui_arg -enabledxvk -nosound -w "$W" -h "$H")
 fi
+# Start the game WITH the profile's settings: some are read only once at startup (nr_lights_quality picks the G-buffer
+# layout), and the game takes config.cfg from Steam Cloud = the live mode's settings; the later bmvr_local exec
+# fixes the cvars but not what startup built (2026-11-09: VR runs had the flat G-buffer while live was flat, and the
+# water holes did not reproduce). +cvar arguments run after config.cfg at startup. Caller's args come after them.
+profile_args=()
+if [[ -z ${BMVR_FLAT:-} && $profile != live ]]; then
+	while IFS= read -r line; do
+		[[ $line =~ ^([A-Za-z_][A-Za-z0-9_]*)\ \"([^\"]*)\"$ ]] || continue
+		[[ -n ${BASH_REMATCH[2]} && ${BASH_REMATCH[2]} != *" "* ]] || continue
+		profile_args+=("+${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")
+	done < <(tr -d '\r' < "$pdir/config.cfg" | grep -v -E '^(bind|unbind)')
+	echo "profile cvars on the command line: $(( ${#profile_args[@]} / 2 ))" >> "$out/run.log"
+fi
 # Inside the namespace (uid 0 there): mount the overlay and make the removals, then a nested namespace maps back to
 # the real uid, because Wine and Steam refuse to run as root.
 ns_setup='
@@ -161,7 +174,7 @@ ns_setup='
 '
 unshare -Urm --propagation private bash -c "$ns_setup" ns "$GAME" "$upper" "$out/overlay/work" "$(id -u)" "$(id -g)" "${#remove[@]}" "${remove[@]}" \
 	"$SLR/_v2-entry-point" --verb=waitforexitandrun -- "$PROTON/proton" waitforexitandrun \
-	"$GAME/bms.exe" "${launch_args[@]}" "$@" >"$out/game.log" 2>&1 &
+	"$GAME/bms.exe" "${launch_args[@]}" "${profile_args[@]}" "$@" >"$out/game.log" 2>&1 &
 game_pid=$!
 while kill -0 $game_pid 2>/dev/null; do
 	if pgrep -x vrserver >/dev/null || pgrep -x vrmonitor >/dev/null; then

@@ -84,7 +84,7 @@ projcheck() {
 verify_settings() {
 	local exp=$out/expected-settings.cfg cv want got bad=0 reasons=
 	[[ -f $exp && -z ${BMVR_FLAT:-} ]] || return 0
-	for cv in cl_csm_enabled cl_csm_qualitymode cl_csm_memoryusage np_gr_quality mat_motion_blur_enabled mat_fxaa_enabled r_occlusion mat_hdr_level; do
+	for cv in cl_csm_enabled cl_csm_qualitymode cl_csm_memoryusage np_gr_quality mat_motion_blur_enabled mat_fxaa_enabled r_occlusion mat_hdr_level nr_lights_quality nr_shadow_quality nr_shadow_res nr_shadow_filter_quality; do
 		want=$(tr -d '\r' < "$exp" | sed -n "s/^$cv \"\(.*\)\"\$/\1/p" | head -1)
 		[[ -n $want ]] || continue
 		echo "$cv" >> "$out/VR/cmd.txt"
@@ -100,6 +100,19 @@ verify_settings() {
 			reasons+="  $cv: profile wants '$want', game has '${got:-no answer}'"$'\n'
 		fi
 	done
+	# What startup built: the cvars above can be right now while the G-buffer/lighting tier was built at startup from
+	# other values (2026-11-09: VR runs with the flat G-buffer). The game prints the tier it built; compare with the
+	# profile: "Light Quality Settings: <nr_lights_quality> - ...", "Shadows Quality Settings: <quality> <res> <filter>".
+	local pv lq sq sr sf light shadow
+	pv() { tr -d '\r' < "$exp" | sed -n "s/^$1 \"\(.*\)\"\$/\1/p" | head -1; }
+	lq=$(pv nr_lights_quality) sq=$(pv nr_shadow_quality) sr=$(pv nr_shadow_res) sf=$(pv nr_shadow_filter_quality)
+	light=$(tr -d '\r' < "$CONSOLE" | grep -a '^Light Quality Settings:' | tail -1 | awk '{print $4}')
+	shadow=$(tr -d '\r' < "$CONSOLE" | grep -a '^Shadows Quality Settings:' | tail -1 | awk '{print $4, $5, $6}')
+	echo "startup tier: light=${light:-none} shadow=${shadow:-none} (profile light=$lq shadow=$sq $sr $sf)" >> "$out/effective-settings.txt"
+	if [[ -n $lq && $light != "$lq" ]] || [[ -n $sq && -n $sr && -n $sf && $shadow != "$sq $sr $sf" ]]; then
+		bad=1
+		reasons+="  startup tier: game built light=${light:-none} shadow=${shadow:-none}, profile wants light=$lq shadow=$sq $sr $sf"$'\n'
+	fi
 	[[ -s $out/effective-settings.txt ]] || { bad=1; reasons+="  no cvar could be checked: $exp lists none of them"$'\n'; }
 	if (( bad )); then
 		{
