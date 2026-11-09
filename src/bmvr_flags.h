@@ -355,6 +355,12 @@ namespace bmvr
     extern bool g_ScopeFollowsGun;
     // Smoothing time in seconds for that gun-driven view (0 = raw aim).
     extern float g_ScopeGunSmoothSec;
+    // Crossbow held with both hands and the gun hand brought within
+    // ScopeRaiseMeters of the headset (pointing roughly where the head
+    // looks) zooms in; taking it 0.10 m further away zooms out. Holds the
+    // game's alt-fire (hold-to-zoom) meanwhile (config ScopeRaiseToZoom).
+    extern bool g_ScopeRaiseToZoom;
+    extern float g_ScopeRaiseMeters;
     // Eye the scoped crossbow bolt starts from (1 left, 2 right = default,
     // 0 = between the eyes). A scope is one-eyed: from the head centre the
     // bolt hit half an IPD beside the reticle in both eyes (2026-11-03).

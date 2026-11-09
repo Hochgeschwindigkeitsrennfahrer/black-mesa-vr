@@ -5655,6 +5655,8 @@ void VR::ProcessInput()
         }
         else if (!menuOwnsButtons && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
             buttons |= IN_ATTACK2;
+        if (UpdateScopeRaise(!menuOwnsButtons && !emptyHands && !m_OnGun && !paused))
+            buttons |= IN_ATTACK2;
         // Right stick up = jump, down = crouch. Only past
         // StickJumpCrouchThreshold and within 30 degrees of straight up or
         // down, so the diagonal a turn passes through does not count. With
@@ -6223,6 +6225,51 @@ void VR::UpdateScopeAimOffset()
     Game::logMsg("Scope aim offset: local (%.3f %.3f %.3f) = %.1f deg off head forward",
         local.x, local.y, local.z,
         acosf((std::min)(1.f, (std::max)(-1.f, local.x))) * (180.f / 3.14159265358979323846f));
+}
+
+bool VR::UpdateScopeRaise(bool allowed)
+{
+    // Black Mesa's crossbow zooms while alt-fire is held, so this holds it
+    // for as long as the crossbow is at the face. Returns true while held.
+    if (!bmvr::g_ScopeRaiseToZoom || !allowed || !ViewmodelIsScoped())
+    {
+        m_ScopeRaised = false;
+        return false;
+    }
+    float dist = 1e9f;
+    bool twoHand = false;
+    QAngle head{};
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+        if (m_RightControllerTrackingValid)
+            dist = (m_RightControllerPosAbs - m_HmdPosAbs).Length() / scale;
+        twoHand = m_TwoHandActive && !m_VmClass.offhandPistol;
+        head = m_HmdAngAbs;
+    }
+    // Gun aim vs where the head looks (raw HMD angles, not the zoomed view).
+    head.y += m_RotationOffsetY.load(std::memory_order_acquire);
+    Vector hf{}, af{};
+    QAngle::AngleVectors(head, &hf, nullptr, nullptr);
+    QAngle::AngleVectors(GetAimAngles(), &af, nullptr, nullptr);
+    const float aimDot = DotProduct(hf, af);
+    const float enter = std::clamp(bmvr::g_ScopeRaiseMeters, 0.1f, 0.6f);
+    const float leave = enter + 0.10f;
+    const bool was = m_ScopeRaised;
+    if (!m_ScopeRaised)
+        // Two hands on the crossbow, at the face, pointing within ~35 deg
+        // of where the head looks.
+        m_ScopeRaised = twoHand && dist < enter && aimDot > 0.82f;
+    else
+        // Out only by distance: letting go with the support hand or looking
+        // around while scoped keeps the zoom.
+        m_ScopeRaised = dist < leave;
+    if (m_ScopeRaised != was)
+        Game::logMsg("Scope raise: %s (hand %.2f m from the head, aim %.0f deg off the head, two-hand %d)",
+            m_ScopeRaised ? "at the face, zoom held" : "away from the face, zoom released", dist,
+            acosf(std::clamp(aimDot, -1.f, 1.f)) * (180.f / 3.14159265358979323846f),
+            twoHand ? 1 : 0);
+    return m_ScopeRaised;
 }
 
 void VR::UpdateScopeZoomSmooth()
@@ -10254,6 +10301,11 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         return false;
     if (!(m_Fov > 10.f) || !m_HmdOriginLatched)
         return false;
+    // Scoped: the view is the magnified scope picture, so gloves and the hand
+    // HUD would be drawn magnified across it (the two-hand support glove sat
+    // over the lower half of the lens).
+    if (m_ScopeZoomActive)
+        drawGloves = false;
 
     // Offsets that no longer match the game (a Black Mesa update) only showed in bmvr_log.txt, so
     // players ran for a session with fixes silently off (2026-10-27). Warn in the headset once in a
@@ -10570,7 +10622,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     };
 
     const bool drawBoxes = drawOverlays && bmvr::g_VrHandsDebugBoxes && m_HasHevSuit;
-    bool wantHandHud = drawOverlays && bmvr::g_HandHud && m_Game && m_HasHevSuit;
+    bool wantHandHud = drawOverlays && bmvr::g_HandHud && m_Game && m_HasHevSuit && !m_ScopeZoomActive;
     bool wantOverlay = drawOverlays && (drawBoxes
         || WeaponMenuOpen()
         || SettingsPanelOpen()

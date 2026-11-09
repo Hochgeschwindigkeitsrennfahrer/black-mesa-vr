@@ -128,6 +128,12 @@ ScopeEye=right
 # 0 = raw, higher = steadier but lags). Both also in the VR settings panel (CROSSBOW SCOPE).
 ScopeFollowsGun=false
 ScopeGunSmoothSec=0.10
+# Raise to zoom: hold the crossbow with both hands and bring it to your face (gun hand within
+# ScopeRaiseMeters of the headset, pointing roughly where you look) to zoom in; move it
+# 0.10 m further away to zoom out. Holding alt-fire still zooms by hand. Also in the VR
+# settings panel (CROSSBOW SCOPE).
+ScopeRaiseToZoom=false
+ScopeRaiseMeters=0.30
 
 # Right stick down: crouch only while held (false = toggle). Left stick click: sprint latches
 # until the stick is centred again (false = hold the click).

@@ -94,6 +94,8 @@ namespace
             { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
             { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Zoom follows the gun", RowKind::Toggle, "ScopeFollowsGun", &bmvr::g_ScopeFollowsGun, nullptr, 0, 0, 0, nullptr },
+            { "Raise to face zooms (2 hands)", RowKind::Toggle, "ScopeRaiseToZoom", &bmvr::g_ScopeRaiseToZoom, nullptr, 0, 0, 0, nullptr },
+            { "Raise distance", RowKind::Number, "ScopeRaiseMeters", nullptr, &bmvr::g_ScopeRaiseMeters, 0.02f, 0.1f, 0.6f, "%.2f m" },
             { "Zoom smoothing", RowKind::Number, "ScopeGunSmoothSec", nullptr, &bmvr::g_ScopeGunSmoothSec, 0.02f, 0.f, 0.5f, "%.2f s" },
             { "MOUNTED GUNS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Turn per hand move", RowKind::Number, "MountedGunGain", nullptr, &bmvr::g_MountedGunGain, 0.25f, 0.5f, 4.f, "%.2fx" },

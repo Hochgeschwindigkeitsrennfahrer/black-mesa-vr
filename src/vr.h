@@ -817,6 +817,7 @@ public:
     Vector GetViewAngle() const;
     void UpdateScopeZoomSmooth();
     void UpdateScopeAimOffset();
+    bool UpdateScopeRaise(bool allowed);
     Vector GetViewOrigin(const Vector& setupOrigin) const;
     void GetViewBasis(Vector* forward, Vector* right, Vector* up) const;
     Vector GetViewOriginLeft(const Vector& setupOrigin) const;
@@ -1477,6 +1478,9 @@ private:
     // looks along (updated with UpdateScopeAimOffset).
     Vector m_ScopeGunDir{ 1.f, 0.f, 0.f };
     bool m_ScopeGunDirValid = false;
+    // ScopeRaiseToZoom: crossbow raised to the face (with hysteresis); alt-fire
+    // is held while it is.
+    bool m_ScopeRaised = false;
     double m_ScopeGunDirMs = 0.0;
     float m_EngineViewFov = 0.f;
     bool m_SawEngineZoomFov = false;
