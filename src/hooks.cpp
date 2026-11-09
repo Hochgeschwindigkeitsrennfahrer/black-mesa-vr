@@ -709,6 +709,7 @@ static uint32_t ServerRva(uintptr_t addr)
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -5824,17 +5825,23 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     //    player is 'in front' of that view, so it steps off backwards;
     //  - jump = along the stick (head frame) or the view, stick zeroed so
     //    HL2 does not flip it; positive forwardmove is held off for 0.5 s so
-    //    the auto-mount cone does not grab the ladder straight back.
+    //    the auto-mount cone does not grab the ladder straight back;
+    //  - mount assist (VR::LadderMode): close to a ladder with the stick
+    //    roughly towards it, the view yaw points straight at the ladder and
+    //    the move is pure forward, so the engine's 15-degree / no-strafe
+    //    auto-mount check passes on the first try.
     // Firing keeps the gun's angles and the stock behaviour.
     static ULONGLONG s_ladderJumpUntil = 0;
     int ladderBits = 0;
     bool onLadder = false;
+    float ladderMountYaw = std::numeric_limits<float>::quiet_NaN();
     const ULONGLONG ladderNow = GetTickCount64();
     const bool afterLadderJump = ladderNow < s_ladderJumpUntil;
     const bool ladderMode = m_VR && m_VR->m_IsVREnabled && cmd->command_number
         && m_VR->IsGameplayEligible() && !afterLadderJump
         && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0
-        && m_VR->LadderMode(ladderBits, onLadder);
+        && m_VR->LadderMode(ladderBits, onLadder, &ladderMountYaw);
+    const bool ladderMountAssist = ladderMode && !onLadder && std::isfinite(ladderMountYaw);
     const bool ladderJump = ladderMode && onLadder && (m_VR->HeldButtons() & IN_JUMP) != 0;
     const bool ladderBack = ladderMode && onLadder && !ladderJump && (ladderBits & IN_BACK) != 0;
     if (ladderJump)
@@ -5844,7 +5851,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     auto applyLadderButtons = [&]() {
         if (!ladderMode)
             return;
-        if (ladderBack)
+        if (ladderBack || ladderMountAssist)
             cmd->buttons &= ~(IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
         cmd->buttons |= ladderBits;
     };
@@ -5916,11 +5923,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
                 pitch = 45.f;
                 yaw += 180.f;
             }
+            else if (ladderMountAssist)
+                yaw = ladderMountYaw;
             static int s_ladderLog;
             if (s_ladderLog < 24)
             {
                 Game::logMsg("Ladder aim: %s%s head yaw %.0f pitch %.0f -> yaw %.0f pitch %.0f",
-                    onLadder ? "on" : "near", ladderJump ? " jump" : (ladderBack ? " back" : ""),
+                    onLadder ? "on" : "near",
+                    ladderJump ? " jump" : (ladderBack ? " back" : (ladderMountAssist ? " mount" : "")),
                     hmdVa.y, hmdVa.x, yaw, pitch);
                 ++s_ladderLog;
             }
@@ -6023,6 +6033,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         if (ladderJump)
         {
             cmd->forwardmove = 0.f;
+            cmd->sidemove = 0.f;
+        }
+        else if (ladderMountAssist)
+        {
+            // Whole stick deflection as forward: any sidemove counts as
+            // strafing and blocks the engine's auto-mount.
+            cmd->forwardmove = sqrtf(analogF * analogF + analogS * analogS);
             cmd->sidemove = 0.f;
         }
         else if (afterLadderJump && cmd->forwardmove > 0.f)

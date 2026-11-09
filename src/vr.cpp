@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -6419,10 +6420,12 @@ QAngle VR::GetUseAimAngles() const
     return aim;
 }
 
-bool VR::LadderMode(int& moveBits, bool& onLadder) const
+bool VR::LadderMode(int& moveBits, bool& onLadder, float* mountYaw) const
 {
     moveBits = 0;
     onLadder = false;
+    if (mountYaw)
+        *mountYaw = std::numeric_limits<float>::quiet_NaN();
     if (!m_Game)
         return false;
     constexpr int kMoveTypeLadder = 9;
@@ -6438,26 +6441,69 @@ bool VR::LadderMode(int& moveBits, bool& onLadder) const
         // BM's ladders are func_useableladders: no ladder brush, just a line
         // between two mount points. HL2 auto-mounts within 32 units of it
         // (CheckLadderAutoMountCone) when the view faces it within 15
-        // degrees; with the gun's angles that rarely held, so the head's
-        // angles take over from 48 units.
+        // degrees flat and the move has no sideways part (any sidemove
+        // counts as strafing; then only looking steeply up or down the
+        // ladder axis mounts). With the gun's angles that rarely held, so
+        // the head's angles take over from 48 units.
         constexpr float kNearHu = 48.f;
         Vector bottoms[32], tops[32];
         const int n = m_Game->CollectLadders(bottoms, tops, 32);
-        for (int i = 0; i < n && !ladder; ++i)
+        float bestDist2 = kNearHu * kNearHu;
+        Vector bestClosest{};
+        for (int i = 0; i < n; ++i)
         {
             const Vector axis = tops[i] - bottoms[i];
             const float len2 = axis.LengthSqr();
             float t = len2 > 1.f ? (origin - bottoms[i]).Dot(axis) / len2 : 0.f;
             t = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
             const Vector closest = bottoms[i] + axis * t;
-            if ((closest - origin).LengthSqr() < kNearHu * kNearHu)
+            const float d2 = (closest - origin).LengthSqr();
+            if (d2 < bestDist2)
+            {
+                bestDist2 = d2;
+                bestClosest = closest;
                 ladder = true;
+            }
         }
         static int s_nearLog;
         if (ladder && s_nearLog < 8)
         {
-            Game::logMsg("Ladder near (%d ladders on the map)", n);
+            Game::logMsg("Ladder near (%d ladders on the map, %.0f units)", n, sqrtf(bestDist2));
             ++s_nearLog;
+        }
+        // Mount assist: the head still had to face the ladder within 15
+        // degrees and the stick had to be dead straight, which took a few
+        // tries at the bottom and while swimming. Inside the engine's
+        // 32-unit range, a stick pointing within kMountConeDeg of the ladder
+        // (in the head's frame) sends the view straight at it with a pure
+        // forward move, so that tick's auto-mount check passes.
+        constexpr float kMountHu = 30.f;   // engine: dist < 32
+        constexpr float kMountConeDeg = 50.f;
+        const float flatX = bestClosest.x - origin.x;
+        const float flatY = bestClosest.y - origin.y;
+        const float flat2 = flatX * flatX + flatY * flatY;
+        if (ladder && mountYaw && bestDist2 < kMountHu * kMountHu && flat2 > 1.f)
+        {
+            const float toLadderYaw = atan2f(flatY, flatX) * 180.f / 3.14159265f;
+            // Stick direction in world yaw: head yaw, stick right turns
+            // clockwise (Source yaw grows to the left).
+            const float stickYaw = GetViewAngle().y - atan2f(s, f) * 180.f / 3.14159265f;
+            float delta = std::fmod(stickYaw - toLadderYaw, 360.f);
+            if (delta > 180.f) delta -= 360.f;
+            if (delta < -180.f) delta += 360.f;
+            if (std::fabs(delta) < kMountConeDeg)
+            {
+                *mountYaw = toLadderYaw;
+                moveBits = IN_FORWARD;
+                static int s_assistLog;
+                if (s_assistLog < 16)
+                {
+                    Game::logMsg("Ladder mount assist: %.0f units, stick %.0f deg off the ladder",
+                        sqrtf(bestDist2), delta);
+                    ++s_assistLog;
+                }
+                return true;
+            }
         }
     }
     if (!ladder)

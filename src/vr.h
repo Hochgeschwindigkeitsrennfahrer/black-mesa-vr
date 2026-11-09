@@ -838,7 +838,11 @@ public:
     // MOVELEFT/MOVERIGHT from the stick at 0.2 deflection (head frame):
     // LadderMove climbs only on those bits, which gameplay sets past 0.5, so
     // a gentle walk-in mounted the ladder and then hung there.
-    bool LadderMode(int& moveBits, bool& onLadder) const;
+    // mountYaw (optional): set to the flat yaw towards the nearest ladder when
+    // the player is within the engine's 32-unit auto-mount range and the
+    // stick points roughly at the ladder (mount assist, see vr.cpp); NaN
+    // otherwise.
+    bool LadderMode(int& moveBits, bool& onLadder, float* mountYaw = nullptr) const;
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover
