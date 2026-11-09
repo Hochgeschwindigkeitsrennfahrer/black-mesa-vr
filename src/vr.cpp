@@ -9448,7 +9448,8 @@ void VR::UpdateAimCrosshair()
         || m_SettingsOpen)
         return;
     // Guns only: no laser on the crowbar, thrown weapons, snarks or bare hands.
-    // The RPG keeps its own guidance dot and gets no beam.
+    // The RPG keeps its own guidance dot and gets no beam; the hivehand gets
+    // neither (below).
     std::string weaponKey;
     {
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
@@ -9471,7 +9472,10 @@ void VR::UpdateAimCrosshair()
         return;
 
     UpdateMuzzleLocal(weaponKey);
-    if (!wantAimAid)
+    // The hivehand's hornets home in on their own (primary fire): no laser
+    // and no dot on the organic Xen weapon. The muzzle above is still kept
+    // up to date, the hornets spawn there.
+    if (!wantAimAid || weaponKey == "hgun")
         return;
     // Same origin and direction the bullet uses, so the reticle cannot disagree
     // with where the shot goes.

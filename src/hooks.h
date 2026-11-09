@@ -103,6 +103,7 @@ typedef void(__thiscall* tGrabSetTarget)(void* thisptr, Vector* pos, QAngle* ang
 typedef void(__thiscall* tGetShootAngles)(void* thisptr, QAngle* out);
 typedef void*(__cdecl* tGrenadeCreate)(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode);
 typedef bool(__cdecl* tGrenadeThrowPosition)(void* grenade, Vector* pos, QAngle* ang, void* owner);
+typedef void*(__cdecl* tProjectileCreate)(int type, Vector* target, float speed, void* owner, void* thrower);
 typedef int(__thiscall* tGetAttachmentVec)(void* thisptr, int number, Vector* origin, QAngle* angles);
 typedef void(__cdecl* tFormatViewModelAttachment)(Vector* origin, bool inverse);
 typedef int(__thiscall* tGetAttachmentMatrix)(void* thisptr, int number, float* matrix);
@@ -193,6 +194,7 @@ public:
     static inline Hook<tGetShootAngles> hkClientGetShootAngles;
     static inline Hook<tGrenadeCreate> hkGrenadeCreate;
     static inline Hook<tGrenadeThrowPosition> hkGrenadeThrowPosition;
+    static inline Hook<tProjectileCreate> hkProjectileCreate;
     static inline Hook<tGetAttachmentVec> hkGetAttachmentVec;
     static inline Hook<tFormatViewModelAttachment> hkFormatViewModelAttachment;
     static inline Hook<tGetAttachmentMatrix> hkGetAttachmentMatrix;
@@ -277,6 +279,7 @@ public:
     static void __fastcall dClientGetShootAngles(void* ecx, void* edx, QAngle* out);
     static void* __cdecl dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode);
     static bool __cdecl dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* ang, void* owner);
+    static void* __cdecl dProjectileCreate(int type, Vector* target, float speed, void* owner, void* thrower);
     static int __fastcall dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles);
     static void __cdecl dFormatViewModelAttachment(Vector* origin, bool inverse);
     static int __fastcall dGetAttachmentMatrix(void* ecx, void* edx, int number, float* matrix);

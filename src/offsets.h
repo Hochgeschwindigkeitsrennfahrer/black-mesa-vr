@@ -190,6 +190,14 @@ public:
     // owner EyePosition (+0x230) / EyeAngles (+0x234), an offset, then a
     // trace back to the eye. Bytes: 55 8B EC 81 EC 88 00 00 00.
     static constexpr int kGrenadeThrowPosition_Server = 0x4832E0; // beta 26234270 (25844216: 0x483060)
+    // server.dll projectile spawn, cdecl (type, Vector* target, float speed,
+    // CBaseEntity* owner, CBaseEntity* thrower) -> projectile. The hivehand
+    // fires type 12 (hornet) through it at the end of an eye trace along
+    // GetShootAngles. It stores the target, places the projectile with
+    // kGrenadeThrowPosition_Server (eye + an EyeAngles offset, i.e. head
+    // frame), then sets velocity = normalize(target - origin) * speed.
+    // Bytes: 55 8B EC 83 EC 3C 53 8B 5D 08 83 FB 15.
+    static constexpr int kProjectileCreate_Server = 0x379D20; // beta 26234270
     static constexpr int kBlackMesaPlayer_RecoilPunchAngles_Server = 0x14BC;
 
     // C_BaseAnimating IClientRenderable GetAttachment. `this` is entity+4.

@@ -8510,6 +8510,8 @@ void Hooks::EnsureWeaponShootOriginHooks()
         &dGrenadeCreate, "server grenade create");
     hookServerFn(hkGrenadeThrowPosition, Offsets::kGrenadeThrowPosition_Server, "558BEC81EC88000000",
         &dGrenadeThrowPosition, "server grenade throw position");
+    hookServerFn(hkProjectileCreate, Offsets::kProjectileCreate_Server, "558BEC83EC3C538B5D0883FB15",
+        &dProjectileCreate, "server projectile create");
     if (client && !hkClientGetShootAngles.pTarget)
     {
         // C_BlackMesaPlayer::GetShootAngles (vtable slot 0x9D): EyeAngles (client vtable +0x26C, not the
@@ -10680,6 +10682,12 @@ namespace
     bool g_VrGrenadeSpawn = false;
     Vector g_VrSpawnPoint{};
     const char* g_VrSpawnWhat = "";
+    // Hornets come several per second: log only the first few spawns.
+    int g_VrSpawnLogBudget = -1;   // -1 = unlimited (grenades)
+    // How far the VR point may be from the game's own point before the game's
+    // is kept (stale pose guard). Hornets: the game's point is ahead of the
+    // eye, the muzzle is at arm's length, ~56 units apart headless.
+    float g_VrSpawnMaxDist = 60.f;
 }
 
 void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode)
@@ -10737,6 +10745,37 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
     return grenade;
 }
 
+void* __cdecl Hooks::dProjectileCreate(int type, Vector* target, float speed, void* owner, void* thrower)
+{
+    if (!hkProjectileCreate.fOriginal)
+        return nullptr;
+    // Hivehand hornets: the game places them at the eye plus a head-frame
+    // offset, which in VR is below and to the side of the drawn weapon. Spawn
+    // them at the hivehand's muzzle instead. The target (end of the game's
+    // aim trace) is kept, so the flight direction, the alt-fire spread and
+    // the homing target are unchanged.
+    constexpr int kProjectileHornet = 12;
+    Vector muzzle{};
+    if (type == kProjectileHornet && m_VR && bmvr::g_VrShotOriginFix
+        && ShouldRewriteShootAngles(thrower ? thrower : owner) && m_VR->TryGetVrShootOrigin(muzzle))
+    {
+        static int s_hornetLogs = 6;
+        g_VrSpawnPoint = muzzle;
+        g_VrSpawnWhat = "Hornet";
+        g_VrSpawnLogBudget = bmvr::g_AimDebug ? -1 : s_hornetLogs;
+        g_VrSpawnMaxDist = 100.f;
+        g_VrGrenadeSpawn = true;
+        void* proj = hkProjectileCreate.fOriginal(type, target, speed, owner, thrower);
+        g_VrGrenadeSpawn = false;
+        if (!bmvr::g_AimDebug)
+            s_hornetLogs = g_VrSpawnLogBudget;
+        g_VrSpawnLogBudget = -1;
+        g_VrSpawnMaxDist = 60.f;
+        return proj;
+    }
+    return hkProjectileCreate.fOriginal(type, target, speed, owner, thrower);
+}
+
 bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* ang, void* owner)
 {
     if (!hkGrenadeThrowPosition.fOriginal)
@@ -10745,11 +10784,15 @@ bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* an
     if (!ok || !g_VrGrenadeSpawn || !pos || !m_VR)
         return ok;
     const Vector hand = g_VrSpawnPoint;
+    const bool log = g_VrSpawnLogBudget != 0;
+    if (g_VrSpawnLogBudget > 0)
+        --g_VrSpawnLogBudget;
     // The game's point is a little ahead of the eye after a trace from the
     // eye; a hand far from it (arm through a wall, stale pose) keeps it.
-    if ((hand - *pos).LengthSqr() > 60.f * 60.f)
+    if ((hand - *pos).LengthSqr() > g_VrSpawnMaxDist * g_VrSpawnMaxDist)
     {
-        Game::logMsg("%s: spawn point %.0f units from the game's point, kept the game's", g_VrSpawnWhat, (hand - *pos).Length());
+        if (log)
+            Game::logMsg("%s: spawn point %.0f units from the game's point, kept the game's", g_VrSpawnWhat, (hand - *pos).Length());
         return ok;
     }
     // The game's point passed its own trace from the eye. A hand reaching
@@ -10768,11 +10811,13 @@ bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* an
         m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT_HULL, &filter, &tr);
         if (tr.startsolid || tr.fraction < 1.f)
         {
-            Game::logMsg("%s: spawn point behind geometry (fraction %.2f), kept the game's point", g_VrSpawnWhat, tr.fraction);
+            if (log)
+                Game::logMsg("%s: spawn point behind geometry (fraction %.2f), kept the game's point", g_VrSpawnWhat, tr.fraction);
             return ok;
         }
     }
-    Game::logMsg("%s: spawned at the VR point, %.0f units from the game's point", g_VrSpawnWhat, (hand - *pos).Length());
+    if (log)
+        Game::logMsg("%s: spawned at the VR point, %.0f units from the game's point", g_VrSpawnWhat, (hand - *pos).Length());
     *pos = hand;
     return ok;
 }
