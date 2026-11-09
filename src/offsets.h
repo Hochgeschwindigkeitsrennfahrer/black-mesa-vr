@@ -555,6 +555,19 @@ public:
     // of the group is skipped. Static mesh table = engine+0x8E6224 (indexed by
     // the surface's material sort id, short at msurface+0x12).
     static constexpr uint32_t kEngineWorldBatchRva = 0x10AFA0;
+    // PerfLog bone/particle diagnostics (client.dll, beta 26234270; found by their
+    // VPROF labels). Frame start (FRAME_RENDER_START work: bone cache
+    // invalidation, threaded bone setup, ParticleMgr()->Simulate), cdecl, no args.
+    static constexpr uint32_t kClientFrameStartRva = 0xF34C0;
+    // C_BaseAnimating::SetupBones (IClientRenderable this, 4 args, ret 0x10).
+    static constexpr uint32_t kClientSetupBonesRva = 0x90350;
+    // C_BaseAnimating::BuildTransformations (6 args, ret 0x18): runs only when
+    // bones are really recomputed.
+    static constexpr uint32_t kClientBuildTransformationsRva = 0x85340;
+    // CParticleCollection::Simulate (float dt, bool; ret 8).
+    static constexpr uint32_t kClientParticleCollectionSimulateRva = 0x313ED0;
+    // CParticleMgr::Simulate (float dt; ret 4).
+    static constexpr uint32_t kClientParticleMgrSimulateRva = 0x1948A0;
     static constexpr uint32_t kEngineWorldStaticMeshesRva = 0x8E6224;
     // CLensflare's world-to-pixel helper (cdecl: world, size[2], out).  Reads the
     // view and projection matrices from the render context; diagnostic hook only.

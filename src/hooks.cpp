@@ -12,6 +12,9 @@ extern "C" volatile int g_BmvrFlashlightMatrixFix = 1;
 #include "bmvr_prof.h"
 #include <intrin.h>
 #include <map>
+#include <unordered_map>
+#include <atomic>
+#include <mutex>
 
 // The areaportal setup's call into ComputeViewMatrices (E8 rel32 just before
 // kAreaPortalComputeViewReturnRva) must target `fn`; otherwise this is another
@@ -757,6 +760,112 @@ static void InstallEngineWorldBatchStats()
             env ? "BMVR_WORLDBATCH_STATS" : "PerfLog", (bmvr::g_GpuPassTiming || bmvr::g_PerfLog) ? "on" : "off");
 }
 
+// PerfLog bone/particle diagnostics: is bone setup or particle simulation
+// redone per eye? Each object (entity / particle collection) is tracked per
+// client frame (frame-start hook); a second recompute of the same object in
+// the same frame is counted, by the eye being drawn when it happened.
+namespace
+{
+    std::atomic<unsigned> g_ClientFrameSeq{ 0 };
+    std::mutex g_RepeatMutex;
+
+    // Returns true when obj was already seen in this client frame (by kind).
+    bool SeenThisFrame(int kind, const void* obj)
+    {
+        static std::unordered_map<const void*, unsigned> s_seen[4];
+        const unsigned frame = g_ClientFrameSeq.load(std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(g_RepeatMutex);
+        auto& m = s_seen[kind & 3];
+        if (m.size() > 8192)
+            m.clear();
+        auto [it, fresh] = m.try_emplace(obj, frame);
+        if (fresh)
+            return false;
+        const bool again = it->second == frame;
+        it->second = frame;
+        return again;
+    }
+
+    using ClientFrameStartFn = void(__cdecl*)();
+    ClientFrameStartFn g_OrigClientFrameStart = nullptr;
+    void __cdecl ClientFrameStartProf()
+    {
+        g_ClientFrameSeq.fetch_add(1, std::memory_order_relaxed);
+        BMVR_PROF("client frame start (bones+particles)");
+        g_OrigClientFrameStart();
+    }
+
+    using SetupBonesFn = bool(__thiscall*)(void* self, void* out, int maxBones, int mask, float time);
+    SetupBonesFn g_OrigSetupBones = nullptr;
+    bool __fastcall SetupBonesProf(void* ecx, void* edx, void* out, int maxBones, int mask, float time)
+    {
+        (void)edx;
+        BMVR_PROF("client SetupBones (incl. cached)");
+        return g_OrigSetupBones(ecx, out, maxBones, mask, time);
+    }
+
+    using BuildTransformationsFn = void(__thiscall*)(void* self, void* hdr, void* pos, void* q, const void* cam, int mask, void* computed);
+    BuildTransformationsFn g_OrigBuildTransformations = nullptr;
+    void __fastcall BuildTransformationsProf(void* ecx, void* edx, void* hdr, void* pos, void* q, const void* cam, int mask, void* computed)
+    {
+        (void)edx;
+        if (SeenThisFrame(0, ecx))
+            BMVR_PROF_COUNT("bones rebuilt again same frame");
+        BMVR_PROF("client BuildTransformations (bone recompute)");
+        g_OrigBuildTransformations(ecx, hdr, pos, q, cam, mask, computed);
+    }
+
+    using ParticleCollectionSimulateFn = void(__thiscall*)(void* self, float dt, bool flag);
+    ParticleCollectionSimulateFn g_OrigParticleCollectionSimulate = nullptr;
+    void __fastcall ParticleCollectionSimulateProf(void* ecx, void* edx, float dt, bool flag)
+    {
+        (void)edx;
+        if (SeenThisFrame(1, ecx))
+            BMVR_PROF_COUNT("particles simulated again same frame");
+        BMVR_PROF("client CParticleCollection::Simulate");
+        g_OrigParticleCollectionSimulate(ecx, dt, flag);
+    }
+
+    using ParticleMgrSimulateFn = void(__thiscall*)(void* self, float dt);
+    ParticleMgrSimulateFn g_OrigParticleMgrSimulate = nullptr;
+    void __fastcall ParticleMgrSimulateProf(void* ecx, void* edx, float dt)
+    {
+        (void)edx;
+        BMVR_PROF("client ParticleMgr()->Simulate");
+        g_OrigParticleMgrSimulate(ecx, dt);
+    }
+}
+
+static void InstallBoneParticleProf(uintptr_t client)
+{
+    if (!bmvr::g_PerfLog || g_OrigClientFrameStart)
+        return;
+    struct H { uint32_t rva; const unsigned char* bytes; size_t n; void* detour; void** orig; const char* name; };
+    static const unsigned char kFrame[] = { 0x55, 0x8B, 0xEC, 0x51 };
+    static const unsigned char kBones[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x68, 0x0E, 0x00, 0x00 };
+    static const unsigned char kBuild[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x40, 0x01, 0x00, 0x00 };
+    static const unsigned char kPcSim[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x30 };
+    static const unsigned char kPmSim[] = { 0x55, 0x8B, 0xEC, 0x83, 0x79, 0x64, 0x00 };
+    const H hooks[] = {
+        { Offsets::kClientFrameStartRva, kFrame, sizeof(kFrame), reinterpret_cast<void*>(&ClientFrameStartProf), reinterpret_cast<void**>(&g_OrigClientFrameStart), "frame start" },
+        { Offsets::kClientSetupBonesRva, kBones, sizeof(kBones), reinterpret_cast<void*>(&SetupBonesProf), reinterpret_cast<void**>(&g_OrigSetupBones), "SetupBones" },
+        { Offsets::kClientBuildTransformationsRva, kBuild, sizeof(kBuild), reinterpret_cast<void*>(&BuildTransformationsProf), reinterpret_cast<void**>(&g_OrigBuildTransformations), "BuildTransformations" },
+        { Offsets::kClientParticleCollectionSimulateRva, kPcSim, sizeof(kPcSim), reinterpret_cast<void*>(&ParticleCollectionSimulateProf), reinterpret_cast<void**>(&g_OrigParticleCollectionSimulate), "CParticleCollection::Simulate" },
+        { Offsets::kClientParticleMgrSimulateRva, kPmSim, sizeof(kPmSim), reinterpret_cast<void*>(&ParticleMgrSimulateProf), reinterpret_cast<void**>(&g_OrigParticleMgrSimulate), "ParticleMgr::Simulate" },
+    };
+    for (const H& h : hooks)
+    {
+        auto* fn = reinterpret_cast<unsigned char*>(client + h.rva);
+        if (std::memcmp(fn, h.bytes, h.n) != 0)
+        {
+            Game::logMsg("Perf log: %s prologue MISMATCH (not hooked)", h.name);
+            continue;
+        }
+        const bool ok = MH_CreateHook(fn, h.detour, h.orig) == MH_OK && MH_EnableHook(fn) == MH_OK;
+        Game::logMsg("Perf log: %s hook %s", h.name, ok ? "on" : "FAILED");
+    }
+}
+
 static void InstallPixelVisStats(uintptr_t client)
 {
     char v[8] = {};
@@ -814,6 +923,7 @@ static void InstallPixelVisPerEye()
     g_ClientCurrentViewId = reinterpret_cast<ClientCurrentViewIdFn>(target);
     InstallPixelVisStats(client);
     InstallEngineWorldBatchStats();
+    InstallBoneParticleProf(client);
     InstallFlareHooks(client);
     // Headless A/B aid: BMVR_PIXELVIS_NOGRACE=1 keeps the stock 1-frame age.
     char noGrace[8] = {};

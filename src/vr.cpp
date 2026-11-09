@@ -4331,6 +4331,7 @@ void VR::WaitOldestOpenXrPending()
 {
     if (m_OpenXrPendingCount == 0)
         return;
+    BMVR_PROF("wait GPU for oldest published frame (paceWait)");
     IDirect3DQuery9* q = m_OpenXrPublishQuery[m_OpenXrPending[0].slot];
     const double t0 = QpcNowMs();
     bool done = !q;
@@ -13634,6 +13635,7 @@ void VR::ApplyHl2vrWaitedPoses(bool usePredicted)
 
 void VR::SyncFrameGetPoses(uint64_t frameId)
 {
+    BMVR_PROF("wait SyncFrameGetPoses");
     // HL2VR HL2VRInterop::SyncFrameGetPoses: frame 0 is a no-op.
     if (frameId == 0)
         return;
@@ -13658,6 +13660,7 @@ void VR::SyncFrameGetPoses(uint64_t frameId)
 
 void VR::MatAwaitFrame(uint64_t frameId)
 {
+    BMVR_PROF("wait MatAwaitFrame");
     if (!m_Compositor)
         return;
 
