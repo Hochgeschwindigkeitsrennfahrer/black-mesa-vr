@@ -1133,8 +1133,10 @@ public:
     void UpdateCrowbarMelee();
     // Hand throw: sampled every input frame; read by the server grenade hooks.
     void SampleThrowHand();
+    void RecordThrowPose(const Vector& trackingPos, int64_t poseTimeNs);
     bool TryGetThrowVelocity(Vector& out);
     bool TryGetThrowOrigin(Vector& out);
+    void LogLastThrow() const;
     // HL2VR physical crowbar (vr_crowbar.mdl on the hand, tip-velocity hits).
     static bool IsCrowbarWeaponModel(const char* model);
     bool IsCrowbarEquipped() const;
@@ -1430,17 +1432,24 @@ private:
     QAngle m_MeleeBladeAngles{};
     bool m_MeleeBladeAnglesValid = false;
     Vector m_CrowbarPrevTipLocal{};
-    // Hand throw (vr_crowbar.cpp): right-hand positions relative to the body,
-    // unrotated by the view yaw, so walking and turning add nothing.
-    struct ThrowSample { double t; Vector local; };
-    // One sample per Present: 512 keeps the release window (up to 1 s back)
-    // even at ~400 fps.
+    // Hand throw (vr_crowbar.cpp): one sample per new controller pose of the
+    // weapon hand's grip, in tracking space (Source units, before the
+    // stick-turn yaw), so walking and turning add nothing. poseT is the
+    // runtime's pose time (velocity is differenced on it, not on when the
+    // game happened to read the pose); t is the arrival time on the
+    // steady clock, which the trigger release is compared against.
+    struct ThrowSample { double t; double poseT; Vector local; };
+    // 90-120 poses/s: 512 is over 4 s.
     static constexpr int kThrowSamples = 512;
     double m_ThrowReleaseT = 0.0;               // trigger let go (IN_ATTACK 1 -> 0)
     bool m_ThrowAttackHeld = false;
     ThrowSample m_ThrowSamples[kThrowSamples]{};
     int m_ThrowSampleNext = 0;
+    int64_t m_ThrowLastPoseNs = 0;
+    Vector m_ThrowLastLocal{};
     Vector m_ThrowHandWorld{};
+    Vector m_ThrowBodyWorld{};
+    Vector m_ThrowReleaseOffset{};               // hand - body at the trigger release
     bool m_ThrowHandValid = false;
     DWORD m_CrowbarLastMotionCheckMs = 0;
     DWORD m_CrowbarNextAttackMs = 0;

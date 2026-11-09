@@ -10738,6 +10738,7 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
     *velocity = hand + playerVel;
     Game::logMsg("VR frag throw: hand %.0f u/s -> (%.0f,%.0f,%.0f) (game %.0f u/s)",
         hand.Length(), velocity->x, velocity->y, velocity->z, before.Length());
+    m_VR->LogLastThrow();
     g_VrSpawnWhat = "VR frag throw";
     g_VrGrenadeSpawn = m_VR->TryGetThrowOrigin(g_VrSpawnPoint);
     void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, kSpawnAtThrowPosition);

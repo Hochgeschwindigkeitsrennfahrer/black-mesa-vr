@@ -19,6 +19,11 @@
 //   buttons <name> ...           attack attack2 reload jump duck use recenter pause flashlight
 //                                select back next prev weaponmenu sprint gripleft (pressed = analog 1)
 //   move <x> <y> / turn <x> <y>  sticks
+//   throw <id> <dx> <dy> <dz> <seconds> <release>  right hand moves from its pose by
+//                                (dx dy dz) metres over <seconds> (smooth start/stop,
+//                                peak speed pi/2 x distance / seconds at the middle);
+//                                attack is held until <release> (0..1 of the move),
+//                                then let go. A new <id> starts a new throw.
 // <VR dir>\cmd.txt: console commands, one per line, appended by the test; each new
 // line is run once (ClientCmd_Unrestricted on the engine thread).
 
@@ -62,6 +67,9 @@ namespace
         FakePose right{ 0.35f, -0.18f, 1.30f, 10, 0, 0 };
         bool buttons[L4D2VR_OPENXR_ACTION_COUNT] = {};
         float moveX = 0, moveY = 0, turnX = 0, turnY = 0;
+        int throwId = 0;
+        float throwD[3] = {};
+        float throwSec = 0.2f, throwRelease = 0.5f;
     };
 
     std::mutex g_CmdMutex;
@@ -153,6 +161,7 @@ namespace
         FakeScript fresh = s;
         std::fill(std::begin(fresh.buttons), std::end(fresh.buttons), false);
         fresh.moveX = fresh.moveY = fresh.turnX = fresh.turnY = 0;
+        fresh.throwId = 0;   // a throw lasts while its line is in the file
         std::string line;
         while (std::getline(in, line))
         {
@@ -168,6 +177,9 @@ namespace
             else if (key == "ipd") ss >> fresh.ipd;
             else if (key == "move") ss >> fresh.moveX >> fresh.moveY;
             else if (key == "turn") ss >> fresh.turnX >> fresh.turnY;
+            else if (key == "throw")
+                ss >> fresh.throwId >> fresh.throwD[0] >> fresh.throwD[1] >> fresh.throwD[2]
+                   >> fresh.throwSec >> fresh.throwRelease;
             else if (key == "buttons")
             {
                 std::string b;
@@ -279,10 +291,20 @@ namespace
         uint32_t loggedDecl = 0;
         L4D2VROpenXrSharedTextureDesc lastDecl[2] = {};
         int64_t t = 0;
+        LARGE_INTEGER qpf{};
+        QueryPerformanceFrequency(&qpf);
+        int activeThrowId = 0;
+        double throwStart = 0.0;
+        FakePose throwBase{};
         for (;;)
         {
             Sleep(8); // ~120 Hz like the PS VR2
-            ++t;
+            // Pose times in nanoseconds like XrTime (the throw code differences
+            // velocity on them).
+            LARGE_INTEGER qpc{};
+            QueryPerformanceCounter(&qpc);
+            const double nowSec = (double)qpc.QuadPart / (double)qpf.QuadPart;
+            t = (int64_t)(nowSec * 1e9);
             const uint64_t st = FileStamp(fakePath);
             if (st != fakeStamp)
             {
@@ -339,7 +361,31 @@ namespace
             in.featureFlags = L4D2VR_OPENXR_INPUT_FEATURE_CONTROLLERS;
             in.actionCount = L4D2VR_OPENXR_ACTION_COUNT;
             in.reserved0 = L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH; // PS VR2 Sense on SteamVR = Touch emulation
-            const FakePose* hands[2] = { &script.left, &script.right };
+            FakePose right = script.right;
+            bool throwAttack = false, throwActive = false;
+            if (script.throwId != 0 && script.throwId != activeThrowId)
+            {
+                activeThrowId = script.throwId;
+                throwStart = nowSec;
+                throwBase = script.right;
+                Game::logMsg("fakehelper: throw %d (%.2f %.2f %.2f) m over %.3f s, release at %.2f, peak %.2f m/s",
+                    activeThrowId, script.throwD[0], script.throwD[1], script.throwD[2], script.throwSec,
+                    script.throwRelease, 1.5707963f * sqrtf(script.throwD[0] * script.throwD[0]
+                        + script.throwD[1] * script.throwD[1] + script.throwD[2] * script.throwD[2])
+                        / std::max(0.01f, script.throwSec));
+            }
+            if (activeThrowId != 0 && activeThrowId == script.throwId)
+            {
+                const float u = (float)std::clamp((nowSec - throwStart) / std::max(0.01f, script.throwSec), 0.0, 1.0);
+                const float k = 0.5f * (1.0f - cosf(kPi * u));
+                right = throwBase;
+                right.x += script.throwD[0] * k;
+                right.y += script.throwD[1] * k;
+                right.z += script.throwD[2] * k;
+                throwActive = u < 1.0f;
+                throwAttack = u < script.throwRelease;
+            }
+            const FakePose* hands[2] = { &script.left, &right };
             for (int h = 0; h < 2; ++h)
             {
                 L4D2VROpenXrControllerPoseDesc p{};
@@ -355,13 +401,16 @@ namespace
             {
                 L4D2VROpenXrDigitalActionDesc& d = in.digitalActions[a];
                 d.active = 1;
-                d.state = script.buttons[a] ? 1 : 0;
-                d.changed = script.buttons[a] != prevButtons[a] ? 1 : 0;
+                bool pressed = script.buttons[a];
+                if (throwActive && a == (uint32_t)L4D2VROpenXrActionId::PrimaryAttack)
+                    pressed = throwAttack;
+                d.state = pressed ? 1 : 0;
+                d.changed = pressed != prevButtons[a] ? 1 : 0;
                 d.lastChangeTime = t;
-                prevButtons[a] = script.buttons[a];
+                prevButtons[a] = pressed;
                 L4D2VROpenXrAnalogActionDesc& an = in.analogActions[a];
                 an.active = 1;
-                an.x = script.buttons[a] ? 1.f : 0.f;   // pressed = full pull/squeeze
+                an.x = pressed ? 1.f : 0.f;   // pressed = full pull/squeeze
             }
             in.analogActions[(int)L4D2VROpenXrActionId::Walk].x = script.moveX;
             in.analogActions[(int)L4D2VROpenXrActionId::Walk].y = script.moveY;

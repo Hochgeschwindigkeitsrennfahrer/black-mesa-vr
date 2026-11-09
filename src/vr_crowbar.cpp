@@ -7,6 +7,7 @@
 #include "bmvr_flags.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <mutex>
 #include <cstring>
 
@@ -513,13 +514,63 @@ void VR::UpdateCrowbarMelee()
 }
 
 // Hand throw, after Lambda1VR (hlsdk CBasePlayer::GetThrowVelocity + the
-// engine's vr_throw_window): the grenade takes the hand's fastest velocity of
-// the last 0.1 s before the release, x 2/3 x ThrowScale, at most 1000 u/s.
-// The finger opens a moment after the arm has peaked, so the release frame
-// alone throws short. Black Mesa may throw only once the pin-pull animation
-// has finished, after the arm has stopped, so the window is anchored on the
-// trigger release (0.1 s before to 0.05 s after) rather than on the server's
-// throw, when that release is at most 1 s old.
+// engine's vr_throw_window), reworked for accuracy:
+// - one sample per new controller pose, differenced on the runtime's pose
+//   time. Sampling once per game frame (~170/s) on the game's clock while
+//   poses arrive at 90/s made the step speeds swing between about half and
+//   twice the real speed, and taking the fastest step picked the spikes.
+// - the speed and direction are the average over the three pose steps
+//   around the fastest one (~33 ms), not a single step.
+// - the window is anchored on the trigger release (0.15 s before to 0.03 s
+//   after): Black Mesa throws only once its pin-pull/throw animation has
+//   run, when the arm has stopped or come back.
+// - the grenade leaves from where the hand was at the release.
+namespace
+{
+    double ThrowNowSec()
+    {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    struct ThrowDiag
+    {
+        float peakStep = 0.f;      // fastest single pose step (u/s, before scaling)
+        float avg = 0.f;           // averaged hand speed used
+        float elevDeg = 0.f;
+        double peakVsRelease = 0.0; // s, negative = before the release
+        double releaseAge = -1.0;   // s from the release to the throw, -1 = no release seen
+        int steps = 0;
+        bool capped = false;
+        float uncapped = 0.f;
+    };
+    ThrowDiag g_LastThrowDiag;
+}
+
+// Called with m_ControllerMutex held, once per controller update.
+void VR::RecordThrowPose(const Vector& trackingPos, int64_t poseTimeNs)
+{
+    if (!std::isfinite(trackingPos.x) || !std::isfinite(trackingPos.y) || !std::isfinite(trackingPos.z))
+        return;
+    const double now = ThrowNowSec();
+    double poseT = now;
+    if (poseTimeNs > 0)
+    {
+        // Same pose as last time: nothing new from the runtime.
+        if (poseTimeNs == m_ThrowLastPoseNs)
+            return;
+        m_ThrowLastPoseNs = poseTimeNs;
+        poseT = static_cast<double>(poseTimeNs) * 1e-9;
+    }
+    else if (trackingPos.x == m_ThrowLastLocal.x && trackingPos.y == m_ThrowLastLocal.y && trackingPos.z == m_ThrowLastLocal.z)
+    {
+        return;   // no pose time (OpenVR): an unchanged position is a repeated pose
+    }
+    m_ThrowLastLocal = trackingPos;
+    m_ThrowSamples[m_ThrowSampleNext] = { now, poseT, trackingPos };
+    m_ThrowSampleNext = (m_ThrowSampleNext + 1) % kThrowSamples;
+}
+
 void VR::SampleThrowHand()
 {
     if (!m_ControllerPoseValid || !m_GameplayEligible)
@@ -532,19 +583,17 @@ void VR::SampleThrowHand()
     if (body.LengthSqr() <= 1.f)
         return;
     const Vector hand = GetRightControllerAbsPos(body);
-    const double now = std::chrono::duration<double>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const double now = ThrowNowSec();
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     const bool attack = (m_HeldButtons.load(std::memory_order_acquire) & IN_ATTACK) != 0;
     if (m_ThrowAttackHeld && !attack)
+    {
         m_ThrowReleaseT = now;
+        m_ThrowReleaseOffset = hand - body;
+    }
     m_ThrowAttackHeld = attack;
-    // Unrotate by the stick-turn yaw only (the tracking space's world yaw):
-    // the head's yaw would turn the hand's offset from the body into speed
-    // whenever the player looks around during the throw.
-    m_ThrowSamples[m_ThrowSampleNext] = { now, WorldToYawLocal(hand, body, m_RotationOffsetY.load(std::memory_order_acquire)) };
-    m_ThrowSampleNext = (m_ThrowSampleNext + 1) % kThrowSamples;
     m_ThrowHandWorld = hand;
+    m_ThrowBodyWorld = body;
     m_ThrowHandValid = true;
 }
 
@@ -553,72 +602,120 @@ bool VR::TryGetThrowOrigin(Vector& out)
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     if (!m_ThrowHandValid)
         return false;
-    out = m_ThrowHandWorld;
+    // The hand at the trigger release, carried along with the player.
+    if (m_ThrowReleaseT > 0.0 && ThrowNowSec() - m_ThrowReleaseT < 1.0)
+        out = m_ThrowBodyWorld + m_ThrowReleaseOffset;
+    else
+        out = m_ThrowHandWorld;
     return true;
 }
 
 bool VR::TryGetThrowVelocity(Vector& out)
 {
-    constexpr double kWindowSec = 0.1;
-    constexpr double kMinStepSec = 0.008;   // pairs closer than this are mostly jitter
-    constexpr float kMaxSpeed = 1000.f;
+    constexpr double kBeforeReleaseSec = 0.15;
+    constexpr double kAfterReleaseSec = 0.03;
+    constexpr double kMinStepSec = 0.003;
+    constexpr double kMaxStepSec = 0.04;    // a gap in tracking, not one pose step
+    constexpr float kMaxSpeed = 1500.f;
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     if (!m_ThrowHandValid)
         return false;
-    const int newest = (m_ThrowSampleNext + kThrowSamples - 1) % kThrowSamples;
-    const double newestT = m_ThrowSamples[newest].t;
-    // Window: the last 0.1 s, or, when the trigger was let go within the
-    // last second, 0.1 s before the release up to just after it. Samples
-    // between the release and the server's throw (BM waits for the pin
-    // animation) are the follow-through or the arm coming back, which can be
-    // faster than the throw and point anywhere.
-    constexpr double kAfterReleaseSec = 0.05;
-    double since = newestT - kWindowSec;
-    double until = newestT;
-    if (m_ThrowReleaseT > 0.0 && newestT - m_ThrowReleaseT < 1.0)
+    const double now = ThrowNowSec();
+    ThrowDiag diag;
+    double since = now - kBeforeReleaseSec - kAfterReleaseSec;
+    double until = now;
+    if (m_ThrowReleaseT > 0.0 && now - m_ThrowReleaseT < 1.0)
     {
-        since = m_ThrowReleaseT - kWindowSec;
+        since = m_ThrowReleaseT - kBeforeReleaseSec;
         until = m_ThrowReleaseT + kAfterReleaseSec;
+        diag.releaseAge = now - m_ThrowReleaseT;
     }
-    Vector best{};
-    float bestSpeed = -1.f;
-    // Walk back from the newest sample: each one against the closest older
-    // sample at least kMinStepSec before it.
-    for (int k = 0; k < kThrowSamples - 1; ++k)
+    // Copy the window oldest first, with one sample of margin on each side
+    // for the averaging.
+    constexpr int kMax = 64;
+    ThrowSample win[kMax];
+    int n = 0;
     {
-        const ThrowSample& a = m_ThrowSamples[(newest - k + kThrowSamples) % kThrowSamples];
-        if (a.t <= 0.0 || a.t < since)
-            break;
-        if (a.t > until)
-            continue;
-        for (int j = k + 1; j < kThrowSamples; ++j)
+        const int newest = (m_ThrowSampleNext + kThrowSamples - 1) % kThrowSamples;
+        int first = -1, count = 0;
+        for (int k = 0; k < kThrowSamples; ++k)
         {
-            const ThrowSample& b = m_ThrowSamples[(newest - j + kThrowSamples) % kThrowSamples];
-            if (b.t <= 0.0 || a.t - b.t > 0.05)
+            const ThrowSample& smp = m_ThrowSamples[(newest - k + kThrowSamples) % kThrowSamples];
+            if (smp.t <= 0.0)
                 break;
-            const double dt = a.t - b.t;
-            if (dt < kMinStepSec)
+            if (smp.t > until + 0.02)
                 continue;
-            const Vector v = (a.local - b.local) * static_cast<float>(1.0 / dt);
-            const float sp = v.Length();
-            if (sp > bestSpeed)
-            {
-                bestSpeed = sp;
-                best = v;
-            }
-            break;
+            first = k;
+            ++count;
+            if (smp.t < since - 0.02 || count >= kMax)
+                break;
+        }
+        for (int k = first; k >= 0 && n < kMax; --k)
+        {
+            const ThrowSample& smp = m_ThrowSamples[(newest - k + kThrowSamples) % kThrowSamples];
+            if (smp.t <= until + 0.02)
+                win[n++] = smp;
         }
     }
-    if (bestSpeed < 0.f)
+    // Fastest single pose step whose end lies inside the window.
+    int peak = -1;
+    float peakSpeed = -1.f;
+    for (int i = 1; i < n; ++i)
+    {
+        if (win[i].t < since || win[i].t > until)
+            continue;
+        const double dt = win[i].poseT - win[i - 1].poseT;
+        if (dt < kMinStepSec || dt > kMaxStepSec)
+            continue;
+        const float sp = (win[i].local - win[i - 1].local).Length() / static_cast<float>(dt);
+        ++diag.steps;
+        if (sp > peakSpeed)
+        {
+            peakSpeed = sp;
+            peak = i;
+        }
+    }
+    if (peak < 0)
         return false;
-    // Back from tracking-space yaw to world.
+    // Average over the steps around it: from sample peak-2 to peak+1 (three
+    // steps) where those samples exist and are not across a tracking gap.
+    int lo = peak - 1, hi = peak;
+    if (lo - 1 >= 0 && win[lo].poseT - win[lo - 1].poseT <= kMaxStepSec)
+        --lo;
+    if (hi + 1 < n && win[hi + 1].poseT - win[hi].poseT <= kMaxStepSec)
+        ++hi;
+    const double span = win[hi].poseT - win[lo].poseT;
+    if (span < kMinStepSec)
+        return false;
+    const Vector best = (win[hi].local - win[lo].local) * static_cast<float>(1.0 / span);
+    diag.peakStep = peakSpeed;
+    diag.avg = best.Length();
+    diag.peakVsRelease = m_ThrowReleaseT > 0.0 && diag.releaseAge >= 0.0 ? win[peak].t - m_ThrowReleaseT : 0.0;
+    // Tracking space -> world: the stick-turn yaw only.
     float s = 0.f, c = 1.f;
     SinCos(DEG2RAD(m_RotationOffsetY.load(std::memory_order_acquire)), &s, &c);
     Vector world(best.x * c - best.y * s, best.x * s + best.y * c, best.z);
     world *= (2.f / 3.f) * std::max(0.1f, bmvr::g_ThrowScale);
     const float speed = world.Length();
+    diag.uncapped = speed;
+    if (speed > 0.f)
+        diag.elevDeg = RAD2DEG(asinf(std::clamp(world.z / speed, -1.f, 1.f)));
     if (speed > kMaxSpeed)
+    {
         world *= kMaxSpeed / speed;
+        diag.capped = true;
+    }
+    g_LastThrowDiag = diag;
     out = world;
     return true;
+}
+
+void VR::LogLastThrow() const
+{
+    const ThrowDiag& d = g_LastThrowDiag;
+    Game::logMsg("VR frag throw detail: hand avg %.0f u/s (fastest step %.0f, %d steps), up %.0f deg, "
+        "peak %+.0f ms vs release, thrown %.0f ms after release%s, scale %.2f",
+        d.avg, d.peakStep, d.steps, d.elevDeg, d.peakVsRelease * 1000.0,
+        d.releaseAge >= 0.0 ? d.releaseAge * 1000.0 : -1.0,
+        d.capped ? " (capped)" : "", bmvr::g_ThrowScale);
 }

@@ -10112,6 +10112,20 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
         return;
 
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    {
+        // Throw samples: the weapon hand's grip (where the grenade sits),
+        // stamped with the runtime's pose time.
+        const bool aimLeftHand = AimControllerRole() == vr::TrackedControllerRole_LeftHand;
+        const Sample& throwHand = aimLeftHand ? physLeft : physRight;
+        if (throwHand.valid)
+        {
+            int64_t poseNs = 0;
+            if (m_OpenXrHelperBridgeActive)
+                poseNs = m_OpenXrLastInputState.controllerPoses[
+                    aimLeftHand ? L4D2VR_OPENXR_HAND_LEFT : L4D2VR_OPENXR_HAND_RIGHT].displayTime;
+            RecordThrowPose(throwHand.pos, poseNs);
+        }
+    }
     m_LeftControllerTrackingValid = physLeft.valid;
     m_LeftControllerDevice = physLeft.idx;
     if (physLeft.valid)
