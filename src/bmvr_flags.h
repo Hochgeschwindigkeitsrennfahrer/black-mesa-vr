@@ -413,6 +413,7 @@ namespace bmvr
     // draw keeps its DepthRange(0, 0.01) instead of the viewmodel 0..1 rewrite;
     // false = glows behind objects show full bright when a sliver peeks out.
     extern bool g_GlowCountDepthFix;
+    extern bool g_EyeUnderwaterWorld;
     extern bool g_FlareEyeAxis;
     // Lens flare layers are turned so their streaks stay level with the world
     // horizon at the light, not with the eye's image (which rolls with the head).

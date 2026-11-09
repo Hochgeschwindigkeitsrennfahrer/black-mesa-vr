@@ -84,6 +84,7 @@ typedef void(__cdecl* tClientPvsVoid)();
 typedef void(__thiscall* tOcclusionBeginView)(void* thisptr, int viewId, int a2, const float* plane, bool a4);
 typedef void(__thiscall* tOccluderSetView)(void* thisptr, const float* origin, float fov, const float* worldToView,
     const float* viewToProjection, const float* nearPlane);
+typedef void(__thiscall* tDrawWorldLists)(void* thisptr, void* renderContext, void* list, unsigned long flags, float waterZAdjust);
 typedef bool(__thiscall* tOccluderIsOccluded)(void* thisptr, const float* mins, const float* maxs);
 typedef void(__thiscall* tComputeViewMatrices)(void* thisptr, void* worldToView, void* viewToProjection, void* worldToProjection);
 typedef ITexture*(__thiscall* tCreateNamedRTEx)(void* thisptr, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags);
@@ -169,6 +170,7 @@ public:
     static inline Hook<tOcclusionBeginView> hkOcclusionBeginView;
     static inline Hook<tOccluderSetView> hkOccluderSetView;
     static inline Hook<tOccluderIsOccluded> hkOccluderIsOccluded;
+    static inline Hook<tDrawWorldLists> hkDrawWorldLists;
     // Set when a leftover main view was skipped / when a view marked the
     // client PVS notifiers; both cleared by the FRAME_RENDER_END check.
     static inline bool m_SkippedViewSinceCheck = false;
@@ -256,6 +258,7 @@ public:
         const float* viewToProjection, const float* nearPlane);
     static void ReplayOccluderView(int eye);
     static bool __fastcall dOccluderIsOccluded(void* ecx, void* edx, const float* mins, const float* maxs);
+    static void __fastcall dDrawWorldLists(void* ecx, void* edx, void* renderContext, void* list, unsigned long flags, float waterZAdjust);
     static void __fastcall dComputeViewMatrices(void* ecx, void* edx, void* worldToView, void* viewToProjection, void* worldToProjection);
     static void ApplyFxaaParams();
     static ITexture* __fastcall dCreateNamedRTEx(void* ecx, void* edx, const char* name, int w, int h, int sizeMode, int format, int depth, unsigned textureFlags, unsigned renderTargetFlags);

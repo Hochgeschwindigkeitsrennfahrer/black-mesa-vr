@@ -133,6 +133,8 @@ namespace bmvr
               Kind::Float, 0.f, 1.f, nullptr, &g_FlareHazeScale },
             { "bmvr_flare_haze_size", "VR: a square flare layer away from the light this wide, as a fraction of the eye height, counts as haze",
               Kind::Float, 0.05f, 4.f, nullptr, &g_FlareHazeMinSize },
+            { "bmvr_eye_underwater_world", "VR: the G-buffer also gets the world under the water surface, as at nr_lights_quality 3 (0 = stock at 2 and below: clear patches in the water)",
+              Kind::Bool, 0.f, 1.f, &g_EyeUnderwaterWorld, nullptr },
             { "bmvr_light_cull_eye", "VR: deferred lights are culled from each eye's view, not the main view that follows the aim",
               Kind::Bool, 0.f, 1.f, &g_LightCullEyeView, nullptr },
             { "bmvr_flare_level", "VR: lens flare streaks stay level with the horizon when the head rolls (0 = stock: they roll with the head)",

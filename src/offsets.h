@@ -522,6 +522,12 @@ public:
     // ret 0x8. Diagnostic hook only (trace frames). Beta 26234270.
     Offset OccluderIsOccluded{ "engine.dll", 0x12F1C0,
         "55 8B EC 81 EC E4 01 00 00 A1 ? ? ? ? 33 C5 89 45 FC 57 8B F9 8B 0D ? ? ? ? 89 BD 54 FE FF FF 81 F9", 0, true };
+    // CVRenderView::DrawWorldLists(IMatRenderContext*, IWorldRenderList*, unsigned long flags, float waterZAdjust),
+    // VEngineRenderView014 slot 13, thiscall, ret 0x10; forwards to the renderer. flags = DRAWWORLDLISTS_*
+    // (0x1 strictly above water, 0x2 strictly under water, 0x4 intersects water, 0x40 shadow depth,
+    // 0x80 refraction, 0x100 reflection). Beta 26234270.
+    Offset DrawWorldLists{ "engine.dll", 0x14F350,
+        "55 8B EC 8B 0D ? ? ? ? D9 45 14 51 D9 1C 24 FF 75 10 8B 01 FF 75 0C FF 75 08 FF 50 20 5D C2 10 00", 0, true };
     static constexpr uint32_t kAreaPortalComputeViewReturnRva = 0x139743; // beta 26234270 (25844216: 0x139663)
     // client CurrentViewID() and the pixel-visibility code's calls to it (E8 rel32):
     // CPixelVisibilitySystem::GetFractionVisible 0xD48B0 (view check + find/create

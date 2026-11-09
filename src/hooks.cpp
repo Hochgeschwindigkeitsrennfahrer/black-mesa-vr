@@ -15,6 +15,7 @@ extern "C" volatile int g_BmvrFlashlightMatrixFix = 1;
 #include <unordered_map>
 #include <atomic>
 #include <mutex>
+#include <set>
 
 // The areaportal setup's call into ComputeViewMatrices (E8 rel32 just before
 // kAreaPortalComputeViewReturnRva) must target `fn`; otherwise this is another
@@ -1193,6 +1194,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkOcclusionBeginView, "OcclusionTrackerBeginView");
     enableIfReady(hkOccluderSetView, "OccluderSetView");
     enableIfReady(hkOccluderIsOccluded, "OccluderIsOccluded");
+    enableIfReady(hkDrawWorldLists, "DrawWorldLists");
     enableIfReady(hkCreateNamedRTEx, "CreateNamedRTEx");
     enableIfReady(hkEndRTAlloc, "EndRTAlloc");
     enableIfReady(hkDrawFilledRect, "DrawFilledRect");
@@ -1312,6 +1314,10 @@ int Hooks::initSourceHooks()
         hkOccluderSetView.createHook((LPVOID)o.OccluderSetView.address, &dOccluderSetView);
     else if ((bmvr::g_OccluderViewPerEye || bmvr::g_OffCenterEyes) && !o.OccluderSetView.valid)
         Game::noteMissingOffset("Occluder SetView (per-eye occluder culling)");
+    if (o.DrawWorldLists.valid && !hkDrawWorldLists.pTarget)
+        hkDrawWorldLists.createHook((LPVOID)o.DrawWorldLists.address, &dDrawWorldLists);
+    else if (!o.DrawWorldLists.valid)
+        Game::noteMissingOffset("DrawWorldLists (underwater world in the eyes)");
     if (o.OccluderIsOccluded.valid && !hkOccluderIsOccluded.pTarget)
         hkOccluderIsOccluded.createHook((LPVOID)o.OccluderIsOccluded.address, &dOccluderIsOccluded);
     if (o.CreateNamedRTEx.valid)
@@ -10379,6 +10385,30 @@ namespace
     };
     OccluderView g_OccluderViews[3];
     void* g_OccluderSystem = nullptr;
+}
+
+// G-buffer world pass and the lighting tier: at nr_lights_quality 3+ Black Mesa draws the main view's G-buffer world
+// pass (DrawWorldLists flag 0x4000) with flags 0x4007, at 2 and below with 0x4005: without 0x2 (strictly under
+// water). The underwater world is then only in the refraction view, and the water shader, which reads the eye's
+// G-buffer depth, sees holes (nothing drawn) under the surface: hard-edged clear patches in the water (bm_c1a1e,
+// both eyes). Adding 0x2 to that pass is what the higher tier does.
+void __fastcall Hooks::dDrawWorldLists(void* ecx, void* edx, void* renderContext, void* list, unsigned long flags, float waterZAdjust)
+{
+    const unsigned long kUnder = 0x2, kGBufferPass = 0x4000;
+    const unsigned long use = (bmvr::g_EyeUnderwaterWorld && (flags & kGBufferPass)) ? (flags | kUnder) : flags;
+    if (use != flags || bmvr::g_PassTraceFrames > 0)
+    {
+        // one line per distinct (eye, flags) combination
+        const int eye = m_VR ? m_VR->m_StereoEye : 0;
+        static std::mutex s_mtx;
+        static std::set<unsigned long long> s_seen;
+        const unsigned long long key = (static_cast<unsigned long long>(eye) << 32) | flags | (use != flags ? 0x80000000ull : 0);
+        std::lock_guard<std::mutex> lock(s_mtx);
+        if (s_seen.size() < 64 && s_seen.insert(key).second)
+            Game::logMsg("DrawWorldLists eye=%d flags=0x%lX%s", eye, flags,
+                use != flags ? " -> 0x2 added: underwater world in the G-buffer (EyeUnderwaterWorld)" : "");
+    }
+    hkDrawWorldLists.fOriginal(ecx, renderContext, list, use, waterZAdjust);
 }
 
 void __fastcall Hooks::dOccluderSetView(void* ecx, void* edx, const float* origin, float fov, const float* worldToView,
