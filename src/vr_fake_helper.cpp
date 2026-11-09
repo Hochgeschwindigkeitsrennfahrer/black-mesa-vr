@@ -19,6 +19,7 @@
 //   buttons <name> ...           attack attack2 reload jump duck use recenter pause flashlight
 //                                select back next prev weaponmenu sprint gripleft (pressed = analog 1)
 //   move <x> <y> / turn <x> <y>  sticks
+//   poserate <hz>                pose updates per second (default 120; ~45 = game at half rate)
 //   throw <id> <dx> <dy> <dz> <seconds> <release>  right hand moves from its pose by
 //                                (dx dy dz) metres over <seconds> (smooth start/stop,
 //                                peak speed pi/2 x distance / seconds at the middle);
@@ -70,6 +71,7 @@ namespace
         int throwId = 0;
         float throwD[3] = {};
         float throwSec = 0.2f, throwRelease = 0.5f;
+        float poseRate = 120.f;   // poses per second (game at half rate: ~45)
     };
 
     std::mutex g_CmdMutex;
@@ -162,6 +164,7 @@ namespace
         std::fill(std::begin(fresh.buttons), std::end(fresh.buttons), false);
         fresh.moveX = fresh.moveY = fresh.turnX = fresh.turnY = 0;
         fresh.throwId = 0;   // a throw lasts while its line is in the file
+        fresh.poseRate = 120.f;
         std::string line;
         while (std::getline(in, line))
         {
@@ -177,6 +180,11 @@ namespace
             else if (key == "ipd") ss >> fresh.ipd;
             else if (key == "move") ss >> fresh.moveX >> fresh.moveY;
             else if (key == "turn") ss >> fresh.turnX >> fresh.turnY;
+            else if (key == "poserate")
+            {
+                ss >> fresh.poseRate;
+                fresh.poseRate = std::clamp(fresh.poseRate, 10.f, 500.f);
+            }
             else if (key == "throw")
                 ss >> fresh.throwId >> fresh.throwD[0] >> fresh.throwD[1] >> fresh.throwD[2]
                    >> fresh.throwSec >> fresh.throwRelease;
@@ -298,7 +306,7 @@ namespace
         FakePose throwBase{};
         for (;;)
         {
-            Sleep(8); // ~120 Hz like the PS VR2
+            Sleep((DWORD)std::max(1.f, roundf(1000.f / script.poseRate))); // ~120 Hz like the PS VR2 unless `poserate`
             // Pose times in nanoseconds like XrTime (the throw code differences
             // velocity on them).
             LARGE_INTEGER qpc{};

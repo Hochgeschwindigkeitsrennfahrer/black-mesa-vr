@@ -519,8 +519,10 @@ void VR::UpdateCrowbarMelee()
 //   time. Sampling once per game frame (~170/s) on the game's clock while
 //   poses arrive at 90/s made the step speeds swing between about half and
 //   twice the real speed, and taking the fastest step picked the spikes.
-// - the speed and direction are the average over the three pose steps
-//   around the fastest one (~33 ms), not a single step.
+// - the speed and direction come from the strongest ~33 ms stretch of pose
+//   time (25-50 ms), not a single step or a fixed number of steps, so the
+//   pose rate (90/s, or ~45/s when the game runs at half rate) does not
+//   change how much of the arm's slow-down is averaged in.
 // - the window is anchored on the trigger release (0.15 s before to 0.03 s
 //   after): Black Mesa throws only once its pin-pull/throw animation has
 //   run, when the arm has stopped or come back.
@@ -543,6 +545,9 @@ namespace
         int steps = 0;
         bool capped = false;
         float uncapped = 0.f;
+        float spanMs = 0.f;          // pose-time span the speed was measured over
+        double spanVsRelease = 0.0;  // s, end of that span vs the release
+        char stepsText[512] = {};    // raw step speeds "u/s/dt" in the window
     };
     ThrowDiag g_LastThrowDiag;
 }
@@ -677,17 +682,64 @@ bool VR::TryGetThrowVelocity(Vector& out)
     }
     if (peak < 0)
         return false;
-    // Average over the steps around it: from sample peak-2 to peak+1 (three
-    // steps) where those samples exist and are not across a tracking gap.
-    int lo = peak - 1, hi = peak;
-    if (lo - 1 >= 0 && win[lo].poseT - win[lo - 1].poseT <= kMaxStepSec)
-        --lo;
-    if (hi + 1 < n && win[hi + 1].poseT - win[hi].poseT <= kMaxStepSec)
-        ++hi;
+    // Speed and direction = the strongest stretch of about 33 ms (start to end
+    // displacement over the pose-time span) ending inside the window. A fixed
+    // time span, not a fixed number of pose steps: at ~45 poses/s three steps
+    // covered ~65 ms and took in the arm stopping, which cancelled the throw
+    // (hand avg 52 u/s next to a 419 u/s step, grenade dropped at the feet).
+    // A one-step spike that reverses cancels out within the span as well.
+    constexpr double kSpanMinSec = 0.025;
+    constexpr double kSpanMaxSec = 0.050;
+    int lo = -1, hi = -1;
+    float bestSpeed = -1.f;
+    for (int j = 1; j < n; ++j)
+    {
+        if (win[j].t < since || win[j].t > until)
+            continue;
+        for (int i = j - 1; i >= 0; --i)
+        {
+            if (win[i + 1].poseT - win[i].poseT > kMaxStepSec)
+                break;   // tracking gap: do not span it
+            const double span = win[j].poseT - win[i].poseT;
+            if (span > kSpanMaxSec)
+                break;
+            if (span < kSpanMinSec)
+                continue;
+            const float sp = (win[j].local - win[i].local).Length() / static_cast<float>(span);
+            if (sp > bestSpeed)
+            {
+                bestSpeed = sp;
+                lo = i;
+                hi = j;
+            }
+        }
+    }
+    if (lo < 0)
+    {
+        // Poses too sparse for a ~33 ms span: the fastest single step.
+        lo = peak - 1;
+        hi = peak;
+    }
     const double span = win[hi].poseT - win[lo].poseT;
     if (span < kMinStepSec)
         return false;
     const Vector best = (win[hi].local - win[lo].local) * static_cast<float>(1.0 / span);
+    diag.spanMs = static_cast<float>(span * 1000.0);
+    diag.spanVsRelease = m_ThrowReleaseT > 0.0 && diag.releaseAge >= 0.0 ? win[hi].t - m_ThrowReleaseT : 0.0;
+    {
+        // Raw step speeds in the window, oldest first (u/s before scaling).
+        int len = 0;
+        diag.stepsText[0] = '\0';
+        for (int i = 1; i < n && len < static_cast<int>(sizeof(diag.stepsText)) - 8; ++i)
+        {
+            const double dt = win[i].poseT - win[i - 1].poseT;
+            if (dt <= 0.0)
+                continue;
+            const float sp = (win[i].local - win[i - 1].local).Length() / static_cast<float>(dt);
+            len += snprintf(diag.stepsText + len, sizeof(diag.stepsText) - len, "%s%.0f/%.0fms",
+                len ? " " : "", sp, dt * 1000.0);
+        }
+    }
     diag.peakStep = peakSpeed;
     diag.avg = best.Length();
     diag.peakVsRelease = m_ThrowReleaseT > 0.0 && diag.releaseAge >= 0.0 ? win[peak].t - m_ThrowReleaseT : 0.0;
@@ -718,4 +770,6 @@ void VR::LogLastThrow() const
         d.avg, d.peakStep, d.steps, d.elevDeg, d.peakVsRelease * 1000.0,
         d.releaseAge >= 0.0 ? d.releaseAge * 1000.0 : -1.0,
         d.capped ? " (capped)" : "", bmvr::g_ThrowScale);
+    Game::logMsg("VR frag throw steps: used %.0f ms span ending %+.0f ms vs release; window u/s/dt: %s",
+        d.spanMs, d.spanVsRelease * 1000.0, d.stepsText);
 }
