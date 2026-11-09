@@ -1298,6 +1298,9 @@ public:
     void DrawIndependentHandsOnDesktop();
     // Last cubemap the engine bound (weapon $envmap). Gloves sample this.
     void NoteSceneCubemap(IDirect3DBaseTexture9* texture);
+    // Per-eye copies of reflection-sized RTs (SkyWaterPerEye), called by the d3d9 device in playback order.
+    void EyeRtNoteWrite(IDirect3DDevice9* device, IDirect3DSurface9* target);
+    IDirect3DBaseTexture9* EyeRtSubstitute(IDirect3DBaseTexture9* texture);
     IDirect3DBaseTexture9* SceneCubemap() const { return m_SceneCubemap; }
     bool GetFingerCurls(vr::VRActionHandle_t skeletonAction, float outCurls[5]) const;
     void TryCompositorPostPresentHandoff(DWORD nowMs, DWORD poseAgeMs);

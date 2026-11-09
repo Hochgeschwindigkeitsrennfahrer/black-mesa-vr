@@ -2445,6 +2445,9 @@ namespace dxvk {
     BMVR_PROF("d3d9 StretchRect");
     D3D9DeviceLock lock = LockDevice();
 
+    if (pDestSurface != nullptr && g_Game && g_Game->m_VR)
+      g_Game->m_VR->EyeRtNoteWrite(this, pDestSurface);
+
     D3D9Surface* dst = static_cast<D3D9Surface*>(pDestSurface);
     D3D9Surface* src = static_cast<D3D9Surface*>(pSourceSurface);
 
@@ -2868,6 +2871,9 @@ namespace dxvk {
     D3D9Surface* rt = static_cast<D3D9Surface*>(pRenderTarget);
     if (unlikely(rt != nullptr && rt->GetDevice() != this))
       return D3DERR_INVALIDCALL;
+
+    if (pRenderTarget != nullptr && g_Game && g_Game->m_VR)
+      g_Game->m_VR->EyeRtNoteWrite(this, pRenderTarget);
 
     return SetRenderTargetInternal(RenderTargetIndex, pRenderTarget);
   }
@@ -4076,6 +4082,9 @@ namespace dxvk {
         && g_Game && g_Game->m_VR
         && pTexture->GetType() == D3DRTYPE_CUBETEXTURE)
       g_Game->m_VR->NoteSceneCubemap(pTexture);
+
+    if (pTexture != nullptr && g_Game && g_Game->m_VR)
+      pTexture = g_Game->m_VR->EyeRtSubstitute(pTexture);
 
     DWORD stateSampler = RemapSamplerState(Stage);
 

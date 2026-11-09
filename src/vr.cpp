@@ -484,6 +484,8 @@ namespace
             t.openBegin = GpuTimerStamp(device);
     }
 
+    std::atomic<bool> g_EyeRtReset{ false };   // SkyWaterPerEye: drop the per-eye RT copies (map change)
+
     int GpuTimerEye(VR* vr)
     {
         int eye = g_McPlayEye != 0 ? g_McPlayEye : (vr ? vr->m_StereoEye : 0);
@@ -3166,6 +3168,7 @@ void VR::PollMapFromEngine()
 void VR::OnLevelInit(const char* newmap)
 {
     m_CurrentMapName = newmap ? newmap : "";
+    g_EyeRtReset = true;   // RTs may be recreated with the map: drop the per-eye copies (SkyWaterPerEye)
     m_GameplayEligible = IsGameplayMapName(newmap);
     bmvr::NoteEngineMapName(newmap);
     bmvr::SetGameplayWorldRts(m_GameplayEligible);
@@ -11652,6 +11655,131 @@ bool VR::DrawVrGlovesIntoBlitSource(int stereoEye)
     if (drew)
         m_VrGlovesDrawnIntoScene = true;
     return drew;
+}
+
+namespace
+{
+    // Per-eye copies of the reflection/refraction RTs (SkyWaterPerEye).
+    // Water in the 3D skybox is drawn before the eye renders its own reflection and refraction, so it samples what
+    // those RTs hold then: the other eye's (right eye: the left eye's of this frame; left eye: the right eye's of
+    // the previous frame), rendered with the other eye's projection. That far water differs per eye and slides with
+    // the head (bm_c2a5a, beyond the dam). Flat gets its own previous frame there. Here: when an eye starts writing
+    // such an RT that the other eye wrote last, the other eye's image is saved first; an eye sampling an RT it did
+    // not write last gets its own saved image. Only RTs that were actually sampled that way get copies.
+    struct EyeRt
+    {
+        IDirect3DTexture9* tex = nullptr;   // not owned
+        UINT w = 0, h = 0;
+        D3DFORMAT fmt = D3DFMT_UNKNOWN;
+        int writer = 0;                     // eye that wrote it last (0 = not an eye pass)
+        bool tracked = false;
+        IDirect3DTexture9* copy[3] = {};
+        bool valid[3] = {};
+    };
+    std::vector<EyeRt> g_EyeRts;            // d3d9 (playback) thread only
+    thread_local bool t_EyeRtCopying = false; // our own StretchRect must not register its copy as a write
+
+    bool EyeRtSizeMatches(UINT w, UINT h)
+    {
+        if (bmvr::g_ReflectionRtW > 0)
+            return static_cast<int>(w) == bmvr::g_ReflectionRtW && static_cast<int>(h) == bmvr::g_ReflectionRtH;
+        return w == 1024 && h == 1024;
+    }
+
+    void EyeRtApplyReset()
+    {
+        if (!g_EyeRtReset.exchange(false))
+            return;
+        for (EyeRt& r : g_EyeRts)
+            for (IDirect3DTexture9*& c : r.copy)
+                if (c)
+                {
+                    c->Release();
+                    c = nullptr;
+                }
+        g_EyeRts.clear();
+    }
+}
+
+void VR::EyeRtNoteWrite(IDirect3DDevice9* device, IDirect3DSurface9* target)
+{
+    if (!bmvr::g_SkyWaterPerEye || !device || !target || t_EyeRtCopying)
+        return;
+    EyeRtApplyReset();
+    D3DSURFACE_DESC d{};
+    if (FAILED(target->GetDesc(&d)) || !EyeRtSizeMatches(d.Width, d.Height))
+        return;
+    IDirect3DTexture9* tex = nullptr;
+    if (FAILED(target->GetContainer(__uuidof(IDirect3DTexture9), reinterpret_cast<void**>(&tex))) || !tex)
+        return;
+    tex->Release();   // the game owns it; only the pointer is kept
+    EyeRt* r = nullptr;
+    for (EyeRt& e : g_EyeRts)
+        if (e.tex == tex)
+            r = &e;
+    if (!r)
+    {
+        if (g_EyeRts.size() >= 16)
+            return;
+        g_EyeRts.push_back({});
+        r = &g_EyeRts.back();
+        r->tex = tex;
+        r->w = d.Width;
+        r->h = d.Height;
+        r->fmt = d.Format;
+    }
+    const int eye = HudPaintActive() ? 0 : GpuTimerEye(this);
+    if (r->tracked && (r->writer == 1 || r->writer == 2) && eye != 0 && r->writer != eye)
+    {
+        // About to be overwritten by this eye: keep the other eye's image.
+        const int o = r->writer;
+        if (!r->copy[o] && FAILED(device->CreateTexture(r->w, r->h, 1, D3DUSAGE_RENDERTARGET, r->fmt, D3DPOOL_DEFAULT,
+            &r->copy[o], nullptr)))
+            r->copy[o] = nullptr;
+        IDirect3DSurface9* dst = nullptr;
+        if (r->copy[o] && SUCCEEDED(r->copy[o]->GetSurfaceLevel(0, &dst)) && dst)
+        {
+            t_EyeRtCopying = true;
+            r->valid[o] = SUCCEEDED(device->StretchRect(target, nullptr, dst, nullptr, D3DTEXF_NONE));
+            t_EyeRtCopying = false;
+            dst->Release();
+        }
+    }
+    r->writer = eye;
+}
+
+IDirect3DBaseTexture9* VR::EyeRtSubstitute(IDirect3DBaseTexture9* texture)
+{
+    if (!bmvr::g_SkyWaterPerEye)
+        return texture;
+    EyeRtApplyReset();
+    if (g_EyeRts.empty())
+        return texture;
+    for (EyeRt& r : g_EyeRts)
+    {
+        if (static_cast<IDirect3DBaseTexture9*>(r.tex) != texture)
+            continue;
+        const int eye = HudPaintActive() ? 0 : GpuTimerEye(this);
+        if (eye == 0 || r.writer == eye || (r.writer != 1 && r.writer != 2))
+            return texture;
+        if (!r.tracked)
+        {
+            r.tracked = true;
+            Game::logMsg("SkyWaterPerEye: eye %d samples a %ux%u RT the other eye wrote last: per-eye copies on for it", eye, r.w, r.h);
+        }
+        if (r.valid[eye] && r.copy[eye])
+        {
+            static int s_log;
+            if (s_log < 4)
+            {
+                ++s_log;
+                Game::logMsg("SkyWaterPerEye: eye %d gets its own previous %ux%u image", eye, r.w, r.h);
+            }
+            return r.copy[eye];
+        }
+        return texture;
+    }
+    return texture;
 }
 
 void VR::NoteSceneCubemap(IDirect3DBaseTexture9* texture)

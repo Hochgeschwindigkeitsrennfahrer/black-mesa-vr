@@ -133,6 +133,8 @@ namespace bmvr
               Kind::Float, 0.f, 1.f, nullptr, &g_FlareHazeScale },
             { "bmvr_flare_haze_size", "VR: a square flare layer away from the light this wide, as a fraction of the eye height, counts as haze",
               Kind::Float, 0.05f, 4.f, nullptr, &g_FlareHazeMinSize },
+            { "bmvr_sky_water_per_eye", "VR: water drawn before an eye's own reflection (3D skybox) gets that eye's previous reflection/refraction, not the other eye's",
+              Kind::Bool, 0.f, 1.f, &g_SkyWaterPerEye, nullptr },
             { "bmvr_eye_underwater_world", "VR: the G-buffer also gets the world under the water surface, as at nr_lights_quality 3 (0 = stock at 2 and below: clear patches in the water)",
               Kind::Bool, 0.f, 1.f, &g_EyeUnderwaterWorld, nullptr },
             { "bmvr_light_cull_eye", "VR: deferred lights are culled from each eye's view, not the main view that follows the aim",
