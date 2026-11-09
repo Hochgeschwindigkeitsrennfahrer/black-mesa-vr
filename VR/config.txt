@@ -140,6 +140,10 @@ TwoHandGripToggle=false
 # false = the game's fixed throw along the aim.
 VrHandThrow=true
 ThrowScale=3.75
+# Mounted guns (50cal/TOW): how far the barrel turns per degree the hands swing around the
+# mount. 1 = the handle stays in the hand; higher = less reach to aim far down/up/sideways.
+# Also in the VR settings panel (MOUNTED GUNS).
+MountedGunGain=1.75
 # Main menu / pause panel: distance and width in metres, height offset (+ = up), and menu
 # pointer smoothing in seconds (lower = more direct). Also in the VR settings panel (MENU).
 MenuForwardMeters=1.4

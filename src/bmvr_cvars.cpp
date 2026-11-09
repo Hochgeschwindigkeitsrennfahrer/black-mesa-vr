@@ -69,6 +69,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_TurnBlocksJumpCrouch, nullptr },
             { "bmvr_sprint_toggle", "VR: a sprint click keeps sprinting until the move stick is released (0 = hold the click)",
               Kind::Bool, 0.f, 1.f, &g_SprintToggle, nullptr },
+            { "bmvr_mounted_gun_gain", "VR: mounted gun (50cal/TOW) barrel turn per degree of hand swing (1 = handle stays in the hand)",
+              Kind::Float, 0.5f, 4.f, nullptr, &g_MountedGunGain },
             { "bmvr_gun_pitch", "VR: extra gun pitch in degrees on top of the controller's own tilt (negative = lower)",
               Kind::Float, -45.f, 45.f, nullptr, &g_GunPitchOffset },
             { "bmvr_hand_gun_right", "VR: support hand on the gun, along the gun: toward the gun hand's side, game units",

@@ -120,6 +120,7 @@ namespace bmvr
     float g_DebugBlankEye = 0.f;
     float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;
+    float g_MountedGunGain = 1.75f;
     float g_ThrowScale = 3.75f;
     bool g_VrSkipMotionBlur = true;
     bool g_VrSkipScreenEffects = true;
@@ -656,6 +657,8 @@ namespace bmvr
                 g_FrameCapMode = static_cast<float>(atof(val));
             else if (std::strcmp(n, "VrHandThrow") == 0)
                 g_VrHandThrow = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MountedGunGain") == 0)
+                g_MountedGunGain = std::clamp(static_cast<float>(atof(val)), 0.5f, 4.f);
             else if (std::strcmp(n, "ThrowScale") == 0)
                 g_ThrowScale = static_cast<float>(atof(val));
             else if (std::strcmp(n, "TwoHandHoldWhileGrip") == 0)

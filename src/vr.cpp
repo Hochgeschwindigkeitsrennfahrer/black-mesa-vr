@@ -6942,9 +6942,13 @@ bool VR::MountedGunAim(QAngle& out)
         while (a < -180.f) a += 360.f;
         return a;
     };
+    // MountedGunGain > 1: the barrel turns further than the hands swing, so
+    // aiming low/high or far sideways needs less reach (the handle leads the
+    // hand instead of staying in it).
+    const float gain = std::clamp(bmvr::g_MountedGunGain, 0.5f, 4.f);
     QAngle wanted{};
-    wanted.x = wrap(m_GunBarrelBase.x) + wrap(handAngles.x - m_GunHandBase.x);
-    wanted.y = wrap(m_GunBarrelBase.y + wrap(handAngles.y - m_GunHandBase.y));
+    wanted.x = wrap(m_GunBarrelBase.x) + gain * wrap(handAngles.x - m_GunHandBase.x);
+    wanted.y = wrap(m_GunBarrelBase.y + gain * wrap(handAngles.y - m_GunHandBase.y));
     wanted.z = 0.f;
     if (wanted.x > 89.f) wanted.x = 89.f;
     if (wanted.x < -89.f) wanted.x = -89.f;
