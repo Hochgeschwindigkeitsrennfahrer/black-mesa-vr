@@ -284,6 +284,7 @@ static float g_FlareAxisShiftX = 0.f;
 static float g_FlareAxisShiftY = 0.f;
 static bool g_FlareElementOnLight = true;
 static float g_FlareAngleFade = 1.f;
+static float g_FlareRoll = 0.f;
 
 // Diagnostic, BMVR_FLARE_LOG=1: what a lens flare's position is computed from.
 // One line per flare and eye when the projection or on-screen state changes,
@@ -322,6 +323,33 @@ static void FlareLogPosition(const float* world, const float* size, const float*
         proj[0], proj[1], proj[2], proj[3], proj[4], proj[5], proj[6], proj[7],
         proj[10], proj[11], proj[14], proj[15],
         view[8], view[9], view[10], cam[0], cam[1], cam[2], GetCurrentThreadId());
+}
+
+// Screen angle of the world horizontal through the light, perpendicular to the
+// line of sight. Rows 0 and 1 of the view matrix are the camera's right and up.
+// Straight above or below, the horizon has no direction; the turn fades out there.
+static float FlareLevelRoll(const float* world, const float* view)
+{
+    const float cam[3] = {
+        -(view[0] * view[3] + view[4] * view[7] + view[8] * view[11]),
+        -(view[1] * view[3] + view[5] * view[7] + view[9] * view[11]),
+        -(view[2] * view[3] + view[6] * view[7] + view[10] * view[11]) };
+    const float d[3] = { world[0] - cam[0], world[1] - cam[1], world[2] - cam[2] };
+    const float dLen = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const float h[3] = { -d[1], d[0], 0.f }; // world up x d
+    const float hLen = std::sqrt(h[0] * h[0] + h[1] * h[1]);
+    if (dLen < 1.f || hLen < 1e-3f)
+        return 0.f;
+    const float hx = view[0] * h[0] + view[1] * h[1] + view[2] * h[2];
+    const float hy = view[4] * h[0] + view[5] * h[1] + view[6] * h[2];
+    // Counter-clockwise on screen, as the quad draw turns a positive angle.
+    float a = std::atan2(hy, hx);
+    // A streak looks the same turned half way round.
+    const float pi = 3.14159265f;
+    while (a > pi * 0.5f) a -= pi;
+    while (a <= -pi * 0.5f) a += pi;
+    const float level = (std::min)(1.f, hLen / dLen / 0.2f);
+    return a * level;
 }
 
 static void __cdecl FlareWorldToScreenHook(const float* world, const float* size, float* out)
@@ -369,6 +397,11 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
         out[0] -= g_FlareAxisShiftX;
         out[1] -= g_FlareAxisShiftY;
     }
+    // Turn the layers so the streaks lie along the world horizon at the light:
+    // the eye's image rolls with the head, a quad drawn level in it does too.
+    g_FlareRoll = 0.f;
+    if (bmvr::g_FlareLevel && Hooks::m_VR && Hooks::m_VR->m_StereoEye != 0)
+        g_FlareRoll = FlareLevelRoll(world, view);
     // Fade by the angle off the view axis, seen from between the eyes.
     g_FlareAngleFade = 1.f;
     if (bmvr::g_FlareFadeAngle > 0.f && proj[0] > 0.01f && proj[5] > 0.01f && size[0] > 0.f && size[1] > 0.f)
@@ -417,8 +450,8 @@ static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, i
         if (s_quads < 120)
         {
             ++s_quads;
-            Game::logMsg("flarequad eye=%d mat=%p %dx%d at %d,%d %s", Hooks::m_VR->m_StereoEye, material, w, h, x, y,
-                onLight ? "light" : (haze ? "haze" : "ghost"));
+            Game::logMsg("flarequad eye=%d mat=%p %dx%d at %d,%d %s angle=%.3f roll=%.3f", Hooks::m_VR->m_StereoEye, material, w, h, x, y,
+                onLight ? "light" : (haze ? "haze" : "ghost"), angle, g_FlareRoll);
         }
     }
     unsigned char dim[4];
@@ -431,7 +464,29 @@ static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, i
             dim[i] = static_cast<unsigned char>(dim[i] * scale);
         color = dim;
     }
-    g_OrigFlareDrawQuad(ecx, material, x + static_cast<int>(g_FlareAxisShiftX), y + static_cast<int>(g_FlareAxisShiftY), drawW, drawH, color, angle);
+    x += static_cast<int>(g_FlareAxisShiftX);
+    y += static_cast<int>(g_FlareAxisShiftY);
+    if (g_FlareRoll != 0.f && Hooks::m_VR && Hooks::m_VR->m_RenderWidth > 0 && Hooks::m_VR->m_RenderHeight > 0)
+    {
+        // The draw turns the quad about the middle of its bottom edge, in NDC.
+        // Move it so the extra turn happens about the quad's own centre, which
+        // for the layers on the light is the light.
+        const float ndcX = 2.f / static_cast<float>(Hooks::m_VR->m_RenderWidth);
+        const float ndcY = 2.f / static_cast<float>(Hooks::m_VR->m_RenderHeight);
+        // Pixel offset (y down) of the centre from the pivot after turning by t.
+        auto centreOffset = [&](float t, float& ox, float& oy) {
+            const float uy = drawH * 0.5f * ndcY; // straight up in NDC
+            ox = -std::sin(t) * uy / ndcX;
+            oy = -std::cos(t) * uy / ndcY;
+        };
+        float ax, ay, bx, by;
+        centreOffset(angle, ax, ay);
+        centreOffset(angle + g_FlareRoll, bx, by);
+        x += static_cast<int>(std::lround(ax - bx));
+        y += static_cast<int>(std::lround(ay - by));
+        angle += g_FlareRoll;
+    }
+    g_OrigFlareDrawQuad(ecx, material, x, y, drawW, drawH, color, angle);
 }
 
 // Same switch: how visible the flare is for each eye. Below the draw threshold

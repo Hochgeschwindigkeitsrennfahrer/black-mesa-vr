@@ -184,6 +184,9 @@ LightCullEyeView=true
 # Lens flares laid out around each eye's view axis, so both eyes show the same flare
 # (bmvr_flare_eye_axis). false = around the image centre, as on a flat screen.
 FlareEyeAxis=true
+# Lens flare streaks stay level with the horizon when you tilt your head (bmvr_flare_level).
+# false = they turn with the head, as on a flat screen.
+FlareLevel=true
 # Both eyes use one flare layout, from the point between them (bmvr_flare_shared).
 FlareSharedLayout=true
 # A flat screen shows about 37 degrees up and down, so a flare leaves it and its built-in fade is done.
