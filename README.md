@@ -6,7 +6,7 @@
 > `public-beta`). Those releases are marked *Pre-release* on GitHub, but they get the current fixes and
 > features first, and they are what we test against.
 > Switch Black Mesa to the public beta, then get the top *Experimental* entry on the
-> **[Releases page](https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr/releases)**.
+> **[Releases page](https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr/releases)**. If you're on Linux, make sure to use the Proton version of the game.
 
 <a href="https://www.youtube.com/watch?v=S9kmK95yqgM">
   <img src="assets/release-2026-09-06.jpg" alt="Black Mesa VR — Weapon Menu" width="90%">
