@@ -1473,6 +1473,11 @@ private:
     // the scope opens on the spot the laser marked and the head still steers.
     Vector m_ScopeAimLocal{ 1.f, 0.f, 0.f };
     bool m_ScopeAimLocalValid = false;
+    // ScopeFollowsGun: smoothed world-space aim direction the zoomed view
+    // looks along (updated with UpdateScopeAimOffset).
+    Vector m_ScopeGunDir{ 1.f, 0.f, 0.f };
+    bool m_ScopeGunDirValid = false;
+    double m_ScopeGunDirMs = 0.0;
     float m_EngineViewFov = 0.f;
     bool m_SawEngineZoomFov = false;
     bool m_RpgLaserLatched = false;

@@ -350,6 +350,11 @@ namespace bmvr
     // Zoomed view starts on the laser's aim instead of straight ahead of the
     // head, keeping that offset while zoomed (config ScopeKeepsAimOffset).
     extern bool g_ScopeKeepsAimOffset;
+    // Zoomed view points along the gun's aim every frame instead of the head
+    // (config ScopeFollowsGun, VR panel). The head still sets the roll.
+    extern bool g_ScopeFollowsGun;
+    // Smoothing time in seconds for that gun-driven view (0 = raw aim).
+    extern float g_ScopeGunSmoothSec;
     // Eye the scoped crossbow bolt starts from (1 left, 2 right = default,
     // 0 = between the eyes). A scope is one-eyed: from the head centre the
     // bolt hit half an IPD beside the reticle in both eyes (2026-11-03).

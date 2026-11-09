@@ -6109,6 +6109,31 @@ Vector VR::GetViewAngle() const
     }
     yaw += offset;
     yaw -= 360.f * floorf((yaw + 180.f) / 360.f);
+    // ScopeFollowsGun: look along the (smoothed) gun aim. The head only adds
+    // its roll, so the horizon still tilts with it. The image is rendered for
+    // the current head pose like any other frame, so reprojection stays right.
+    if (m_ScopeZoomActive && m_ScopeGunDirValid)
+    {
+        Vector f{}, r{}, u{};
+        QAngle::AngleVectors(QAngle(pitch, yaw, roll), &f, &r, &u);
+        // Keep "up" perpendicular to the view direction; when the aim is far
+        // off the head's up axis this is the head's up, tilted along.
+        Vector up = u - m_ScopeGunDir * DotProduct(u, m_ScopeGunDir);
+        if (VectorNormalize(up) < 0.05f)
+            up = u;
+        QAngle out{};
+        QAngle::VectorAngles(m_ScopeGunDir, up, out);
+        if (std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z))
+        {
+            pitch = out.x;
+            yaw = out.y;
+            roll = out.z;
+            if (pitch > 180.f) pitch -= 360.f;
+            if (pitch < -180.f) pitch += 360.f;
+            yaw -= 360.f * floorf((yaw + 180.f) / 360.f);
+        }
+        return Vector(pitch, yaw, roll);
+    }
     // Zoomed: look along the laser direction captured at zoom start, kept
     // relative to the head. The offset is constant while zoomed, so the
     // compositor's reprojection (raw HMD pose) still sees only head motion.
@@ -6138,6 +6163,40 @@ Vector VR::GetViewAngle() const
 void VR::UpdateScopeAimOffset()
 {
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    if (m_ScopeZoomActive && bmvr::g_ScopeFollowsGun)
+    {
+        m_ScopeAimLocalValid = false;
+        Vector aim{};
+        QAngle::AngleVectors(GetAimAngles(), &aim, nullptr, nullptr);
+        if (VectorNormalize(aim) < 0.01f)
+            return;
+        const double nowMs = static_cast<double>(GetTickCount64());
+        const float tau = bmvr::g_ScopeGunSmoothSec;
+        if (!m_ScopeGunDirValid || !(tau > 0.005f))
+        {
+            if (!m_ScopeGunDirValid)
+                Game::logMsg("Scope follows gun: on (smoothing %.2f s)", tau);
+            m_ScopeGunDir = aim;
+            m_ScopeGunDirValid = true;
+            m_ScopeGunDirMs = nowMs;
+            return;
+        }
+        // Called several times per frame: integrate over real time only.
+        float dt = static_cast<float>((nowMs - m_ScopeGunDirMs) * 0.001);
+        if (dt <= 0.f)
+            return;
+        m_ScopeGunDirMs = nowMs;
+        if (dt > 0.25f)
+            dt = 0.25f;
+        const float a = 1.f - expf(-dt / tau);
+        Vector d = m_ScopeGunDir + (aim - m_ScopeGunDir) * a;
+        if (VectorNormalize(d) > 0.01f)
+            m_ScopeGunDir = d;
+        return;
+    }
+    if (m_ScopeGunDirValid)
+        Game::logMsg("Scope follows gun: off");
+    m_ScopeGunDirValid = false;
     if (!m_ScopeZoomActive || !bmvr::g_ScopeKeepsAimOffset)
     {
         m_ScopeAimLocalValid = false;

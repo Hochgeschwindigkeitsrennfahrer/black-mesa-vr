@@ -122,6 +122,12 @@ LeftHanded=false
 ScopeZoomFovScale=0.28
 # Eye the scoped crossbow bolt starts from, so it lands on that eye's reticle: right, left or center.
 ScopeEye=right
+# Zoomed view follows the gun's aim instead of the head: aim by pointing the crossbow (a
+# two-hand grip on the front of the crossbow steadies it). The whole headset view moves with
+# the hand, so it can be less comfortable. ScopeGunSmoothSec smooths hand tremor (seconds,
+# 0 = raw, higher = steadier but lags). Both also in the VR settings panel (CROSSBOW SCOPE).
+ScopeFollowsGun=false
+ScopeGunSmoothSec=0.10
 
 # Right stick down: crouch only while held (false = toggle). Left stick click: sprint latches
 # until the stick is centred again (false = hold the click).

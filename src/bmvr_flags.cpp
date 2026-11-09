@@ -152,6 +152,8 @@ namespace bmvr
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
     bool g_ScopeKeepsAimOffset = true;
+    bool g_ScopeFollowsGun = false;
+    float g_ScopeGunSmoothSec = 0.10f;
     int g_ScopeEye = 2;
     float g_LeftEyeCullPad = 0.f;
     bool g_MenuCursorHook = true;
@@ -710,6 +712,10 @@ namespace bmvr
                 g_ScopeUsesHmdAim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ScopeKeepsAimOffset") == 0)
                 g_ScopeKeepsAimOffset = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ScopeFollowsGun") == 0)
+                g_ScopeFollowsGun = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ScopeGunSmoothSec") == 0)
+                g_ScopeGunSmoothSec = std::clamp(static_cast<float>(atof(val)), 0.f, 0.5f);
             else if (std::strcmp(n, "ScopeZoomFovScale") == 0)
                 g_ScopeZoomFovScale = static_cast<float>(atof(val));
             else if (std::strcmp(n, "ScopeEye") == 0)
