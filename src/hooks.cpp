@@ -210,6 +210,23 @@ static float __fastcall PixelVisFractionStats(void* ecx, void* edx, const void* 
         ++s_stats[e].drops;
         ++s_viewDrops[viewId & 0xF][e];
     }
+    // Pulsing: the fraction jumps by more than 0.2 between this glow's
+    // consecutive samples, split by head roll (upright < 15 deg, tilted >= 30).
+    static int s_swing[2][2], s_rollSamples[2][2];
+    static double s_rollSum;
+    static int s_rollN;
+    float roll = Hooks::m_VR ? std::fabs(Hooks::m_VR->m_HmdAngAbs.z) : 0.f;
+    if (roll > 180.f)
+        roll = 360.f - roll;
+    const int rb = roll < 15.f ? 0 : (roll >= 30.f ? 1 : -1);
+    if (rb >= 0)
+    {
+        ++s_rollSamples[e][rb];
+        if (it != s_last[e].end() && std::fabs(it->second - f) > 0.2f)
+            ++s_swing[e][rb];
+    }
+    s_rollSum += roll;
+    ++s_rollN;
     s_last[e][key] = f;
     ++s_stats[e].samples;
     if (f >= 0.5f)
@@ -233,6 +250,14 @@ static float __fastcall PixelVisFractionStats(void* ecx, void* edx, const void* 
             s_viewDrops[v][0] = s_viewDrops[v][1] = 0;
         }
         Game::logMsg("pixelvis drops by view:%s", len ? views : " none");
+        Game::logMsg("pixelvis swings (>0.2 between samples) upright(<15deg) L=%d/%d R=%d/%d tilted(>=30deg) L=%d/%d R=%d/%d, mean |roll| %.1f",
+            s_swing[0][0], s_rollSamples[0][0], s_swing[1][0], s_rollSamples[1][0],
+            s_swing[0][1], s_rollSamples[0][1], s_swing[1][1], s_rollSamples[1][1],
+            s_rollN ? s_rollSum / s_rollN : 0.0);
+        std::memset(s_swing, 0, sizeof(s_swing));
+        std::memset(s_rollSamples, 0, sizeof(s_rollSamples));
+        s_rollSum = 0.0;
+        s_rollN = 0;
         g_PixelVisCreates[0] = g_PixelVisCreates[1] = 0;
         s_stats[0] = Stats();
         s_stats[1] = Stats();
@@ -734,7 +759,7 @@ static void InstallEngineWorldBatchStats()
 static void InstallPixelVisStats(uintptr_t client)
 {
     char v[8] = {};
-    if (!GetEnvironmentVariableA("BMVR_PIXELVIS_STATS", v, sizeof(v)) || v[0] != '1')
+    if ((!GetEnvironmentVariableA("BMVR_PIXELVIS_STATS", v, sizeof(v)) || v[0] != '1') && !bmvr::g_PerfLog)
         return;
     auto* fn = reinterpret_cast<LPVOID>(client + Offsets::kPixelVisGetFractionRva);
     if (MH_CreateHook(fn, reinterpret_cast<LPVOID>(&PixelVisFractionStats),
