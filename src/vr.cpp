@@ -517,7 +517,7 @@ namespace
     };
     std::recursive_mutex g_AuditMutex;
     std::map<const void*, AuditTex> g_AuditTex;
-    std::atomic<int> g_AuditFramesLeft{ 0 };  // Presents left; the first one only warms up the writer map
+    std::atomic<int> g_AuditFramesLeft{ 0 };  // 1 while an audit runs (the first Present only warms up the writer map)
     std::atomic<bool> g_AuditHooksOn{ false };
     uint32_t g_AuditFrame = 0;
     uint32_t g_AuditSeq = 0;
@@ -540,10 +540,37 @@ namespace
     char g_AuditConstMat[64] = { 1 };  // { 1 } = env not read yet
     char g_AuditTexPrefix[64];          // BMVR_AUDIT_TEXPREFIX, read at each audit start
     std::set<std::pair<int, const void*>> g_AuditTexDumped;
+    // The audit ends after N complete stereo pairs, not after N Presents: in
+    // MulticoreMode the Present arrives on another thread, and a stall right
+    // after the start (the panel capture's full-size eye dump) let a whole
+    // frame draw during the warm-up, then two Presents came back to back and
+    // the logged "frame" had no draws. A pair counts once a left-eye pass has
+    // started after a right-eye draw (so it is logged from its start) and
+    // right-eye draws followed it; the audit stops at the next Present.
+    int g_AuditPairsWanted = 0;
+    int g_AuditPairsDone = 0;
+    int g_AuditPairPhase = 0;   // 0 = need a right-eye draw, 1 = need a left start, 2 = in left, need right
+    int g_AuditLastEye = 0;     // last non-HUD eye 1/2 seen while logging
+    int g_AuditPresentCap = 0;  // Presents after which the audit gives up
 
     bool AuditLogging()
     {
         return g_AuditFramesLeft.load(std::memory_order_acquire) > 0 && g_AuditFrame > 0;
+    }
+
+    void AuditTrackEye(int eye, bool hud)
+    {
+        if (hud || (eye != 1 && eye != 2) || eye == g_AuditLastEye)
+            return;
+        g_AuditLastEye = eye;
+        if (eye == 2)
+        {
+            if (g_AuditPairPhase == 2)
+                ++g_AuditPairsDone;
+            g_AuditPairPhase = 1;
+        }
+        else if (g_AuditPairPhase == 1)
+            g_AuditPairPhase = 2;
     }
 
     const char* AuditSizeLabel(VR* vr, UINT w, UINT h)
@@ -656,6 +683,7 @@ namespace
             rt->Release();
         if (AuditLogging())
         {
+            AuditTrackEye(eye, hud);
             D3DVIEWPORT9 vp{};
             device->GetViewport(&vp);
             DWORD scissorOn = 0;
@@ -985,14 +1013,20 @@ namespace
         g_AuditLines = 0;
         g_AuditGroup.clear();
         g_AuditGroupLine.clear();
-        g_AuditFramesLeft.store(frames + 1, std::memory_order_release);
+        g_AuditPairsWanted = frames;
+        g_AuditPairsDone = 0;
+        g_AuditPairPhase = 0;
+        g_AuditLastEye = 0;
+        g_AuditPresentCap = 4 * frames + 60;
+        g_AuditFramesLeft.store(1, std::memory_order_release);
         g_AuditConstMat[0] = 1;   // re-read the env (the panel capture sets it)
         g_AuditTexPrefix[0] = 0;
         GetEnvironmentVariableA("BMVR_AUDIT_TEXPREFIX", g_AuditTexPrefix, sizeof(g_AuditTexPrefix));
         g_AuditTexDumped.clear();
         AuditSetDrawHooks(true);
         Hooks::SetMatBindHooks(true);
-        Game::logMsg("audit: %d frames (+1 warm-up), draw hooks %s", frames, g_AuditVtbl ? "on" : "missing");
+        Game::logMsg("audit: %d stereo pair(s) after a warm-up Present, draw hooks %s", frames,
+            g_AuditVtbl ? "on" : "missing");
     }
 
     void AuditOnPresent()
@@ -1007,10 +1041,16 @@ namespace
             ++g_AuditLines;
         }
         ++g_AuditFrame;
-        if (g_AuditFramesLeft.fetch_sub(1, std::memory_order_acq_rel) == 1)
+        const bool pairsDone = g_AuditPairsDone >= g_AuditPairsWanted;
+        const bool gaveUp = !pairsDone && (g_AuditLines >= kAuditMaxLines
+            || static_cast<int>(g_AuditFrame) > g_AuditPresentCap);
+        if (pairsDone || gaveUp)
         {
+            g_AuditFramesLeft.store(0, std::memory_order_release);
             VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
-            Game::logMsg("audit: done, %d lines%s; RT textures written:", g_AuditLines,
+            Game::logMsg("audit: %s, %d/%d stereo pair(s) over %u Present(s), %d lines%s; RT textures written:",
+                pairsDone ? "done" : "GAVE UP (no complete left+right pair)", g_AuditPairsDone,
+                g_AuditPairsWanted, g_AuditFrame - 1, g_AuditLines,
                 g_AuditLines >= kAuditMaxLines ? " (capped)" : "");
             for (const auto& [key, t] : g_AuditTex)
                 Game::logMsg("audit tex %p %ux%u[%s] last e%d%s frame %u seq %u", key, t.w, t.h,
@@ -4463,6 +4503,15 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
     s_lastCheck = now;
     if (s_capturePolls > 0)
         --s_capturePolls;
+    // VR/capture.txt: the panel's "Capture debug frame", for headless tests.
+    const std::string captureTrigger = bmvr::VrFilePath("capture.txt");
+    if (FILE* cf = std::fopen(captureTrigger.c_str(), "rb"))
+    {
+        std::fclose(cf);
+        std::remove(captureTrigger.c_str());
+        bmvr::g_DebugCaptureAt = now ? now : 1;
+        Game::logMsg("debug capture: triggered by VR/capture.txt");
+    }
     if (bmvr::g_DebugCaptureAt && static_cast<LONG>(now - bmvr::g_DebugCaptureAt) >= 0)
     {
         bmvr::g_DebugCaptureAt = 0;
