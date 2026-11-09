@@ -138,6 +138,7 @@ namespace bmvr
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
     bool g_SkipDrawAnim = true;
+    bool g_MuteFidgetSounds = true;
     // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = true;
     bool g_SettingsTriangleHold = true;
@@ -699,6 +700,8 @@ namespace bmvr
                 g_SprintAimedPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SkipDrawAnim") == 0)
                 g_SkipDrawAnim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MuteFidgetSounds") == 0)
+                g_MuteFidgetSounds = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MirrorBothEyes") == 0)
                 g_MirrorBothEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VRRuntimeBackend") == 0)

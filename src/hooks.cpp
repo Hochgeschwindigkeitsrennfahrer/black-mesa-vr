@@ -2447,6 +2447,140 @@ namespace
         ++g_ArmHdrPatchCount;
     }
 
+    // Fidget sounds: the fidget clips (tau coil spin, MP5 check...) play
+    // their sound from a client AE_CL_PLAYSOUND event at the clip start. In
+    // VR the fidget pose is frozen (the gun stays in the hand), so the sound
+    // came without the motion it belongs to. Moving those events past the end
+    // of the clip (cycle 2) means they never fire; other events in the clip
+    // stay. One-time write per studio header, restored with the arm patches.
+    // Toggling off restores the header being drawn.
+    constexpr int kStudioSeqNumEvents = 24;
+    constexpr int kStudioSeqEventIndex = 28;
+    constexpr int kStudioEventSize = 80;      // cycle, event, type, options[64], szeventindex
+    constexpr int kStudioEventOptions = 12;
+    constexpr int kStudioEventNameIndex = 76;
+    constexpr int kStudioEventNewStyle = 0x400;
+    constexpr int kClEventSound = 5004;       // old-style CL_EVENT_SOUND
+    constexpr float kMutedEventCycle = 2.f;
+
+    // Headers already handled (gun + the always-idle hands viewmodel take
+    // turns here, so one slot would re-walk both every frame).
+    struct FidgetHdrState { unsigned char* hdr; bool muted; };
+    FidgetHdrState g_FidgetHdrs[8]{};
+    unsigned g_FidgetHdrNext = 0;
+
+    int FloatBits(float f)
+    {
+        int i;
+        std::memcpy(&i, &f, sizeof(i));
+        return i;
+    }
+
+    void ApplyFidgetSoundMute(unsigned char* hdr)
+    {
+        const bool mute = bmvr::g_MuteFidgetSounds;
+        if (!hdr)
+            return;
+        FidgetHdrState* slot = nullptr;
+        for (auto& st : g_FidgetHdrs)
+            if (st.hdr == hdr)
+                slot = &st;
+        if (slot && slot->muted == mute)
+            return;
+        if (!slot)
+            slot = &g_FidgetHdrs[g_FidgetHdrNext++ & 7];
+        slot->hdr = hdr;
+        slot->muted = mute;
+        int numSeq = 0, seqIndex = 0;
+        __try
+        {
+            numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
+            seqIndex = *reinterpret_cast<int*>(hdr + kStudioHdrLocalSeqIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        if (numSeq <= 0 || numSeq > 256 || seqIndex <= 0)
+            return;
+        int changed = 0;
+        for (int s = 0; s < numSeq; ++s)
+        {
+            const char* label = StudioSequenceLabel(hdr, s);
+            if (!label)
+                continue;
+            char low[96]{};
+            for (int i = 0; i < 95 && label[i]; ++i)
+                low[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+            if (!std::strstr(low, "fidget"))
+                continue;
+            unsigned char* desc = hdr + seqIndex + s * kStudioSeqDescSize;
+            int numEv = 0, evIndex = 0;
+            __try
+            {
+                numEv = *reinterpret_cast<int*>(desc + kStudioSeqNumEvents);
+                evIndex = *reinterpret_cast<int*>(desc + kStudioSeqEventIndex);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                continue;
+            }
+            if (numEv <= 0 || numEv > 64 || evIndex <= 0)
+                continue;
+            for (int e = 0; e < numEv; ++e)
+            {
+                unsigned char* ev = desc + evIndex + e * kStudioEventSize;
+                float cycle = 0.f;
+                bool sound = false;
+                __try
+                {
+                    cycle = *reinterpret_cast<float*>(ev);
+                    const int id = *reinterpret_cast<int*>(ev + 4);
+                    const int type = *reinterpret_cast<int*>(ev + 8);
+                    const int nameOff = *reinterpret_cast<int*>(ev + kStudioEventNameIndex);
+                    if (type & kStudioEventNewStyle)
+                        sound = nameOff > 0
+                            && std::strncmp(reinterpret_cast<const char*>(ev + nameOff), "AE_CL_PLAYSOUND", 16) == 0;
+                    else
+                        sound = id == kClEventSound;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    continue;
+                }
+                if (!sound)
+                    continue;
+                int* p = reinterpret_cast<int*>(ev);
+                if (mute && cycle <= 1.f)
+                {
+                    RememberHdrPatch(p, FloatBits(cycle));
+                    if (PokeInt(p, FloatBits(kMutedEventCycle)))
+                        ++changed;
+                }
+                else if (!mute && cycle == kMutedEventCycle)
+                {
+                    for (int i = 0; i < g_ArmHdrPatchCount; ++i)
+                    {
+                        if (g_ArmHdrPatches[i].p == p)
+                        {
+                            if (PokeInt(p, g_ArmHdrPatches[i].original))
+                                ++changed;
+                            g_ArmHdrPatches[i].p = nullptr;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (changed)
+        {
+            char name[65]{};
+            __try { std::memcpy(name, hdr + 12, 64); }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            Game::logMsg("Fidget sounds %s on %s: %d event(s)", mute ? "muted" : "restored", name, changed);
+        }
+    }
+
     int WeaponRootScore(const char* n)
     {
         if (!n || !n[0])
@@ -2676,7 +2810,10 @@ namespace
         }
         NoteWeaponRootFromHdr(hdr, modelName);
         if (hdr)
+        {
             g_LastViewmodelStudioHdr = hdr;
+            ApplyFidgetSoundMute(hdr);
+        }
         static char s_lastVm[260]{};
         if (modelName && modelName[0] && _stricmp(s_lastVm, modelName) != 0)
         {
