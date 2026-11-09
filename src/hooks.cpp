@@ -2252,7 +2252,7 @@ namespace
         // Classify once per sequence change instead of three lowercase passes
         // + ~30 strstr on every CalcViewModelView. The label is a copy, so the
         // header + sequence index identify it.
-        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; bool lowered; bool delta; };
+        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; bool lowered; bool delta; bool scope; };
         static LabelClass s_lc{ nullptr, -1 };
         if (!label || hdr != s_lc.hdr || seq != s_lc.seq
             || std::strncmp(s_lc.text, label, sizeof(s_lc.text) - 1) != 0)
@@ -2273,6 +2273,7 @@ namespace
             // action words miss.
             s_lc.beamHide = false;
             s_lc.lowered = false;
+            s_lc.scope = false;
             if (label)
             {
                 char lb[96]{};
@@ -2285,6 +2286,9 @@ namespace
                 // lowtoidle. Tested as names since their activities differ per model.
                 if (std::strstr(lb, "idletolow") || std::strstr(lb, "lowidle") || std::strstr(lb, "lowtoidle"))
                     s_lc.beamHide = s_lc.lowered = true;
+                // Crossbow idletoscope (and any to/from-scope clip): brings the
+                // gun up to the flat camera.
+                s_lc.scope = std::strstr(lb, "scope") != nullptr;
             }
             if (bmvr::g_AimDebug)
                 Game::logMsg("AimDebug viewmodel seq %d '%s' action=%d loco=%d beamHide=%d tick=%lu",
@@ -2382,6 +2386,26 @@ namespace
             {
                 s_loggedHdr = hdr;
                 Game::logMsg("Viewmodel delta layer seq %d '%s' as main sequence -> idle", seq, label ? label : "?");
+            }
+            ForceViewmodelIdlePose(viewmodel, hdr);
+            return;
+        }
+
+        // Crossbow zoom: idletoscope moves the gun from the hand to the flat
+        // camera (screen centre) over the engine's zoom ramp, so in VR the gun
+        // slid sideways across the view before the scope opened. The gun is
+        // already at the eye in VR: hold the idle pose.
+        if (bmvr::g_ScopeClipIdle && s_lc.scope && Hooks::m_Game
+            && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
+            && StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))
+        {
+            static unsigned char* s_loggedScopeHdr;
+            static int s_loggedScopeSeq = -1;
+            if (s_loggedScopeHdr != hdr || s_loggedScopeSeq != seq)
+            {
+                s_loggedScopeHdr = hdr;
+                s_loggedScopeSeq = seq;
+                Game::logMsg("Viewmodel scope clip seq %d '%s' -> idle", seq, label ? label : "?");
             }
             ForceViewmodelIdlePose(viewmodel, hdr);
             return;

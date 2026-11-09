@@ -5644,7 +5644,8 @@ void VR::ProcessInput()
     // Once the engine's zoomed CViewSetup FOV has been seen it decides (the
     // m_bZooming read stays 0 on beta 26234270 while scoped, which cleared
     // the zoom NoteEngineScopeFov had just set, every frame).
-    const bool engineZoom = m_SawEngineZoomFov && m_EngineViewFov > 1.f && m_EngineViewFov < 45.f;
+    // NoteEngineScopeFov decides from the engine FOV ramp (see there).
+    const bool engineZoom = m_SawEngineZoomFov && m_ScopeZoomActive;
     m_ScopeZoomActive = bmvr::g_ScopeUsesHmdAim && scopedWeapon
         && (m_SawEngineZoomFov ? engineZoom
             : (zoomFlag == 1 || (zoomFlag < 0 && m_CrossbowZoomLatched)));
@@ -13199,14 +13200,68 @@ void VR::TickCompositorFocus()
 
 void VR::NoteEngineScopeFov(float engineFov)
 {
+    if (bmvr::g_AimDebug && ViewmodelIsScoped() && fabsf(engineFov - m_EngineViewFov) > 0.05f)
+        Game::logMsg("AimDebug engine fov %.2f tick=%llu", engineFov, GetTickCount64());
+    const float prevFov = m_EngineViewFov;
     m_EngineViewFov = engineFov;
+    // The engine's unzoomed FOV (72.7 at 1920x1080): a value held for
+    // 150 ms outside the zoom (a zoom ramp changes it every frame).
+    {
+        const ULONGLONG now = GetTickCount64();
+        if (fabsf(engineFov - m_EngineFovStableValue) > 0.01f)
+        {
+            m_EngineFovStableValue = engineFov;
+            m_EngineFovStableSinceMs = now;
+        }
+        else if (now - m_EngineFovStableSinceMs >= 150 && engineFov >= 55.f && engineFov < 179.f
+            && !m_ScopeZoomActive)
+            m_EngineRestFov = engineFov;
+    }
     if (!ViewmodelIsScoped() || !bmvr::g_ScopeUsesHmdAim)
+    {
+        m_EngineZoomOutRamp = false;
         return;
+    }
     // Black Mesa writes the 2D zoom FOV into CViewSetup (7.4 when fully
     // zoomed on beta 26234270). Once we have seen that, trust it to turn VR
-    // magnification off as well — a stuck m_bZooming / latch cannot keep the
+    // magnification on and off — a stuck m_bZooming / latch cannot keep the
     // HMD zoomed after unscope.
-    if (engineFov > 1.f && engineFov < 45.f)
+    // The game draws its scope overlay (lens + reticle) for as long as its
+    // FOV falls (zoom-in ramp, ~100 ms from rest) or sits zoomed, and drops
+    // it the moment the FOV starts rising again (zoom-out ramp, ~160 ms).
+    // VR magnification follows that: on at the first falling step, off at
+    // the second rising one. Fixed thresholds (on below 45, off above 55)
+    // showed the overlay over the unmagnified eye view (each eye's lens at
+    // its own off-centre image centre) on the way in, and a magnified view
+    // with the gun and no lens on the way out.
+    const bool restKnown = m_EngineRestFov > 55.f;
+    const bool falling = engineFov < prevFov - 0.01f;
+    // Rising two frames in a row: a single-frame spike while fully zoomed
+    // (7.4 -> 13.3 -> 7.4, seen headless) is not the zoom-out ramp.
+    if (engineFov > prevFov + 0.02f)
+        ++m_EngineFovRiseFrames;
+    else
+        m_EngineFovRiseFrames = 0;
+    const bool rising = m_EngineFovRiseFrames >= 2;
+    const bool atRest = restKnown ? engineFov >= m_EngineRestFov - 0.05f : engineFov >= 55.f;
+    if (m_ScopeZoomActive)
+    {
+        // Before the first engine zoom the netvar/latch path decides.
+        if (m_SawEngineZoomFov && (rising || atRest))
+        {
+            Game::logMsg("Engine unscoped FOV %.1f (%s) — dropping VR zoom", engineFov,
+                rising ? "zoom-out ramp" : "at rest");
+            m_ScopeZoomActive = false;
+            m_CrossbowZoomLatched = false;
+            m_EngineZoomOutRamp = rising && !atRest;
+        }
+        return;
+    }
+    if (m_EngineZoomOutRamp && (falling || atRest))
+        m_EngineZoomOutRamp = false;
+    if (m_EngineZoomOutRamp || !(engineFov > 1.f))
+        return;
+    if (engineFov < 45.f || (restKnown && falling && engineFov < m_EngineRestFov - 0.1f))
     {
         if (!m_SawEngineZoomFov)
             Game::logMsg("Engine scope FOV %.1f — VR zoom will follow CViewSetup", engineFov);
@@ -13214,14 +13269,6 @@ void VR::NoteEngineScopeFov(float engineFov)
         m_ScopeZoomActive = true;
         m_CrossbowZoomLatched = true;
         UpdateScopeAimOffset();
-        return;
-    }
-    if (m_SawEngineZoomFov && engineFov >= 55.f)
-    {
-        if (m_ScopeZoomActive)
-            Game::logMsg("Engine unscoped FOV %.1f — dropping VR zoom", engineFov);
-        m_ScopeZoomActive = false;
-        m_CrossbowZoomLatched = false;
     }
 }
 

@@ -1501,6 +1501,11 @@ private:
     bool m_ScopeRaised = false;
     double m_ScopeGunDirMs = 0.0;
     float m_EngineViewFov = 0.f;
+    float m_EngineRestFov = 0.f;
+    bool m_EngineZoomOutRamp = false;
+    int m_EngineFovRiseFrames = 0;
+    float m_EngineFovStableValue = 0.f;
+    ULONGLONG m_EngineFovStableSinceMs = 0;
     bool m_SawEngineZoomFov = false;
     bool m_RpgLaserLatched = false;
     bool m_RpgLaserActive = false;

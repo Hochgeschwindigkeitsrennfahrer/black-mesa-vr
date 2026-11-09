@@ -140,6 +140,7 @@ namespace bmvr
     bool g_SprintAimedPose = true;
     bool g_SkipDrawAnim = true;
     bool g_DeltaSeqIdle = true;
+    bool g_ScopeClipIdle = true;
     bool g_ThrowStroke = false;
     bool g_MuteFidgetSounds = true;
     // Optional features: off unless enabled in VR/config.txt.
@@ -710,6 +711,8 @@ namespace bmvr
                 g_SkipDrawAnim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "DeltaSeqIdle") == 0)
                 g_DeltaSeqIdle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ScopeClipIdle") == 0)
+                g_ScopeClipIdle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ThrowStroke") == 0)
                 g_ThrowStroke = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MuteFidgetSounds") == 0)

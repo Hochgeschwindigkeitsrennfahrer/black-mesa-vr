@@ -320,6 +320,7 @@ namespace bmvr
     extern bool g_SkipDrawAnim;          // draw/holster/pickup animations show the idle pose
     extern bool g_ThrowStroke;           // frag throw velocity from the throwing stroke (far point of the hold -> release)
     extern bool g_DeltaSeqIdle;          // a delta layer as the main viewmodel sequence shows idle (tau/crossbow)
+    extern bool g_ScopeClipIdle;         // crossbow to/from-scope clips show idle (the clip moves the gun to the eye)
     extern bool g_MuteFidgetSounds;      // weapon fidget clips play no sound (the pose is frozen in VR)
     // Optional features, default off:
     extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
