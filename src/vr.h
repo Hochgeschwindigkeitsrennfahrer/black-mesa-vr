@@ -330,6 +330,8 @@ public:
         // Extra grab length along +F from the point, so a pump/handguard is a
         // rail instead of a single rear bone.
         float offhandRailMeters = 0.f;
+        // Radius around the rail within which a squeeze grabs (long guns).
+        float offhandEnterMeters = 0.05f;
     };
     ViewmodelClass m_VmClass;
     static void ClassifyViewmodel(const char* modelName, ViewmodelClass& out);

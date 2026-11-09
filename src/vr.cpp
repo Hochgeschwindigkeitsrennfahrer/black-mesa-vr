@@ -11743,8 +11743,10 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     // now read kVmFlagMp5 / kVmFlagCrowbar instead.
     out.mp5 = has("mp5") || has("smg");
 
-    auto setTwoHand = [&](float gx, float gy, float gz, bool useBone = true, bool pistol = false, float rail = 0.f) {
+    auto setTwoHand = [&](float gx, float gy, float gz, bool useBone = true, bool pistol = false, float rail = 0.f,
+        float enter = 0.05f) {
         out.twoHand = true;
+        out.offhandEnterMeters = enter;
         out.offhandUseBone = useBone;
         out.offhandPistol = pistol;
         out.offhandMetersX = gx;
@@ -11760,7 +11762,10 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
         // into the support hand. L_Wrist on this model sits on the magazine.
         setTwoHand(0.24f, -0.07f, 0.02f, false, false, 0.10f);
     else if (out.scoped)
-        setTwoHand(0.24f, 0.00f, 0.02f);
+        // Rail along the stock + wider radius: a single point never latched
+        // in play (2026-11-09 log: 0 of 23 squeezes, hand 1-4 cm off it or
+        // further along the stock).
+        setTwoHand(0.24f, 0.00f, 0.02f, true, false, 0.25f, 0.08f);
     else if (out.rpg)
         setTwoHand(0.22f, 0.00f, 0.025f);
     else if (has("gauss") || has("tau"))
@@ -11901,7 +11906,7 @@ void VR::ApplyTwoHandWeaponAim()
     const float lat = std::sqrt(latR * latR + latU * latU);
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
     const bool pistol = m_VmClass.offhandPistol;
-    const float enterR = (pistol ? 0.07f : 0.05f) * scale;
+    const float enterR = (pistol ? 0.07f : m_VmClass.offhandEnterMeters) * scale;
     const float stayR = (pistol ? 0.14f : 0.12f) * scale;
     const float slop = 0.04f * scale;
     const float railHu = m_VmClass.offhandRailMeters * scale;
