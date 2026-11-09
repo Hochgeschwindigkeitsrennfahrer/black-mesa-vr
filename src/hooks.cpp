@@ -1957,6 +1957,8 @@ namespace
     constexpr int kStudioHdrLocalSeqIndex = 192;
     constexpr int kStudioSeqDescSize = 212;
     constexpr int kStudioSeqLabelIndex = 4;
+    constexpr int kStudioSeqFlags = 12;      // mstudioseqdesc_t::flags
+    constexpr int kStudioSeqFlagDelta = 0x4; // STUDIO_DELTA: additive layer, no pose of its own
 
     unsigned char* g_LastViewmodelStudioHdr = nullptr;
     int g_LastViewmodelIdleSeq = -1;
@@ -2181,6 +2183,27 @@ namespace
         return out;
     }
 
+    // True when sequence seq of hdr is a delta (additive) layer. Played as the
+    // main sequence it shows the bare reference pose.
+    bool StudioSequenceIsDelta(unsigned char* hdr, int seq)
+    {
+        if (!hdr || seq < 0)
+            return false;
+        __try
+        {
+            const int numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
+            const int seqIndex = *reinterpret_cast<int*>(hdr + kStudioHdrLocalSeqIndex);
+            if (numSeq <= 0 || seq >= numSeq || seqIndex <= 0)
+                return false;
+            const int flags = *reinterpret_cast<int*>(hdr + seqIndex + seq * kStudioSeqDescSize + kStudioSeqFlags);
+            return (flags & kStudioSeqFlagDelta) != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     // studiohdr_t::name (+12, 64 chars) is the path below models/, e.g.
     // "weapons\\v_gauss.mdl"; model names carry the "models/" prefix.
     bool StudioHdrMatchesModel(unsigned char* hdr, const char* model)
@@ -2229,7 +2252,7 @@ namespace
         // Classify once per sequence change instead of three lowercase passes
         // + ~30 strstr on every CalcViewModelView. The label is a copy, so the
         // header + sequence index identify it.
-        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; bool lowered; };
+        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; bool lowered; bool delta; };
         static LabelClass s_lc{ nullptr, -1 };
         if (!label || hdr != s_lc.hdr || seq != s_lc.seq
             || std::strncmp(s_lc.text, label, sizeof(s_lc.text) - 1) != 0)
@@ -2242,6 +2265,7 @@ namespace
             s_lc.action = SequenceLabelLooksLikeWeaponAction(label);
             s_lc.loco = SequenceLabelLooksLikeLocomotionOnly(label);
             s_lc.equip = SequenceLabelLooksLikeEquipOnly(label);
+            s_lc.delta = StudioSequenceIsDelta(hdr, seq);
             // Laser beam off while the animation swings the gun off the aim
             // (reload, draw, holster...); kept while firing and for the
             // shotgun pump between shots (gun stays on the aim). The shotgun
@@ -2342,6 +2366,27 @@ namespace
         // still be the previous gun's: only force when its name matches the
         // active weapon's viewmodel, or the old model's idle index would land
         // on the new model.
+        // Switching again while the previous gun is still drawing (hovering
+        // through the weapon menu ring) leaves the new viewmodel on sequence 0
+        // for its whole draw time (~0.5 s; the game does this, also with the
+        // draw skip off). On the tau and crossbow sequence 0 is a delta layer,
+        // which alone is the reference pose: barrel sideways, laser off the
+        // aim. A delta layer is never a real main sequence, so show idle. Other
+        // guns' sequence 0 is not a delta layer: they are not touched.
+        if (bmvr::g_DeltaSeqIdle && s_lc.delta && Hooks::m_Game
+            && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
+            && StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))
+        {
+            static unsigned char* s_loggedHdr;
+            if (s_loggedHdr != hdr)
+            {
+                s_loggedHdr = hdr;
+                Game::logMsg("Viewmodel delta layer seq %d '%s' as main sequence -> idle", seq, label ? label : "?");
+            }
+            ForceViewmodelIdlePose(viewmodel, hdr);
+            return;
+        }
+
         if (bmvr::g_SkipDrawAnim && s_lc.equip && Hooks::m_Game
             && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
             && StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))

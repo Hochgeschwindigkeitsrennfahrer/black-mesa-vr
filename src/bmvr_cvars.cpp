@@ -115,6 +115,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrCrosshairDot, nullptr },
             { "bmvr_skip_draw_anim", "VR: guns appear in the hand in their idle pose (no draw/holster/pickup animation)",
               Kind::Bool, 0.f, 1.f, &g_SkipDrawAnim, nullptr },
+            { "bmvr_delta_seq_idle", "VR: tau/crossbow show idle instead of the sideways reference pose after a fast weapon-menu switch",
+              Kind::Bool, 0.f, 1.f, &g_DeltaSeqIdle, nullptr },
             { "bmvr_mute_fidget_sound", "VR: weapon fidget clips play no sound (the gun does not fidget in VR)",
               Kind::Bool, 0.f, 1.f, &g_MuteFidgetSounds, nullptr },
             { "bmvr_laser_beam", "VR: red laser beam from the gun to where it points",
