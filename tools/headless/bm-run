@@ -163,6 +163,23 @@ if [[ -z ${BMVR_FLAT:-} && $profile != live ]]; then
 	done < <(tr -d '\r' < "$pdir/config.cfg" | grep -v -E '^(bind|unbind)')
 	echo "profile cvars on the command line: $(( ${#profile_args[@]} / 2 ))" >> "$out/run.log"
 fi
+# BMVR_CVARS="name=value ...": a deliberate off-profile run. Overrides those cvars at startup AND in the expected
+# settings the guard checks, so the run is still verified (against the overridden values). Logged in run.log.
+if [[ -n ${BMVR_CVARS:-} ]]; then
+	[[ -z ${BMVR_FLAT:-} && $profile != live ]] || { echo "BMVR_CVARS needs a VR run with a settings profile" >&2; exit 1; }
+	for kv in $BMVR_CVARS; do
+		k=${kv%%=*} v=${kv#*=}
+		[[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ && $kv == *=* ]] || { echo "BMVR_CVARS: bad entry '$kv'" >&2; exit 1; }
+		profile_args+=("+$k" "$v")
+		printf '%s "%s"\r\n' "$k" "$v" >> "$upper/bms/cfg/bmvr_harness_profile.cfg"   # runtime re-exec of the profile
+		if grep -q "^$k \"" "$out/expected-settings.cfg"; then
+			sed -i "s/^$k \".*\"/$k \"$v\"/" "$out/expected-settings.cfg"
+		else
+			printf '%s "%s"\n' "$k" "$v" >> "$out/expected-settings.cfg"
+		fi
+	done
+	echo "OFF-PROFILE run, BMVR_CVARS: $BMVR_CVARS" >> "$out/run.log"
+fi
 # Inside the namespace (uid 0 there): mount the overlay and make the removals, then a nested namespace maps back to
 # the real uid, because Wine and Steam refuse to run as root.
 ns_setup='
