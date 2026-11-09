@@ -413,7 +413,7 @@ namespace
 
     bool GpuTimerEnabled()
     {
-        return !g_GpuTimer.failed && bmvr::g_GpuPassTiming;
+        return !g_GpuTimer.failed && (bmvr::g_GpuPassTiming || bmvr::g_PerfLog);
     }
 
     bool GpuTimerThreadOk()
@@ -1116,9 +1116,33 @@ namespace
     // Called before Present: closes the frame and resolves the oldest one.
     void GpuTimerOnPresent(IDirect3DDevice9* device, VR* vr)
     {
-        if (!device || !GpuTimerEnabled() || !GpuTimerThreadOk())
+        if (!device || !GpuTimerEnabled())
             return;
         GpuPassTimer& t = g_GpuTimer;
+        // The timer belongs to the thread that presents (the device thread). With
+        // MulticoreMode that becomes the render thread after loading, so follow
+        // it instead of staying on the first thread that drew (timing stopped).
+        if (const DWORD tid = GetCurrentThreadId(); t.threadId != tid)
+        {
+            if (t.threadId != 0)
+                Game::logMsg("GPU pass timing: following the presenting thread %lu (was %lu)",
+                    static_cast<unsigned long>(tid), static_cast<unsigned long>(t.threadId));
+            t.threadId = tid;
+            GpuTimerRecycle(t.openBegin);
+            t.openBegin = nullptr;
+            t.openKind = kSpanNone;
+            for (int i = 0; i < kGpuFrames; ++i)
+            {
+                for (GpuSpan& sp : t.frames[i])
+                {
+                    GpuTimerRecycle(sp.begin);
+                    GpuTimerRecycle(sp.end);
+                }
+                t.frames[i].clear();
+                GpuTimerRecycle(t.frameEnd[i]);
+            }
+            t.lastFrameEndTs = 0;
+        }
         const int resumeKind = t.openKind;
         const int resumeEye = t.openEye;
         GpuTimerSwitch(device, kSpanNone, 0);

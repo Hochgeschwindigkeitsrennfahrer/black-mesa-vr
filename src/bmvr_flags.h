@@ -308,6 +308,10 @@ namespace bmvr
     // GPU ms per frame for eye-sized RTs, the reflection set and refract
     // copies, per eye, every ~5 s (D3D timestamp queries, no stalls).
     extern bool g_GpuPassTiming;
+    // PerfLog (default false): playtest performance log. Turns on GpuPassTiming
+    // and the engine world batch counters (per eye/view: surface groups, mesh
+    // changes vs the engine's 127 limit, player position) every ~5 s.
+    extern bool g_PerfLog;
     extern int g_ReflectionRtH;
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;

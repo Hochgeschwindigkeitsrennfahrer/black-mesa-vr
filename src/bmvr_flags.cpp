@@ -134,6 +134,7 @@ namespace bmvr
     int g_RefractCopyRtW = 0;
     int g_RefractCopyRtH = 0;
     bool g_GpuPassTiming = false;
+    bool g_PerfLog = false;
     int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
@@ -681,6 +682,8 @@ namespace bmvr
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassTiming") == 0)
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "PerfLog") == 0)
+                g_PerfLog = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ReflectionRtScale") == 0)
             {
                 const float v = static_cast<float>(atof(val));

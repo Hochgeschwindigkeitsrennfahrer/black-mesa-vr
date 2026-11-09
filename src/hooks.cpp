@@ -10,6 +10,7 @@ extern "C" volatile int g_BmvrD3dDrawTrace = 0;
 extern "C" volatile int g_BmvrFlashlightMatrixFix = 1;
 #include "bmvr_flags.h"
 #include <intrin.h>
+#include <map>
 
 // The areaportal setup's call into ComputeViewMatrices (E8 rel32 just before
 // kAreaPortalComputeViewReturnRva) must target `fn`; otherwise this is another
@@ -592,6 +593,144 @@ static void InstallFlareHooks(uintptr_t client)
         MH_EnableHook(frac);
 }
 
+// Performance log (PerfLog=true in VR/config.txt, or env BMVR_WORLDBATCH_STATS=1):
+// per engine world batcher call (eye, client view id, mode, sort group) the
+// number of surface groups, triangles and world static mesh changes, i.e. the
+// engine's batch count with its 127 limit ("Too many vertex format changes in
+// frame, whole world not rendered": the rest of that group is skipped). Every
+// 5 s one line per key that drew anything, plus the player's view position;
+// a call at the limit is logged at once (at most once per 2 s).
+using EngineWorldBatchFn = void(__cdecl*)(void* ctx, void* list, int group, int mode);
+static EngineWorldBatchFn g_OrigEngineWorldBatch = nullptr;
+static uintptr_t g_EngineBase = 0;
+
+struct WorldBatchCount { int groups = 0, batches = 0, dyn = 0, distinct = 0; unsigned tris = 0; };
+
+static bool CountWorldBatches(void* list, int group, WorldBatchCount& c)
+{
+    __try
+    {
+        auto* base = static_cast<unsigned char*>(list);
+        auto* vec = base + (group + 3) * 20;
+        auto** elems = *reinterpret_cast<unsigned char***>(vec);
+        const int count = *reinterpret_cast<int*>(vec + 0xC);
+        auto* surfList = *reinterpret_cast<unsigned char**>(base);
+        auto** meshes = *reinterpret_cast<void***>(g_EngineBase + Offsets::kEngineWorldStaticMeshesRva);
+        void* last = nullptr;
+        void* seen[64];
+        for (int i = 0; i < count && elems && surfList && meshes; ++i)
+        {
+            const unsigned char* g = elems[i];
+            const short h = *reinterpret_cast<const short*>(g);
+            if (h == -1)
+                continue;
+            const unsigned char* surf = *reinterpret_cast<unsigned char* const*>(surfList + h * 64 + 4);
+            if (!surf)
+                continue;
+            ++c.groups;
+            if (surf[0] & 0x80)
+            {
+                ++c.dyn;
+                continue;
+            }
+            c.tris += *reinterpret_cast<const unsigned short*>(g + 0xC);
+            void* mesh = meshes[*reinterpret_cast<const short*>(surf + 0x12)];
+            if (mesh != last)
+            {
+                ++c.batches;
+                last = mesh;
+                bool known = false;
+                for (int k = 0; k < c.distinct; ++k)
+                    if (seen[k] == mesh) { known = true; break; }
+                if (!known && c.distinct < 64)
+                    seen[c.distinct++] = mesh;
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return true;
+}
+
+static void __cdecl EngineWorldBatchStats(void* ctx, void* list, int group, int mode)
+{
+    WorldBatchCount c;
+    const bool ok = CountWorldBatches(list, group, c);
+    struct Agg { int calls = 0, over = 0, maxGroups = 0, maxBatches = 0, maxDistinct = 0, maxDyn = 0; long long groups = 0, batches = 0, tris = 0; };
+    static std::map<unsigned, Agg> s_agg;
+    static ULONGLONG s_next, s_nextOver;
+    static int s_overSince;
+    const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
+    const int viewId = g_ClientCurrentViewId ? g_ClientCurrentViewId() : -1;
+    const Vector pos = Hooks::m_VR ? Hooks::m_VR->m_SetupOrigin : Vector{};
+    const unsigned key = (static_cast<unsigned>(eye & 0xF) << 24) | (static_cast<unsigned>(viewId & 0xFFF) << 12)
+        | (static_cast<unsigned>(mode & 0xF) << 4) | static_cast<unsigned>(group & 0xF);
+    const ULONGLONG now = GetTickCount64();
+    if (ok)
+    {
+        Agg& a = s_agg[key];
+        ++a.calls;
+        a.groups += c.groups;
+        a.batches += c.batches;
+        a.tris += c.tris;
+        a.maxGroups = (std::max)(a.maxGroups, c.groups);
+        a.maxBatches = (std::max)(a.maxBatches, c.batches);
+        a.maxDistinct = (std::max)(a.maxDistinct, c.distinct);
+        a.maxDyn = (std::max)(a.maxDyn, c.dyn);
+        if (c.batches >= 127)
+        {
+            ++a.over;
+            ++s_overSince;
+            if (now >= s_nextOver)
+            {
+                Game::logMsg("worldbatch LIMIT eye=%d view=%d mode=%d group=%d: groups=%d (dynamic %d) batches=%d distinct meshes=%d tris=%u "
+                    "pos=(%.0f,%.0f,%.0f) calls at limit since last=%d",
+                    eye, viewId, mode, group, c.groups, c.dyn, c.batches, c.distinct, c.tris, pos.x, pos.y, pos.z, s_overSince);
+                s_overSince = 0;
+                s_nextOver = now + 2000;
+            }
+        }
+    }
+    if (!s_next)
+        s_next = now + 5000;
+    if (now >= s_next)
+    {
+        Game::logMsg("worldbatch 5s: pos=(%.0f,%.0f,%.0f) keys=%u", pos.x, pos.y, pos.z, static_cast<unsigned>(s_agg.size()));
+        for (const auto& [k, a] : s_agg)
+            if (a.maxGroups > 0)
+                Game::logMsg("worldbatch eye=%u view=%d mode=%u group=%u: calls=%d groups avg %lld max %d (dyn max %d), "
+                    "batches avg %lld max %d (distinct meshes max %d), tris avg %lld, at limit %d",
+                    k >> 24, static_cast<int>((k >> 12) & 0xFFF), (k >> 4) & 0xF, k & 0xF, a.calls,
+                    a.groups / a.calls, a.maxGroups, a.maxDyn, a.batches / a.calls, a.maxBatches, a.maxDistinct,
+                    a.tris / a.calls, a.over);
+        s_agg.clear();
+        s_next = now + 5000;
+    }
+    g_OrigEngineWorldBatch(ctx, list, group, mode);
+}
+
+static void InstallEngineWorldBatchStats()
+{
+    char v[8] = {};
+    const bool env = GetEnvironmentVariableA("BMVR_WORLDBATCH_STATS", v, sizeof(v)) && v[0] == '1';
+    if ((!env && !bmvr::g_PerfLog) || g_OrigEngineWorldBatch)
+        return;
+    g_EngineBase = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
+    if (!g_EngineBase)
+        return;
+    auto* fn = reinterpret_cast<unsigned char*>(g_EngineBase + Offsets::kEngineWorldBatchRva);
+    static const unsigned char kPrologue[] = { 0x55, 0x8B, 0xEC, 0xB8, 0x94, 0x18, 0x00, 0x00 };
+    if (std::memcmp(fn, kPrologue, sizeof(kPrologue)) != 0)
+    {
+        Game::logMsg("worldbatch stats: prologue MISMATCH (not hooked)");
+        return;
+    }
+    if (MH_CreateHook(fn, reinterpret_cast<LPVOID>(&EngineWorldBatchStats),
+            reinterpret_cast<LPVOID*>(&g_OrigEngineWorldBatch)) == MH_OK
+        && MH_EnableHook(fn) == MH_OK)
+        Game::logMsg("Perf log: world batch counters on (%s), GPU pass timing %s",
+            env ? "BMVR_WORLDBATCH_STATS" : "PerfLog", (bmvr::g_GpuPassTiming || bmvr::g_PerfLog) ? "on" : "off");
+}
+
 static void InstallPixelVisStats(uintptr_t client)
 {
     char v[8] = {};
@@ -648,6 +787,7 @@ static void InstallPixelVisPerEye()
     }
     g_ClientCurrentViewId = reinterpret_cast<ClientCurrentViewIdFn>(target);
     InstallPixelVisStats(client);
+    InstallEngineWorldBatchStats();
     InstallFlareHooks(client);
     // Headless A/B aid: BMVR_PIXELVIS_NOGRACE=1 keeps the stock 1-frame age.
     char noGrace[8] = {};

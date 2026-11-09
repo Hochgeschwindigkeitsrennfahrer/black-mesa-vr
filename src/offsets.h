@@ -548,6 +548,14 @@ public:
     // GetFractionVisible 0xD48B0 and find-or-create query for a view 0xD4560.
     static constexpr uint32_t kPixelVisGetFractionRva = 0xD48B0;
     static constexpr uint32_t kPixelVisQueryForViewRva = 0xD4560;
+    // Headless diagnostic only (BMVR_WORLDBATCH_STATS): engine world surface
+    // batcher (cdecl: render context, sort list, sort group, mode). Walks the
+    // group's surface groups and starts a batch on every change of world static
+    // mesh; local limit 127 batches ("Too many vertex format changes"), the rest
+    // of the group is skipped. Static mesh table = engine+0x8E6224 (indexed by
+    // the surface's material sort id, short at msurface+0x12).
+    static constexpr uint32_t kEngineWorldBatchRva = 0x10AFA0;
+    static constexpr uint32_t kEngineWorldStaticMeshesRva = 0x8E6224;
     // CLensflare's world-to-pixel helper (cdecl: world, size[2], out).  Reads the
     // view and projection matrices from the render context; diagnostic hook only.
     static constexpr uint32_t kLensflareWorldToScreenRva = 0x223960;
