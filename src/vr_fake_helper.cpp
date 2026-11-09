@@ -25,6 +25,12 @@
 //                                peak speed pi/2 x distance / seconds at the middle);
 //                                attack is held until <release> (0..1 of the move),
 //                                then let go. A new <id> starts a new throw.
+//                                Optional 7th value <arc>: extra up-and-down bump of
+//                                <arc> metres (sin over the move), so the direction
+//                                changes along the swing like an overhand arc.
+//   poselag <every> <ms>         every <every>-th pose reports the hand where it was
+//                                <ms> earlier (the PS VR2 Sense on SteamVR: every third
+//                                pose at 90/s barely moves, then the next ones catch up)
 // <VR dir>\cmd.txt: console commands, one per line, appended by the test; each new
 // line is run once (ClientCmd_Unrestricted on the engine thread).
 
@@ -72,6 +78,9 @@ namespace
         float throwD[3] = {};
         float throwSec = 0.2f, throwRelease = 0.5f;
         float poseRate = 120.f;   // poses per second (game at half rate: ~45)
+        float throwArc = 0.f;
+        int poseLagEvery = 0;
+        float poseLagMs = 0.f;
     };
 
     std::mutex g_CmdMutex;
@@ -165,6 +174,9 @@ namespace
         fresh.moveX = fresh.moveY = fresh.turnX = fresh.turnY = 0;
         fresh.throwId = 0;   // a throw lasts while its line is in the file
         fresh.poseRate = 120.f;
+        fresh.throwArc = 0.f;
+        fresh.poseLagEvery = 0;
+        fresh.poseLagMs = 0.f;
         std::string line;
         while (std::getline(in, line))
         {
@@ -186,8 +198,14 @@ namespace
                 fresh.poseRate = std::clamp(fresh.poseRate, 10.f, 500.f);
             }
             else if (key == "throw")
+            {
                 ss >> fresh.throwId >> fresh.throwD[0] >> fresh.throwD[1] >> fresh.throwD[2]
                    >> fresh.throwSec >> fresh.throwRelease;
+                if (!(ss >> fresh.throwArc))
+                    fresh.throwArc = 0.f;
+            }
+            else if (key == "poselag")
+                ss >> fresh.poseLagEvery >> fresh.poseLagMs;
             else if (key == "buttons")
             {
                 std::string b;
@@ -304,6 +322,7 @@ namespace
         int activeThrowId = 0;
         double throwStart = 0.0;
         FakePose throwBase{};
+        uint64_t poseCount = 0;
         for (;;)
         {
             Sleep((DWORD)std::max(1.f, roundf(1000.f / script.poseRate))); // ~120 Hz like the PS VR2 unless `poserate`
@@ -384,12 +403,16 @@ namespace
             }
             if (activeThrowId != 0 && activeThrowId == script.throwId)
             {
+                ++poseCount;
+                const bool lagged = script.poseLagEvery > 0 && poseCount % (uint64_t)script.poseLagEvery == 0;
+                const double handSec = nowSec - (lagged ? script.poseLagMs * 1e-3 : 0.0);
                 const float u = (float)std::clamp((nowSec - throwStart) / std::max(0.01f, script.throwSec), 0.0, 1.0);
-                const float k = 0.5f * (1.0f - cosf(kPi * u));
+                const float uh = (float)std::clamp((handSec - throwStart) / std::max(0.01f, script.throwSec), 0.0, 1.0);
+                const float k = 0.5f * (1.0f - cosf(kPi * uh));
                 right = throwBase;
                 right.x += script.throwD[0] * k;
                 right.y += script.throwD[1] * k;
-                right.z += script.throwD[2] * k;
+                right.z += script.throwD[2] * k + script.throwArc * sinf(kPi * uh);
                 throwActive = u < 1.0f;
                 throwAttack = u < script.throwRelease;
             }

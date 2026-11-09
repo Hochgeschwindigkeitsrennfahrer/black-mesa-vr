@@ -519,10 +519,11 @@ void VR::UpdateCrowbarMelee()
 //   time. Sampling once per game frame (~170/s) on the game's clock while
 //   poses arrive at 90/s made the step speeds swing between about half and
 //   twice the real speed, and taking the fastest step picked the spikes.
-// - the speed and direction come from the strongest ~33 ms stretch of pose
-//   time (25-50 ms), not a single step or a fixed number of steps, so the
-//   pose rate (90/s, or ~45/s when the game runs at half rate) does not
-//   change how much of the arm's slow-down is averaged in.
+// - the speed and direction come from the strongest least-squares line
+//   through ~66 ms of poses near the trigger release (see
+//   TryGetThrowVelocity), not from single steps, so the pose wobble and the
+//   pose rate (90/s, or ~45/s when the game runs at half rate) do not change
+//   the result much. bmvr_throw_stroke 1 uses the whole throwing stroke.
 // - the window is anchored on the trigger release (0.15 s before to 0.03 s
 //   after): Black Mesa throws only once its pin-pull/throw animation has
 //   run, when the arm has stopped or come back.
@@ -548,6 +549,14 @@ namespace
         float spanMs = 0.f;          // pose-time span the speed was measured over
         double spanVsRelease = 0.0;  // s, end of that span vs the release
         char stepsText[512] = {};    // raw step speeds "u/s/dt" in the window
+        const char* fitMode = "";
+        int fitPoses = 0;
+        float releaseFit = -1.f;     // fitted speed at the release, -1 = none
+        // comparison estimates (u/s before scaling, elevation in degrees)
+        float strokeSpeed = -1.f, strokeElev = 0.f, strokeMs = 0.f, strokeLen = 0.f;
+        double strokeStartVsRelease = 0.0;
+        float peakFitSpeed = -1.f, peakFitElev = 0.f;
+        float span33Speed = -1.f, span33Elev = 0.f;
     };
     ThrowDiag g_LastThrowDiag;
 }
@@ -591,6 +600,8 @@ void VR::SampleThrowHand()
     const double now = ThrowNowSec();
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     const bool attack = (m_HeldButtons.load(std::memory_order_acquire) & IN_ATTACK) != 0;
+    if (!m_ThrowAttackHeld && attack)
+        m_ThrowPressT = now;   // pin pulled
     if (m_ThrowAttackHeld && !attack)
     {
         m_ThrowReleaseT = now;
@@ -682,50 +693,226 @@ bool VR::TryGetThrowVelocity(Vector& out)
     }
     if (peak < 0)
         return false;
-    // Speed and direction = the strongest stretch of about 33 ms (start to end
-    // displacement over the pose-time span) ending inside the window. A fixed
-    // time span, not a fixed number of pose steps: at ~45 poses/s three steps
-    // covered ~65 ms and took in the arm stopping, which cancelled the throw
-    // (hand avg 52 u/s next to a 419 u/s step, grenade dropped at the feet).
-    // A one-step spike that reverses cancels out within the span as well.
-    constexpr double kSpanMinSec = 0.025;
-    constexpr double kSpanMaxSec = 0.050;
+    // Speed and direction = the strongest least-squares line through about
+    // 66 ms of hand positions (pose time) ending inside the window. The PS VR2
+    // Sense poses on SteamVR wobble: at 90/s every third pose barely moves
+    // and the next ones catch up (steps like 353 49 392 391 50 372 u/s), so
+    // the previous strongest ~33 ms span (two or three steps) depended on
+    // where the wobble fell and picked different parts of the arm's arc from
+    // throw to throw (10 vs 40 deg up). A fit over two wobble periods evens
+    // it out. Not anchored on the release itself: on a curved swing that
+    // made the result depend on when the trigger was let go (later = flatter
+    // and slower); the fit at the release is logged for comparison.
+    constexpr double kFitSec = 0.066;
+    constexpr double kFitAfterReleaseSec = 0.016;   // release fit (log only)
+    auto fitLine = [&](double t0, double t1, Vector& vel, int& lo, int& hi) -> bool {
+        lo = hi = -1;
+        double tm = 0.0;
+        Vector xm(0, 0, 0);
+        int cnt = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            if (win[i].t < t0 || win[i].t > t1)
+                continue;
+            if (lo >= 0 && win[i].poseT - win[hi].poseT > kMaxStepSec)
+                return false;   // tracking gap inside the stretch
+            if (lo < 0)
+                lo = i;
+            hi = i;
+            tm += win[i].poseT;
+            xm += win[i].local;
+            ++cnt;
+        }
+        if (cnt < 3)
+            return false;
+        tm /= cnt;
+        xm *= 1.f / static_cast<float>(cnt);
+        double stt = 0.0;
+        Vector stx(0, 0, 0);
+        for (int i = lo; i <= hi; ++i)
+        {
+            const double dt = win[i].poseT - tm;
+            stt += dt * dt;
+            stx += (win[i].local - xm) * static_cast<float>(dt);
+        }
+        if (stt <= 1e-9)
+            return false;
+        vel = stx * static_cast<float>(1.0 / stt);
+        return true;
+    };
+    Vector best(0, 0, 0);
     int lo = -1, hi = -1;
-    float bestSpeed = -1.f;
-    for (int j = 1; j < n; ++j)
+    // Strongest fitted stretch ending inside the window.
+    Vector peakVel(0, 0, 0);
+    int peakLo = -1, peakHi = -1;
+    float peakFit = -1.f;
+    for (int j = 0; j < n; ++j)
     {
         if (win[j].t < since || win[j].t > until)
             continue;
-        for (int i = j - 1; i >= 0; --i)
+        Vector v;
+        int a, b;
+        if (fitLine(win[j].t - kFitSec - 1e-4, win[j].t + 1e-4, v, a, b) && v.Length() > peakFit)
         {
-            if (win[i + 1].poseT - win[i].poseT > kMaxStepSec)
-                break;   // tracking gap: do not span it
-            const double span = win[j].poseT - win[i].poseT;
-            if (span > kSpanMaxSec)
-                break;
-            if (span < kSpanMinSec)
+            peakFit = v.Length();
+            peakVel = v;
+            peakLo = a;
+            peakHi = b;
+        }
+    }
+    diag.fitMode = "peak";
+    if (diag.releaseAge >= 0.0)
+    {
+        const double r1 = m_ThrowReleaseT + kFitAfterReleaseSec;
+        Vector v;
+        int a, b;
+        bool ok = fitLine(r1 - kFitSec, r1, v, a, b);
+        if (!ok)   // poses too sparse (half rate): a wider stretch
+            ok = fitLine(r1 - 1.5 * kFitSec, r1, v, a, b);
+        diag.releaseFit = ok ? v.Length() : -1.f;
+    }
+    auto elevOf = [](const Vector& v) {
+        const float l = v.Length();
+        return l > 0.f ? RAD2DEG(asinf(std::clamp(v.z / l, -1.f, 1.f))) : 0.f;
+    };
+    if (peakFit > 0.f)
+    {
+        diag.peakFitSpeed = peakFit;
+        diag.peakFitElev = elevOf(peakVel);
+    }
+    {
+        // Old estimate for comparison: strongest 25-50 ms span.
+        float bestSp = -1.f;
+        Vector bestV(0, 0, 0);
+        for (int j = 1; j < n; ++j)
+        {
+            if (win[j].t < since || win[j].t > until)
                 continue;
-            const float sp = (win[j].local - win[i].local).Length() / static_cast<float>(span);
-            if (sp > bestSpeed)
+            for (int i = j - 1; i >= 0; --i)
             {
-                bestSpeed = sp;
-                lo = i;
-                hi = j;
+                if (win[i + 1].poseT - win[i].poseT > kMaxStepSec)
+                    break;
+                const double sp = win[j].poseT - win[i].poseT;
+                if (sp > 0.050)
+                    break;
+                if (sp < 0.025)
+                    continue;
+                const Vector v = (win[j].local - win[i].local) * static_cast<float>(1.0 / sp);
+                if (v.Length() > bestSp)
+                {
+                    bestSp = v.Length();
+                    bestV = v;
+                }
+            }
+        }
+        if (bestSp > 0.f)
+        {
+            diag.span33Speed = bestSp;
+            diag.span33Elev = elevOf(bestV);
+        }
+    }
+    // The throwing stroke (used with bmvr_throw_stroke 1, always logged):
+    // from the point of the hold (pin pulled -> trigger
+    // let go, at most 1 s back) farthest from where the hand is at the
+    // release, to the release. Its chord gives the direction and its length
+    // over its duration the speed. Two positions half a metre apart, so the
+    // pose wobble (a few mm) hardly matters, and neither does where the
+    // speed peaked. If the hand rested at the far point, the stroke starts
+    // when it left (the last pose still within 95 % of that distance).
+    if (diag.releaseAge >= 0.0 && m_ThrowPressT > 0.0 && m_ThrowPressT < m_ThrowReleaseT)
+    {
+        constexpr double kMaxHoldSec = 1.0;
+        constexpr double kReleaseSlackSec = 0.005;
+        const double from = std::max(m_ThrowPressT, m_ThrowReleaseT - kMaxHoldSec);
+        const double to = m_ThrowReleaseT + kReleaseSlackSec;
+        // Oldest first.
+        static ThrowSample hold[kThrowSamples];
+        int hn = 0;
+        const int newest = (m_ThrowSampleNext + kThrowSamples - 1) % kThrowSamples;
+        int first = -1;
+        for (int k = 0; k < kThrowSamples; ++k)
+        {
+            const ThrowSample& smp = m_ThrowSamples[(newest - k + kThrowSamples) % kThrowSamples];
+            if (smp.t <= 0.0 || smp.t < from)
+                break;
+            first = k;
+        }
+        for (int k = first; k >= 0; --k)
+        {
+            const ThrowSample& smp = m_ThrowSamples[(newest - k + kThrowSamples) % kThrowSamples];
+            if (smp.t <= to)
+                hold[hn++] = smp;
+        }
+        if (hn >= 3)
+        {
+            const ThrowSample& end = hold[hn - 1];
+            float maxD = 0.f;
+            for (int i = 0; i < hn - 1; ++i)
+                maxD = std::max(maxD, (hold[i].local - end.local).Length());
+            int st = -1;
+            for (int i = hn - 2; i >= 0; --i)
+                if ((hold[i].local - end.local).Length() >= 0.95f * maxD)
+                {
+                    st = i;
+                    break;
+                }
+            constexpr float kMinStrokeUnits = 4.f;   // ~10 cm
+            constexpr double kMinStrokeSec = 0.03;
+            if (st >= 0)
+            {
+                const double dur = end.poseT - hold[st].poseT;
+                const Vector chord = end.local - hold[st].local;
+                if (dur >= kMinStrokeSec && chord.Length() >= kMinStrokeUnits)
+                {
+                    // Mean stroke speed -> speed at the release: an arm
+                    // accelerating from rest averages about 2/pi of its
+                    // peak (sine profile), so x pi/2 keeps Throw strength
+                    // roughly where it was tuned.
+                    constexpr float kStrokeToRelease = 1.5708f;
+                    const Vector v = chord * static_cast<float>(kStrokeToRelease / dur);
+                    diag.strokeSpeed = v.Length();
+                    diag.strokeElev = elevOf(v);
+                    diag.strokeMs = static_cast<float>(dur * 1000.0);
+                    diag.strokeLen = chord.Length();
+                    diag.strokeStartVsRelease = hold[st].t - m_ThrowReleaseT;
+                    if (bmvr::g_ThrowStroke)
+                    {
+                        best = v;
+                        lo = hi = -2;   // marker: stroke used
+                        diag.fitMode = "stroke";
+                    }
+                }
             }
         }
     }
-    if (lo < 0)
+    if (lo == -2)
     {
-        // Poses too sparse for a ~33 ms span: the fastest single step.
+        // stroke: no fit span
+    }
+    else if (lo < 0 && peakLo >= 0)
+    {
+        best = peakVel;
+        lo = peakLo;
+        hi = peakHi;
+    }
+    else
+    {
+        // Poses too sparse for a fit: the fastest single step.
         lo = peak - 1;
         hi = peak;
+        const double dt = win[hi].poseT - win[lo].poseT;
+        if (dt < kMinStepSec)
+            return false;
+        best = (win[hi].local - win[lo].local) * static_cast<float>(1.0 / dt);
+        diag.fitMode = "single step";
     }
-    const double span = win[hi].poseT - win[lo].poseT;
-    if (span < kMinStepSec)
-        return false;
-    const Vector best = (win[hi].local - win[lo].local) * static_cast<float>(1.0 / span);
-    diag.spanMs = static_cast<float>(span * 1000.0);
-    diag.spanVsRelease = m_ThrowReleaseT > 0.0 && diag.releaseAge >= 0.0 ? win[hi].t - m_ThrowReleaseT : 0.0;
+    if (lo >= 0)
+    {
+        const double span = win[hi].poseT - win[lo].poseT;
+        diag.fitPoses = hi - lo + 1;
+        diag.spanMs = static_cast<float>(span * 1000.0);
+        diag.spanVsRelease = m_ThrowReleaseT > 0.0 && diag.releaseAge >= 0.0 ? win[hi].t - m_ThrowReleaseT : 0.0;
+    }
     {
         // Raw step speeds in the window, oldest first (u/s before scaling).
         int len = 0;
@@ -770,6 +957,10 @@ void VR::LogLastThrow() const
         d.avg, d.peakStep, d.steps, d.elevDeg, d.peakVsRelease * 1000.0,
         d.releaseAge >= 0.0 ? d.releaseAge * 1000.0 : -1.0,
         d.capped ? " (capped)" : "", bmvr::g_ThrowScale);
-    Game::logMsg("VR frag throw steps: used %.0f ms span ending %+.0f ms vs release; window u/s/dt: %s",
-        d.spanMs, d.spanVsRelease * 1000.0, d.stepsText);
+    Game::logMsg("VR frag throw estimates: used %s | stroke %.0f u/s up %.0f deg (%.0f units over %.0f ms, "
+        "started %+.0f ms vs release) | 66 ms fit peak %.0f u/s up %.0f deg | release fit %.0f u/s | "
+        "old 33 ms span %.0f u/s up %.0f deg",
+        d.fitMode, d.strokeSpeed, d.strokeElev, d.strokeLen, d.strokeMs, d.strokeStartVsRelease * 1000.0,
+        d.peakFitSpeed, d.peakFitElev, d.releaseFit, d.span33Speed, d.span33Elev);
+    Game::logMsg("VR frag throw steps: window u/s/dt: %s", d.stepsText);
 }

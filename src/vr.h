@@ -1450,6 +1450,7 @@ private:
     // 90-120 poses/s: 512 is over 4 s.
     static constexpr int kThrowSamples = 512;
     double m_ThrowReleaseT = 0.0;               // trigger let go (IN_ATTACK 1 -> 0)
+    double m_ThrowPressT = 0.0;                 // pin pulled (IN_ATTACK 0 -> 1)
     bool m_ThrowAttackHeld = false;
     ThrowSample m_ThrowSamples[kThrowSamples]{};
     int m_ThrowSampleNext = 0;
