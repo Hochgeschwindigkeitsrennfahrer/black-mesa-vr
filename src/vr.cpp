@@ -6637,6 +6637,7 @@ bool VR::LadderMode(int& moveBits, bool& onLadder, float* mountYaw) const
         const int n = m_Game->CollectLadders(bottoms, tops, 32);
         float bestDist2 = kNearHu * kNearHu;
         Vector bestClosest{};
+        float bestT = 0.f;
         for (int i = 0; i < n; ++i)
         {
             const Vector axis = tops[i] - bottoms[i];
@@ -6649,6 +6650,7 @@ bool VR::LadderMode(int& moveBits, bool& onLadder, float* mountYaw) const
             {
                 bestDist2 = d2;
                 bestClosest = closest;
+                bestT = t;
                 ladder = true;
             }
         }
@@ -6664,12 +6666,17 @@ bool VR::LadderMode(int& moveBits, bool& onLadder, float* mountYaw) const
         // 32-unit range, a stick pointing within kMountConeDeg of the ladder
         // (in the head's frame) sends the view straight at it with a pure
         // forward move, so that tick's auto-mount check passes.
+        // Only on the lower half of the ladder (from the bottom, or swimming
+        // up to it): at the top the closest point is the top end, so walking
+        // anywhere near the hole within 50 degrees mounted the ladder; there
+        // the engine's own check (face it within 15 degrees) applies.
         constexpr float kMountHu = 30.f;   // engine: dist < 32
         constexpr float kMountConeDeg = 50.f;
+        constexpr float kMountMaxAlong = 0.5f;   // fraction of the ladder from the bottom
         const float flatX = bestClosest.x - origin.x;
         const float flatY = bestClosest.y - origin.y;
         const float flat2 = flatX * flatX + flatY * flatY;
-        if (ladder && mountYaw && bestDist2 < kMountHu * kMountHu && flat2 > 1.f)
+        if (ladder && mountYaw && bestDist2 < kMountHu * kMountHu && flat2 > 1.f && bestT <= kMountMaxAlong)
         {
             const float toLadderYaw = atan2f(flatY, flatX) * 180.f / 3.14159265f;
             // Stick direction in world yaw: head yaw, stick right turns
@@ -6685,8 +6692,8 @@ bool VR::LadderMode(int& moveBits, bool& onLadder, float* mountYaw) const
                 static int s_assistLog;
                 if (s_assistLog < 16)
                 {
-                    Game::logMsg("Ladder mount assist: %.0f units, stick %.0f deg off the ladder",
-                        sqrtf(bestDist2), delta);
+                    Game::logMsg("Ladder mount assist: %.0f units, stick %.0f deg off the ladder, %.0f%% up it",
+                        sqrtf(bestDist2), delta, bestT * 100.f);
                     ++s_assistLog;
                 }
                 return true;

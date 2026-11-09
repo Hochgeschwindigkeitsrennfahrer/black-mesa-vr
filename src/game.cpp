@@ -975,6 +975,9 @@ int Game::CollectLadders(Vector* bottoms, Vector* tops, int maxLadders)
                 me.x, me.y, me.z, haveMe ? "" : " (unknown)");
         else
             Game::logMsg("Ladders: none on the map");
+        for (int i = 0; i < n && i < 16; ++i)
+            Game::logMsg("Ladder %d: bottom (%.0f,%.0f,%.0f) top (%.0f,%.0f,%.0f)", i,
+                bottoms[i].x, bottoms[i].y, bottoms[i].z, tops[i].x, tops[i].y, tops[i].z);
     }
     return n;
 }
