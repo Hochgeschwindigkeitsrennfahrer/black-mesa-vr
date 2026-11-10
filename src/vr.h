@@ -1321,6 +1321,22 @@ private:
     void ApplyTurnStick(float stickX, float deltaMs);
     static bool IsGameplayMapName(const char* map);
     void PollMapFromEngine();
+    // One explicit phase for what the headset should show (docs: steam repo
+    // docs/plans/bmvr-loading-mode.md). Step 1: computed + logged only.
+    enum class VrPhase : uint8_t { Unknown, Menu2D, Loading, Gameplay, Pause };
+    static const char* VrPhaseName(VrPhase p);
+    bool EngineDrawingLoadingImage();
+    void UpdateVrPhase(bool inGame);
+    VrPhase m_VrPhase = VrPhase::Unknown;
+    DWORD m_VrPhaseSinceMs = 0;
+    // engine scr_drawloading byte, from IVEngineClient slot 29
+    // (IsDrawingLoadingImage = mov al,[abs]; ret). nullptr = not found yet,
+    // m_LoadingFlagProbed stops re-probing after a failed check.
+    const volatile uint8_t* m_LoadingFlagAddr = nullptr;
+    bool m_LoadingFlagProbed = false;
+    bool m_PhaseDumpBackbuffer = false;
+    DWORD m_PhaseDumpAtMs = 0;
+    void TickPhaseDump();
     bool InitOpenVR();
     bool InitOpenXR();
     bool ConsumeOpenXrTracking();

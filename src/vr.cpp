@@ -3186,7 +3186,8 @@ void VR::OnLevelInit(const char* newmap)
     m_GameUiVisible = false;
     m_GameUiActivateMs = 0;
     m_MenuLastVisibleMs = 0;
-    m_MenuPanelPoseValid = false;
+    if (m_VrPhase != VrPhase::Loading)   // loading panel keeps its place
+        m_MenuPanelPoseValid = false;
     m_WeaponMenuPrevEntity = 0;
     m_WeaponMenuPrevKind = 0;
     m_GmanModelIndex[0] = m_GmanModelIndex[1] = -1;
@@ -3229,6 +3230,104 @@ bool VR::ShouldCompositorSubmit() const
     return true;
 }
 
+const char* VR::VrPhaseName(VrPhase p)
+{
+    switch (p)
+    {
+    case VrPhase::Menu2D: return "menu2d";
+    case VrPhase::Loading: return "loading";
+    case VrPhase::Gameplay: return "gameplay";
+    case VrPhase::Pause: return "pause";
+    default: return "unknown";
+    }
+}
+
+bool VR::EngineDrawingLoadingImage()
+{
+    if (!m_LoadingFlagProbed)
+    {
+        m_LoadingFlagProbed = true;
+        if (m_Game && m_Game->m_EngineClient)
+        {
+            __try
+            {
+                void** vtbl = *reinterpret_cast<void***>(m_Game->m_EngineClient);
+                const uint8_t* fn = static_cast<const uint8_t*>(vtbl[29]);
+                // IsDrawingLoadingImage: A0 <abs32> C3 = mov al,[scr_drawloading]; ret
+                if (fn && fn[0] == 0xA0 && fn[5] == 0xC3)
+                    m_LoadingFlagAddr = *reinterpret_cast<const volatile uint8_t* const*>(fn + 1);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                m_LoadingFlagAddr = nullptr;
+            }
+        }
+        Game::logMsg("VR phase: loading flag %s", m_LoadingFlagAddr ? "found (engine slot 29)" : "NOT found; loading phase from LevelInit/IsInGame only");
+    }
+    if (!m_LoadingFlagAddr)
+        return false;
+    bool on = false;
+    __try
+    {
+        on = *m_LoadingFlagAddr != 0;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        m_LoadingFlagAddr = nullptr;
+    }
+    return on;
+}
+
+void VR::UpdateVrPhase(bool inGame)
+{
+    const bool drawingLoading = EngineDrawingLoadingImage();
+    // Want2dMenuPanel / WantPauseWorldOverlay depend on the current phase;
+    // evaluate the non-loading phases as if no phase were set yet.
+    const VrPhase prev = m_VrPhase;
+    m_VrPhase = VrPhase::Unknown;
+    VrPhase phase;
+    if (drawingLoading || (m_GameplayEligible && (!inGame || !m_SeenGameplay) && !PauseUiActive()))
+        phase = VrPhase::Loading;
+    else if (Want2dMenuPanel())
+        phase = VrPhase::Menu2D;
+    else if (WantPauseWorldOverlay())
+        phase = VrPhase::Pause;
+    else if (m_GameplayEligible && inGame)
+        phase = VrPhase::Gameplay;
+    else
+        phase = VrPhase::Menu2D;
+    m_VrPhase = prev;
+    if (phase == m_VrPhase)
+        return;
+    const DWORD now = GetTickCount();
+    Game::logMsg("VR phase %s -> %s after %lu ms (loadingImage=%d inGame=%d eligible=%d seen=%d gameUi=%d map=%s)",
+        VrPhaseName(m_VrPhase), VrPhaseName(phase),
+        m_VrPhaseSinceMs ? static_cast<unsigned long>(now - m_VrPhaseSinceMs) : 0ul,
+        drawingLoading ? 1 : 0, inGame ? 1 : 0, m_GameplayEligible ? 1 : 0, m_SeenGameplay ? 1 : 0,
+        PauseUiActive() ? 1 : 0, m_CurrentMapName.c_str());
+    m_VrPhase = phase;
+    m_VrPhaseSinceMs = now;
+    // Test aid (BMVR_PHASE_DUMP=1, headless): dump what the next publish shows
+    // after each change, plus the window backbuffer (dump verb, "-bb.bmp").
+    static const bool s_phaseDump = [] { char v[8] = {}; return GetEnvironmentVariableA("BMVR_PHASE_DUMP", v, sizeof(v)) > 0 && v[0] == '1'; }();
+    if (s_phaseDump)
+        m_PhaseDumpAtMs = now + 150;   // after the switch has reached a publish
+}
+
+void VR::TickPhaseDump()
+{
+    if (!m_PhaseDumpAtMs || static_cast<int32_t>(GetTickCount() - m_PhaseDumpAtMs) < 0)
+        return;
+    m_PhaseDumpAtMs = 0;
+    static int s_phaseDumpN;
+    if (FILE* df = std::fopen(bmvr::VrFilePath("dump.txt").c_str(), "wb"))
+    {
+        std::fprintf(df, "phase%02d-%s 2", ++s_phaseDumpN, VrPhaseName(m_VrPhase));
+        std::fclose(df);
+    }
+    m_PhaseDumpBackbuffer = true;
+}
+
 void VR::OnLevelShutdown()
 {
     m_GameplayEligible = false;
@@ -3252,7 +3351,9 @@ void VR::OnLevelShutdown()
     m_GameUiVisible = false;
     m_GameUiActivateMs = 0;
     m_MenuLastVisibleMs = 0;
-    m_MenuPanelPoseValid = false;
+    // A loading panel stays where it was latched for the whole load.
+    if (m_VrPhase != VrPhase::Loading)
+        m_MenuPanelPoseValid = false;
     Game::logMsg("LevelShutdown");
 }
 
@@ -4555,7 +4656,7 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         return;
     static DWORD s_lastCheck = 0;
     const DWORD now = GetTickCount();
-    if (now - s_lastCheck < 250)
+    if (now - s_lastCheck < 250 && !m_PhaseDumpBackbuffer)
         return;
     s_lastCheck = now;
     if (s_capturePolls > 0)
@@ -4657,6 +4758,16 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         Game::logMsg("debug dump: no publish slot (%u)", slot);
     DumpSurfaceBmp(dev, m_D9HUDSurface, base + "-hud.bmp", 2);
     DumpSurfaceBmp(dev, m_D9HUDSurface, base + "-hud-alpha.bmp", 2, true);
+    if (m_PhaseDumpBackbuffer)
+    {
+        m_PhaseDumpBackbuffer = false;
+        IDirect3DSurface9* bb = nullptr;
+        if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb)
+        {
+            DumpSurfaceBmp(dev, bb, base + "-bb.bmp", 2);
+            bb->Release();
+        }
+    }
     dev->Release();
 }
 
@@ -8714,6 +8825,8 @@ bool VR::WantPauseWorldOverlay() const
 {
     if (!m_IsVREnabled || !m_GameplayEligible || !PauseUiActive())
         return false;
+    if (m_VrPhase == VrPhase::Loading)
+        return false;
     if (!m_Game || !m_Game->m_EngineClient)
         return false;
     if (!m_Game->m_EngineClient->IsInGame())
@@ -8732,6 +8845,13 @@ bool VR::Want2dMenuPanel() const
         return true;
     if (!PauseUiActive())
         return false;
+    // Loading phase with the game's loading dialog up (changelevel, load from
+    // the pause menu): the window shows Black Mesa's loading screen; show it
+    // as the 2D panel (helper drops the stereo layer) instead of the frozen
+    // world. Without the dialog (in-game load) the window is only the world
+    // mirror, so the stereo frame stays.
+    if (m_VrPhase == VrPhase::Loading)
+        return true;
     // Load / LevelInit GameUI before gameplay has run. In-game pause is overlay.
     return !m_SeenGameplay;
 }
@@ -8767,7 +8887,20 @@ void VR::LatchMenuPanelIfNeeded()
         return;
     }
     if (m_MenuPanelPoseValid)
+    {
+        // A pause overlay latched just before loading began (or the reverse):
+        // keep the place, switch between mono panel and stereo world.
+        const bool mono = Want2dMenuPanel();
+        if (((m_MenuPanelPose.reserved1 & L4D2VR_OPENXR_POSE_FLAG_MONO) != 0) != mono)
+        {
+            if (mono)
+                m_MenuPanelPose.reserved1 |= L4D2VR_OPENXR_POSE_FLAG_MONO;
+            else
+                m_MenuPanelPose.reserved1 &= ~L4D2VR_OPENXR_POSE_FLAG_MONO;
+            Game::logMsg("Menu panel %s (phase %s)", mono ? "-> mono 2D" : "-> world overlay", VrPhaseName(m_VrPhase));
+        }
         return;
+    }
     if (!m_OpenXrLastHmdPose.valid || !m_HmdPoseValid)
         return;
     ++m_MenuOverlayEpoch;
@@ -17570,6 +17703,8 @@ void VR::Update()
 
     PollMapFromEngine();
     const bool inGame = m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
+    UpdateVrPhase(inGame);
+    TickPhaseDump();
     // LevelInit names the map before IsInGame. Do not run AutoMatQueueMode,
     // pose, or input during that window — Present is about to stop for
     // material precache, and overnight Update work is not what unblocks it.
