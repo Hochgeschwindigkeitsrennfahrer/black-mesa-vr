@@ -169,6 +169,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_FollowScriptedCamera, nullptr },
             { "bmvr_glow_hold", "VR: seconds a dimming light glow keeps its brightness before it fades (0 = off; stops flicker behind dirty glass / at the view edge)",
               Kind::Float, 0.f, 2.f, nullptr, &g_GlowHold },
+            { "bmvr_freeze_head", "VR debug: the game view keeps the current head pose (SteamVR still reprojects it to the real head); hands keep tracking",
+              Kind::Bool, 0.f, 1.f, &g_FreezeHead, nullptr },
             { "bmvr_glow_trace", "VR debug: record every light glow's brightness + frame timing for N seconds into VR/glowtrace-*.csv",
               Kind::Float, 0.f, 120.f, nullptr, &g_GlowTraceSeconds },
             { "bmvr_menu_smooth", "VR: menu pointer smoothing in seconds (lower = more direct)",

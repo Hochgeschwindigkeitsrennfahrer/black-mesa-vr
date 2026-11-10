@@ -3819,6 +3819,33 @@ bool VR::ConsumeOpenXrTracking()
     if (!L4D2VR_ReadOpenXrHmdPose(openXrPose, &generation))
         return false;
 
+    // Debug "Freeze head pose": the game renders from the pose of the moment
+    // it was switched on. The frame still goes out with that pose and a live
+    // display time, so SteamVR reprojects it to the real head (the scene stays
+    // put in the room, edges go black on big turns). Controllers keep tracking.
+    {
+        static bool s_frozen = false;
+        static float s_pos[3], s_rot[4];
+        if (bmvr::g_FreezeHead && openXrPose.valid)
+        {
+            if (!s_frozen)
+            {
+                std::memcpy(s_pos, openXrPose.position, sizeof(s_pos));
+                std::memcpy(s_rot, openXrPose.orientation, sizeof(s_rot));
+                s_frozen = true;
+                Game::logMsg("Freeze head pose: ON at (%.3f %.3f %.3f) rot (%.3f %.3f %.3f %.3f)", s_pos[0], s_pos[1],
+                    s_pos[2], s_rot[0], s_rot[1], s_rot[2], s_rot[3]);
+            }
+            std::memcpy(openXrPose.position, s_pos, sizeof(s_pos));
+            std::memcpy(openXrPose.orientation, s_rot, sizeof(s_rot));
+        }
+        else if (s_frozen && !bmvr::g_FreezeHead)
+        {
+            s_frozen = false;
+            Game::logMsg("Freeze head pose: OFF");
+        }
+    }
+
     m_OpenXrLastHmdPose = openXrPose;
     m_OpenXrLastHmdPoseGeneration = generation;
     if (openXrPose.reserved0 != 0)

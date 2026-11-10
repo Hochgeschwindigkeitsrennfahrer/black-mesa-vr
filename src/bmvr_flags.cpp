@@ -118,6 +118,7 @@ namespace bmvr
     bool g_PauseMenuColourFromFrame = true;
     unsigned long g_DebugCaptureAt = 0;
     float g_DebugBlankEye = 0.f;
+    bool g_FreezeHead = false;
     float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;
     float g_MountedGunGain = 1.75f;
