@@ -126,13 +126,13 @@ ScopeEye=right
 # two-hand grip on the front of the crossbow steadies it). The whole headset view moves with
 # the hand, so it can be less comfortable. ScopeGunSmoothSec smooths hand tremor (seconds,
 # 0 = raw, higher = steadier but lags). Both also in the VR settings panel (CROSSBOW SCOPE).
-ScopeFollowsGun=false
+ScopeFollowsGun=true
 ScopeGunSmoothSec=0.10
 # Raise to zoom: hold the crossbow with both hands and bring it to your face (gun hand within
 # ScopeRaiseMeters of the headset, pointing roughly where you look) to zoom in; move it
 # 0.10 m further away to zoom out. Holding alt-fire still zooms by hand. Also in the VR
 # settings panel (CROSSBOW SCOPE).
-ScopeRaiseToZoom=false
+ScopeRaiseToZoom=true
 ScopeRaiseMeters=0.30
 
 # Right stick down: crouch only while held (false = toggle). Left stick click: sprint latches
@@ -147,11 +147,12 @@ SprintToggle=false
 # Two-handed guns: squeezing the support grip on the gun latches the hold (no need to
 # keep squeezing); squeeze again, or take the hand away from the gun, to let go.
 TwoHandGripToggle=false
-# Frag grenade: thrown from the hand at the hand's speed (fastest moment of the last 0.1 s
-# before the trigger is let go) x 2/3 x ThrowScale, capped at 1000 units/s, as in Lambda1VR.
+# Frag grenade: thrown from the hand at the hand's speed (smoothed over ~66 ms around the
+# fastest moment before the trigger is let go) x 2/3 x ThrowScale, capped at 1500 units/s.
+# Also in the VR settings panel (Throw strength).
 # false = the game's fixed throw along the aim.
 VrHandThrow=true
-ThrowScale=3.75
+ThrowScale=5.5
 # Mounted guns (50cal/TOW): how far the barrel turns per degree the hands swing around the
 # mount. 1 = the handle stays in the hand; higher = less reach to aim far down/up/sideways.
 # Also in the VR settings panel (MOUNTED GUNS).

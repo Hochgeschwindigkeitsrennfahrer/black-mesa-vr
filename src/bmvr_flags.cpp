@@ -121,7 +121,7 @@ namespace bmvr
     float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;
     float g_MountedGunGain = 1.75f;
-    float g_ThrowScale = 3.75f;
+    float g_ThrowScale = 5.5f;
     bool g_VrSkipMotionBlur = true;
     bool g_VrSkipScreenEffects = true;
     float g_EnvmapScaleWorld = 1.f;
@@ -157,9 +157,9 @@ namespace bmvr
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
     bool g_ScopeKeepsAimOffset = true;
-    bool g_ScopeFollowsGun = false;
+    bool g_ScopeFollowsGun = true;
     float g_ScopeGunSmoothSec = 0.10f;
-    bool g_ScopeRaiseToZoom = false;
+    bool g_ScopeRaiseToZoom = true;
     float g_ScopeRaiseMeters = 0.30f;
     int g_ScopeEye = 2;
     float g_LeftEyeCullPad = 0.f;

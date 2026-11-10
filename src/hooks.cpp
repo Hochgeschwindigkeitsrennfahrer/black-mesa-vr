@@ -3146,76 +3146,6 @@ namespace
         return r;
     }
 
-    bool StrHasNoCase(const char* s, const char* sub)
-    {
-        if (!s || !sub)
-            return false;
-        const size_t n = std::strlen(sub);
-        for (; *s; ++s)
-            if (_strnicmp(s, sub, n) == 0)
-                return true;
-        return false;
-    }
-
-    void TraceWeaponSwitch(VR& vr, Game* game, const ModelRenderInfo_t& info, void* state,
-        const char* modelName, const void* bones)
-    {
-        static char s_model[128]{};
-        static ULONGLONG s_start = 0;
-        static DWORD s_lastTick = 0;
-        const ULONGLONG now = GetTickCount64();
-        void* ent = info.pRenderable
-            ? static_cast<char*>(const_cast<void*>(static_cast<const void*>(info.pRenderable))) - 4 : nullptr;
-        if (!ent || ent != static_cast<void*>(game->GetViewModelEntity()))
-            return;
-        if (_stricmp(s_model, modelName) != 0)
-        {
-            strncpy_s(s_model, modelName, _TRUNCATE);
-            s_start = now;
-            Game::logMsg("SwitchTrace start %s twoHand=%d", modelName, vr.TwoHandGripActive() ? 1 : 0);
-        }
-        if (now - s_start > 1000 || static_cast<DWORD>(now) == s_lastTick)
-            return;
-        s_lastTick = static_cast<DWORD>(now);
-        int seq = -1;
-        float cyc = -1.f;
-        float bo[3]{}, bx[3]{};
-        __try
-        {
-            seq = *reinterpret_cast<int*>(static_cast<char*>(ent) + kViewmodelSequence);
-            cyc = *reinterpret_cast<float*>(static_cast<char*>(ent) + kViewmodelCycle);
-            if (bones)
-            {
-                const float* m = static_cast<const float*>(bones);
-                bx[0] = m[0]; bx[1] = m[4]; bx[2] = m[8];
-                bo[0] = m[3]; bo[1] = m[7]; bo[2] = m[11];
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {}
-        const auto* lite = state ? static_cast<const DrawModelStateLite*>(state) : nullptr;
-        const char* label = (lite && seq >= 0) ? StudioSequenceLabel(lite->studioHdr, seq) : nullptr;
-        const bool lastHdrMatches = StudioHdrMatchesModel(g_LastViewmodelStudioHdr, modelName);
-        Vector vo{}, vf{}, vrt{}, vu{}, muz{};
-        const bool frame = vr.GunFrameNow(vo, vf, vrt, vu);
-        const bool hasMuz = vr.TryGetRawMuzzleWorld(muz);
-        auto local = [&](const Vector& p) {
-            const Vector d = p - vo;
-            return Vector(d.Dot(vf), d.Dot(vrt), d.Dot(vu));
-        };
-        const Vector boneLocal = frame ? local(Vector(bo[0], bo[1], bo[2])) : Vector();
-        const Vector bxw(bx[0], bx[1], bx[2]);
-        const Vector boneAxis = frame ? Vector(bxw.Dot(vf), bxw.Dot(vrt), bxw.Dot(vu)) : Vector();
-        const Vector muzLocal = (frame && hasMuz) ? local(muz) : Vector();
-        const Vector entLocal = frame ? local(info.origin) : Vector();
-        Game::logMsg("SwitchTrace +%llums seq=%d '%s' cyc=%.2f hdrOk=%d bone0 at=(%.1f,%.1f,%.1f) x=(%.2f,%.2f,%.2f) "
-            "muzzle=(%.1f,%.1f,%.1f)%s ent=(%.1f,%.1f,%.1f) ang=(%.0f,%.0f,%.0f) twoHand=%d frame=%d",
-            now - s_start, seq, label ? label : "?", cyc, lastHdrMatches ? 1 : 0,
-            boneLocal.x, boneLocal.y, boneLocal.z, boneAxis.x, boneAxis.y, boneAxis.z,
-            muzLocal.x, muzLocal.y, muzLocal.z, hasMuz ? "" : "(none)",
-            entLocal.x, entLocal.y, entLocal.z, info.angles.x, info.angles.y, info.angles.z,
-            vr.TwoHandGripActive() ? 1 : 0, frame ? 1 : 0);
-    }
-
     void ApplyViewmodelStudioWork(void* state, const char* modelName, int body, int skin,
         bool hideArms, void* pCustomBoneToWorld)
     {
@@ -7023,15 +6953,6 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         && m_VR->StereoWorldPassActive();
     if (isViewmodel && vrViewmodelPass && m_VR->IsGameplayEligible() && EngineInGame())
         ApplyViewmodelStudioWork(state, modelName, body, skin, hideArms, pCustomBoneToWorld);
-
-    // Switch trace (playtest aid, logging only): the tau and crossbow show
-    // pointing sideways for a moment after a switch in real sessions, not in
-    // the harness. For 1 s after either model appears, one line per frame
-    // for the weapon's own viewmodel: sequence, root bone and raw muzzle in
-    // the gun frame, two-hand state. Grep "SwitchTrace".
-    if (isViewmodel && vrViewmodelPass && modelName && m_VR && m_Game
-        && (StrHasNoCase(modelName, "v_gauss") || StrHasNoCase(modelName, "v_crossbow")))
-        TraceWeaponSwitch(*m_VR, m_Game, info, state, modelName, pCustomBoneToWorld);
 
     void* bonesToDraw = pCustomBoneToWorld;
     const ModelRenderInfo_t* infoToDraw = &info;
@@ -11184,7 +11105,8 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
     *velocity = hand + playerVel;
     Game::logMsg("VR frag throw: hand %.0f u/s -> (%.0f,%.0f,%.0f) (game %.0f u/s)",
         hand.Length(), velocity->x, velocity->y, velocity->z, before.Length());
-    m_VR->LogLastThrow();
+    if (bmvr::g_PerfLog)
+        m_VR->LogLastThrow();   // estimator details, playtest logging only
     g_VrSpawnWhat = "VR frag throw";
     g_VrGrenadeSpawn = m_VR->TryGetThrowOrigin(g_VrSpawnPoint);
     void* grenade = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, kSpawnAtThrowPosition);
