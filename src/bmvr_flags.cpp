@@ -187,6 +187,7 @@ namespace bmvr
     float g_FxaaEdgeThreshold = 0.166f;
     float g_FxaaEdgeThresholdMin = 0.0833f;
     float g_GlowHold = 0.f;
+    float g_GlowTraceSeconds = 0.f;
     bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;
     float g_ScopeZoomSmoothSec = 0.16f;

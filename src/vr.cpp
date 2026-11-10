@@ -5,6 +5,7 @@
 #include "offsets.h"
 #include "MinHook.h"
 #include "d3d9_vr.h"
+#include "bmvr_glowtrace.h"
 #include "bmvr_flags.h"
 #include "bmvr_cvars.h"
 #include "hooks.h"
@@ -4647,6 +4648,8 @@ void VR::PublishOpenXrPair(uint32_t slot, const OpenXrPendingPublish& pend)
         m_OpenXrPublishSlot = slot;
     PublishOpenXrResolvedEyeTextures(frameId, pend.panel2d);
     ++m_OpenXrPublishes;
+    if (bmvr::glowtrace::Active())
+        bmvr::glowtrace::Event('U', frameId);
     if (slot != kOpenXrNoSlot)
     {
         if (m_OpenXrVisibleSlot != kOpenXrNoSlot && m_OpenXrVisibleSlot != slot)
@@ -14744,6 +14747,8 @@ bool VR::PublishMcRingBand(const OpenXrPendingPublish& pend)
     L4D2VR_PublishOpenXrSharedTextureFrame(frameId);
     m_OpenXrLastPublishedSharedTextureFrameId.store(frameId, std::memory_order_release);
     ++m_OpenXrPublishes;
+    if (bmvr::glowtrace::Active())
+        bmvr::glowtrace::Event('U', frameId);
     m_HasSubmittedSceneFrame.store(true, std::memory_order_release);
     ++m_SubmitCount;
     static int s_mcSubmit;
@@ -16887,6 +16892,20 @@ void VR::SubmitVRTextures()
     {
         TickOpenXrHelperWatchdog();
         ++m_OpenXrSubmitAttempts;
+        if (bmvr::glowtrace::WantsStart())
+        {
+            char header[256];
+            std::snprintf(header, sizeof(header),
+                "glow trace: FrameCap mode %.0f applied fps_max %d, MulticoreMode %d, GlowHold %.2f, PixelVisPerEye %d",
+                bmvr::g_FrameCapMode, m_FrameCapApplied, bmvr::g_MulticoreMode ? 1 : 0, bmvr::g_GlowHold,
+                bmvr::g_PixelVisPerEye ? 1 : 0);
+            bmvr::glowtrace::Start(header);
+        }
+        if (bmvr::glowtrace::Active())
+        {
+            bmvr::glowtrace::Event('P', 0);
+            bmvr::glowtrace::PollFinish();
+        }
         // Deferred publish: hand over any slot whose GPU copy has completed
         // since the last Present, before deciding whether to copy new eyes.
         PollOpenXrDeferredPublish();

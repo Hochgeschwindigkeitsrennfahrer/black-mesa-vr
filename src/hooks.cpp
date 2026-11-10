@@ -9,6 +9,7 @@ extern "C" volatile int g_BmvrD3dDrawTrace = 0;
 // d3d9 device: rebuild the flashlight shadow matrix from the current light pose (VR/config.txt FlashlightShadowMatrixFix).
 extern "C" volatile int g_BmvrFlashlightMatrixFix = 1;
 #include "bmvr_flags.h"
+#include "bmvr_glowtrace.h"
 #include "bmvr_prof.h"
 #include <intrin.h>
 #include <map>
@@ -57,6 +58,12 @@ static int __cdecl PixelVisCurrentViewId()
     return id;
 }
 
+// Glow trace: the query-level value (before GlowHold) of the current
+// GetFractionVisible call, filled by the hook below on the same thread.
+static thread_local float t_GlowTraceRaw = 0.f;
+static thread_local float t_GlowTraceFadeInv = 0.f;
+static thread_local bool t_GlowTraceHaveRaw = false;
+
 // Glow hold (GlowHold / bmvr_glow_hold): per query (= per glow, eye and view)
 // keep the brightest recent value while the game's value dips, then fade.
 using PixelVisQueryFractionFn = float(__thiscall*)(void* query, float fadeTimeInv);
@@ -66,6 +73,12 @@ static float __fastcall PixelVisQueryFractionHold(void* ecx, void* edx, float fa
 {
     (void)edx;
     const float raw = g_OrigPixelVisQueryFraction(ecx, fadeTimeInv);
+    if (bmvr::glowtrace::Active())
+    {
+        t_GlowTraceRaw = raw;
+        t_GlowTraceFadeInv = fadeTimeInv;
+        t_GlowTraceHaveRaw = true;
+    }
     const float hold = bmvr::g_GlowHold;
     if (!(hold > 0.f) || !std::isfinite(raw))
         return raw;
@@ -193,12 +206,41 @@ using PixelVisFractionFn = float(__thiscall*)(void* sys, const void* params, voi
 static PixelVisFractionFn g_OrigPixelVisFraction = nullptr;
 static int g_PixelVisCreates[2];
 
+static bool g_PixelVisStatsOn = false;
+
+// pixelvis_queryparams_t starts with the glow's world position.
+static bool ReadGlowPos(const void* params, float out[3])
+{
+    __try
+    {
+        const float* p = static_cast<const float*>(params);
+        out[0] = p[0];
+        out[1] = p[1];
+        out[2] = p[2];
+        return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 static float __fastcall PixelVisFractionStats(void* ecx, void* edx, const void* params, void* handle)
 {
     (void)edx;
+    if (!g_PixelVisStatsOn && !bmvr::glowtrace::Active())
+        return g_OrigPixelVisFraction(ecx, params, handle);
+    t_GlowTraceHaveRaw = false;
     const float f = g_OrigPixelVisFraction(ecx, params, handle);
     const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
-    if (eye != 1 && eye != 2)
+    if (bmvr::glowtrace::Active())
+    {
+        float pos[3];
+        const bool havePos = params && ReadGlowPos(params, pos);
+        const int vid = g_ClientCurrentViewId ? g_ClientCurrentViewId() : -1;
+        const QAngle a = Hooks::m_VR ? Hooks::m_VR->m_HmdAngAbs : QAngle{};
+        bmvr::glowtrace::Glow(eye, vid & 0xFFFF, reinterpret_cast<uintptr_t>(handle), havePos ? pos : nullptr,
+            t_GlowTraceHaveRaw ? t_GlowTraceFadeInv : -1.f, t_GlowTraceHaveRaw ? t_GlowTraceRaw : -1.f, f,
+            a.x, a.y, a.z);
+    }
+    if (!g_PixelVisStatsOn || (eye != 1 && eye != 2))
         return f;
     struct Stats { int samples = 0, lit = 0, drops = 0; };
     static std::unordered_map<uintptr_t, float> s_last[2];
@@ -869,14 +911,19 @@ static void InstallBoneParticleProf(uintptr_t client)
 
 static void InstallPixelVisStats(uintptr_t client)
 {
+    // Always hooked (one flag test per glow when idle) so bmvr_glow_trace
+    // works in every session; the stats need PerfLog or BMVR_PIXELVIS_STATS.
     char v[8] = {};
-    if ((!GetEnvironmentVariableA("BMVR_PIXELVIS_STATS", v, sizeof(v)) || v[0] != '1') && !bmvr::g_PerfLog)
-        return;
+    g_PixelVisStatsOn = (GetEnvironmentVariableA("BMVR_PIXELVIS_STATS", v, sizeof(v)) && v[0] == '1') || bmvr::g_PerfLog;
     auto* fn = reinterpret_cast<LPVOID>(client + Offsets::kPixelVisGetFractionRva);
     if (MH_CreateHook(fn, reinterpret_cast<LPVOID>(&PixelVisFractionStats),
             reinterpret_cast<LPVOID*>(&g_OrigPixelVisFraction)) == MH_OK
         && MH_EnableHook(fn) == MH_OK)
-        Game::logMsg("pixelvis stats hook on (BMVR_PIXELVIS_STATS)");
+        Game::logMsg("pixelvis hook on (glow trace%s)", g_PixelVisStatsOn ? " + stats" : "");
+    else
+        return;
+    if (!g_PixelVisStatsOn)
+        return;
     auto* qfn = reinterpret_cast<LPVOID>(client + Offsets::kPixelVisQueryForViewRva);
     if (MH_CreateHook(qfn, reinterpret_cast<LPVOID>(&PixelVisQueryForViewStats),
             reinterpret_cast<LPVOID*>(&g_OrigPixelVisQueryForView)) == MH_OK)

@@ -131,6 +131,7 @@ namespace
             // Not saved (no key): always off after a restart.
             { "DEBUG", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
+            { "Record glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
@@ -667,6 +668,15 @@ void VR::UpdateSettingsPanel()
                 bmvr::g_DebugCaptureAt = 1;
             Game::logMsg("debug capture: armed, in 2 s");
             CloseSettingsPanel("debug capture");
+            return;
+        }
+        // Closes the panel and records 20 s of glow brightness + frame timing
+        // (bmvr_glowtrace.h).
+        if (r.fmt && std::strcmp(r.fmt, "glow_trace") == 0)
+        {
+            bmvr::g_GlowTraceSeconds = 20.f;
+            Game::logMsg("glow trace: armed from the panel (20 s)");
+            CloseSettingsPanel("glow trace");
             return;
         }
         // Recenter (was a right-stick tap, now hands/weapon).

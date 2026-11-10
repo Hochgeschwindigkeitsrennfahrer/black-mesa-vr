@@ -455,6 +455,9 @@ namespace bmvr
     // view, small head movements) no longer flickers it. Brightening is
     // immediate. Per glow, per eye and view.
     extern float g_GlowHold;
+    // bmvr_glow_trace <seconds> / panel DEBUG "Record glow trace": start a glow
+    // trace of that length (bmvr_glowtrace.h); reset to 0 once it starts.
+    extern float g_GlowTraceSeconds;
     // FollowScriptedCamera (default true, cvar bmvr_follow_scripted_camera):
     // while a cutscene camera drives the view (fall + drag scene, tram), the
     // view takes its orientation with the head turning relative to it.

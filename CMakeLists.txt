@@ -44,6 +44,7 @@ set(BMVR_SOURCES
   src/openxr_loader_util.cpp
   src/bmvr_flags.cpp
   src/bmvr_prof.cpp
+  src/bmvr_glowtrace.cpp
   src/bmvr_cvars.cpp
   src/sdk/checksum_crc.cpp
   third_party/l4d2vr/L4D2VR/vr_hands/vr_hand_asset_loader.cpp
