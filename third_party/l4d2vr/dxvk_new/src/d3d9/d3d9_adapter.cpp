@@ -1003,6 +1003,9 @@ namespace dxvk {
     // Custom Vendor ID / Device ID / Device Description
     if (options.customVendorId >= 0)
       m_vendorId = uint32_t(options.customVendorId);
+    else if (m_vendorId == uint32_t(DxvkGpuVendor::Intel)
+          && env::getExeName() == "bms.exe")
+      m_vendorId = uint32_t(DxvkGpuVendor::Nvidia);   // Black Mesa on Intel: see config.cpp
 
     if (options.customDeviceId >= 0)
       m_deviceId = uint32_t(options.customDeviceId);

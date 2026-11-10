@@ -843,11 +843,13 @@ namespace dxvk {
       { "d3d9.cachedWriteOnlyBuffers",      "True" },
     }} },
     /* Black Mesa VR                              *
-     * Artifacts & broken flashlight on Intel.    *
      * Stock dxvk.conf also sets deviceLossOnFocusLoss=True, which marks the
-     * device Lost on alt-tab and races VR eye-texture Reset/Submit. */
+     * device Lost on alt-tab and races VR eye-texture Reset/Submit.
+     * The upstream NVIDIA vendor ID (artifacts and broken flashlight on
+     * Intel) is applied for Intel GPUs only, in D3D9Adapter: on AMD it made
+     * the game take other code paths than flat play (other shaders, and a
+     * video-settings reset on every flat/VR switch). */
     { R"(\\bms\.exe$)", {{
-      { "d3d9.customVendorId",              "10de" },
       { "d3d9.deviceLossOnFocusLoss",       "False" },
     }} },
     /* Final Fantasy XIV - Direct3D 9 mode        *
