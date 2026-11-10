@@ -44,6 +44,15 @@ live_state() {
 	sha256sum "$STEAM"/userdata/*/362890/remote/cfg/config.cfg 2>/dev/null || true
 }
 live_state > "$out/live-state.sha"
+# The game saves config.cfg through the Steam Cloud API: the Steam client writes userdata/.../remote outside the
+# overlay (2026-11-10: a vendor-ID test made the game reset its video settings and that reached the cloud copy).
+# Keep a copy and put it back after the run if it changed.
+cloud_cfgs=()
+for f in "$STEAM"/userdata/*/362890/remote/cfg/config.cfg; do
+	[[ -f $f ]] || continue
+	cp -p "$f" "$out/cloud-config-$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$f")")")")").cfg"
+	cloud_cfgs+=("$f")
+done
 
 upper=$out/overlay/upper
 mkdir -p "$upper" "$out/overlay/work"
@@ -95,6 +104,15 @@ cleanup() {
 	cp "$upper/bms/console.log" "$out/console.log" 2>/dev/null || true
 	(cd "$upper" && find . -type f | sort) > "$out/overlay-files.txt" 2>/dev/null || true
 	if [[ -z ${BMVR_KEEP_UPPER:-} ]]; then chmod -R u+rwx "$out/overlay" 2>/dev/null || true; rm -rf "${out:?}/overlay"; fi
+	local f saved
+	for f in "${cloud_cfgs[@]}"; do
+		saved="$out/cloud-config-$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$f")")")")").cfg"
+		if ! cmp -s "$f" "$saved"; then
+			cp -p "$f" "$out/cloud-config-changed-by-run.cfg"
+			cp -p "$saved" "$f.bmvr-tmp" && mv "$f.bmvr-tmp" "$f" && touch "$f"
+			echo "Steam Cloud config.cfg was changed by the game: restored (changed copy in $out/cloud-config-changed-by-run.cfg)" | tee -a "$out/run.log" >&2
+		fi
+	done
 	if cmp -s <(live_state) "$out/live-state.sha"; then
 		echo "real game folder + cloud config unchanged (verified)" >> "$out/run.log"
 	else
