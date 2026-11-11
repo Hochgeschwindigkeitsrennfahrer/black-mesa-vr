@@ -1221,7 +1221,9 @@ public:
     void SettingsPanelFrame(Vector& origin, Vector& fwd, Vector& right, Vector& up) const;
     static IDirect3DTexture9* SettingsGearTexture(IDirect3DDevice9* device);
     bool m_SettingsOpen = false;
-    bool m_SettingsDirty = false;
+    // Set by the game thread, cleared by the render thread before it paints:
+    // a change during a paint stays set and is painted next frame.
+    std::atomic<bool> m_SettingsDirty{ false };
     bool m_SettingsChanged = false;
     bool m_SettingsClickHeld = false;
     bool m_SettingsBackHeld = false;

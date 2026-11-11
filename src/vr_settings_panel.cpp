@@ -836,8 +836,13 @@ void VR::UpdateSettingsPanel()
                 if (r >= 0)
                 {
                     row = r;
+                    // -/+ zones only on number rows; elsewhere the zone
+                    // flickered across the pill and repainted every frame.
                     const int cx = px - RowX(r);
-                    zone = (cx >= kMinusX0 && cx < kMinusX1) ? 0 : (cx >= kPlusX0 && cx < kPlusX1) ? 2 : 1;
+                    if (Rows()[r].kind == RowKind::Number)
+                        zone = (cx >= kMinusX0 && cx < kMinusX1) ? 0 : (cx >= kPlusX0 && cx < kPlusX1) ? 2 : 1;
+                    else
+                        zone = 1;
                 }
             }
         }
@@ -995,7 +1000,10 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     if (g_Gfx.device && g_Gfx.device != device)
         ReleaseGfx();
     g_Gfx.device = device;
-    if (m_SettingsDirty || !g_Gfx.gpu)
+    // exchange before Paint: a click on the game thread while this paints
+    // sets the flag again, so it is drawn next frame. (A plain bool cleared
+    // after Upload lost such clicks: pills needed 2-3 pulls, 2026-11-11.)
+    if (m_SettingsDirty.exchange(false) || !g_Gfx.gpu)
     {
         Canvas c(kTexW, TexH());
         if (c.ok())
@@ -1008,9 +1016,11 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
                 g_Gfx.w = c.w;
                 g_Gfx.h = c.h;
             }
-            if (Upload(device, c, g_Gfx.sys, g_Gfx.gpu))
-                m_SettingsDirty = false;
+            if (!Upload(device, c, g_Gfx.sys, g_Gfx.gpu))
+                m_SettingsDirty = true;
         }
+        else
+            m_SettingsDirty = true;
     }
     if (!g_Gfx.gpu)
         return;
