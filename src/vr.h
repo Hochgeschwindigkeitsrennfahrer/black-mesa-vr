@@ -793,6 +793,17 @@ public:
     uint32_t m_OpenXrLastSeenHelperSubmitted = 0;
     uint32_t m_OpenXrSubmitAttempts = 0;
     uint32_t m_OpenXrPublishes = 0;
+    // Frame evenness: interval between published frames, in 90 Hz-tick
+    // buckets (helper rate), plus how often the bucket changes frame to frame
+    // (an uneven 1-2-1-2 pattern judders more than a steady 2-2-2).
+    struct PublishEvenness
+    {
+        double lastMs = 0, sum = 0, sumSq = 0, minMs = 1e9, maxMs = 0;
+        uint32_t n = 0, ticks[5] = {}, changes = 0;
+        int lastBucket = -1;
+    };
+    PublishEvenness m_PublishEven;
+    void NotePublishEvenness();
     uint32_t m_OpenXrSkippedNoNewFrame = 0;
     uint32_t m_OpenXrSkippedHelperBusy = 0;
     uint32_t m_OpenXrPublishRateTick = 0;

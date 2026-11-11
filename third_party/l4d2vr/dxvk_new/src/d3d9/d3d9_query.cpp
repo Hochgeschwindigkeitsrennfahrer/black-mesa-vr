@@ -1,6 +1,7 @@
 #include "d3d9_query.h"
 
 #include "d3d9_device.h"
+#include "bmvr_prof.h"
 
 namespace dxvk {
 
@@ -127,6 +128,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9Query::GetData(void* pData, DWORD dwSize, DWORD dwGetDataFlags) {
+    BMVR_PROF("d3d9 Query GetData");
     D3D9DeviceLock lock = m_parent->LockDevice();
 
     bool flush = dwGetDataFlags & D3DGETDATA_FLUSH;

@@ -4882,6 +4882,7 @@ void VR::PublishOpenXrPair(uint32_t slot, const OpenXrPendingPublish& pend)
         m_OpenXrPublishSlot = slot;
     PublishOpenXrResolvedEyeTextures(frameId, pend.panel2d);
     ++m_OpenXrPublishes;
+    NotePublishEvenness();
     if (bmvr::glowtrace::Active())
         bmvr::glowtrace::Event('U', frameId);
     if (slot != kOpenXrNoSlot)
@@ -13909,6 +13910,35 @@ void VR::TickOpenVrFrameCap()
     ApplyFrameCap(static_cast<int>(hz + 0.5f), hz, "reported");
 }
 
+void VR::NotePublishEvenness()
+{
+    PublishEvenness& e = m_PublishEven;
+    const double now = QpcNowMs();
+    if (e.lastMs > 0)
+    {
+        const double dt = now - e.lastMs;
+        if (dt < 250.0)  // longer = load / pause, not pacing
+        {
+            const double tick = 1000.0 / 90.0;
+            int b = static_cast<int>(dt / tick + 0.5) - 1;
+            if (b < 0) b = 0;
+            if (b > 4) b = 4;
+            ++e.ticks[b];
+            if (e.lastBucket >= 0 && b != e.lastBucket)
+                ++e.changes;
+            e.lastBucket = b;
+            ++e.n;
+            e.sum += dt;
+            e.sumSq += dt * dt;
+            if (dt < e.minMs) e.minMs = dt;
+            if (dt > e.maxMs) e.maxMs = dt;
+        }
+        else
+            e.lastBucket = -1;
+    }
+    e.lastMs = now;
+}
+
 void VR::LogOpenXrPublishRate()
 {
     const uint32_t now = GetTickCount();
@@ -13987,6 +14017,23 @@ void VR::LogOpenXrPublishRate()
     m_OpenXrCopyWaitMs = 0.0;
     m_OpenXrCopyWaitMaxMs = 0.0;
     m_OpenXrStereoPairs = 0;
+    {
+        PublishEvenness& e = m_PublishEven;
+        if (e.n > 0)
+        {
+            const double avg = e.sum / e.n;
+            const double var = e.sumSq / e.n - avg * avg;
+            Game::logMsg("publish evenness: %u frames, interval avg %.2f ms sd %.2f min %.2f max %.2f; "
+                "ticks 1/2/3/4/5+ = %u/%u/%u/%u/%u, tick changes %.0f%% of frames",
+                e.n, avg, var > 0 ? std::sqrt(var) : 0.0, e.minMs, e.maxMs,
+                e.ticks[0], e.ticks[1], e.ticks[2], e.ticks[3], e.ticks[4], 100.0 * e.changes / e.n);
+        }
+        const double last = e.lastMs;
+        const int lastBucket = e.lastBucket;
+        e = PublishEvenness{};
+        e.lastMs = last;
+        e.lastBucket = lastBucket;
+    }
     m_OpenXrPublishRateTick = now;
     m_OpenXrSubmitAttempts = 0;
     m_OpenXrPublishes = 0;
@@ -15003,6 +15050,7 @@ bool VR::PublishMcRingBand(const OpenXrPendingPublish& pend)
     L4D2VR_PublishOpenXrSharedTextureFrame(frameId);
     m_OpenXrLastPublishedSharedTextureFrameId.store(frameId, std::memory_order_release);
     ++m_OpenXrPublishes;
+    NotePublishEvenness();
     if (bmvr::glowtrace::Active())
         bmvr::glowtrace::Event('U', frameId);
     m_HasSubmittedSceneFrame.store(true, std::memory_order_release);

@@ -2188,6 +2188,7 @@ namespace dxvk {
     const RECT*              pSourceRect,
           IDirect3DSurface9* pDestinationSurface,
     const POINT*             pDestPoint) {
+    BMVR_PROF("d3d9 UpdateSurface");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9Surface* src = static_cast<D3D9Surface*>(pSourceSurface);
@@ -2266,6 +2267,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::UpdateTexture(
           IDirect3DBaseTexture9* pSourceTexture,
           IDirect3DBaseTexture9* pDestinationTexture) {
+    BMVR_PROF("d3d9 UpdateTexture");
     D3D9DeviceLock lock = LockDevice();
 
     if (!pDestinationTexture || !pSourceTexture)
@@ -2360,6 +2362,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetRenderTargetData(
           IDirect3DSurface9* pRenderTarget,
           IDirect3DSurface9* pDestSurface) {
+    BMVR_PROF("d3d9 GetRenderTargetData");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(IsDeviceLost())) {
@@ -3071,6 +3074,7 @@ namespace dxvk {
   // Some games don't even call them.
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::BeginScene() {
+    BMVR_PROF("d3d9 BeginScene");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_inScene))
@@ -3083,6 +3087,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EndScene() {
+    BMVR_PROF("d3d9 EndScene");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(!m_inScene))
@@ -7263,6 +7268,7 @@ namespace dxvk {
     const DxvkPagedResource&                Resource,
           uint64_t                          SequenceNumber,
           DWORD                             MapFlags) {
+    BMVR_PROF("dxvk wait WaitForResource");
     // Wait for the any pending D3D9 command to be executed
     // on the CS thread so that we can determine whether the
     // resource is currently in use or not.
@@ -7335,6 +7341,7 @@ namespace dxvk {
             D3DLOCKED_BOX*          pLockedBox,
       const D3DBOX*                 pBox,
             DWORD                   Flags) {
+    BMVR_PROF("d3d9 LockImage");
     D3D9DeviceLock lock = LockDevice();
 
     UINT Subresource = pResource->CalcSubresource(Face, MipLevel);
@@ -7834,6 +7841,7 @@ namespace dxvk {
           UINT                    SizeToLock,
           void**                  ppbData,
           DWORD                   Flags) {
+    BMVR_PROF("d3d9 LockBuffer");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(ppbData == nullptr))
@@ -8249,6 +8257,7 @@ namespace dxvk {
 
 
   void D3D9DeviceEx::EmitCsChunk(DxvkCsChunkRef&& chunk) {
+    BMVR_PROF("dxvk wait EmitCsChunk (CS queue)");
     // Flush init commands so that the CS thread
     // can processe them before the first use.
     m_initializer->FlushCsChunk();
@@ -8267,6 +8276,7 @@ namespace dxvk {
 
 
   void D3D9DeviceEx::SynchronizeCsThread(uint64_t SequenceNumber) {
+    BMVR_PROF("dxvk wait SynchronizeCsThread");
     D3D9DeviceLock lock = LockDevice();
 
     // Dispatch current chunk so that all commands
@@ -8694,6 +8704,7 @@ namespace dxvk {
 
 
   void D3D9DeviceEx::Flush() {
+    BMVR_PROF("dxvk Flush (submit)");
     ExecuteFlush<false>();
   }
 

@@ -25,6 +25,12 @@ namespace bmvr
         int Register(Site& site);
         long long Now();
         void Add(int id, long long ticks);
+        // Idle gaps between top-level d3d9 calls on a thread (sites named
+        // "d3d9 ..."): time the thread spent outside d3d9 = engine CPU work
+        // or waiting. Gaps >= 0.25 ms are logged per (previous call, next call).
+        void GapEnter(int id, long long now);
+        void GapLeave(int id, long long now);
+        bool IsGapSite(int id);
         void Count(int id);
         // Main-thread frame boundary: top-level RenderView enter / leave.
         void FrameRenderViewEnter();
@@ -40,11 +46,18 @@ namespace bmvr
                     return;
                 id = s.id >= 0 ? s.id : Register(s);
                 t0 = Now();
+                if (id >= 0 && IsGapSite(id))
+                    GapEnter(id, t0);
             }
             ~Scope()
             {
                 if (id >= 0)
-                    Add(id, Now() - t0);
+                {
+                    const long long t1 = Now();
+                    Add(id, t1 - t0);
+                    if (IsGapSite(id))
+                        GapLeave(id, t1);
+                }
             }
             Scope(const Scope&) = delete;
             Scope& operator=(const Scope&) = delete;

@@ -9,6 +9,7 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+#include <cstring>
 
 // DXVK side (dxvk_graphics.cpp): pipeline variants created / optimized
 // pipelines compiled since start. Read as deltas per report.
@@ -34,6 +35,7 @@ namespace bmvr::prof
         {
             const char* name = nullptr;
             bool counter = false;
+            bool gap = false;
             Cell cell[kThreads][kEyes];
         };
 
@@ -43,6 +45,22 @@ namespace bmvr::prof
         std::atomic<DWORD> g_ThreadIds[kThreads - 1]{};
         std::atomic<int> g_ThreadCount{ 0 };
         thread_local int t_Thread = -1;
+
+        // Gap tracker (per thread index): depth of nested d3d9 sites, last
+        // top-level exit, the site it was, and the big gaps per site pair.
+        thread_local int t_GapDepth = 0;
+        thread_local long long t_GapLastExit = 0;
+        thread_local int t_GapLastSite = -1;
+        struct GapCell
+        {
+            long long ticks = 0, maxTicks = 0;
+            int count = 0;
+        };
+        std::mutex g_GapMutex;
+        std::unordered_map<uint64_t, GapCell> g_Gaps;  // (thread, prev site, next site)
+        std::atomic<long long> g_GapSmall[kThreads]{};  // gaps below the threshold
+        std::atomic<long long> g_GapBig[kThreads]{};
+        std::atomic<long long> g_GapCalls[kThreads]{};
 
         long long g_Freq = 0;
         // Main thread frame state (only touched on the RenderView thread).
@@ -138,6 +156,37 @@ namespace bmvr::prof
             Game::logMsg("%s; all threads %.2f", line, total / frames);
         }
 
+        void ReportGaps(int frames)
+        {
+            for (int t = 0; t < kThreads; ++t)
+            {
+                const long long smallTicks = g_GapSmall[t].exchange(0);
+                const long long bigTicks = g_GapBig[t].exchange(0);
+                const long long calls = g_GapCalls[t].exchange(0);
+                if (calls > 0)
+                    Game::logMsg("prof gaps t%d: outside d3d9 %.2f ms/frame (%.2f in gaps >= 0.25 ms, %.2f in %.0f small gaps/frame)",
+                        t, Ms(smallTicks + bigTicks) / frames, Ms(bigTicks) / frames, Ms(smallTicks) / frames, static_cast<double>(calls) / frames);
+            }
+            std::vector<std::pair<uint64_t, GapCell>> rows;
+            {
+                std::lock_guard<std::mutex> lock(g_GapMutex);
+                rows.assign(g_Gaps.begin(), g_Gaps.end());
+                g_Gaps.clear();
+            }
+            std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second.ticks > b.second.ticks; });
+            for (size_t i = 0; i < rows.size() && i < 16; ++i)
+            {
+                const uint64_t k = rows[i].first;
+                const int t = static_cast<int>(k >> 32);
+                const int prev = static_cast<int>((k >> 16) & 0xFFFF);
+                const int next = static_cast<int>(k & 0xFFFF);
+                const GapCell& c = rows[i].second;
+                Game::logMsg("prof gap t%d after %-28s before %-28s: %.3f ms/frame, %.2f/frame, avg %.2f ms, max %.2f ms",
+                    t, prev < kMaxSites ? g_Slots[prev].name : "?", next < kMaxSites ? g_Slots[next].name : "?",
+                    Ms(c.ticks) / frames, static_cast<double>(c.count) / frames, Ms(c.ticks) / c.count, Ms(c.maxTicks));
+            }
+        }
+
         void Report()
         {
             const int frames = (std::max)(g_Frames, 1);
@@ -188,6 +237,7 @@ namespace bmvr::prof
                         r.name, r.t, r.e, Ms(r.ticks) / frames, static_cast<double>(r.calls) / frames,
                         Ms(r.ticks) * 1000.0 / r.calls, Ms(r.maxTicks));
             }
+            ReportGaps(frames);
             g_FrameTicks = g_FrameMax = g_RvTicks = 0;
             g_Frames = 0;
         }
@@ -215,6 +265,7 @@ namespace bmvr::prof
         if (n >= kMaxSites)
             return -1;
         g_Slots[n].name = site.name;
+        g_Slots[n].gap = std::strncmp(site.name, "d3d9 ", 5) == 0;
         g_SlotCount.store(n + 1);
         site.id = n;
         return n;
@@ -237,6 +288,42 @@ namespace bmvr::prof
             return;
         g_Slots[id].counter = true;
         g_Slots[id].cell[ThreadIndex()][Eye()].calls.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    bool IsGapSite(int id)
+    {
+        return id >= 0 && id < kMaxSites && g_Slots[id].gap;
+    }
+
+    void GapEnter(int id, long long now)
+    {
+        if (t_GapDepth++ != 0 || !t_GapLastExit)
+            return;
+        const int t = ThreadIndex();
+        const long long gap = now - t_GapLastExit;
+        g_GapCalls[t].fetch_add(1, std::memory_order_relaxed);
+        if (gap < g_Freq / 4000)  // 0.25 ms
+        {
+            g_GapSmall[t].fetch_add(gap, std::memory_order_relaxed);
+            return;
+        }
+        g_GapBig[t].fetch_add(gap, std::memory_order_relaxed);
+        const uint64_t key = (static_cast<uint64_t>(t) << 32) | (static_cast<uint64_t>(t_GapLastSite & 0xFFFF) << 16)
+            | static_cast<uint64_t>(id & 0xFFFF);
+        std::lock_guard<std::mutex> lock(g_GapMutex);
+        GapCell& c = g_Gaps[key];
+        c.ticks += gap;
+        c.maxTicks = (std::max)(c.maxTicks, gap);
+        ++c.count;
+    }
+
+    void GapLeave(int id, long long now)
+    {
+        if (t_GapDepth > 0 && --t_GapDepth == 0)
+        {
+            t_GapLastExit = now;
+            t_GapLastSite = id;
+        }
     }
 
     void FrameRenderViewEnter()
