@@ -124,6 +124,11 @@ namespace bmvr
     // caller pins HWND — advertising 3168 here before FullFrame grew is what
     // created 3168 G-buffers behind a 2560 FullFrame (flashlight + ghost world,
     // 2026-09-01).
+    // Explicit eye-sized render targets by exact name. Bloom: own depth,
+    // aux class. Scene: keeps the engine's depth (it binds the G-buffer depth
+    // with it) and counts as an eye-sized world target.
+    enum class EyeRtClass { None, Bloom, Scene };
+    EyeRtClass EyeScaledRtClass(const char* name);
     bool EyeScaledRtSize(const char* name, uint32_t& width, uint32_t& height);
     bool HaveHmdFramebufferSize(uint32_t& width, uint32_t& height);
     // Cached game HWND (Valve001 / "Black Mesa"). Null while the window is

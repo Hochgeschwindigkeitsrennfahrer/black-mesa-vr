@@ -1670,6 +1670,8 @@ namespace
     {
         if (!name || !name[0] || name[0] == '?')
             return false;
+        if (bmvr::EyeScaledRtClass(name) == bmvr::EyeRtClass::Scene)
+            return false;
         if (std::strstr(name, "backbuffer"))
             return false;
         if (std::strstr(name, "_rt_FullFrameFB") || std::strstr(name, "_rt_ResolvedFullFrame"))
@@ -4475,6 +4477,8 @@ namespace
     {
         if (!name || !name[0] || name[0] == '?')
             return false;
+        if (bmvr::EyeScaledRtClass(name) == bmvr::EyeRtClass::Scene)
+            return true;
         if (std::strstr(name, "shadow") || std::strstr(name, "Shadow")
             || std::strstr(name, "flashlight") || std::strstr(name, "Flashlight")
             || std::strstr(name, "csm") || std::strstr(name, "CSM")
@@ -10980,17 +10984,21 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
         if (s_tableLog < 32)
         {
             ++s_tableLog;
-            Game::logMsg("CreateNamedRT %s mode=%d depth=%d -> %ux%u LITERAL, own depth (eye size table)",
-                name, sizeMode, depth, tableW, tableH);
+            const bool scene = bmvr::EyeScaledRtClass(name) == bmvr::EyeRtClass::Scene;
+            Game::logMsg("CreateNamedRT %s mode=%d depth=%d -> %ux%u LITERAL, %s (eye size table)",
+                name, sizeMode, depth, tableW, tableH, scene ? "engine depth, scene" : "own depth");
         }
         w = static_cast<int>(tableW);
         h = static_cast<int>(tableH);
         sizeMode = RT_SIZE_LITERAL;
-        // Own depth buffer of the same size. With the engine's shared depth the
-        // viewport on a target taller than the window is cut to the window's
-        // height: the bright pass filled only the top of the target and left
-        // stale pixels below, which engine_post then showed as a ghost.
-        depth = MATERIAL_RT_DEPTH_SEPARATE;
+        // Bloom: own depth buffer of the same size. With the engine's shared
+        // depth the viewport on a target taller than the window is cut to the
+        // window's height: the bright pass filled only the top of the target and
+        // left stale pixels below, which engine_post then showed as a ghost.
+        // Scene targets keep the engine's choice: the CSM gather is pushed with
+        // the eye-sized G-buffer depth and tests its stencil.
+        if (bmvr::EyeScaledRtClass(name) != bmvr::EyeRtClass::Scene)
+            depth = MATERIAL_RT_DEPTH_SEPARATE;
     }
     const int oldW = w;
     const int oldH = h;

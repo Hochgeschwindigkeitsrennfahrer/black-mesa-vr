@@ -2387,30 +2387,55 @@ namespace bmvr
     // engine's frame buffer size. Divisors are the engine's own ratios for these
     // targets. Targets not listed and not grown elsewhere keep the engine's
     // window-based size (_rt_Hud, _rt_DofBlur).
+    namespace
+    {
+        struct EyeRtEntry { const char* name; uint32_t divisor; EyeRtClass cls; };
+        // Render targets sized from the eye by exact name (size-authority plan,
+        // docs/plans/bmvr-size-authority.md). Names compare case-insensitively:
+        // CreateNamedRT gets the engine's spelling, ITexture::GetName the
+        // lower-case one.
+        const EyeRtEntry kEyeRtTable[] = {
+            { "_rt_Small2FB0", 2, EyeRtClass::Bloom }, { "_rt_Small2FB1", 2, EyeRtClass::Bloom },
+            { "_rt_SmallFB0", 4, EyeRtClass::Bloom }, { "_rt_SmallFB1", 4, EyeRtClass::Bloom },
+            { "_rt_SmallFB2", 4, EyeRtClass::Bloom }, { "_rt_SmallFB3", 4, EyeRtClass::Bloom },
+            { "_rt_Small8FB0", 8, EyeRtClass::Bloom }, { "_rt_Small8FB1", 8, EyeRtClass::Bloom },
+            { "_rt_Small16FB0", 16, EyeRtClass::Bloom }, { "_rt_Small16FB1", 16, EyeRtClass::Bloom },
+            { "_rt_Small32FB0", 32, EyeRtClass::Bloom }, { "_rt_Small32FB1", 32, EyeRtClass::Bloom },
+            // CSM sun shadow gather, one value per screen pixel, read back by the
+            // lit passes at the eye's screen position. At the engine's window
+            // size the D3D hook took it for the backbuffer and sent the gather
+            // into the eye image: white sky, shadows read from an empty buffer.
+            { "_rt_CSMShadowBuffer", 1, EyeRtClass::Scene },
+        };
+
+        const EyeRtEntry* FindEyeRt(const char* name)
+        {
+            if (!name || !name[0])
+                return nullptr;
+            for (const EyeRtEntry& entry : kEyeRtTable)
+                if (_stricmp(name, entry.name) == 0)
+                    return &entry;
+            return nullptr;
+        }
+    }
+
+    EyeRtClass EyeScaledRtClass(const char* name)
+    {
+        const EyeRtEntry* entry = FindEyeRt(name);
+        return entry ? entry->cls : EyeRtClass::None;
+    }
+
     bool EyeScaledRtSize(const char* name, uint32_t& width, uint32_t& height)
     {
-        struct Entry { const char* name; uint32_t divisor; };
-        static const Entry kTable[] = {
-            { "_rt_Small2FB0", 2 }, { "_rt_Small2FB1", 2 },
-            { "_rt_SmallFB0", 4 }, { "_rt_SmallFB1", 4 }, { "_rt_SmallFB2", 4 }, { "_rt_SmallFB3", 4 },
-            { "_rt_Small8FB0", 8 }, { "_rt_Small8FB1", 8 },
-            { "_rt_Small16FB0", 16 }, { "_rt_Small16FB1", 16 },
-            { "_rt_Small32FB0", 32 }, { "_rt_Small32FB1", 32 },
-        };
-        if (!name)
+        const EyeRtEntry* entry = FindEyeRt(name);
+        if (!entry)
             return false;
-        for (const Entry& entry : kTable)
-        {
-            if (std::strcmp(name, entry.name) != 0)
-                continue;
-            uint32_t eyeW = 0, eyeH = 0;
-            if (!ComputeGrownWorldFramebuffer(eyeW, eyeH))
-                return false;
-            width = eyeW / entry.divisor;
-            height = eyeH / entry.divisor;
-            return true;
-        }
-        return false;
+        uint32_t eyeW = 0, eyeH = 0;
+        if (!ComputeGrownWorldFramebuffer(eyeW, eyeH))
+            return false;
+        width = eyeW / entry->divisor;
+        height = eyeH / entry->divisor;
+        return true;
     }
 
     bool ComputeGrownWorldGbuffer(uint32_t& width, uint32_t& height)
