@@ -153,8 +153,8 @@ ScopeEye=right
 # could not be opened at all).
 # Weapon menu opened low (hand by the hip) tilts back to face the eye
 # (max 60 degrees); false = always upright.
-# The VR settings panel pauses the game while it is open.
-VrSettingsPause=true
+# The VR settings panel pauses the game while it is open (VrSettingsPause; in the panel:
+# Debug -> VIEW TESTS, off to watch a change happen live behind the panel).
 
 # Bloom and auto-exposure on the eyes (bmvr_eye_bloom). Also in the VR settings panel.
 

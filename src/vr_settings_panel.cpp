@@ -156,6 +156,9 @@ namespace
             { "Glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
             { "VIEW TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
+            // Glow fades and other effects run on game time: with the game
+            // paused a change only shows after the panel closes.
+            { "Panel pauses the game", RowKind::Toggle, "VrSettingsPause", &bmvr::g_VrSettingsPause, nullptr, 0, 0, 0, nullptr },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -947,6 +950,12 @@ void VR::UpdateSettingsPanel()
         else
             return;
         break;
+    }
+    // Pause switched while the panel is open: apply it now.
+    if (r.b == &bmvr::g_VrSettingsPause && bmvr::g_VrSettingsPause != m_SettingsPausedGame)
+    {
+        m_SettingsPausedGame = bmvr::g_VrSettingsPause;
+        m_PendingPauseCmd.store(m_SettingsPausedGame ? 1 : 2, std::memory_order_release);
     }
     if (IsEngineCvarKey(r.key))
     {
