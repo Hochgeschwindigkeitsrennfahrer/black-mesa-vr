@@ -33,6 +33,7 @@
 #include <new>
 #include <string>
 #include <vector>
+#include "bmvr_seh.h"
 
 namespace
 {
@@ -2401,7 +2402,7 @@ namespace
     {
         if (!ctx)
             return;
-        __try
+        BMVR_TRY
         {
             ctx->OverrideAlphaWriteEnable(enable, write);
         }
@@ -2459,7 +2460,7 @@ namespace
         ITexture* tex = nullptr;
         if (!fn || !mat)
             return nullptr;
-        __try
+        BMVR_TRY
         {
             tex = fn(mat, name, w, h, RT_SIZE_LITERAL, IMAGE_FORMAT_RGBA16161616F,
                 MATERIAL_RT_DEPTH_SHARED,
@@ -2478,7 +2479,7 @@ namespace
         ok = false;
         if (!fn || !mat)
             return;
-        __try
+        BMVR_TRY
         {
             fn(mat);
             ok = true;
@@ -2493,7 +2494,7 @@ namespace
     {
         if (!fn || !mat)
             return;
-        __try
+        BMVR_TRY
         {
             fn(mat);
         }
@@ -2507,7 +2508,7 @@ namespace
         const char* map = nullptr;
         if (!eng)
             return "";
-        __try
+        BMVR_TRY
         {
             map = eng->GetLevelNameShort();
         }
@@ -2523,7 +2524,7 @@ namespace
         if (!eng)
             return false;
         bool paused = false;
-        __try
+        BMVR_TRY
         {
             paused = eng->IsPaused();
         }
@@ -2539,7 +2540,7 @@ namespace
         if (!engineVgui)
             return false;
         bool vis = false;
-        __try
+        BMVR_TRY
         {
             vis = static_cast<IEngineVGui*>(engineVgui)->IsGameUIVisible();
         }
@@ -2555,7 +2556,7 @@ namespace
         if (!g_D3DVR9 || !surf)
             return E_POINTER;
         HRESULT hr = E_FAIL;
-        __try
+        BMVR_TRY
         {
             hr = g_D3DVR9->TransferSurface(surf, FALSE);
         }
@@ -2571,7 +2572,7 @@ namespace
         void** vt = nullptr;
         if (!obj)
             return nullptr;
-        __try
+        BMVR_TRY
         {
             vt = *reinterpret_cast<void***>(obj);
         }
@@ -2588,7 +2589,7 @@ namespace
         if (!vt)
             return 0;
         int team = 0;
-        __try
+        BMVR_TRY
         {
             using Fn = int(__thiscall*)(void*);
             Fn fn = reinterpret_cast<Fn>(vt[Offsets::kCBasePlayer_GetTeamNumberVt / 4]);
@@ -2608,7 +2609,7 @@ namespace
         if (!vt)
             return false;
         bool ok = false;
-        __try
+        BMVR_TRY
         {
             using FnPos = Vector*(__thiscall*)(void*, Vector*);
             using FnAng = QAngle*(__thiscall*)(void*);
@@ -2640,7 +2641,7 @@ namespace
         if (!fn || !eye || !ang)
             return nullptr;
         void* screen = nullptr;
-        __try
+        BMVR_TRY
         {
             using Fn = void*(__cdecl*)(const Vector*, const QAngle*, int);
             screen = reinterpret_cast<Fn>(fn)(eye, ang, team);
@@ -2658,7 +2659,7 @@ namespace
             return;
         if (fn)
         {
-            __try
+            BMVR_TRY
             {
                 using Fn = void(__cdecl*)(void*, int);
                 reinterpret_cast<Fn>(fn)(screen, buttons);
@@ -2668,7 +2669,7 @@ namespace
             {
             }
         }
-        __try
+        BMVR_TRY
         {
             *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(screen)
                 + Offsets::kC_VGuiScreen_ButtonState) = buttons;
@@ -2683,7 +2684,7 @@ namespace
         int v = 0;
         if (!p)
             return 0;
-        __try
+        BMVR_TRY
         {
             v = *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(p) + off);
         }
@@ -2699,7 +2700,7 @@ namespace
         void* v = nullptr;
         if (!p)
             return nullptr;
-        __try
+        BMVR_TRY
         {
             v = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(p) + off);
         }
@@ -2715,7 +2716,7 @@ namespace
         if (!fn || !screen || !ray || !u || !v)
             return false;
         bool hit = false;
-        __try
+        BMVR_TRY
         {
             using Fn = bool(__thiscall*)(void*, Ray_t*, float*, float*, float*);
             hit = reinterpret_cast<Fn>(fn)(screen, ray, u, v, nullptr);
@@ -2733,7 +2734,7 @@ namespace
     {
         if (!clientBase || !panel)
             return;
-        __try
+        BMVR_TRY
         {
             const uintptr_t global = modeSite ? *reinterpret_cast<const uint32_t*>(modeSite)
                                               : clientBase + Offsets::kClientModeGlobalRva;
@@ -2756,7 +2757,7 @@ namespace
         void** vt = SehObjectVTable(in);
         if (!vt)
             return;
-        __try
+        BMVR_TRY
         {
             using Fn = void(__thiscall*)(void*, int, int);
             Fn fn = reinterpret_cast<Fn>(vt[Offsets::kVguiVtInternalCursorMoved]);
@@ -2774,7 +2775,7 @@ namespace
         if (!vt)
             return;
         const int code = Offsets::kVguiMouseLeftCode;
-        __try
+        BMVR_TRY
         {
             using FnState = void(__thiscall*)(void*, int, int);
             using FnBtn = void(__thiscall*)(void*, int);
@@ -2995,7 +2996,7 @@ static IMatRenderContext* SehGetRenderContext(void* mat)
     IMatRenderContext* ctx = nullptr;
     if (!mat)
         return nullptr;
-    __try
+    BMVR_TRY
     {
         void** vt = *reinterpret_cast<void***>(mat);
         if (vt)
@@ -3017,7 +3018,7 @@ static void SehReleaseMatContext(IMatRenderContext* ctx)
 {
     if (!ctx)
         return;
-    __try
+    BMVR_TRY
     {
         void** vt = *reinterpret_cast<void***>(ctx);
         if (!vt)
@@ -3037,7 +3038,7 @@ static ICallQueue* SehCallQueueFromSlot(void* ctx, int slot)
     ICallQueue* q = nullptr;
     if (!ctx || slot < 0)
         return nullptr;
-    __try
+    BMVR_TRY
     {
         void** vt = *reinterpret_cast<void***>(ctx);
         if (!vt)
@@ -3066,7 +3067,7 @@ static bool SehQueueFunctorInternal(ICallQueue* q, CFunctor* functor)
     if (!q || !functor)
         return false;
     bool ok = false;
-    __try
+    BMVR_TRY
     {
         void** vt = *reinterpret_cast<void***>(q);
         if (vt && vt[0])
@@ -3249,7 +3250,7 @@ bool VR::EngineDrawingLoadingImage()
         m_LoadingFlagProbed = true;
         if (m_Game && m_Game->m_EngineClient)
         {
-            __try
+            BMVR_TRY
             {
                 void** vtbl = *reinterpret_cast<void***>(m_Game->m_EngineClient);
                 const uint8_t* fn = static_cast<const uint8_t*>(vtbl[29]);
@@ -3267,7 +3268,7 @@ bool VR::EngineDrawingLoadingImage()
     if (!m_LoadingFlagAddr)
         return false;
     bool on = false;
-    __try
+    BMVR_TRY
     {
         on = *m_LoadingFlagAddr != 0;
     }
@@ -3417,7 +3418,7 @@ void VR::LogFullFrameSizeIfReady()
     s_lastPollMs = nowMs ? nowMs : 1;
     static int s_logs;
     void** vt = nullptr;
-    __try
+    BMVR_TRY
     {
         vt = *reinterpret_cast<void***>(m_Game->m_MaterialSystem);
     }
@@ -3435,7 +3436,7 @@ void VR::LogFullFrameSizeIfReady()
         ITexture* tex = nullptr;
         int aw = 0;
         int ah = 0;
-        __try
+        BMVR_TRY
         {
             tex = reinterpret_cast<FindFn>(vt[Offsets::kIMaterialSystem_FindTextureVt])(
                 m_Game->m_MaterialSystem, name, "RenderTargets", false, 0);
@@ -8178,7 +8179,7 @@ namespace
     // Depth-first from the vgui root; fills found[i] for kTitleHudNames[i].
     bool SehFindTitleHudPanels(void* ipanel, unsigned int root, unsigned int* found)
     {
-        __try
+        BMVR_TRY
         {
             unsigned int stack[64];
             int sp = 0;
@@ -8222,7 +8223,7 @@ namespace
     // paint against (abs pos + clip rect are only valid during a paint).
     void SehLogPanelChain(void* ipanel, unsigned int p, const char* tag)
     {
-        __try
+        BMVR_TRY
         {
             for (int depth = 0; p && depth < 12; ++depth)
             {
@@ -8247,7 +8248,7 @@ namespace
     // x, y, wide, tall of a panel (relative to its parent); false on a fault.
     bool SehPanelBounds(void* ipanel, unsigned int p, int* out)
     {
-        __try
+        BMVR_TRY
         {
             PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetPos, p, &out[0], &out[1]);
             PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetSize, p, &out[2], &out[3]);
@@ -8261,7 +8262,7 @@ namespace
 
     bool SehPanelVisible(void* ipanel, unsigned int p)
     {
-        __try
+        BMVR_TRY
         {
             return PanelCall<bool>(ipanel, kPanelIsVisible, p);
         }
@@ -8275,7 +8276,7 @@ namespace
         unsigned int* hidden, int cap)
     {
         int count = 0;
-        __try
+        BMVR_TRY
         {
             unsigned int keep[40];
             int keepCount = 0;
@@ -8327,7 +8328,7 @@ namespace
     int SehFitPanelChain(void* ipanel, unsigned int p, int w, int h,
         unsigned int* panels, int (*sizes)[2], int count, int cap)
     {
-        __try
+        BMVR_TRY
         {
             for (int depth = 0; p && depth < 12 && count < cap; ++depth)
             {
@@ -8355,7 +8356,7 @@ namespace
 
     void SehRestorePanelSizes(void* ipanel, const unsigned int* panels, const int (*sizes)[2], int count)
     {
-        __try
+        BMVR_TRY
         {
             for (int i = count - 1; i >= 0; --i)
                 PanelCall<void, unsigned int, int, int>(ipanel, kPanelSetSize, panels[i], sizes[i][0], sizes[i][1]);
@@ -8367,7 +8368,7 @@ namespace
 
     void SehShowPanels(void* ipanel, const unsigned int* panels, int count)
     {
-        __try
+        BMVR_TRY
         {
             for (int i = 0; i < count; ++i)
                 PanelCall<void>(ipanel, kPanelSetVisible, panels[i], true);
@@ -8392,7 +8393,7 @@ namespace
     int SehFindScreenEffectMaterials(void* matsys, IMaterial** out)
     {
         int found = 0;
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(matsys);
             using tFirst = unsigned short(__thiscall*)(void*);
@@ -8427,7 +8428,7 @@ namespace
 
     int SehNumMaterials(void* matsys)
     {
-        __try
+        BMVR_TRY
         {
             using tNum = int(__thiscall*)(void*);
             return reinterpret_cast<tNum>((*reinterpret_cast<void***>(matsys))[Offsets::kIMaterialSystem_GetNumMaterialsVt])(matsys);
@@ -8440,7 +8441,7 @@ namespace
 
     void SehSetNoDraw(IMaterial* m, bool on)
     {
-        __try
+        BMVR_TRY
         {
             using tSetFlag = void(__thiscall*)(IMaterial*, int, bool);
             reinterpret_cast<tSetFlag>((*reinterpret_cast<void***>(m))[Offsets::kIMaterial_SetMaterialVarFlagVt])(
@@ -8536,7 +8537,7 @@ namespace
     // $envmaptint as a vector var, or null.
     void* SehFindEnvmapTint(IMaterial* m, float* rgb)
     {
-        __try
+        BMVR_TRY
         {
             using tFindVar = void*(__thiscall*)(IMaterial*, const char*, bool*, bool);
             bool found = false;
@@ -8558,7 +8559,7 @@ namespace
 
     void SehSetVec3(void* var, const float* rgb)
     {
-        __try
+        BMVR_TRY
         {
             using tSet = void(__thiscall*)(void*, float, float, float);
             reinterpret_cast<tSet>((*reinterpret_cast<void***>(var))[Offsets::kIMaterialVar_SetVecValue3Vt])(
@@ -8580,7 +8581,7 @@ namespace
 
     bool SehWalkMaterials(void* matsys, EnvmapVisit visit, void* ctx, int* count)
     {
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(matsys);
             using tFirst = unsigned short(__thiscall*)(void*);
@@ -10047,7 +10048,7 @@ void VR::UpdateRpgLaserPoint()
     {
         unsigned char laserOn = 0;
         const int onOff = m_Game->RpgLaserOnOffset();
-        __try
+        BMVR_TRY
         {
             laserOn = *reinterpret_cast<unsigned char*>(
                 reinterpret_cast<char*>(weap) + onOff);

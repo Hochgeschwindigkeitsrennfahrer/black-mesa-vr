@@ -43,6 +43,8 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 # resets the try-state to -1 at the lifetime start of any local declared inside
 # the __try body, so the guarded loads ran unprotected (ServerEntityIndex
 # crash on map load, 2026-10-11); -disable-lifetime-markers keeps them inside.
+# Third quirk, not fixable by a flag: a caught fault returns with EBX/ESI/EDI
+# wiped, so every __try is written BMVR_TRY (src/bmvr_seh.h, checked at build).
 set(_bmvr_seh "/EHa -Xclang -disable-lifetime-markers")
 set(CMAKE_CXX_FLAGS_RELEASE_INIT "${_bmvr_seh}")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT "${_bmvr_seh}")

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <mutex>
 #include <cstring>
+#include "bmvr_seh.h"
 
 namespace
 {
@@ -110,7 +111,7 @@ namespace
         const matrix3x4_t* xform = world3x4
             ? reinterpret_cast<const matrix3x4_t*>(world3x4) : nullptr;
         int drawn = 0;
-        __try
+        BMVR_TRY
         {
             drawn = render->DrawModel(
                 flags,

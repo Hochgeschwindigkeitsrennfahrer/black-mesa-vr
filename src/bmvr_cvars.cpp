@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include "bmvr_seh.h"
 
 // No Source SDK here, so a ConVar is built by cloning an existing client.dll
 // ConVar and patching its fields. Layout (BM, Alien Swarm-era tier1; the same
@@ -257,7 +258,7 @@ namespace bmvr
         bool CallGetNameAt(void* obj, int slot, const char*& out)
         {
             out = nullptr;
-            __try
+            BMVR_TRY
             {
                 void** vt = *reinterpret_cast<void***>(obj);
                 using tGetName = const char*(__thiscall*)(void*);
@@ -283,7 +284,7 @@ namespace bmvr
 
         bool CallRegister(void* icvar, void* obj)
         {
-            __try
+            BMVR_TRY
             {
                 void** vt = *reinterpret_cast<void***>(icvar);
                 using tRegister = void(__thiscall*)(void*, void*);
@@ -298,7 +299,7 @@ namespace bmvr
 
         bool CopyTemplate(const void* tmpl, void* dst)
         {
-            __try
+            BMVR_TRY
             {
                 std::memcpy(dst, tmpl, kCloneBytes);
             }
@@ -318,7 +319,7 @@ namespace bmvr
                 if (!c)
                     continue;
                 void* parent = nullptr;
-                __try { parent = Field<void*>(c, 0x1C); }
+                BMVR_TRY { parent = Field<void*>(c, 0x1C); }
                 __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
                 if (parent != c)
                     continue;

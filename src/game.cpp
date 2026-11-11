@@ -17,6 +17,7 @@
 #include <string>
 #include <mutex>
 #include <set>
+#include "bmvr_seh.h"
 using tCreateInterface = void*(__cdecl*)(const char* name, int* returnCode);
 
 static HMODULE GetModuleWithRetry(const char* dllname, int maxTries = 1800, int delayMs = 100)
@@ -75,7 +76,7 @@ static void* SehVtableSlot(void* iface, int slot)
     void* fn = nullptr;
     if (!iface)
         return nullptr;
-    __try
+    BMVR_TRY
     {
         void** vt = *reinterpret_cast<void***>(iface);
         if (vt)
@@ -215,7 +216,7 @@ C_BaseEntity* Game::LocalPlayerUseEntity()
         return nullptr;
 
     uint32_t handle = 0;
-    __try
+    BMVR_TRY
     {
         handle = *reinterpret_cast<uint32_t*>(
             reinterpret_cast<uint8_t*>(player) + Offsets::kCBasePlayer_hUseEntity);
@@ -269,7 +270,7 @@ const char* Game::GetEntityModelName(C_BaseEntity* entity)
     if (!entity || !m_ModelInfo)
         return nullptr;
     short modelIndex = 0;
-    __try
+    BMVR_TRY
     {
         modelIndex = *reinterpret_cast<const short*>(
             reinterpret_cast<uintptr_t>(entity) + 0x94);
@@ -294,7 +295,7 @@ void* Game::FindOrLoadModel(const char* name)
         if (!model)
             return false;
         const char* got = nullptr;
-        __try
+        BMVR_TRY
         {
             got = m_ModelInfo->GetModelName(model);
         }
@@ -315,7 +316,7 @@ void* Game::FindOrLoadModel(const char* name)
         return leaf && leaf[0] && std::strstr(got, leaf) != nullptr;
     };
     int idx = -1;
-    __try
+    BMVR_TRY
     {
         idx = m_ModelInfo->GetModelIndex(name);
     }
@@ -326,7 +327,7 @@ void* Game::FindOrLoadModel(const char* name)
     if (idx != -1)
     {
         void* model = nullptr;
-        __try
+        BMVR_TRY
         {
             model = m_ModelInfo->GetModel(idx);
         }
@@ -339,7 +340,7 @@ void* Game::FindOrLoadModel(const char* name)
     }
 
     void** vt = nullptr;
-    __try
+    BMVR_TRY
     {
         vt = *reinterpret_cast<void***>(m_ModelInfo);
     }
@@ -354,7 +355,7 @@ void* Game::FindOrLoadModel(const char* name)
     // (Source 2013 layout). Probe those two only; a wide slot sweep can call
     // OnLevelChange / CleanupDynamicModels.
     void* found = nullptr;
-    __try
+    BMVR_TRY
     {
         using FindFn = void*(__thiscall*)(void*, const char*);
         auto find = reinterpret_cast<FindFn>(vt[59]);
@@ -370,7 +371,7 @@ void* Game::FindOrLoadModel(const char* name)
     }
     if (found)
         return found;
-    __try
+    BMVR_TRY
     {
         using RegFn = int(__thiscall*)(void*, const char*, bool);
         auto reg = reinterpret_cast<RegFn>(vt[52]);
@@ -405,7 +406,7 @@ C_BaseEntity* Game::GetViewModelEntity()
     constexpr int kViewModel0 = 0x13F0;
     constexpr uint32_t kInvalid = 0xFFFFFFFFu;
     uint32_t h = 0;
-    __try
+    BMVR_TRY
     {
         h = *reinterpret_cast<const uint32_t*>(
             reinterpret_cast<uintptr_t>(player) + kViewModel0);
@@ -424,7 +425,7 @@ bool Game::GetEntityAttachment(C_BaseEntity* entity, const char* name, Vector& o
     if (!entity || !name || !name[0])
         return false;
     int ok = 0;
-    __try
+    BMVR_TRY
     {
         unsigned char* rend = reinterpret_cast<unsigned char*>(entity) + 4;
         void** vt = *reinterpret_cast<void***>(rend);
@@ -460,7 +461,7 @@ void Game::EmitEntitySound(C_BaseEntity* entity, const char* soundName)
     using EmitFn = void(__thiscall*)(void*, const char*, float, float*);
     auto emit = reinterpret_cast<EmitFn>(
         reinterpret_cast<uintptr_t>(client) + Offsets::kCBaseEntity_EmitSound);
-    __try
+    BMVR_TRY
     {
         emit(entity, soundName, 0.f, nullptr);
     }
@@ -483,7 +484,7 @@ void Game::PlayUiSound(const char* sample)
     if (!m_EngineSound)
         return;
     void** vt = nullptr;
-    __try
+    BMVR_TRY
     {
         vt = *reinterpret_cast<void***>(m_EngineSound);
     }
@@ -497,7 +498,7 @@ void Game::PlayUiSound(const char* sample)
     using PrecacheFn = bool(__thiscall*)(void*, const char*, bool, bool);
     using AmbientFn = void(__thiscall*)(void*, const char*, float, int, int, float);
     static int s_logged;
-    __try
+    BMVR_TRY
     {
         auto precache = reinterpret_cast<PrecacheFn>(vt[0]);
         if (precache)
@@ -526,7 +527,7 @@ const char* Game::GetEntityNetworkName(int entityIndex)
     if (!m_ClientEntityList || entityIndex <= 0)
         return nullptr;
     void* net = nullptr;
-    __try
+    BMVR_TRY
     {
         net = m_ClientEntityList->GetClientNetworkable(entityIndex);
     }
@@ -543,7 +544,7 @@ const char* Game::GetEntityNetworkName(int entityIndex)
         const char* networkName;
     };
     const char* name = nullptr;
-    __try
+    BMVR_TRY
     {
         void** vt = *reinterpret_cast<void***>(net);
         using tGetClientClass = ClientClassLite*(__thiscall*)(void*);
@@ -569,7 +570,7 @@ const char* Game::GetEntityClientClassName(C_BaseEntity* entity)
         const char* networkName;
     };
     const char* name = nullptr;
-    __try
+    BMVR_TRY
     {
         unsigned char* net = reinterpret_cast<unsigned char*>(entity) + 8;
         void** vt = *reinterpret_cast<void***>(net);
@@ -821,7 +822,7 @@ int Game::ReadPlayerFlagByte(int& offset)
     if (!player)
         return -1;
     unsigned char value = 0;
-    __try
+    BMVR_TRY
     {
         value = *reinterpret_cast<volatile unsigned char*>(
             static_cast<unsigned char*>(player) + offset);
@@ -856,7 +857,7 @@ int Game::LocalPlayerMoveType()
     if (!player)
         return -1;
     unsigned char value = 0;
-    __try
+    BMVR_TRY
     {
         value = *reinterpret_cast<volatile unsigned char*>(
             static_cast<unsigned char*>(player) + g_nvMoveType);
@@ -889,7 +890,7 @@ int Game::LocalPlayerFlags()
     if (!player)
         return -1;
     int value = 0;
-    __try
+    BMVR_TRY
     {
         value = *reinterpret_cast<volatile int*>(static_cast<unsigned char*>(player) + g_nvFlags);
     }
@@ -915,7 +916,7 @@ bool Game::LocalPlayerAbsOrigin(Vector& out)
     void* player = local > 0 ? m_ClientEntityList->GetClientEntity(local) : nullptr;
     if (!player)
         return false;
-    __try
+    BMVR_TRY
     {
         out = *reinterpret_cast<const Vector*>(static_cast<const char*>(player) + Offsets::kCBaseEntity_AbsOrigin);
     }
@@ -952,7 +953,7 @@ int Game::CollectLadders(Vector* bottoms, Vector* tops, int maxLadders)
         const char* ent = static_cast<const char*>(m_ClientEntityList->GetClientEntity(s_index[i]));
         if (!ent)
             continue;
-        __try
+        BMVR_TRY
         {
             const Vector org = *reinterpret_cast<const Vector*>(ent + Offsets::kCBaseEntity_AbsOrigin);
             bottoms[n] = org + *reinterpret_cast<const Vector*>(ent + Offsets::kCFuncLadder_MountBottom);
@@ -1019,7 +1020,7 @@ bool Game::GetEntityAbsOrigin(C_BaseEntity* entity, Vector& out)
 {
     if (!entity)
         return false;
-    __try
+    BMVR_TRY
     {
         out = *reinterpret_cast<const Vector*>(reinterpret_cast<const char*>(entity) + Offsets::kCBaseEntity_AbsOrigin);
     }
@@ -1034,7 +1035,7 @@ int Game::ModelPrecacheIndex(const char* name)
 {
     if (!m_ModelInfo || !name || !name[0])
         return -1;
-    __try
+    BMVR_TRY
     {
         return m_ModelInfo->GetModelIndex(name);
     }
@@ -1048,7 +1049,7 @@ namespace
 {
     int ReadEntityModelIndexRaw(const void* entity)
     {
-        __try
+        BMVR_TRY
         {
             return *reinterpret_cast<const short*>(reinterpret_cast<uintptr_t>(entity) + 0x94);
         }
@@ -1092,7 +1093,7 @@ int Game::VisibleEntityModelIndex(int entityIndex, Vector& origin)
     void* ent = m_ClientEntityList->GetClientEntity(entityIndex);
     if (!ent)
         return -1;
-    __try
+    BMVR_TRY
     {
         // Dormancy (out of PVS, stale origin) is not checked here: the caller
         // traces line of sight instead of calling an unverified vtable slot.
@@ -1189,7 +1190,7 @@ int Game::ReadWeaponClip(C_BaseEntity* weapon)
     if (g_nvClip1 < 0)
         return -1;
     int clip = -1;
-    __try
+    BMVR_TRY
     {
         clip = *reinterpret_cast<volatile int*>(
             reinterpret_cast<unsigned char*>(weapon) + g_nvClip1);
@@ -1210,7 +1211,7 @@ bool Game::WeaponHasNoAmmo(C_BaseEntity* weapon)
     auto rdInt = [](void* ent, int off) -> int {
         if (!ent || off < 0)
             return -1;
-        __try
+        BMVR_TRY
         {
             return *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(ent) + off);
         }
@@ -1245,7 +1246,7 @@ bool Game::ReadLocalPlayerViewEntitySet(bool& set)
     void* player = m_ClientEntityList->GetClientEntity(local);
     if (!player)
         return false;
-    __try
+    BMVR_TRY
     {
         const unsigned int h = *reinterpret_cast<volatile unsigned int*>(
             reinterpret_cast<unsigned char*>(player) + g_nvViewEntity);
@@ -1273,7 +1274,7 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
     auto rdInt = [](void* ent, int off) -> int {
         if (!ent || off < 0)
             return -1;
-        __try
+        BMVR_TRY
         {
             return *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(ent) + off);
         }
@@ -1285,7 +1286,7 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
     auto rdByte = [](void* ent, int off) -> int {
         if (!ent || off < 0)
             return -1;
-        __try
+        BMVR_TRY
         {
             return *reinterpret_cast<volatile unsigned char*>(reinterpret_cast<unsigned char*>(ent) + off);
         }
@@ -1297,7 +1298,7 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
     auto rdFloat = [](void* ent, int off) -> float {
         if (!ent || off < 0)
             return -1.f;
-        __try
+        BMVR_TRY
         {
             return *reinterpret_cast<volatile float*>(reinterpret_cast<unsigned char*>(ent) + off);
         }
@@ -1330,7 +1331,7 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
         float curtime = -1.f;
         if (m_BaseClient)
         {
-            __try
+            BMVR_TRY
             {
                 const uintptr_t gp = *reinterpret_cast<uintptr_t*>(
                     m_BaseClient + Offsets::kClientGpGlobalsPtr);
@@ -1461,7 +1462,7 @@ int Game::CollectInventoryWeapons(InventoryWeapon* out, int maxCount)
     for (int i = 0; i < kMaxWeapons && n < maxCount; ++i)
     {
         uint32_t h = 0;
-        __try
+        BMVR_TRY
         {
             h = handles[i];
         }
@@ -1503,7 +1504,7 @@ bool Game::ClientCmd(const char* szCmdString)
     if (!m_EngineClient || !szCmdString)
         return false;
     bool ok = false;
-    __try
+    BMVR_TRY
     {
         m_EngineClient->ClientCmd(szCmdString);
         ok = true;
@@ -1520,7 +1521,7 @@ bool Game::ClientCmd_Unrestricted(const char* szCmdString)
     if (!m_EngineClient || !szCmdString)
         return false;
     bool ok = false;
-    __try
+    BMVR_TRY
     {
         m_EngineClient->ClientCmd_Unrestricted(szCmdString);
         ok = true;
@@ -1544,7 +1545,7 @@ bool Game::TryGetLightForPoint(const Vector& pos, Vector& outRgb, bool clamp) co
         return false;
 
     void** vt = nullptr;
-    __try
+    BMVR_TRY
     {
         vt = *reinterpret_cast<void***>(m_EngineClient);
     }
@@ -1562,7 +1563,7 @@ bool Game::TryGetLightForPoint(const Vector& pos, Vector& outRgb, bool clamp) co
     sampled.y = 0.f;
     sampled.z = 0.f;
     Vector* ret = nullptr;
-    __try
+    BMVR_TRY
     {
         ret = reinterpret_cast<Fn>(vt[Offsets::kIEngineClient_GetLightForPoint])(
             m_EngineClient, &sampled, &pos, clamp ? 1 : 0);
@@ -1615,7 +1616,7 @@ void Game::ResolveMaterialThreadSlots() const
     }
 
     void** vtbl = nullptr;
-    __try
+    BMVR_TRY
     {
         vtbl = *reinterpret_cast<void***>(m_MaterialSystem);
     }
@@ -1648,7 +1649,7 @@ void Game::ResolveMaterialThreadSlots() const
 
     const void* gbd = reinterpret_cast<void*>(gbdAddr);
     int gbdSlot = -1;
-    __try
+    BMVR_TRY
     {
         for (int i = 0; i < 96; ++i)
         {
@@ -1710,7 +1711,7 @@ bool Game::MaterialVTableMatchesDump() const
 {
     if (!m_MaterialSystem || !m_Offsets || !m_Offsets->GetBackBufferDimensions.valid)
         return false;
-    __try
+    BMVR_TRY
     {
         void** vtbl = *reinterpret_cast<void***>(m_MaterialSystem);
         if (!vtbl)
@@ -1738,7 +1739,7 @@ bool Game::SetMatQueueMode(int mode) const
         if (!m_VR->PassThroughWarmupDone())
             return false;
     }
-    __try
+    BMVR_TRY
     {
         void** vtbl = *reinterpret_cast<void***>(m_MaterialSystem);
         if (!vtbl || m_MatSetThreadSlot < 0 || !vtbl[m_MatSetThreadSlot])
@@ -1769,7 +1770,7 @@ void Game::ExecuteQueuedMaterials() const
     if (!m_MatSlotsValid || m_CachedMatQueueMode.load(std::memory_order_acquire) == 0)
         return;
     bool ran = false;
-    __try
+    BMVR_TRY
     {
         void** vtbl = *reinterpret_cast<void***>(m_MaterialSystem);
         if (vtbl && m_MatExecuteQueuedSlot >= 0 && vtbl[m_MatExecuteQueuedSlot])
@@ -1797,7 +1798,7 @@ namespace
     const char* SehCStringAt(void* obj, int offset)
     {
         const char* s = nullptr;
-        __try
+        BMVR_TRY
         {
             s = *reinterpret_cast<const char**>(reinterpret_cast<uint8_t*>(obj) + offset);
             if (s && s[0] == '\0')
@@ -1816,7 +1817,7 @@ namespace
         if (!cvar)
             return nullptr;
         void** vt = nullptr;
-        __try { vt = *reinterpret_cast<void***>(cvar); }
+        BMVR_TRY { vt = *reinterpret_cast<void***>(cvar); }
         __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
         if (!vt)
             return nullptr;
@@ -1825,7 +1826,7 @@ namespace
         for (int slot : slots)
         {
             const char* n = nullptr;
-            __try
+            BMVR_TRY
             {
                 if (!vt[slot])
                     continue;
@@ -1865,7 +1866,7 @@ namespace
         if (!icvar || !name || slot < 0)
             return nullptr;
         void* found = nullptr;
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(icvar);
             if (!vt || !vt[slot])
@@ -1943,7 +1944,7 @@ namespace
         if (!cvar)
             return false;
         void* parent = nullptr;
-        __try { parent = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(cvar) + 0x1C); }
+        BMVR_TRY { parent = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(cvar) + 0x1C); }
         __except (EXCEPTION_EXECUTE_HANDLER) { parent = nullptr; }
         void* objs[2] = { cvar, (parent && parent != cvar) ? parent : nullptr };
         bool ok = false;
@@ -1956,7 +1957,7 @@ namespace
             fu.f = fval;
             fu.u ^= reinterpret_cast<uint32_t>(obj);
             const uint32_t storedInt = static_cast<uint32_t>(ival) ^ reinterpret_cast<uint32_t>(obj);
-            __try
+            BMVR_TRY
             {
                 *reinterpret_cast<uint32_t*>(b + 0x2C) = fu.u;
                 *reinterpret_cast<uint32_t*>(b + 0x30) = storedInt;
@@ -2032,7 +2033,7 @@ bool Game::GetConVarInt(const char* name, int& value) const
     if (!cvar)
         return false;
     uint32_t stored = 0;
-    __try
+    BMVR_TRY
     {
         stored = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(cvar) + 0x30);
     }
@@ -2051,7 +2052,7 @@ bool Game::GetConVarFloat(const char* name, float& value) const
     if (!cvar)
         return false;
     uint32_t stored = 0;
-    __try
+    BMVR_TRY
     {
         stored = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(cvar) + 0x2C);
     }

@@ -19,6 +19,7 @@
 #include <string.h>
 #include <string>
 #include <vector>
+#include "bmvr_seh.h"
 
 extern "C" volatile int g_BmvrFlashlightMatrixFix;
 
@@ -1435,7 +1436,7 @@ namespace bmvr
         for (int i = 0; i < count; ++i)
         {
             DWORD v = 0;
-            __try
+            BMVR_TRY
             {
                 v = stk[i];
             }

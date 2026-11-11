@@ -4,6 +4,7 @@
 #include "bmvr_version.h"
 #include <cstdint>
 #include <cstring>
+#include "bmvr_seh.h"
 
 static LONG CALLBACK FaultVeh(PEXCEPTION_POINTERS info)
 {
@@ -43,7 +44,7 @@ static LONG CALLBACK FaultVeh(PEXCEPTION_POINTERS info)
     for (int frame = 0; frame < 12 && used < static_cast<int>(sizeof(body)) - 80; ++frame)
     {
         DWORD next = 0, ret = 0;
-        __try
+        BMVR_TRY
         {
             next = *reinterpret_cast<DWORD*>(static_cast<uintptr_t>(ebp));
             ret = *reinterpret_cast<DWORD*>(static_cast<uintptr_t>(ebp + 4));
@@ -199,6 +200,8 @@ static DWORD WINAPI InitBMVR(LPVOID param)
     GetModuleFileNameA(static_cast<HMODULE>(param), path, MAX_PATH);
     bmvr::Log("BMVR d3d9.dll loaded (L4D2VR architecture, Black Mesa offsets) from %s",
         path[0] ? path : "?");
+    // One caught fault on purpose: checks BMVR_TRY keeps EBX/ESI/EDI (bmvr_seh.h).
+    bmvr::seh::SelfTest();
     // Test switch: hold back the hooks so the engine's first render target pass runs without them, the startup
     // order some real launches get (bloom targets eye-sized). Harness: BMVR_TEST_INIT_DELAY_MS.
     char delayText[16]{};

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 #include <d3d9.h>
+#include "bmvr_seh.h"
 
 namespace
 {
@@ -66,7 +67,7 @@ namespace
         if (!vm)
             return -1;
         int parity = -1;
-        __try
+        BMVR_TRY
         {
             parity = *reinterpret_cast<const unsigned char*>(
                 reinterpret_cast<uintptr_t>(vm) + 0x9F8);

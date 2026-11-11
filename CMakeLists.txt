@@ -46,6 +46,7 @@ set(BMVR_SOURCES
   src/bmvr_prof.cpp
   src/bmvr_glowtrace.cpp
   src/bmvr_cvars.cpp
+  src/bmvr_seh.cpp
   src/sdk/checksum_crc.cpp
   third_party/l4d2vr/L4D2VR/vr_hands/vr_hand_asset_loader.cpp
   third_party/minhook/src/buffer.c
@@ -65,6 +66,13 @@ add_custom_target(bmvr_version
   VERBATIM
 )
 add_dependencies(d3d9 bmvr_version)
+# Bare __try is a build error: see src/bmvr_seh.h.
+add_custom_target(bmvr_seh_guards
+  COMMAND "${CMAKE_COMMAND}" -DSRC_DIR=${ROOT}/src -P "${ROOT}/tools/check_seh_guards.cmake"
+  COMMENT "BMVR: check __try guards"
+  VERBATIM
+)
+add_dependencies(d3d9 bmvr_seh_guards)
 set_target_properties(d3d9 PROPERTIES
   OUTPUT_NAME "d3d9"
   PREFIX ""

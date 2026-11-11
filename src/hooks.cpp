@@ -1,6 +1,7 @@
 #include "hooks.h"
 #include "game.h"
 #include "sdk.h"
+#include "bmvr_seh.h"
 #include "vr.h"
 #include "offsets.h"
 
@@ -29,7 +30,7 @@ static bool AreaPortalComputeViewCallSiteOk(int fn)
     const uintptr_t ret = engine + Offsets::kAreaPortalComputeViewReturnRva;
     const auto* call = reinterpret_cast<const unsigned char*>(ret - 5);
     bool ok = false;
-    __try
+    BMVR_TRY
     {
         ok = call[0] == 0xE8
             && ret + *reinterpret_cast<const int32_t*>(call + 1) == static_cast<uintptr_t>(fn);
@@ -211,7 +212,7 @@ static bool g_PixelVisStatsOn = false;
 // pixelvis_queryparams_t starts with the glow's world position.
 static bool ReadGlowPos(const void* params, float out[3])
 {
-    __try
+    BMVR_TRY
     {
         const float* p = static_cast<const float*>(params);
         out[0] = p[0];
@@ -325,7 +326,7 @@ static const void* ScaledPixelVisParams(const void* params, PixelVisParamsCopy& 
     const float scale = bmvr::g_GlowProxyScale;
     if (!params || !(scale > 1.001f))
         return params;
-    __try
+    BMVR_TRY
     {
         std::memcpy(&copy, params, sizeof(copy));
     }
@@ -810,7 +811,7 @@ struct WorldBatchCount { int groups = 0, batches = 0, dyn = 0, distinct = 0; uns
 
 static bool CountWorldBatches(void* list, int group, WorldBatchCount& c)
 {
-    __try
+    BMVR_TRY
     {
         auto* base = static_cast<unsigned char*>(list);
         auto* vec = base + (group + 3) * 20;
@@ -1070,7 +1071,7 @@ static void InstallPixelVisPerEye()
     {
         const auto* call = reinterpret_cast<const unsigned char*>(client + rva);
         bool ok = false;
-        __try
+        BMVR_TRY
         {
             ok = call[0] == 0xE8
                 && client + rva + 5 + *reinterpret_cast<const int32_t*>(call + 1) == target;
@@ -1180,7 +1181,7 @@ namespace
         void** vt = nullptr;
         if (!mat)
             return nullptr;
-        __try
+        BMVR_TRY
         {
             vt = *reinterpret_cast<void***>(mat);
         }
@@ -1203,7 +1204,7 @@ namespace
             return "";
         IEngineClient* eng = Hooks::m_Game->m_EngineClient;
         const char* map = nullptr;
-        __try
+        BMVR_TRY
         {
             map = eng->GetLevelNameShort();
         }
@@ -1213,7 +1214,7 @@ namespace
         }
         if (map && map[0])
             return map;
-        __try
+        BMVR_TRY
         {
             map = eng->GetLevelName();
         }
@@ -1512,7 +1513,7 @@ int Hooks::initSourceHooks()
         if (surf)
         {
             void** vt = nullptr;
-            __try
+            BMVR_TRY
             {
                 vt = *reinterpret_cast<void***>(surf);
             }
@@ -1534,7 +1535,7 @@ int Hooks::initSourceHooks()
         // calls in vr.cpp: 3 GetPos, 5 GetSize).
         void* ipanel = m_Game->GetInterface("vgui2.dll", "VGUI_Panel009");
         void** pvt = nullptr;
-        __try
+        BMVR_TRY
         {
             pvt = ipanel ? *reinterpret_cast<void***>(ipanel) : nullptr;
         }
@@ -1837,7 +1838,7 @@ namespace
         void* fn = nullptr;
         if (!ctx || byteOffset < 0)
             return nullptr;
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(ctx);
             if (vt)
@@ -1863,7 +1864,7 @@ namespace
         if (!texture)
             return "null";
         const char* name = "?";
-        __try
+        BMVR_TRY
         {
             name = texture->GetName();
         }
@@ -1879,7 +1880,7 @@ namespace
         if (!info || !model)
             return nullptr;
         const char* name = nullptr;
-        __try
+        BMVR_TRY
         {
             name = info->GetModelName(model);
         }
@@ -1895,7 +1896,7 @@ namespace
         if (!Hooks::m_Game || !Hooks::m_Game->m_EngineClient)
             return 0;
         int local = 0;
-        __try
+        BMVR_TRY
         {
             local = Hooks::m_Game->m_EngineClient->GetLocalPlayer();
         }
@@ -2096,7 +2097,7 @@ namespace
         static const char* kNames[] = { "muzzle", "Fire01", "Fire02", "bolt_spawn" };
         if (!hdr || !bones)
             return false;
-        __try
+        BMVR_TRY
         {
             const int n = *reinterpret_cast<const int*>(hdr + 0xF0);           // numlocalattachments
             const int idx = *reinterpret_cast<const int*>(hdr + 0xF4);         // localattachmentindex
@@ -2208,7 +2209,7 @@ namespace
         if (hdr == g_LastViewmodelIdleHdr)
             return g_LastViewmodelIdleSeq;
         int numSeq = 0;
-        __try
+        BMVR_TRY
         {
             numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
         }
@@ -2260,7 +2261,7 @@ namespace
         if (!viewmodel)
             return;
         const int idle = FindIdleSequence(hdr);
-        __try
+        BMVR_TRY
         {
             if (idle >= 0)
                 *reinterpret_cast<int*>(static_cast<char*>(viewmodel) + kViewmodelSequence) = idle;
@@ -2288,7 +2289,7 @@ namespace
         // m_vecPunchAngleVel +0xB0 (Ghidra FUN_100b7240 / FUN_100b6d20).
         // DT_BlackMesaPlayer m_recoilPunchAngles +0x1934, m_recoilPositionOffset +0x1940
         // (FUN_1025cb60).
-        __try
+        BMVR_TRY
         {
             float* punch = reinterpret_cast<float*>(
                 static_cast<char*>(player) + 0x103C + 0x74);
@@ -2317,7 +2318,7 @@ namespace
             return nullptr;
         int numSeq = 0;
         int seqIndex = 0;
-        __try
+        BMVR_TRY
         {
             numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
             seqIndex = *reinterpret_cast<int*>(hdr + kStudioHdrLocalSeqIndex);
@@ -2330,7 +2331,7 @@ namespace
             return nullptr;
         unsigned char* desc = hdr + seqIndex + seq * kStudioSeqDescSize;
         int labelOff = 0;
-        __try
+        BMVR_TRY
         {
             labelOff = *reinterpret_cast<int*>(desc + kStudioSeqLabelIndex);
         }
@@ -2348,7 +2349,7 @@ namespace
         thread_local unsigned s_next;
         char* out = s_copy[s_next++ & 3];
         const char* src = reinterpret_cast<const char*>(desc + labelOff);
-        __try
+        BMVR_TRY
         {
             int n = 0;
             for (; n < 95 && src[n]; ++n)
@@ -2368,7 +2369,7 @@ namespace
     {
         if (!hdr || seq < 0)
             return false;
-        __try
+        BMVR_TRY
         {
             const int numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
             const int seqIndex = *reinterpret_cast<int*>(hdr + kStudioHdrLocalSeqIndex);
@@ -2390,7 +2391,7 @@ namespace
         if (!hdr || !model || !model[0])
             return false;
         char name[65]{};
-        __try
+        BMVR_TRY
         {
             std::memcpy(name, hdr + 12, 64);
         }
@@ -2418,7 +2419,7 @@ namespace
             return;
         unsigned char* hdr = g_LastViewmodelStudioHdr;
         int seq = 0;
-        __try
+        BMVR_TRY
         {
             seq = *reinterpret_cast<int*>(static_cast<char*>(viewmodel) + kViewmodelSequence);
         }
@@ -2496,7 +2497,7 @@ namespace
         const bool crowbar = Hooks::m_VR->ViewmodelIsCrowbar();
 
         auto restoreRate = [&]() {
-            __try
+            BMVR_TRY
             {
                 float* rate = reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelPlaybackRate);
                 if (*rate <= 0.01f)
@@ -2505,7 +2506,7 @@ namespace
             __except (EXCEPTION_EXECUTE_HANDLER) {}
         };
         auto freeze = [&]() {
-            __try
+            BMVR_TRY
             {
                 *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelCycle) = 0.f;
                 *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelPlaybackRate) = 0.f;
@@ -2629,7 +2630,7 @@ namespace
             return nullptr;
         int id = 0;
         int ver = 0;
-        __try
+        BMVR_TRY
         {
             id = *reinterpret_cast<int*>(p);
             ver = *(reinterpret_cast<int*>(p) + 1);
@@ -2650,7 +2651,7 @@ namespace
         DrawModelStateLite* st = nullptr;
         unsigned char* hdr = nullptr;
         void* inner = nullptr;
-        __try
+        BMVR_TRY
         {
             st = reinterpret_cast<DrawModelStateLite*>(state);
             hdr = AsStudioHdr(st->studioHdr);
@@ -2753,7 +2754,7 @@ namespace
         if (!hdr)
             return 0;
         int n = 0;
-        __try { n = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones); }
+        BMVR_TRY { n = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones); }
         __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
         if (n < 1 || n > kMaxStudioBones)
             return 0;
@@ -2769,7 +2770,7 @@ namespace
         int length = 0;
         int numbones = 0;
         int boneindex = 0;
-        __try
+        BMVR_TRY
         {
             length = *reinterpret_cast<int*>(hdr + kStudioHdrLength);
             numbones = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
@@ -2789,7 +2790,7 @@ namespace
         {
             unsigned char* bone = hdr + boneindex + i * kStudioBoneSize;
             int szname = 0;
-            __try { szname = *reinterpret_cast<int*>(bone); }
+            BMVR_TRY { szname = *reinterpret_cast<int*>(bone); }
             __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
             const char* n = StudioRelString(bone, szname);
             if (n[0] && _stricmp(n, name) == 0)
@@ -2809,7 +2810,7 @@ namespace
             return;
         const float* m = bones12 + idx * 12;
         Vector world{};
-        __try
+        BMVR_TRY
         {
             world.x = m[3];
             world.y = m[7];
@@ -2850,7 +2851,7 @@ namespace
         void* vm = Hooks::m_Game->GetViewModelEntity();
         int seq = -1;
         float cur[3][4];
-        __try
+        BMVR_TRY
         {
             if (vm)
                 seq = *reinterpret_cast<int*>(static_cast<char*>(vm) + kViewmodelSequence);
@@ -2886,7 +2887,7 @@ namespace
     {
         if (!dst || !src || count < 1 || count > kMaxStudioBones)
             return false;
-        __try
+        BMVR_TRY
         {
             std::memcpy(dst, src, static_cast<size_t>(count) * 12 * sizeof(float));
             for (int i = 0; i < count; ++i)
@@ -2913,7 +2914,7 @@ namespace
     {
         if (!renderable)
             return false;
-        __try
+        BMVR_TRY
         {
             *reinterpret_cast<float*>(reinterpret_cast<char*>(renderable) + 0x7C0) = scale;
             return true;
@@ -2929,7 +2930,7 @@ namespace
         if (!base || rel <= 0 || rel > 0x100000)
             return "";
         const char* s = reinterpret_cast<const char*>(base + rel);
-        __try
+        BMVR_TRY
         {
             if (!s[0])
                 return "";
@@ -2949,7 +2950,7 @@ namespace
         if (!VirtualProtect(p, sizeof(int), PAGE_READWRITE, &oldProt))
             return false;
         bool ok = false;
-        __try
+        BMVR_TRY
         {
             *p = value;
             ok = true;
@@ -3022,7 +3023,7 @@ namespace
         slot->hdr = hdr;
         slot->muted = mute;
         int numSeq = 0, seqIndex = 0;
-        __try
+        BMVR_TRY
         {
             numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
             seqIndex = *reinterpret_cast<int*>(hdr + kStudioHdrLocalSeqIndex);
@@ -3046,7 +3047,7 @@ namespace
                 continue;
             unsigned char* desc = hdr + seqIndex + s * kStudioSeqDescSize;
             int numEv = 0, evIndex = 0;
-            __try
+            BMVR_TRY
             {
                 numEv = *reinterpret_cast<int*>(desc + kStudioSeqNumEvents);
                 evIndex = *reinterpret_cast<int*>(desc + kStudioSeqEventIndex);
@@ -3062,7 +3063,7 @@ namespace
                 unsigned char* ev = desc + evIndex + e * kStudioEventSize;
                 float cycle = 0.f;
                 bool sound = false;
-                __try
+                BMVR_TRY
                 {
                     cycle = *reinterpret_cast<float*>(ev);
                     const int id = *reinterpret_cast<int*>(ev + 4);
@@ -3105,7 +3106,7 @@ namespace
         if (changed)
         {
             char name[65]{};
-            __try { std::memcpy(name, hdr + 12, 64); }
+            BMVR_TRY { std::memcpy(name, hdr + 12, 64); }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
             Game::logMsg("Fidget sounds %s on %s: %d event(s)", mute ? "muted" : "restored", name, changed);
         }
@@ -3148,7 +3149,7 @@ namespace
         int length = 0;
         int numbones = 0;
         int boneindex = 0;
-        __try
+        BMVR_TRY
         {
             length = *reinterpret_cast<int*>(hdr + kStudioHdrLength);
             numbones = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
@@ -3175,7 +3176,7 @@ namespace
             int parent = -2;
             int szname = 0;
             float pos[3]{};
-            __try
+            BMVR_TRY
             {
                 szname = *reinterpret_cast<int*>(bone);
                 parent = *reinterpret_cast<int*>(bone + 4);
@@ -3229,7 +3230,7 @@ namespace
 
         if (state)
         {
-            __try
+            BMVR_TRY
             {
                 auto* st = reinterpret_cast<DrawModelStateLite*>(state);
                 int* hw = reinterpret_cast<int*>(st->studioHWData);
@@ -3252,7 +3253,7 @@ namespace
         int length = 0;
         int numbody = 0;
         int bodyindex = 0;
-        __try
+        BMVR_TRY
         {
             length = *reinterpret_cast<int*>(hdr + kStudioHdrLength);
             numbody = *reinterpret_cast<int*>(hdr + kStudioHdrNumBodyparts);
@@ -3277,7 +3278,7 @@ namespace
             int nummodels = 0;
             int base = 1;
             int modelindex = 0;
-            __try
+            BMVR_TRY
             {
                 szname = *reinterpret_cast<int*>(bp);
                 nummodels = *reinterpret_cast<int*>(bp + 4);
@@ -3306,7 +3307,7 @@ namespace
                 unsigned char* model = bp + modelindex + mi * kStudioModelSize;
                 int* pMeshes = reinterpret_cast<int*>(model + kStudioModelNumMeshes);
                 int nMesh = 0;
-                __try { nMesh = *pMeshes; }
+                BMVR_TRY { nMesh = *pMeshes; }
                 __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
                 if (nMesh < 0 || nMesh > 64)
                     continue;
@@ -3444,7 +3445,7 @@ namespace
             return nullptr;
         void* mat = Hooks::m_Game->m_MaterialSystem;
         IMatRenderContext* ctx = nullptr;
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(mat);
             if (vt)
@@ -3466,7 +3467,7 @@ namespace
     {
         if (!ctx)
             return;
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(ctx);
             if (!vt)
@@ -3526,7 +3527,7 @@ namespace
             return;
         auto setOrigin = reinterpret_cast<SetVecFn>(const_cast<unsigned char*>(originCode));
         auto setAngles = reinterpret_cast<SetVecFn>(const_cast<unsigned char*>(anglesCode));
-        __try
+        BMVR_TRY
         {
             setOrigin(ent, origin);
             setAngles(ent, angles);
@@ -3840,7 +3841,7 @@ namespace
         if (!def)
             return nullptr;
         const char* name = nullptr;
-        __try
+        BMVR_TRY
         {
             name = *reinterpret_cast<const char**>(
                 static_cast<char*>(def) + Offsets::kCParticleDef_Name);
@@ -3864,7 +3865,7 @@ namespace
         if (!effect)
             return nullptr;
         void* def = nullptr;
-        __try
+        BMVR_TRY
         {
             def = *reinterpret_cast<void**>(
                 static_cast<char*>(effect) + Offsets::kCNewParticleEffect_Def);
@@ -3881,7 +3882,7 @@ namespace
         if (!def)
             return false;
         bool changed = false;
-        __try
+        BMVR_TRY
         {
             unsigned char* flag = reinterpret_cast<unsigned char*>(def)
                 + Offsets::kCParticleDef_ViewModelEffect;
@@ -3901,7 +3902,7 @@ namespace
     {
         if (!effect)
             return false;
-        __try
+        BMVR_TRY
         {
             return *(static_cast<unsigned char*>(effect) + Offsets::kCNewParticleEffect_ViewModel) != 0;
         }
@@ -3915,7 +3916,7 @@ namespace
     {
         if (!effect)
             return;
-        __try
+        BMVR_TRY
         {
             *(static_cast<unsigned char*>(effect) + Offsets::kCNewParticleEffect_ViewModel) = 0;
         }
@@ -3960,7 +3961,7 @@ namespace
         }
         auto* find = reinterpret_cast<tFind>(findCode);
         void* mgr = nullptr;
-        __try
+        BMVR_TRY
         {
             mgr = *reinterpret_cast<void**>(
                 reinterpret_cast<unsigned char*>(client) + Offsets::kParticleSystemMgr);
@@ -3975,7 +3976,7 @@ namespace
         for (const char* name : kNames)
         {
             void* def = nullptr;
-            __try
+            BMVR_TRY
             {
                 def = find(mgr, name);
             }
@@ -3995,7 +3996,7 @@ namespace
     {
         if (!ent)
             return;
-        __try
+        BMVR_TRY
         {
             int* fx = reinterpret_cast<int*>(
                 reinterpret_cast<char*>(ent) + Offsets::kCBaseEntity_fEffects);
@@ -4219,7 +4220,7 @@ namespace
         float* delta = nullptr;
         int type = -1;
         float r = 0.f, g = 0.f, b = 0.f;
-        __try
+        BMVR_TRY
         {
             type = *reinterpret_cast<int*>(static_cast<char*>(beam) + Offsets::kBeam_t_type);
             start = reinterpret_cast<float*>(static_cast<char*>(beam) + Offsets::kBeam_t_start);
@@ -4289,7 +4290,7 @@ namespace
         bool zeroVel = bmvr::g_DisableViewBob && owner;
         if (zeroVel)
         {
-            __try
+            BMVR_TRY
             {
                 savedVel = *reinterpret_cast<Vector*>(reinterpret_cast<char*>(owner) + kLocalPlayerVecVelocity);
                 *reinterpret_cast<Vector*>(reinterpret_cast<char*>(owner) + kLocalPlayerVecVelocity) = Vector(0.f, 0.f, 0.f);
@@ -4302,7 +4303,7 @@ namespace
         Hooks::hkCalcViewModelView.fOriginal(ecx, owner, eyePosition, eyeAngles);
         if (zeroVel)
         {
-            __try
+            BMVR_TRY
             {
                 *reinterpret_cast<Vector*>(reinterpret_cast<char*>(owner) + kLocalPlayerVecVelocity) = savedVel;
             }
@@ -4314,7 +4315,7 @@ namespace
     {
         if (!ctx)
             return;
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(ctx);
             if (!vt)
@@ -4729,7 +4730,7 @@ namespace
         if (!material)
             return "null";
         const char* name = "?";
-        __try
+        BMVR_TRY
         {
             name = material->GetName();
         }
@@ -5153,7 +5154,7 @@ namespace
     const char* SafeMatVarNameAt(void* var, int slot)
     {
         const char* name = nullptr;
-        __try
+        BMVR_TRY
         {
             name = reinterpret_cast<tMatVarGetName>((*reinterpret_cast<void***>(var))[slot])(var);
             if (name)
@@ -5191,7 +5192,7 @@ namespace
 
     bool SafeMatVarGetFloat(void* var, float& out)
     {
-        __try
+        BMVR_TRY
         {
             out = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(var) + 0xC);
         }
@@ -5204,7 +5205,7 @@ namespace
 
     bool SafeMatVarGetInt(void* var, int& out)
     {
-        __try
+        BMVR_TRY
         {
             out = *reinterpret_cast<const int*>(reinterpret_cast<const uint8_t*>(var) + 0x8);
         }
@@ -5219,7 +5220,7 @@ namespace
     // (both inline getters read those) instead of guessing a setter slot.
     bool SafeMatVarSetFloat(void* var, float value)
     {
-        __try
+        BMVR_TRY
         {
             if (g_MatVarNameSlot)
             {
@@ -5241,7 +5242,7 @@ namespace
 
     bool SafeMatVarSetInt(void* var, int value)
     {
-        __try
+        BMVR_TRY
         {
             if (g_MatVarNameSlot)
             {
@@ -5267,7 +5268,7 @@ namespace
     {
         void* var = nullptr;
         found = false;
-        __try
+        BMVR_TRY
         {
             var = material->FindVar(name, &found, false);
         }
@@ -5282,7 +5283,7 @@ namespace
     void* SafeReadPtr(const void* at)
     {
         void* p = nullptr;
-        __try
+        BMVR_TRY
         {
             p = *reinterpret_cast<void* const*>(at);
         }
@@ -5304,16 +5305,23 @@ namespace
             return 0;
         int best = 0;
         const uint8_t* base = reinterpret_cast<const uint8_t*>(material);
+        // Most words in the material are not pointers: check each address is
+        // readable first, so the scan does not lean on caught faults.
         for (int off = 4; off < 0x200; off += 4)
         {
+            if (!bmvr::seh::IsReadable(base + off, sizeof(void*)))
+                break;
             void** arr = reinterpret_cast<void**>(SafeReadPtr(base + off));
             if (!arr || (reinterpret_cast<uintptr_t>(arr) & 3) != 0)
                 continue;
             int n = 0;
             while (n < 256)
             {
+                if (!bmvr::seh::IsReadable(arr + n, sizeof(void*)))
+                    break;
                 void* v = SafeReadPtr(arr + n);
-                if (!v || (reinterpret_cast<uintptr_t>(v) & 3) != 0 || SafeReadPtr(v) != varVtable)
+                if (!v || (reinterpret_cast<uintptr_t>(v) & 3) != 0 || !bmvr::seh::IsReadable(v, sizeof(void*))
+                    || SafeReadPtr(v) != varVtable)
                     break;
                 ++n;
             }
@@ -5518,7 +5526,7 @@ namespace
         h = 0;
         if (!texture)
             return false;
-        __try
+        BMVR_TRY
         {
             w = texture->GetActualWidth();
             h = texture->GetActualHeight();
@@ -5539,7 +5547,7 @@ namespace
         if (!ctx || !Hooks::hkGetRenderTarget.fOriginal)
             return false;
         ITexture* rt = nullptr;
-        __try
+        BMVR_TRY
         {
             rt = Hooks::hkGetRenderTarget.fOriginal(ctx);
         }
@@ -5580,7 +5588,7 @@ namespace
 
     void SehViewport(IMatRenderContext* ctx, int w, int h)
     {
-        __try
+        BMVR_TRY
         {
             Hooks::hkViewport.fOriginal(ctx, 0, 0, w, h);
         }
@@ -5593,7 +5601,7 @@ namespace
     {
         if (!Hooks::hkVgui_Paint.fOriginal)
             return false;
-        __try
+        BMVR_TRY
         {
             Hooks::hkVgui_Paint.fOriginal(vgui, paintMode);
             return true;
@@ -6960,7 +6968,7 @@ namespace
 {
     const char* SehMaterialName(IMaterial* material)
     {
-        __try
+        BMVR_TRY
         {
             return material ? material->GetName() : nullptr;
         }
@@ -7041,7 +7049,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     int skin = 0;
     int entityIndex = 0;
     void* pModel = nullptr;
-    __try
+    BMVR_TRY
     {
         pModel = info.pModel;
         entityIndex = info.entity_index;
@@ -7321,7 +7329,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
     if (hkDrawModelExecute.fOriginal)
     {
-        __try
+        BMVR_TRY
         {
             if (isViewmodel && m_VR && m_VR->StereoWorldPassActive())
                 ForceStereoViewmodelWorldDepth(g_MatCtx);
@@ -8169,7 +8177,7 @@ void Hooks::EnsureServerFlashlightHook()
         return;
     }
     bool hasImpulseField = false;
-    __try
+    BMVR_TRY
     {
         for (int i = 0; i < 120; ++i)
         {
@@ -8264,7 +8272,7 @@ void Hooks::EnsureFogColorPatch()
     {
         auto* call = reinterpret_cast<unsigned char*>(base + rva);
         bool ok = false;
-        __try
+        BMVR_TRY
         {
             ok = memcmp(reinterpret_cast<const void*>(target), kEyeVectorsPrologue, sizeof(kEyeVectorsPrologue)) == 0
                 && call[-1] == 0x50 && call[0] == 0xE8
@@ -8442,7 +8450,7 @@ void __fastcall Hooks::dUpdateFlashlightState(void* ecx, void* edx, void* flashl
             if (flashlightState && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
         && m_VR->m_HmdPoseValid && EngineInGame())
     {
-        __try
+        BMVR_TRY
         {
             auto* f = reinterpret_cast<float*>(flashlightState);
             const Vector body = m_VR->m_HasStereoBodyOrigin ? m_VR->m_StereoBodyOrigin : m_VR->m_SetupOrigin;
@@ -8595,7 +8603,7 @@ namespace
         void** vt = nullptr;
         void* fn = nullptr;
         using Fn = int(__thiscall*)(void*);
-        __try
+        BMVR_TRY
         {
             vt = *reinterpret_cast<void***>(net);
             if (InServerDll(vt))
@@ -9870,7 +9878,7 @@ void __fastcall Hooks::dRpgUpdateLaser(void* ecx, void* edx)
     const int onOff = m_Game ? m_Game->RpgLaserOnOffset() : Offsets::kCWeaponRpg_bLaserOn;
     if (ecx)
     {
-        __try
+        BMVR_TRY
         {
             laserOn = *reinterpret_cast<unsigned char*>(static_cast<char*>(ecx) + onOff);
         }
@@ -10039,7 +10047,7 @@ int __stdcall Hooks::dSpriteRenderableDraw(void* renderable, float scale, float 
     {
         void* model = nullptr;
         float* origin = nullptr;
-        __try
+        BMVR_TRY
         {
             void** vt = *reinterpret_cast<void***>(renderable);
             using GetVecFn = float*(__thiscall*)(void*);
@@ -10268,7 +10276,7 @@ namespace
         w = h = 0;
         if (!tex)
             return;
-        __try
+        BMVR_TRY
         {
             w = tex->GetActualWidth();
             h = tex->GetActualHeight();
@@ -10294,7 +10302,7 @@ namespace
         DescribeCodeAddress(caller, callerText, sizeof(callerText));
         DescribeCodeAddress(bb.caller, bbCallerText, sizeof(bbCallerText));
         int fbW = 0, fbH = 0;
-        __try
+        BMVR_TRY
         {
             using GetFn = void(__thiscall*)(void*, int&, int&);
             void** vt = *reinterpret_cast<void***>(materialSystem);
@@ -11113,7 +11121,7 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     if (tex && name && (fullMode || namedFb || namedGb || wantGrow))
     {
         int aw = 0, ah = 0;
-        __try
+        BMVR_TRY
         {
             aw = tex->GetActualWidth();
             ah = tex->GetActualHeight();
@@ -11378,7 +11386,7 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
     // keep the player's full velocity like Lambda1VR (hand speed is relative
     // to the body).
     Vector playerVel{};
-    __try
+    BMVR_TRY
     {
         constexpr int kAbsVelocity = 0x218;   // FUN_10487250 reads +0x218..0x220
         playerVel = *reinterpret_cast<const Vector*>(static_cast<const char*>(owner) + kAbsVelocity);

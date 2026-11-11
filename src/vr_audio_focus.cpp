@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <cmath>
+#include "bmvr_seh.h"
 
 // One SteamVR user loses all audio on alt-tab and does not get it back.
 // Black Mesa's snd_mute_losefocus (default 1) omits DSBCAPS_GLOBALFOCUS, so
@@ -133,7 +134,7 @@ namespace
         if (!g_Game || !g_Game->m_BaseEngine)
             return nullptr;
         const auto* insn = reinterpret_cast<const uint8_t*>(g_Game->m_BaseEngine + kMixPlayInsnRva);
-        __try
+        BMVR_TRY
         {
             if (insn[0] != 0xA1)
                 return nullptr;
@@ -166,7 +167,7 @@ namespace
         DsView v{};
         if (!slot)
             return v;
-        __try
+        BMVR_TRY
         {
             void* buf = *slot;
             if (!buf)
@@ -191,7 +192,7 @@ namespace
     {
         if (!slot)
             return false;
-        __try
+        BMVR_TRY
         {
             void* buf = *slot;
             if (!buf)
