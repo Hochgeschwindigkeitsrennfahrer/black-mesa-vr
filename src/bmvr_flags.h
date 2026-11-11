@@ -191,7 +191,6 @@ namespace bmvr
     extern bool g_MatchHmdHz;
     extern bool g_DisableViewBob;
     extern bool g_LeftHanded;
-    extern bool g_RecenterResetsYaw;
     // AutoRecenterOnResume (default true): closing the pause menu (GameUI) in
     // a map recenters the head position (not the turn direction), so a walk
     // away from the play spot while paused does not leave the eye in walls.
@@ -447,6 +446,11 @@ namespace bmvr
     // shader, so it runs with all of them at 0. FxaaApply (default true; false =
     // that stock behaviour) sends these instead. Values are FXAA 3.11's own terms.
     extern bool g_FxaaApply;
+    // VR settings panel (vr_settings_panel.cpp): records every panel setting's
+    // built-in default; called before config.txt is read. The panel then saves
+    // only values that differ from it, so a later default change reaches players
+    // who never touched that setting.
+    void CapturePanelDefaults();
     extern float g_FxaaSubpixel;
     extern float g_FxaaEdgeThreshold;
     extern float g_FxaaEdgeThresholdMin;

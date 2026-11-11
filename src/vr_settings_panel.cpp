@@ -4,7 +4,9 @@
 // overlay pass like the weapon menu, so it needs nothing from Black Mesa's UI and
 // behaves the same on every game build. Text is rendered with GDI into a 32-bit
 // DIB and uploaded to a D3D9 texture only when something changes. Values apply
-// live; changed ones are written to VR/config.txt when the panel closes.
+// live. On close, settings that differ from the built-in default are written to
+// VR/config.txt and ones back at the default are removed from it, so a later
+// default change still reaches players who never changed that setting.
 //
 // Threads: UpdateSettingsPanel (ProcessInput) and DrawSettingsPanel (hand
 // overlay) both run on the render thread; the game thread only reads the flags.
@@ -55,7 +57,10 @@ namespace
         float* f;
         float step, lo, hi;
         const char* fmt;      // number display
+        bool defB = false;    // built-in default (CapturePanelDefaults)
+        float defF = 0.f;
     };
+    bool g_DefaultsCaptured = false;
 
     std::vector<Row>& Rows()
     {
@@ -96,7 +101,6 @@ namespace
             { "Grip: left save, right crowbar", RowKind::Toggle, "ShoulderGestures", &bmvr::g_ShoulderGestures, nullptr, 0, 0, 0, nullptr },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Recenter resets turning", RowKind::Toggle, "RecenterResetsYaw", &bmvr::g_RecenterResetsYaw, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
             { "GRAPHICS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -288,9 +292,20 @@ namespace
         return buf;
     }
 
-    // Replace `Key=...` (first non-comment line) or append it; keeps the file's
-    // line endings and every other line as it was.
-    bool WriteConfigValues(const std::vector<std::pair<std::string, std::string>>& kv)
+    bool IsDefault(const Row& r)
+    {
+        if (!g_DefaultsCaptured)
+            return false;
+        if (r.kind == RowKind::Toggle)
+            return r.b && *r.b == r.defB;
+        return r.f && std::fabs(*r.f - r.defF) <= 1e-4f * (std::max)(1.f, std::fabs(r.defF));
+    }
+
+    // Replace `Key=...` (first non-comment line) or append it; `Key=` lines of
+    // the keys in `drop` are removed. Keeps the file's line endings and every
+    // other line as it was.
+    bool WriteConfigValues(const std::vector<std::pair<std::string, std::string>>& kv,
+        const std::vector<std::string>& drop)
     {
         const std::string path = bmvr::VrFilePath("config.txt");
         std::string text;
@@ -303,6 +318,22 @@ namespace
             std::fclose(f);
         }
         const std::string eol = (text.find("\r\n") != std::string::npos) ? "\r\n" : "\n";
+        for (const std::string& key : drop)
+        {
+            const std::string want = key + "=";
+            size_t pos = 0;
+            while (pos < text.size())
+            {
+                size_t end = text.find('\n', pos);
+                end = (end == std::string::npos) ? text.size() : end + 1;
+                if (text.compare(pos, want.size(), want) == 0)
+                {
+                    text.erase(pos, end - pos);
+                    continue;
+                }
+                pos = end;
+            }
+        }
         for (const auto& [key, value] : kv)
         {
             const std::string want = key + "=";
@@ -538,6 +569,18 @@ namespace
     };
 }
 
+void bmvr::CapturePanelDefaults()
+{
+    for (Row& r : Rows())
+    {
+        if (r.b)
+            r.defB = *r.b;
+        if (r.f)
+            r.defF = *r.f;
+    }
+    g_DefaultsCaptured = true;
+}
+
 IDirect3DTexture9* VR::SettingsGearTexture(IDirect3DDevice9* device)
 {
     if (!device)
@@ -616,13 +659,19 @@ void VR::CloseSettingsPanel(const char* why)
     if (m_SettingsChanged)
     {
         std::vector<std::pair<std::string, std::string>> kv;
+        std::vector<std::string> drop;
         for (const Row& r : Rows())
         {
-            if (r.key)
+            if (!r.key)
+                continue;
+            if (IsDefault(r))
+                drop.emplace_back(r.key);
+            else
                 kv.emplace_back(r.key, FormatValue(r));
         }
-        const bool ok = WriteConfigValues(kv);
-        Game::logMsg("VR settings saved to config.txt: %s", ok ? "ok" : "FAILED");
+        const bool ok = WriteConfigValues(kv, drop);
+        Game::logMsg("VR settings saved to config.txt: %s (%d set, %d at default left out)",
+            ok ? "ok" : "FAILED", static_cast<int>(kv.size()), static_cast<int>(drop.size()));
     }
     m_SettingsChanged = false;
     // Closed by Black Mesa's pause menu: leave the pause to that menu.
@@ -741,9 +790,9 @@ void VR::UpdateSettingsPanel()
         // The FXAA values back at their defaults; on or off stays as it is.
         if (r.fmt && std::strcmp(r.fmt, "fxaa_default") == 0)
         {
-            bmvr::g_FxaaSubpixel = 0.35f;
-            bmvr::g_FxaaEdgeThreshold = 0.13f;
-            bmvr::g_FxaaEdgeThresholdMin = 0.025f;
+            bmvr::g_FxaaSubpixel = 0.25f;
+            bmvr::g_FxaaEdgeThreshold = 0.166f;
+            bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
             break;
         }
         // The bloom/flare values back at their defaults; on or off stays as it is.

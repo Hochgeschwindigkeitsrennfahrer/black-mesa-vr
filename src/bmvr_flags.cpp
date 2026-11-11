@@ -88,7 +88,6 @@ namespace bmvr
     bool g_MatchHmdHz = false;
     bool g_DisableViewBob = true;
     bool g_LeftHanded = false;
-    bool g_RecenterResetsYaw = true;
     bool g_AutoRecenterOnResume = true;
     bool g_HideLocalPlayerModel = true;
     bool g_HideViewmodelArms = true;
@@ -97,10 +96,10 @@ namespace bmvr
     float g_VrHandsModelScale = 0.85f;
     bool g_VrHandsDebugBoxes = false;
     bool g_HandHud = true;
-    bool g_VrCrosshair = false;
-    float g_VrCrosshairScale = 1.f;
-    bool g_VrCrosshairDot = false;
-    bool g_VrLaserBeam = false;
+    bool g_VrCrosshair = true;
+    float g_VrCrosshairScale = 0.5f;
+    bool g_VrCrosshairDot = true;
+    bool g_VrLaserBeam = true;
     float g_VrLaserWidth = 0.06f;
     float g_VrLaserStartForward = 0.f;
     bool g_AimDebug = false;
@@ -149,10 +148,10 @@ namespace bmvr
     bool g_SettingsTriangleHold = true;
     bool g_WeaponMenuSettingsGear = true;
     bool g_WeaponMenuTilt = true;
-    bool g_CrouchStickHold = false;
+    bool g_CrouchStickHold = true;
     float g_StickJumpCrouchThreshold = 0.8f;
     bool g_TurnBlocksJumpCrouch = true;
-    bool g_SprintToggle = false;
+    bool g_SprintToggle = true;
     bool g_VrSettingsPause = true;
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
@@ -184,9 +183,9 @@ namespace bmvr
     bool g_ViewProjNormalFix = true;
     bool g_EyeBloom = true;
     bool g_FxaaApply = true;
-    float g_FxaaSubpixel = 0.35f;
-    float g_FxaaEdgeThreshold = 0.13f;
-    float g_FxaaEdgeThresholdMin = 0.025f;
+    float g_FxaaSubpixel = 0.25f;
+    float g_FxaaEdgeThreshold = 0.166f;
+    float g_FxaaEdgeThresholdMin = 0.0833f;
     float g_GlowHold = 0.f;
     float g_GlowSmooth = 0.15f;
     float g_GlowHideMs = 100.f;
@@ -601,7 +600,7 @@ namespace bmvr
             else if (std::strcmp(n, "LeftHanded") == 0)
                 g_LeftHanded = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RecenterResetsYaw") == 0)
-                g_RecenterResetsYaw = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                ;   // retired 2026-11-11: recenter never resets the turn direction
             else if (std::strcmp(n, "AutoRecenterOnResume") == 0)
                 g_AutoRecenterOnResume = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "HideLocalPlayerModel") == 0)
@@ -1741,6 +1740,7 @@ namespace bmvr
         InstallCrashHandler();
         StartWatchdog();
         DetectCampaignSession();
+        CapturePanelDefaults();   // before config.txt: the panel saves only values that differ
         ReadUserConfig(ExeDir() + L"\\VR\\config.txt");
         ClearSkipsOnBuildChange();
         ReadSkipFile(SkipPath());

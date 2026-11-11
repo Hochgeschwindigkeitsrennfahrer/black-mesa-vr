@@ -1759,9 +1759,7 @@ void VR::Recenter(const char* why)
     m_HmdOriginLatched = false;
     m_MenuPanelPoseValid = false;
     ++m_MenuOverlayEpoch;
-    if (bmvr::g_RecenterResetsYaw)
-        m_RotationOffsetY.store(0.f, std::memory_order_release);
-    Game::logMsg("Recenter (%s)%s", why, bmvr::g_RecenterResetsYaw ? " + yaw" : "");
+    Game::logMsg("Recenter (%s)", why);
 }
 
 void VR::RecenterPosition(const char* why)

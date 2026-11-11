@@ -1,5 +1,9 @@
 # Black Mesa VR. Read once at launch. Quit and restart after edits.
 # Player settings only. Other behavior uses the built-in defaults.
+# Settings in the in-VR settings panel (hold Triangle/Y) are not listed here:
+# the panel writes a line only for a setting you changed from its default and
+# removes it again when you set it back, so improved defaults reach you in
+# updates. Explanations of those settings below are kept for reference.
 
 # Multiplier on the runtime's recommended per-eye size. 1.0 = recommended.
 # 0.75 if the GPU is bound. Above 1.0 is extra supersampling (sharper, less
@@ -35,23 +39,17 @@ RefractCopyRtScale=0.5
 # losing all shine. World = walls, floors, glass; Models = props and NPCs.
 # Your own weapons and hands are never changed. Also in the VR panel and as
 # bmvr_envmap_scale_world / bmvr_envmap_scale_models (live).
-EnvmapScaleWorld=0.4
-EnvmapScaleModels=0.8
 
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
 WorldRenderAtEyeSize=true
 
 # Right-stick turn. Degrees per millisecond at full deflection.
-TurnSpeed=0.25
-SnapTurning=false
-SnapTurnAngle=45.0
 
 # Cutscene cameras (the fall and drag in the soldier ambush, the tram) take the
 # view with them; the head turns relative to them. Needs strong VR legs: you
 # are tipped onto your back and dragged. false = head only (the view stays
 # level and the scene plays around you). Also in the VR settings panel.
-FollowScriptedCamera=true
 
 # Extra nudge on top of the built-in weapon poses (Source units / degrees).
 ViewmodelPosOffsetX=0.0
@@ -69,19 +67,13 @@ ControllerPitchTiltIndex=0
 ControllerPitchTiltVive=-45.0
 # Player preference on top of the per-controller tilt above, in degrees
 # (negative = gun points lower). Also in the VR settings panel (bmvr_gun_pitch).
-GunPitchOffset=0
 # Hand models rolled thumb-up around the controller, in degrees, to match a
 # hand around a grip instead of lying flat (90 = palms facing each other).
 # Mirrored per hand, all controllers (Index included); not for a hand on a
 # weapon. Also in the VR settings panel (bmvr_hand_roll).
-VrHandsRollDeg=90
 # Support hand on the gun, game units along the gun: right, up, toward the muzzle
 # (bmvr_hand_gun_right, _up, _forward). Also in the VR settings panel.
-VrHandsGunGripRight=1.2
-VrHandsGunGripUp=0
-VrHandsGunGripForward=0
 # While the G-Man is in front of you, grip extends only the middle finger.
-VrGmanGesture=true
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
 ViewmodelPosOffsetXTouch=5.5
 
@@ -111,10 +103,8 @@ OffCenterEyes=true
 
 Haptics=true
 HideCrosshair=true
-VrCrosshair=false
 # Aim marker as a red laser dot instead of the amber ticks. Follows the shot
 # (tilt and GunPitchOffset included); guns only. Also in the VR settings panel.
-VrCrosshairDot=false
 DisableViewBob=true
 LeftHanded=false
 
@@ -126,69 +116,47 @@ ScopeEye=right
 # two-hand grip on the front of the crossbow steadies it). The whole headset view moves with
 # the hand, so it can be less comfortable. ScopeGunSmoothSec smooths hand tremor (seconds,
 # 0 = raw, higher = steadier but lags). Both also in the VR settings panel (CROSSBOW SCOPE).
-ScopeFollowsGun=true
-ScopeGunSmoothSec=0.10
 # Raise to zoom: hold the crossbow with both hands and bring it to your face (gun hand within
 # ScopeRaiseMeters of the headset, pointing roughly where you look) to zoom in; move it
 # 0.10 m further away to zoom out. Holding alt-fire still zooms by hand. Also in the VR
 # settings panel (CROSSBOW SCOPE).
-ScopeRaiseToZoom=true
-ScopeRaiseMeters=0.30
 
 # Right stick down: crouch only while held (false = toggle). Left stick click: sprint latches
 # until the stick is centred again (false = hold the click).
-CrouchStickHold=false
 # Right stick up/down: how far (0.3..0.95) it must go before it jumps/crouches; it also has
 # to point within 30 degrees of straight up/down. TurnBlocksJumpCrouch: after the stick went
 # sideways to turn, no jump/crouch until it is back near the centre.
-StickJumpCrouchThreshold=0.8
-TurnBlocksJumpCrouch=true
-SprintToggle=false
 # Two-handed guns: squeezing the support grip on the gun latches the hold (no need to
 # keep squeezing); squeeze again, or take the hand away from the gun, to let go.
-TwoHandGripToggle=false
 # Frag grenade: thrown from the hand at the hand's speed (smoothed over ~66 ms around the
 # fastest moment before the trigger is let go) x 2/3 x ThrowScale, capped at 1500 units/s.
 # Also in the VR settings panel (Throw strength).
 # false = the game's fixed throw along the aim.
-VrHandThrow=true
-ThrowScale=5.5
 # Mounted guns (50cal/TOW): how far the barrel turns per degree the hands swing around the
 # mount. 1 = the handle stays in the hand; higher = less reach to aim far down/up/sideways.
 # Also in the VR settings panel (MOUNTED GUNS).
-MountedGunGain=1.75
 # Main menu / pause panel: distance and width in metres, height offset (+ = up), and menu
 # pointer smoothing in seconds (lower = more direct). Also in the VR settings panel (MENU).
-MenuForwardMeters=1.4
-MenuWidthMeters=1.6
-MenuHeightOffsetMeters=-0.02
-MenuCursorSmoothSec=0.05
 # The VR settings panel (weapon menu: the VR SETTINGS slot below the crowbar)
-# changes several of these live and writes them back here. They are also
-# bmvr_* console cvars.
+# changes several of these live and writes the ones you changed back here.
+# They are also bmvr_* console cvars.
 
 # Hand behind the shoulder + grip: left = quick save (hold the hand there
 # ~0.25 s until a light buzz, then grip; GAME SAVED shown), right = crowbar
 # (grip right away). Also in the VR settings panel (SHOULDER GESTURES).
-ShoulderGestures=true
 
 # Hold Triangle/Y 0.6 s = VR settings panel; a tap pauses on release.
 # false = Triangle/Y pauses on press; open the panel from the weapon menu's gear.
-SettingsTriangleHold=true
 
-# Optional features, off by default:
 # Weapon menu: VR gear slot below the crowbar (opens the VR settings panel).
 # false hides it, but only while SettingsTriangleHold=true (else the panel
 # could not be opened at all).
-WeaponMenuSettingsGear=true
 # Weapon menu opened low (hand by the hip) tilts back to face the eye
 # (max 60 degrees); false = always upright.
-WeaponMenuTilt=true
 # The VR settings panel pauses the game while it is open.
 VrSettingsPause=true
 
 # Bloom and auto-exposure on the eyes (bmvr_eye_bloom). Also in the VR settings panel.
-EyeBloom=true
 
 # Deferred lights are culled from each eye's view (bmvr_light_cull_eye). false = the main view,
 # which follows the gun aim: lights behind the hand go out.
@@ -205,32 +173,22 @@ FlareSharedLayout=true
 # A flat screen shows about 37 degrees up and down, so a flare leaves it and its built-in fade is done.
 # A headset shows far more, and a flat layer that far out looks tilted: fade out by this angle
 # off the view axis (bmvr_flare_fade_angle, 0 = no fade).
-FlareFadeAngle=45
 
 # Light glows (sprites, lamps) get their brightness from a tiny occlusion query of a few pixels.
 # In the headset every small head movement changes it, differently per eye: the glows flicker
 # and the eyes disagree. GlowSmooth averages each glow over both eyes and smooths it over this
 # many seconds (bmvr_glow_smooth, 0 = off). A glow hidden for GlowHideMs in an eye goes dark
 # at once, so it does not shine through walls (bmvr_glow_hide_ms).
-GlowSmooth=0.15
 GlowHideMs=100
 # Strength of the layers on the light (bmvr_flare_light).
-FlareLightScale=1
 # Flare layers placed away from the light are off by default: they wash out the view in a headset.
 # Strength of the large square ones: 0 off, 1 stock (bmvr_flare_haze).
 # A square layer away from the light this wide, as a fraction of the eye height, counts (bmvr_flare_haze_size).
-FlareHazeScale=0
-FlareHazeMinSize=0.5
 # Strength of the other layers away from the light (bmvr_flare_ghosts). All three are in the VR settings panel.
-FlareGhostScale=0
 
 # FXAA settings, also in the VR settings panel and as bmvr_fxaa_* console commands.
 # The game never passes the mat_fxaa_* cvars to the shader and runs FXAA with all values at 0.
 # FxaaApply=true (default) sends these values instead. false keeps the stock behaviour.
-FxaaApply=true
-# Sub-pixel smoothing: 0 off, 0.25 about as sharp as with FxaaApply=false, 0.35 mod default, 0.75 FXAA's own default, 1 softest.
-FxaaSubpixel=0.35
+# Sub-pixel smoothing: 0 off, 0.25 about as sharp as with FxaaApply=false, 0.75 FXAA's own default, 1 softest.
 # Edge contrast needed to smooth: 0.063 most edges, 0.166 FXAA default, 0.333 fewest.
-FxaaEdgeThreshold=0.13
 # Darks below this contrast are skipped: 0.0312 treats most, 0.0833 FXAA default.
-FxaaEdgeThresholdMin=0.025
