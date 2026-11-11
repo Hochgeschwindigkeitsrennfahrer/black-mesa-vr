@@ -974,7 +974,7 @@ void VR::UpdateSettingsPanel()
         if (r.fmt && std::strcmp(r.fmt, "glow_default") == 0)
         {
             bmvr::g_GlowSmooth = 0.15f;
-            bmvr::g_GlowHideMs = 100.f;
+            bmvr::g_GlowHideMs = 20.f;
             break;
         }
         // The bloom/flare values back at their defaults; on or off stays as it is.

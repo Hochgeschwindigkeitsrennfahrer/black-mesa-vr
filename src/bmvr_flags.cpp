@@ -198,9 +198,9 @@ namespace bmvr
     float g_FxaaEdgeThresholdMin = 0.0833f;
     float g_GlowHold = 0.f;
     float g_GlowSmooth = 0.15f;
-    float g_GlowHideMs = 100.f;
+    float g_GlowHideMs = 20.f;
     bool g_LoadingCard = true;
-    float g_GlowProxyScale = 1.f;
+    float g_GlowProxyScale = 1.5f;
     float g_PoseHoldDeg = 0.f;
     float g_PoseHoldMm = 0.f;
     float g_GlowTraceSeconds = 0.f;

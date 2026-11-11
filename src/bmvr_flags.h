@@ -489,13 +489,13 @@ namespace bmvr
     // glow's visible fraction is averaged over both eyes and smoothed with this
     // time constant. The tiny glow proxies cover a few pixels, so sub-pixel head
     // motion made the fraction jump every frame, differently per eye.
-    // GlowHideMs (default 100, cvar bmvr_glow_hide_ms): an eye whose query reads
+    // GlowHideMs (default 20 since 2026-11-11, was 100; cvar bmvr_glow_hide_ms): an eye whose query reads
     // 0 this long shows the glow at 0 at once (no glow through walls).
     extern float g_GlowSmooth;
     extern float g_GlowHideMs;
     // Tests (VR panel Debug -> TESTS), default off:
-    // GlowProxyScale (bmvr_glow_proxy_scale, 1 = stock): the glow occlusion
-    // test area is this many times wider, so a query counts more pixels and
+    // GlowProxyScale (bmvr_glow_proxy_scale, default 1.5 since 2026-11-11,
+    // 1 = stock): the glow occlusion test area is this many times wider, so a query counts more pixels and
     // its visible fraction moves in finer steps.
     // PoseHoldDeg / PoseHoldMm (bmvr_pose_hold_deg / _mm, 0 = off): the game
     // keeps the previous head pose until the head turns or moves more than
