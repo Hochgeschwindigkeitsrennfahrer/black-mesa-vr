@@ -174,6 +174,7 @@ namespace bmvr
     bool g_FlareEyeAxis = true;
     bool g_FlareLevel = true;
     bool g_SpriteLevel = true;
+    bool g_ViewmodelFxCatchUp = true;
     bool g_LightCullEyeView = true;
     bool g_FlareSharedLayout = true;
     float g_FlareHazeScale = 0.f;

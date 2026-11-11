@@ -425,6 +425,9 @@ namespace bmvr
     // View-parallel sprites (light glows) face each eye with world up instead
     // of copying the eye's right/up (which roll and turn with the head).
     extern bool g_SpriteLevel;
+    // Muzzle flashes etc. follow the gun while moving (control point shifted
+    // by the player's move since last frame's view).
+    extern bool g_ViewmodelFxCatchUp;
     extern bool g_LightCullEyeView;
     extern bool g_FlareSharedLayout;
     extern float g_FlareHazeScale;

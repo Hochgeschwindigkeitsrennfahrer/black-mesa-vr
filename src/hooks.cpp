@@ -3895,6 +3895,20 @@ namespace
         return changed;
     }
 
+    bool EffectIsViewModel(void* effect)
+    {
+        if (!effect)
+            return false;
+        __try
+        {
+            return *(static_cast<unsigned char*>(effect) + Offsets::kCNewParticleEffect_ViewModel) != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     void ClearEffectViewModelFlag(void* effect)
     {
         if (!effect)
@@ -9780,6 +9794,36 @@ void __fastcall Hooks::dParticleSetControlPoint(void* ecx, void* edx, int index,
                 origin->x, origin->y, origin->z, AimOffLookDegrees(),
                 gluonImpact ? "world" : "?");
             ++s_cp;
+        }
+    }
+    // Viewmodel effects (muzzle flashes) take their control point from the
+    // gun's attachment while particles simulate, before this frame's view is
+    // set up: the gun then still sits at last frame's view origin, which
+    // trails the player by 3-5 units while moving. The gun is drawn from the
+    // fresh origin, so the flash lagged behind it when strafing (user video
+    // 2026-11-11). Shift the point by the player's move since then.
+    Vector shifted{};
+    if (origin && bmvr::g_ViewmodelFxCatchUp && m_VR && m_VR->m_IsVREnabled && m_VR->m_StereoEye == 0
+        && !m_VR->m_HasStereoBodyOrigin && EffectIsViewModel(ecx) && hkClientWeaponShootPosition.fOriginal
+        && m_Game && m_Game->m_EngineClient && m_VR->m_SetupOrigin.LengthSqr() > 1.f)
+    {
+        void* player = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+        Vector eyeNow{};
+        if (player && hkClientWeaponShootPosition.fOriginal(player, &eyeNow))
+        {
+            const Vector delta = eyeNow - m_VR->m_SetupOrigin;
+            if (delta.LengthSqr() > 1e-4f && delta.LengthSqr() < 32.f * 32.f)
+            {
+                shifted = *origin + delta;
+                origin = &shifted;
+                static int s_log;
+                if (s_log < 6)
+                {
+                    ++s_log;
+                    Game::logMsg("viewmodel fx catch-up: %s cp%d moved (%.2f,%.2f,%.2f)",
+                        ParticleDefName(ParticleEffectDef(ecx)), index, delta.x, delta.y, delta.z);
+                }
+            }
         }
     }
     if (hkParticleSetControlPoint.fOriginal)

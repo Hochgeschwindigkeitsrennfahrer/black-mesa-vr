@@ -198,6 +198,7 @@ namespace
             { "Tau/crossbow switch fix", RowKind::Toggle, nullptr, &bmvr::g_DeltaSeqIdle, nullptr, 0, 0, 0, nullptr },
             { "No crossbow scope animation", RowKind::Toggle, nullptr, &bmvr::g_ScopeClipIdle, nullptr, 0, 0, 0, nullptr },
             { "Mute weapon fidget sounds", RowKind::Toggle, nullptr, &bmvr::g_MuteFidgetSounds, nullptr, 0, 0, 0, nullptr },
+            { "Muzzle flash follows gun", RowKind::Toggle, nullptr, &bmvr::g_ViewmodelFxCatchUp, nullptr, 0, 0, 0, nullptr },
             { "LOADING card", RowKind::Toggle, nullptr, &bmvr::g_LoadingCard, nullptr, 0, 0, 0, nullptr },
             { "Glow hold", RowKind::Number, nullptr, nullptr, &bmvr::g_GlowHold, 0.1f, 0.f, 2.f, "%.1f s" },
             { "G-MAN GESTURE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
