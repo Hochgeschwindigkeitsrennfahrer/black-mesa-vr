@@ -41,6 +41,8 @@ Launcher (`bms.exe` `FUN_00401760` / `FUN_00401620`): on modern Windows it calls
 17. Distinguish status clearly: implemented / compiled / launched / runtime-initialized / head tracking verified / rendering verified / stereo verified / headset presentation verified / gameplay verified.
 18. The acceptance criterion is visible Black Mesa gameplay in the headset. Compiling, loading, VR init, and head tracking alone are not success.
 
+Guarded reads use `BMVR_TRY` instead of `__try` (`src/bmvr_seh.h`): on the 32-bit clang-cl build a caught fault otherwise wipes the caller's EBX/ESI/EDI. A bare `__try` fails the build.
+
 ## Black Mesa constraints
 
 19. Install the combined `d3d9.dll` at `bin\thirdparty\dxvk-windows-x86\`, `bin\`, **and** next to `bms.exe`. Close the game before overwrite. A running `bms.exe` cannot load a DLL copied after it started.
