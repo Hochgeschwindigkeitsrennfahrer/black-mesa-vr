@@ -1,4 +1,5 @@
 #include "bmvr_prof.h"
+#include "bmvr_sampler.h"
 #include "game.h"
 #include "hooks.h"
 #include "vr.h"
@@ -61,6 +62,27 @@ namespace bmvr::prof
         std::atomic<long long> g_GapSmall[kThreads]{};  // gaps below the threshold
         std::atomic<long long> g_GapBig[kThreads]{};
         std::atomic<long long> g_GapCalls[kThreads]{};
+
+        // Site stack per thread (innermost / outermost active BMVR_PROF scope)
+        // and lock contention records.
+        thread_local int t_Sites[32];
+        thread_local int t_SiteDepth = 0;
+        struct LockCell
+        {
+            long long ticks = 0, maxTicks = 0;
+            int count = 0;
+        };
+        std::mutex g_LockMutex;
+        // key: wait/hold, thread, kind, owner thread, outer site, inner site
+        std::unordered_map<uint64_t, LockCell> g_Locks;
+
+        int ThreadIndexOf(uint32_t tid)
+        {
+            for (int i = 0; i < kThreads - 1; ++i)
+                if (tid != 0 && g_ThreadIds[i].load() == tid)
+                    return i;
+            return tid ? kThreads - 1 : 7;
+        }
 
         long long g_Freq = 0;
         // Main thread frame state (only touched on the RenderView thread).
@@ -156,6 +178,40 @@ namespace bmvr::prof
             Game::logMsg("%s; all threads %.2f", line, total / frames);
         }
 
+        void ReportLocks(int frames)
+        {
+            std::vector<std::pair<uint64_t, LockCell>> rows;
+            {
+                std::lock_guard<std::mutex> lock(g_LockMutex);
+                rows.assign(g_Locks.begin(), g_Locks.end());
+                g_Locks.clear();
+            }
+            std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second.ticks > b.second.ticks; });
+            static const char* kKind[] = { "plain", "exclusive", "frame-own", "drain-plain", "drain-excl", "drain-frame" };
+            auto site = [](int id) -> const char* {
+                return (id >= 0 && id < g_SlotCount.load()) ? g_Slots[id].name : "-";
+            };
+            int shownW = 0, shownH = 0;
+            for (const auto& r : rows)
+            {
+                const uint64_t k = r.first;
+                const bool hold = (k >> 40) & 1;
+                const int t = (k >> 36) & 0xF, kind = (k >> 32) & 0xF, own = (k >> 28) & 0xF;
+                const int outer = (k >> 12) & 0xFFF, inner = k & 0xFFF;
+                const LockCell& c = r.second;
+                if (hold ? shownH++ >= 10 : shownW++ >= 14)
+                    continue;
+                char ownTxt[16];
+                if (own == 7)
+                    _snprintf_s(ownTxt, sizeof(ownTxt), _TRUNCATE, "-");
+                else
+                    _snprintf_s(ownTxt, sizeof(ownTxt), _TRUNCATE, "t%d", own);
+                Game::logMsg("prof lock %s t%d %-11s owner %-3s in %s / %s: %.3f ms/frame, %.2f/frame, avg %.3f ms, max %.2f ms",
+                    hold ? "HOLD" : "wait", t, kind < 6 ? kKind[kind] : "?", ownTxt, site(outer), site(inner),
+                    Ms(c.ticks) / frames, static_cast<double>(c.count) / frames, Ms(c.ticks) / c.count, Ms(c.maxTicks));
+            }
+        }
+
         void ReportGaps(int frames)
         {
             for (int t = 0; t < kThreads; ++t)
@@ -238,6 +294,8 @@ namespace bmvr::prof
                         Ms(r.ticks) * 1000.0 / r.calls, Ms(r.maxTicks));
             }
             ReportGaps(frames);
+            ::bmvr::sampler::Report(frames);
+            ReportLocks(frames);
             g_FrameTicks = g_FrameMax = g_RvTicks = 0;
             g_Frames = 0;
         }
@@ -290,6 +348,63 @@ namespace bmvr::prof
         g_Slots[id].cell[ThreadIndex()][Eye()].calls.fetch_add(1, std::memory_order_relaxed);
     }
 
+    void PushSite(int id)
+    {
+        if (t_SiteDepth < 32)
+            t_Sites[t_SiteDepth] = id;
+        ++t_SiteDepth;
+    }
+
+    void CurrentSites(int& outer, int& inner)
+    {
+        const int d = (std::min)(t_SiteDepth, 32);
+        outer = d > 0 ? t_Sites[0] : -1;
+        inner = d > 0 ? t_Sites[d - 1] : -1;
+    }
+
+    const char* SiteName(int id)
+    {
+        return (id >= 0 && id < g_SlotCount.load()) ? g_Slots[id].name : "-";
+    }
+
+    void PopSite()
+    {
+        if (t_SiteDepth > 0)
+            --t_SiteDepth;
+    }
+
+    namespace
+    {
+        void RecordLock(bool hold, int kind, long long ticks, uint32_t ownerTid)
+        {
+            const int t = ThreadIndex();
+            const int d = (std::min)(t_SiteDepth, 32);
+            const int outer = d > 0 ? t_Sites[0] : 0xFFF;
+            const int inner = d > 0 ? t_Sites[d - 1] : 0xFFF;
+            const int own = hold ? 7 : ThreadIndexOf(ownerTid);
+            const uint64_t key = (static_cast<uint64_t>(hold) << 40) | (static_cast<uint64_t>(t) << 36)
+                | (static_cast<uint64_t>(kind & 0xF) << 32) | (static_cast<uint64_t>(own & 0xF) << 28)
+                | (static_cast<uint64_t>(outer & 0xFFF) << 12) | static_cast<uint64_t>(inner & 0xFFF);
+            std::lock_guard<std::mutex> lock(g_LockMutex);
+            LockCell& c = g_Locks[key];
+            c.ticks += ticks;
+            c.maxTicks = (std::max)(c.maxTicks, ticks);
+            ++c.count;
+        }
+    }
+
+    void LockWait(int kind, long long ticks, uint32_t ownerTid)
+    {
+        RecordLock(false, kind, ticks, ownerTid);
+    }
+
+    void LockHold(int kind, long long ticks)
+    {
+        // Only holds >= 0.25 ms are interesting (and keep the map small).
+        if (ticks >= g_Freq / 4000)
+            RecordLock(true, kind, ticks, 0);
+    }
+
     bool IsGapSite(int id)
     {
         return id >= 0 && id < kMaxSites && g_Slots[id].gap;
@@ -297,6 +412,18 @@ namespace bmvr::prof
 
     void GapEnter(int id, long long now)
     {
+        static int s_drawSite = -2;
+        if (s_drawSite == -2 && std::strcmp(g_Slots[id].name, "d3d9 DrawIndexedPrimitive") == 0)
+            s_drawSite = id;
+        if (id == s_drawSite)
+        {
+            thread_local bool t_noted = false;
+            if (!t_noted)
+            {
+                ::bmvr::sampler::NoteRenderThread();
+                t_noted = true;
+            }
+        }
         if (t_GapDepth++ != 0 || !t_GapLastExit)
             return;
         const int t = ThreadIndex();
@@ -332,6 +459,7 @@ namespace bmvr::prof
             return;
         if (g_RvDepth++ != 0)
             return;
+        ::bmvr::sampler::NoteMainThread();
         if (!g_Freq)
         {
             LARGE_INTEGER f;

@@ -17891,7 +17891,14 @@ void VR::Update()
     // materialsystem after the first stereo frame (x32dbg 2026-08-18).
 
     ++m_PresentTick;
-    m_StereoEyesDrawnThisFrame = false;
+    // MulticoreMode: Present runs on the render thread at the end of ITS
+    // frame, which lags the main thread by a frame. Resetting here let the
+    // main thread's next frame see "eyes drawn" + "poses waited" still set and
+    // skip its whole view as a leftover (every other engine frame outdoors,
+    // 2026-11-11). With bmvr_mc_frame_reset the main thread resets both at
+    // its own frame end (Hooks::dClientPvsNotifierCheck).
+    if (!(bmvr::g_McFrameReset && McPipelineEnabled()))
+        m_StereoEyesDrawnThisFrame = false;
     static DWORD s_fpsLogMs;
     static uint32_t s_fpsLogTick;
     static DWORD s_lastPresentMs;
@@ -17993,7 +18000,8 @@ void VR::Update()
     PollVrMenuEvents();
     LatchMenuPanelIfNeeded();
     ProcessInput();
-    m_PosesWaitedThisFrame = false;
+    if (!(bmvr::g_McFrameReset && McPipelineEnabled()))
+        m_PosesWaitedThisFrame = false;
 
     // Capture+Submit on background01 when menu_vr is still enabled. Look/stereo
     // stay gated on real maps. Named RTs / WaitDeviceIdle stay skipped.

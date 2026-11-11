@@ -44,6 +44,7 @@ set(BMVR_SOURCES
   src/openxr_loader_util.cpp
   src/bmvr_flags.cpp
   src/bmvr_prof.cpp
+  src/bmvr_sampler.cpp
   src/bmvr_glowtrace.cpp
   src/bmvr_cvars.cpp
   src/bmvr_seh.cpp

@@ -22,6 +22,9 @@ namespace dxvk::sync {
 
     bool try_lock();
 
+    // BMVR lock profiling: current owner thread id (0 = free).
+    uint32_t owner() const { return m_owner.load(std::memory_order_relaxed); }
+
   private:
 
     std::atomic<uint32_t> m_owner   = { 0u };

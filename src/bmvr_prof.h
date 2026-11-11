@@ -31,6 +31,16 @@ namespace bmvr
         void GapEnter(int id, long long now);
         void GapLeave(int id, long long now);
         bool IsGapSite(int id);
+        // d3d9 device-lock contention (d3d9_multithread.h): kind 0 plain,
+        // 1 exclusive, 2 Source frame ownership, +3 = draining in-flight calls.
+        void LockWait(int kind, long long ticks, uint32_t ownerTid);
+        void LockHold(int kind, long long ticks);
+        void PushSite(int id);
+        // Outermost / innermost active BMVR_PROF site of this thread (-1 none)
+        // and a site's name.
+        void CurrentSites(int& outer, int& inner);
+        const char* SiteName(int id);
+        void PopSite();
         void Count(int id);
         // Main-thread frame boundary: top-level RenderView enter / leave.
         void FrameRenderViewEnter();
@@ -46,6 +56,8 @@ namespace bmvr
                     return;
                 id = s.id >= 0 ? s.id : Register(s);
                 t0 = Now();
+                if (id >= 0)
+                    PushSite(id);
                 if (id >= 0 && IsGapSite(id))
                     GapEnter(id, t0);
             }
@@ -57,6 +69,7 @@ namespace bmvr
                     Add(id, t1 - t0);
                     if (IsGapSite(id))
                         GapLeave(id, t1);
+                    PopSite();
                 }
             }
             Scope(const Scope&) = delete;

@@ -412,6 +412,11 @@ namespace bmvr
     // RightEyeFirst (default false, test aid, MulticoreMode only): record the
     // right eye's RenderView before the left one.
     extern bool g_RightEyeFirst;
+    // bmvr_mc_frame_reset (default on): MulticoreMode resets the per-frame
+    // "eyes drawn" / "poses waited" flags at the main thread's frame end
+    // instead of the render thread's Present (which skipped every other
+    // frame's view when the render thread lagged). 0 = old behaviour.
+    extern bool g_McFrameReset;
     // OcclusionTrackerPerEye (default true): Black Mesa's occlusion tracker
     // (r_occlusion_tracker_enabled) keys its results by view id, and both
     // eyes render as the same main view, so objects hidden from the first

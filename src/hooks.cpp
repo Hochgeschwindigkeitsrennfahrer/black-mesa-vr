@@ -10578,6 +10578,19 @@ void __cdecl Hooks::dClientUpdatePvsNotifiers()
 void __cdecl Hooks::dClientPvsNotifierCheck()
 {
     BMVR_PROF("hook ClientPvsNotifierCheck");
+    // Main-thread frame end (FRAME_RENDER_END): per-frame VR flags reset here
+    // in MulticoreMode, see VR::Update.
+    if (m_VR && bmvr::g_McFrameReset && m_VR->McPipelineEnabled())
+    {
+        static int s_log;
+        if (s_log < 2)
+        {
+            Game::logMsg("MC per-frame flags reset at the main thread's frame end (bmvr_mc_frame_reset 1)");
+            ++s_log;
+        }
+        m_VR->m_StereoEyesDrawnThisFrame = false;
+        m_VR->m_PosesWaitedThisFrame = false;
+    }
     const bool skip = m_SkippedViewSinceCheck && !m_PvsSeenSinceCheck;
     m_SkippedViewSinceCheck = false;
     m_PvsSeenSinceCheck = false;
