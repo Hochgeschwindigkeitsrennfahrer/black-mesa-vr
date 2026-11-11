@@ -173,6 +173,7 @@ namespace bmvr
     bool g_EyeUnderwaterWorld = true;
     bool g_FlareEyeAxis = true;
     bool g_FlareLevel = true;
+    bool g_SpriteLevel = true;
     bool g_LightCullEyeView = true;
     bool g_FlareSharedLayout = true;
     float g_FlareHazeScale = 0.f;
@@ -793,6 +794,8 @@ namespace bmvr
                 g_LightCullEyeView = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlareLevel") == 0)
                 g_FlareLevel = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "SpriteLevel") == 0)
+                g_SpriteLevel = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlareEyeAxis") == 0)
                 g_FlareEyeAxis = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PixelVisPerEye") == 0)

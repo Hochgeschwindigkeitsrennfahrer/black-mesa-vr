@@ -327,6 +327,13 @@ public:
     // client.dll camera-facing sprite quad (FUN_100821a0). cdecl, origin* +
     // width/height/color. Unique bytes: 53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04
     static constexpr int kSpriteQuad = 0x74360; // beta 26234270 (25844216: 0x742A0)
+    // client.dll GetSpriteAxes (FUN_100e9380, SDK sprite.cpp): cdecl (type,
+    // origin, angles, &forward, &right, &up), called by C_SpriteRenderer::
+    // DrawSprite. Type 2 (VP_PARALLEL) copies CurrentViewForward/Right/Up.
+    // Beta 26234270 only (checked 2026-11-11).
+    static constexpr int kGetSpriteAxes = 0xE9380;
+    // CurrentViewOrigin() (FUN_101f6a10) returns this global (client RVA).
+    static constexpr int kCurrentViewOriginGlobal = 0x6CAD58;
     // client.dll CViewRenderBeams::DrawBeam (FUN_101f5be0). thiscall, Beam_t*
     // on the stack, ret 4. Unique bytes: 55 8B EC 83 EC 2C A1 ? ? ? ? 33 C5 89 45 FC 89 4D E8
     static constexpr int kCViewRenderBeams_DrawBeam = 0x1E84A0; // beta 26234270 (25844216: 0x1E82B0)

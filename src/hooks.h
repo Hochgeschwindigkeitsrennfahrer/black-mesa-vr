@@ -129,6 +129,7 @@ typedef int(__stdcall* tSpriteRenderableDraw)(void* renderable, float scale, flo
     int rendermode, int renderfx, unsigned char* color, float hdr, unsigned* unk);
 typedef int(__thiscall* tEnvLaserDotDraw)(void* thisptr, unsigned flags);
 typedef void(__cdecl* tSpriteQuad)(float* origin, float width, float height, unsigned color);
+typedef void(__cdecl* tSpriteAxes)(int type, const float* origin, const float* angles, float* fwd, float* right, float* up);
 
 class Hooks
 {
@@ -216,6 +217,7 @@ public:
     static inline Hook<tSpriteRenderableDraw> hkSpriteRenderableDraw;
     static inline Hook<tEnvLaserDotDraw> hkEnvLaserDotDraw;
     static inline Hook<tSpriteQuad> hkSpriteQuad;
+    static inline Hook<tSpriteAxes> hkSpriteAxes;
 
     Hooks() = default;
     explicit Hooks(Game* game);
@@ -305,6 +307,7 @@ public:
         int rendermode, int renderfx, unsigned char* color, float hdr, unsigned* unk);
     static int __fastcall dEnvLaserDotDraw(void* ecx, void* edx, unsigned flags);
     static void __cdecl dSpriteQuad(float* origin, float width, float height, unsigned color);
+    static void __cdecl dSpriteAxes(int type, const float* origin, const float* angles, float* fwd, float* right, float* up);
     static void EnsureServerFlashlightHook();
     static void EnsureClientFlashlightHook();
     static void EnsureBmFlashlightHook();

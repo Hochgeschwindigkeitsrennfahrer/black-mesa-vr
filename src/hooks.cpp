@@ -486,6 +486,8 @@ static float g_FlareAxisShiftY = 0.f;
 static bool g_FlareElementOnLight = true;
 static float g_FlareAngleFade = 1.f;
 static float g_FlareRoll = 0.f;
+// client CurrentViewOrigin() global: the view of the pass being drawn.
+static const float* g_ClientViewOrigin = nullptr;
 
 // Diagnostic, BMVR_FLARE_LOG=1: what a lens flare's position is computed from.
 // One line per flare and eye when the projection or on-screen state changes,
@@ -9582,13 +9584,35 @@ bool Hooks::EnsureWeaponVfxHooks()
                 + Offsets::kSpriteQuad;
         }
     }
+    if (!hkSpriteAxes.pTarget)
+    {
+        constexpr const char* kAxesBytes =
+            "538BDC83EC0883E4F083C404558B6B04896C24048BEC83EC388B4B10F30F100D";
+        auto* p = ResolveCode(client, Offsets::kGetSpriteAxes, kAxesBytes);
+        if (p)
+        {
+            g_ClientViewOrigin = reinterpret_cast<const float*>(
+                reinterpret_cast<unsigned char*>(client) + Offsets::kCurrentViewOriginGlobal);
+            if (hkSpriteAxes.createHook(p, &dSpriteAxes) == 0 && hkSpriteAxes.enableHook() == 0)
+                Game::logMsg("Hook enabled: sprite axes rva=0x%X",
+                    static_cast<unsigned>(p - reinterpret_cast<unsigned char*>(client)));
+            else
+                Game::logMsg("sprite axes hook failed");
+        }
+        else
+        {
+            Game::logMsg("sprite axes skipped (bytes/rva 0x%X)", Offsets::kGetSpriteAxes);
+            Game::noteMissingOffset("sprite axes");
+            hkSpriteAxes.pTarget = reinterpret_cast<unsigned char*>(client) + Offsets::kGetSpriteAxes;
+        }
+    }
     s_done = hkTauBeamView.pTarget && hkTauBeamWorld.pTarget && hkTauBeamFireTrace.pTarget
         && hkGluonImpactTrace.pTarget && hkGluonBeamUpdate.pTarget && hkGluonBeamFxSet.pTarget
         && hkGluonBeamFxDraw.pTarget && hkParticleSetControlPoint.pTarget
         && hkParticleMgrAddEffect.pTarget && hkRpgUpdateLaser.pTarget
         && hkHudCrosshairPaint.pTarget && hkSpriteRendererDraw.pTarget
         && hkViewRenderBeamsDraw.pTarget && hkSpriteRenderableDraw.pTarget
-        && hkEnvLaserDotDraw.pTarget && hkSpriteQuad.pTarget;
+        && hkEnvLaserDotDraw.pTarget && hkSpriteQuad.pTarget && hkSpriteAxes.pTarget;
     return s_done;
 }
 
@@ -10049,6 +10073,40 @@ int __fastcall Hooks::dEnvLaserDotDraw(void* ecx, void* edx, unsigned flags)
         result = hkEnvLaserDotDraw.fOriginal(ecx, flags);
     g_EnvLaserDotQuad = false;
     return result;
+}
+
+// Sprites drawn "parallel to the view plane" (glows, most env_sprites) copy the
+// camera's right/up, so in a headset they roll with the head and turn with it.
+// In a VR eye pass they face that eye's position with up kept to world up
+// instead, as the game's own upright sprites do (bmvr_sprite_level).
+void __cdecl Hooks::dSpriteAxes(int type, const float* origin, const float* angles, float* fwd, float* right, float* up)
+{
+    hkSpriteAxes.fOriginal(type, origin, angles, fwd, right, up);
+    // 0 = VP_PARALLEL_UPRIGHT (turns with head yaw), 2 = VP_PARALLEL (also
+    // rolls); 2 with a roll angle is the game's own oriented case, left alone.
+    if (!bmvr::g_SpriteLevel || !m_VR || m_VR->m_StereoEye == 0 || !g_ClientViewOrigin
+        || !origin || !fwd || !right || !up)
+        return;
+    if (!(type == 0 || (type == 2 && !(angles && angles[2] != 0.f))))
+        return;
+    Vector f(origin[0] - g_ClientViewOrigin[0], origin[1] - g_ClientViewOrigin[1], origin[2] - g_ClientViewOrigin[2]);
+    if (VectorNormalize(f) < 1.f)
+        return;
+    // Straight above or below: no horizon, keep the game's axes.
+    Vector r(f.y, -f.x, 0.f); // forward x world up
+    if (VectorNormalize(r) < 0.05f)
+        return;
+    const Vector u(r.y * f.z - r.z * f.y, r.z * f.x - r.x * f.z, r.x * f.y - r.y * f.x); // right x forward
+    fwd[0] = f.x; fwd[1] = f.y; fwd[2] = f.z;
+    right[0] = r.x; right[1] = r.y; right[2] = r.z;
+    up[0] = u.x; up[1] = u.y; up[2] = u.z;
+    static int s_log;
+    if (s_log < 4)
+    {
+        ++s_log;
+        Game::logMsg("sprite axes: type %d at (%.0f,%.0f,%.0f) eye %d levelled", type, origin[0], origin[1], origin[2],
+            m_VR->m_StereoEye);
+    }
 }
 
 void __cdecl Hooks::dSpriteQuad(float* origin, float width, float height, unsigned color)

@@ -422,6 +422,9 @@ namespace bmvr
     // Lens flare layers are turned so their streaks stay level with the world
     // horizon at the light, not with the eye's image (which rolls with the head).
     extern bool g_FlareLevel;
+    // View-parallel sprites (light glows) face each eye with world up instead
+    // of copying the eye's right/up (which roll and turn with the head).
+    extern bool g_SpriteLevel;
     extern bool g_LightCullEyeView;
     extern bool g_FlareSharedLayout;
     extern float g_FlareHazeScale;
