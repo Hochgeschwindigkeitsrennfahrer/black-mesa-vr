@@ -456,6 +456,14 @@ namespace bmvr
     // view, small head movements) no longer flickers it. Brightening is
     // immediate. Per glow, per eye and view.
     extern float g_GlowHold;
+    // GlowSmooth (seconds, default 0.15, cvar bmvr_glow_smooth, 0 = off): each
+    // glow's visible fraction is averaged over both eyes and smoothed with this
+    // time constant. The tiny glow proxies cover a few pixels, so sub-pixel head
+    // motion made the fraction jump every frame, differently per eye.
+    // GlowHideMs (default 100, cvar bmvr_glow_hide_ms): an eye whose query reads
+    // 0 this long shows the glow at 0 at once (no glow through walls).
+    extern float g_GlowSmooth;
+    extern float g_GlowHideMs;
     // bmvr_glow_trace <seconds> / panel DEBUG "Record glow trace": start a glow
     // trace of that length (bmvr_glowtrace.h); reset to 0 once it starts.
     extern float g_GlowTraceSeconds;

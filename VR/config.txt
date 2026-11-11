@@ -206,6 +206,14 @@ FlareSharedLayout=true
 # A headset shows far more, and a flat layer that far out looks tilted: fade out by this angle
 # off the view axis (bmvr_flare_fade_angle, 0 = no fade).
 FlareFadeAngle=45
+
+# Light glows (sprites, lamps) get their brightness from a tiny occlusion query of a few pixels.
+# In the headset every small head movement changes it, differently per eye: the glows flicker
+# and the eyes disagree. GlowSmooth averages each glow over both eyes and smooths it over this
+# many seconds (bmvr_glow_smooth, 0 = off). A glow hidden for GlowHideMs in an eye goes dark
+# at once, so it does not shine through walls (bmvr_glow_hide_ms).
+GlowSmooth=0.15
+GlowHideMs=100
 # Strength of the layers on the light (bmvr_flare_light).
 FlareLightScale=1
 # Flare layers placed away from the light are off by default: they wash out the view in a headset.

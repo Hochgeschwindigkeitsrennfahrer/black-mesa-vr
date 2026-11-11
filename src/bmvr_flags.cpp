@@ -188,6 +188,8 @@ namespace bmvr
     float g_FxaaEdgeThreshold = 0.166f;
     float g_FxaaEdgeThresholdMin = 0.0833f;
     float g_GlowHold = 0.f;
+    float g_GlowSmooth = 0.15f;
+    float g_GlowHideMs = 100.f;
     float g_GlowTraceSeconds = 0.f;
     bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;
@@ -762,6 +764,10 @@ namespace bmvr
                 g_FlareSharedLayout = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlareHazeScale") == 0)
                 g_FlareHazeScale = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "GlowSmooth") == 0)
+                g_GlowSmooth = std::clamp(static_cast<float>(atof(val)), 0.f, 0.5f);
+            else if (std::strcmp(n, "GlowHideMs") == 0)
+                g_GlowHideMs = std::clamp(static_cast<float>(atof(val)), 0.f, 500.f);
             else if (std::strcmp(n, "FlareFadeAngle") == 0)
                 g_FlareFadeAngle = std::clamp(static_cast<float>(atof(val)), 0.f, 90.f);
             else if (std::strcmp(n, "FlareLightScale") == 0)

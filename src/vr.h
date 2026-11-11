@@ -1329,6 +1329,12 @@ private:
     void UpdateVrPhase(bool inGame);
     VrPhase m_VrPhase = VrPhase::Unknown;
     DWORD m_VrPhaseSinceMs = 0;
+    // In-game load without the game's loading dialog (trigger changelevel,
+    // reload after death): a LOADING card painted onto the held eye pair,
+    // as flat Black Mesa shows its small LOADING box. Painted on the eyes
+    // published during the load's forced Presents; cleared when it ends.
+    bool m_LoadingCardShown = false;
+    bool m_LoadingCardForcePublish = false;
     // engine scr_drawloading byte, from IVEngineClient slot 29
     // (IsDrawingLoadingImage = mov al,[abs]; ret). nullptr = not found yet,
     // m_LoadingFlagProbed stops re-probing after a failed check.

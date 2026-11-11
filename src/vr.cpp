@@ -3305,6 +3305,13 @@ void VR::UpdateVrPhase(bool inGame)
         m_VrPhaseSinceMs ? static_cast<unsigned long>(now - m_VrPhaseSinceMs) : 0ul,
         drawingLoading ? 1 : 0, inGame ? 1 : 0, m_GameplayEligible ? 1 : 0, m_SeenGameplay ? 1 : 0,
         PauseUiActive() ? 1 : 0, m_CurrentMapName.c_str());
+    if (m_VrPhase == VrPhase::Loading && m_LoadingCardShown)
+    {
+        m_LoadingCardShown = false;
+        m_LoadingCardForcePublish = false;
+        if (std::strcmp(m_ToastText, "LOADING") == 0)
+            m_ToastUntilMs = 0;
+    }
     m_VrPhase = phase;
     m_VrPhaseSinceMs = now;
     // Test aid (BMVR_PHASE_DUMP=1, headless): dump what the next publish shows
@@ -17056,9 +17063,9 @@ void VR::SubmitVRTextures()
         {
             char header[256];
             std::snprintf(header, sizeof(header),
-                "glow trace: FrameCap mode %.0f applied fps_max %d, MulticoreMode %d, GlowHold %.2f, PixelVisPerEye %d",
+                "glow trace: FrameCap mode %.0f applied fps_max %d, MulticoreMode %d, GlowHold %.2f, GlowSmooth %.2f, GlowHideMs %.0f, PixelVisPerEye %d",
                 bmvr::g_FrameCapMode, m_FrameCapApplied, bmvr::g_MulticoreMode ? 1 : 0, bmvr::g_GlowHold,
-                bmvr::g_PixelVisPerEye ? 1 : 0);
+                bmvr::g_GlowSmooth, bmvr::g_GlowHideMs, bmvr::g_PixelVisPerEye ? 1 : 0);
             bmvr::glowtrace::Start(header);
         }
         if (bmvr::glowtrace::Active())
@@ -17202,6 +17209,29 @@ void VR::SubmitVRTextures()
                         m_McEyeCopyQueued ? 1 : 0, m_McEyeCopyDone ? 1 : 0);
                     ++s_mcPresentFb;
                 }
+            }
+        }
+        // In-game load (no loading dialog): the game freezes for seconds after
+        // two forced Presents; paint LOADING onto the eyes published now so the
+        // helper holds the card instead of a silent frozen world. The first
+        // such Present republishes the last pair even if nothing new was drawn.
+        const bool loadingCard = m_VrPhase == VrPhase::Loading && m_DirectEyeSubmit && !PauseUiActive()
+            && !Want2dMenuPanel() && m_D9LeftEyeSurface && m_D9RightEyeSurface;
+        if (loadingCard)
+        {
+            if (!m_LoadingCardShown)
+            {
+                m_LoadingCardShown = true;
+                m_LoadingCardForcePublish = true;
+                ShowToast("LOADING", 120000);
+                Game::logMsg("Loading card: in-game load, LOADING painted on the held eye pair");
+            }
+            DrawToastOnEyeSurface(m_D9LeftEyeSurface, 1);
+            DrawToastOnEyeSurface(m_D9RightEyeSurface, 2);
+            if (m_LoadingCardForcePublish)
+            {
+                m_LoadingCardForcePublish = false;
+                m_RenderedNewFrame.store(true, std::memory_order_release);
             }
         }
         const bool haveNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);

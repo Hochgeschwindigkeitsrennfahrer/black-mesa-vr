@@ -222,14 +222,103 @@ static bool ReadGlowPos(const void* params, float out[3])
     __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+// Glow smoothing (GlowSmooth / bmvr_glow_smooth): per glow and view (the
+// eye offset of the view id left out), the latest fraction of each eye is
+// averaged and low-passed, so both eyes show the same, steady brightness.
+// An eye whose query has read 0 for GlowHideMs gets 0 at once and leaves
+// the average: smoothing never keeps a glow lit behind a wall for longer
+// than that (the engine's own fade is ~60 ms).
+static double GlowNowMs()
+{
+    static LARGE_INTEGER s_freq = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f; }();
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return static_cast<double>(c.QuadPart) * 1000.0 / static_cast<double>(s_freq.QuadPart);
+}
+
+static float GlowStereoSmooth(const void* handle, int viewId, int eye, float raw)
+{
+    struct State
+    {
+        float raw[2] = {};
+        double seenMs[2] = { -1e9, -1e9 };
+        double zeroSinceMs[2] = { -1.0, -1.0 };   // -1 = not reading 0
+        float ema = 0.f;
+        double emaMs = 0.0;
+    };
+    static SRWLOCK s_lock = SRWLOCK_INIT;
+    static std::unordered_map<uint64_t, State> s_glows;
+    static double s_nextPurge;
+    const double now = GlowNowMs();
+    const double tauMs = bmvr::g_GlowSmooth * 1000.0;
+    const double hideMs = bmvr::g_GlowHideMs;
+    const int e = eye - 1, o = 1 - e;
+    const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle)) << 16) | static_cast<uint16_t>(viewId);
+    AcquireSRWLockExclusive(&s_lock);
+    auto [it, fresh] = s_glows.try_emplace(key);
+    State& st = it->second;
+    // New, or not asked for a while (off screen, reused handle): start from now.
+    if (fresh || now - (std::max)(st.seenMs[0], st.seenMs[1]) > 500.0)
+    {
+        st = State{};
+        st.ema = raw;
+        st.emaMs = now;
+    }
+    st.raw[e] = raw;
+    st.seenMs[e] = now;
+    if (raw > 0.f)
+        st.zeroSinceMs[e] = -1.0;
+    else if (st.zeroSinceMs[e] < 0.0)
+        st.zeroSinceMs[e] = now;
+    auto hidden = [&](int i) { return st.zeroSinceMs[i] >= 0.0 && now - st.zeroSinceMs[i] >= hideMs; };
+    float out;
+    if (hidden(e))
+    {
+        // Really hidden in this eye: dark now; if the other eye agrees (or is
+        // gone), the glow restarts from 0 when it shows again.
+        if (hidden(o) || now - st.seenMs[o] > 100.0)
+            st.ema = 0.f;
+        out = 0.f;
+    }
+    else
+    {
+        float sum = raw;
+        int n = 1;
+        if (now - st.seenMs[o] <= 100.0 && !hidden(o))
+        {
+            sum += st.raw[o];
+            ++n;
+        }
+        const float target = sum / static_cast<float>(n);
+        const double dt = now - st.emaMs;
+        const float a = tauMs > 0.0 ? static_cast<float>(1.0 - std::exp(-(std::max)(dt, 0.0) / tauMs)) : 1.f;
+        st.ema += a * (target - st.ema);
+        out = st.ema;
+    }
+    st.emaMs = now;
+    if (now >= s_nextPurge)
+    {
+        s_nextPurge = now + 10000.0;
+        for (auto p = s_glows.begin(); p != s_glows.end();)
+            p = (now - (std::max)(p->second.seenMs[0], p->second.seenMs[1]) > 2000.0) ? s_glows.erase(p) : std::next(p);
+    }
+    ReleaseSRWLockExclusive(&s_lock);
+    return out;
+}
+
 static float __fastcall PixelVisFractionStats(void* ecx, void* edx, const void* params, void* handle)
 {
     (void)edx;
-    if (!g_PixelVisStatsOn && !bmvr::glowtrace::Active())
+    const bool smooth = bmvr::g_GlowSmooth > 0.f;
+    if (!smooth && !g_PixelVisStatsOn && !bmvr::glowtrace::Active())
         return g_OrigPixelVisFraction(ecx, params, handle);
     t_GlowTraceHaveRaw = false;
-    const float f = g_OrigPixelVisFraction(ecx, params, handle);
+    float f = g_OrigPixelVisFraction(ecx, params, handle);
     const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
+    if (smooth && (eye == 1 || eye == 2) && std::isfinite(f) && g_ClientCurrentViewId)
+        f = GlowStereoSmooth(handle, g_ClientCurrentViewId(), eye, f);
+    if (!g_PixelVisStatsOn && !bmvr::glowtrace::Active())
+        return f;
     if (bmvr::glowtrace::Active())
     {
         float pos[3];
@@ -919,7 +1008,7 @@ static void InstallPixelVisStats(uintptr_t client)
     if (MH_CreateHook(fn, reinterpret_cast<LPVOID>(&PixelVisFractionStats),
             reinterpret_cast<LPVOID*>(&g_OrigPixelVisFraction)) == MH_OK
         && MH_EnableHook(fn) == MH_OK)
-        Game::logMsg("pixelvis hook on (glow trace%s)", g_PixelVisStatsOn ? " + stats" : "");
+        Game::logMsg("pixelvis hook on (glow trace%s; GlowSmooth %.2f s, GlowHideMs %.0f)", g_PixelVisStatsOn ? " + stats" : "", bmvr::g_GlowSmooth, bmvr::g_GlowHideMs);
     else
         return;
     if (!g_PixelVisStatsOn)

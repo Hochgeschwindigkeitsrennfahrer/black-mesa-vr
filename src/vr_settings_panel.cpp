@@ -79,6 +79,7 @@ namespace
             { "Large round haze", RowKind::Number, "FlareHazeScale", nullptr, &bmvr::g_FlareHazeScale, 0.05f, 0.f, 1.f, "%.2f" },
             { "Haze from size", RowKind::Number, "FlareHazeMinSize", nullptr, &bmvr::g_FlareHazeMinSize, 0.05f, 0.05f, 4.f, "%.2f" },
             { "Ghosts away from light", RowKind::Number, "FlareGhostScale", nullptr, &bmvr::g_FlareGhostScale, 0.05f, 0.f, 1.f, "%.2f" },
+            { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
             { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
@@ -132,7 +133,7 @@ namespace
             { "DEBUG", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
-            { "Record glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
+            { "Glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
