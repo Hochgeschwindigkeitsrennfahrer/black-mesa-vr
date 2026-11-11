@@ -492,6 +492,25 @@ namespace
                 state->status = static_cast<uint32_t>(L4D2VROpenXrBridgeStatus::SubmittedFrame);
                 if (consumedCount == 1 || consumedCount % 600 == 0)
                     Game::logMsg("fakehelper: consumed frame %u (count %u)", frameId, consumedCount);
+                // The real helper shows the frame as a flat 2D quad while the
+                // latched game render pose carries POSE_FLAG_MONO; log every
+                // change so a stuck 2D mode shows up headless.
+                {
+                    const L4D2VROpenXrPoseDesc pose = state->gameRenderPose;
+                    static int s_lastMono = -1;
+                    const int mono = (pose.valid && (pose.reserved1 & L4D2VR_OPENXR_POSE_FLAG_MONO)) ? 1 : 0;
+                    if (consumedCount % 300 == 0)
+                        Game::logMsg("fakehelper: frame %u game render pose (%.4f %.4f %.4f) gen %u, helper hmd pose (%.4f %.4f %.4f) gen %u",
+                            frameId, pose.position[0], pose.position[1], pose.position[2], state->gameRenderPoseGeneration,
+                            state->hmdPose.position[0], state->hmdPose.position[1], state->hmdPose.position[2],
+                            state->trackingPoseGeneration);
+                    if (mono != s_lastMono)
+                    {
+                        s_lastMono = mono;
+                        Game::logMsg("fakehelper: frame %u render pose %s (valid=%u y=%.3f)",
+                            frameId, mono ? "MONO -> helper shows a 2D quad" : "stereo", pose.valid, pose.position[1]);
+                    }
+                }
             }
             state->heartbeatTickMs = GetTickCount64();
         }

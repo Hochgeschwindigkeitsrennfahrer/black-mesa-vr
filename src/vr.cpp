@@ -3312,6 +3312,8 @@ void VR::UpdateVrPhase(bool inGame)
         if (std::strcmp(m_ToastText, "LOADING") == 0)
             m_ToastUntilMs = 0;
     }
+    if (prev == VrPhase::Loading && phase != VrPhase::Loading)
+        m_PoseDiagUntilMs = now + 30000;   // pose diagnostic after every load
     m_VrPhase = phase;
     m_VrPhaseSinceMs = now;
     // Test aid (BMVR_PHASE_DUMP=1, headless): dump what the next publish shows
@@ -3319,6 +3321,43 @@ void VR::UpdateVrPhase(bool inGame)
     static const bool s_phaseDump = [] { char v[8] = {}; return GetEnvironmentVariableA("BMVR_PHASE_DUMP", v, sizeof(v)) > 0 && v[0] == '1'; }();
     if (s_phaseDump)
         m_PhaseDumpAtMs = now + 150;   // after the switch has reached a publish
+}
+
+// One line per second for 30 s after a load (2026-11-11: head pose stuck
+// after in-game loads in the headset, not reproduced headless). Every stage
+// from the helper's HMD pose to the pose published with the eyes.
+void VR::TickPoseDiag()
+{
+    if (!m_PoseDiagUntilMs)
+        return;
+    const DWORD now = GetTickCount();
+    if (static_cast<int32_t>(now - m_PoseDiagUntilMs) > 0)
+    {
+        m_PoseDiagUntilMs = 0;
+        return;
+    }
+    static DWORD s_last;
+    if (now - s_last < 1000)
+        return;
+    s_last = now;
+    L4D2VROpenXrPoseDesc raw{};
+    uint32_t rawGen = 0;
+    const bool rawOk = L4D2VR_ReadOpenXrHmdPose(raw, &rawGen);
+    const uint32_t band = m_McFrame >= 2 ? (m_McFrame - 2) % 3u : 0u;
+    const L4D2VROpenXrPoseDesc& mc = m_McPoses[band];
+    Game::logMsg("pose diag: raw ok=%d gen=%u (%.4f %.4f %.4f) t=%lld | last gen=%u (%.4f %.4f %.4f) t=%lld latchedGen=%u"
+        " | stereo valid=%d (%.4f %.4f %.4f) | mc frame=%u band=%u valid=%d (%.4f %.4f %.4f) | hmdAbs (%.2f %.2f %.2f) yaw %.2f"
+        " | waitedTick age=%lu err=%d waited=%d phase=%s card=%d direct=%d",
+        rawOk ? 1 : 0, rawGen, raw.position[0], raw.position[1], raw.position[2], static_cast<long long>(raw.displayTime),
+        m_OpenXrLastHmdPoseGeneration, m_OpenXrLastHmdPose.position[0], m_OpenXrLastHmdPose.position[1],
+        m_OpenXrLastHmdPose.position[2], static_cast<long long>(m_OpenXrLastHmdPose.displayTime), m_OpenXrLatchedPoseGeneration,
+        m_OpenXrStereoRenderPoseValid ? 1 : 0, m_OpenXrStereoRenderPose.position[0], m_OpenXrStereoRenderPose.position[1],
+        m_OpenXrStereoRenderPose.position[2],
+        m_McFrame, band, mc.valid, mc.position[0], mc.position[1], mc.position[2],
+        m_HmdPosAbs.x, m_HmdPosAbs.y, m_HmdPosAbs.z, m_HmdAngAbs.y,
+        static_cast<unsigned long>(now - m_WaitedPoseTick.load(std::memory_order_acquire)),
+        m_LastPoseWaitError.load(std::memory_order_acquire), m_PosesWaitedThisFrame ? 1 : 0,
+        VrPhaseName(m_VrPhase), m_LoadingCardShown ? 1 : 0, m_DirectEyeSubmit ? 1 : 0);
 }
 
 void VR::TickPhaseDump()
@@ -17215,7 +17254,7 @@ void VR::SubmitVRTextures()
         // two forced Presents; paint LOADING onto the eyes published now so the
         // helper holds the card instead of a silent frozen world. The first
         // such Present republishes the last pair even if nothing new was drawn.
-        const bool loadingCard = m_VrPhase == VrPhase::Loading && m_DirectEyeSubmit && !PauseUiActive()
+        const bool loadingCard = bmvr::g_LoadingCard && m_VrPhase == VrPhase::Loading && m_DirectEyeSubmit && !PauseUiActive()
             && !Want2dMenuPanel() && m_D9LeftEyeSurface && m_D9RightEyeSurface;
         if (loadingCard)
         {
@@ -17735,6 +17774,7 @@ void VR::Update()
     const bool inGame = m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
     UpdateVrPhase(inGame);
     TickPhaseDump();
+    TickPoseDiag();
     // LevelInit names the map before IsInGame. Do not run AutoMatQueueMode,
     // pose, or input during that window — Present is about to stop for
     // material precache, and overnight Update work is not what unblocks it.

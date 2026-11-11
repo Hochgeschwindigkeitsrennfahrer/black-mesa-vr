@@ -171,6 +171,8 @@ namespace bmvr
               Kind::Float, 0.f, 0.5f, nullptr, &g_GlowSmooth },
             { "bmvr_glow_hide_ms", "VR: a glow hidden this many ms in an eye goes dark at once despite smoothing (no glow through walls)",
               Kind::Float, 0.f, 500.f, nullptr, &g_GlowHideMs },
+            { "bmvr_loading_card", "VR: LOADING card on the eyes during in-game loads (0 = old frozen world; test switch)",
+              Kind::Bool, 0.f, 1.f, &g_LoadingCard, nullptr },
             { "bmvr_freeze_head", "VR debug: the game view keeps the current head pose (SteamVR still reprojects it to the real head); hands keep tracking",
               Kind::Bool, 0.f, 1.f, &g_FreezeHead, nullptr },
             { "bmvr_glow_trace", "VR debug: record every light glow's brightness + frame timing for N seconds into VR/glowtrace-*.csv",

@@ -1343,6 +1343,8 @@ private:
     bool m_PhaseDumpBackbuffer = false;
     DWORD m_PhaseDumpAtMs = 0;
     void TickPhaseDump();
+    DWORD m_PoseDiagUntilMs = 0;
+    void TickPoseDiag();
     bool InitOpenVR();
     bool InitOpenXR();
     bool ConsumeOpenXrTracking();

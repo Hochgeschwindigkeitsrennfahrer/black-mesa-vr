@@ -189,6 +189,7 @@ namespace bmvr
     float g_GlowHold = 0.f;
     float g_GlowSmooth = 0.15f;
     float g_GlowHideMs = 100.f;
+    bool g_LoadingCard = true;
     float g_GlowTraceSeconds = 0.f;
     bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;

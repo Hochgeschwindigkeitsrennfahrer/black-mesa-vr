@@ -468,6 +468,9 @@ namespace bmvr
     // 0 this long shows the glow at 0 at once (no glow through walls).
     extern float g_GlowSmooth;
     extern float g_GlowHideMs;
+    // LOADING card on in-game loads (bmvr_loading_card, default on). Test switch
+    // for the 2026-11-11 stuck-head-pose-after-load report.
+    extern bool g_LoadingCard;
     // bmvr_glow_trace <seconds> / panel DEBUG "Record glow trace": start a glow
     // trace of that length (bmvr_glowtrace.h); reset to 0 once it starts.
     extern float g_GlowTraceSeconds;
