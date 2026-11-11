@@ -3993,6 +3993,55 @@ bool VR::ConsumeOpenXrTracking()
         }
     }
 
+    // Test "head pose hold" (PoseHoldDeg / PoseHoldMm): keep the previous
+    // pose until the head turns or moves past the threshold. Render and
+    // publish both use the held pose (like Freeze head pose), so SteamVR
+    // reprojects the small difference; a still head renders identical frames.
+    if ((bmvr::g_PoseHoldDeg > 0.f || bmvr::g_PoseHoldMm > 0.f) && openXrPose.valid && !bmvr::g_FreezeHead)
+    {
+        static bool s_have = false;
+        static float s_pos[3], s_rot[4];
+        static uint32_t s_holds, s_moves;
+        static DWORD s_logMs;
+        bool move = !s_have;
+        if (s_have)
+        {
+            float dot = 0.f;
+            for (int i = 0; i < 4; ++i)
+                dot += s_rot[i] * openXrPose.orientation[i];
+            const float angDeg = 2.f * acosf((std::min)(1.f, fabsf(dot))) * (180.f / 3.14159265f);
+            const float dx = openXrPose.position[0] - s_pos[0], dy = openXrPose.position[1] - s_pos[1],
+                        dz = openXrPose.position[2] - s_pos[2];
+            const float distMm = sqrtf(dx * dx + dy * dy + dz * dz) * 1000.f;
+            // A threshold left at 0 while the other is set uses a small
+            // default, so tracking noise in that axis cannot break every hold.
+            const float degThr = bmvr::g_PoseHoldDeg > 0.f ? bmvr::g_PoseHoldDeg : 0.05f;
+            const float mmThr = bmvr::g_PoseHoldMm > 0.f ? bmvr::g_PoseHoldMm : 1.f;
+            move = angDeg > degThr || distMm > mmThr;
+        }
+        if (move)
+        {
+            std::memcpy(s_pos, openXrPose.position, sizeof(s_pos));
+            std::memcpy(s_rot, openXrPose.orientation, sizeof(s_rot));
+            s_have = true;
+            ++s_moves;
+        }
+        else
+        {
+            std::memcpy(openXrPose.position, s_pos, sizeof(s_pos));
+            std::memcpy(openXrPose.orientation, s_rot, sizeof(s_rot));
+            ++s_holds;
+        }
+        const DWORD nowMs = GetTickCount();
+        if (nowMs - s_logMs >= 10000)
+        {
+            s_logMs = nowMs;
+            Game::logMsg("Head pose hold %.2f deg / %.1f mm: %u held, %u moved (last 10 s)",
+                bmvr::g_PoseHoldDeg, bmvr::g_PoseHoldMm, s_holds, s_moves);
+            s_holds = s_moves = 0;
+        }
+    }
+
     m_OpenXrLastHmdPose = openXrPose;
     m_OpenXrLastHmdPoseGeneration = generation;
     if (openXrPose.reserved0 != 0)

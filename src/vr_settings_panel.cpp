@@ -112,7 +112,10 @@ namespace
             { "Large round haze", RowKind::Number, "FlareHazeScale", nullptr, &bmvr::g_FlareHazeScale, 0.05f, 0.f, 1.f, "%.2f" },
             { "Haze from size", RowKind::Number, "FlareHazeMinSize", nullptr, &bmvr::g_FlareHazeMinSize, 0.05f, 0.05f, 4.f, "%.2f" },
             { "Ghosts away from light", RowKind::Number, "FlareGhostScale", nullptr, &bmvr::g_FlareGhostScale, 0.05f, 0.f, 1.f, "%.2f" },
+            { "LIGHT GLOWS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Reset glow values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_default" },
             { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
+            { "Dark when hidden after", RowKind::Number, "GlowHideMs", nullptr, &bmvr::g_GlowHideMs, 10.f, 0.f, 500.f, "%.0f ms" },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
             { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
@@ -142,6 +145,11 @@ namespace
             { "VIEW TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
+            // Experiments; saved like the other settings, off by default.
+            { "TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
+            { "Head hold: angle", RowKind::Number, "PoseHoldDeg", nullptr, &bmvr::g_PoseHoldDeg, 0.02f, 0.f, 1.f, "%.2f\xB0" },
+            { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
             // Hand/glove placement tuning; saved like the other settings.
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
@@ -793,6 +801,13 @@ void VR::UpdateSettingsPanel()
             bmvr::g_FxaaSubpixel = 0.25f;
             bmvr::g_FxaaEdgeThreshold = 0.166f;
             bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
+            break;
+        }
+        // The glow values back at their defaults.
+        if (r.fmt && std::strcmp(r.fmt, "glow_default") == 0)
+        {
+            bmvr::g_GlowSmooth = 0.15f;
+            bmvr::g_GlowHideMs = 100.f;
             break;
         }
         // The bloom/flare values back at their defaults; on or off stays as it is.

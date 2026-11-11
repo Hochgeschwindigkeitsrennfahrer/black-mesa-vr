@@ -306,9 +306,48 @@ static float GlowStereoSmooth(const void* handle, int viewId, int eye, float raw
     return out;
 }
 
+// GlowProxyScale: the query's test area (pixelvis_queryparams_t::proxySize,
+// after the Vector position) widened on a copy of the params; the engine
+// keeps one query set per proxy size, so a change applies from the next query.
+struct PixelVisParamsCopy
+{
+    float position[3];
+    float proxySize;
+    float proxyAspect;
+    float fadeTime;
+    bool bSetup;
+    bool bSizeInScreenspace;
+};
+static_assert(sizeof(PixelVisParamsCopy) == 28, "pixelvis_queryparams_t layout");
+
+static const void* ScaledPixelVisParams(const void* params, PixelVisParamsCopy& copy)
+{
+    const float scale = bmvr::g_GlowProxyScale;
+    if (!params || !(scale > 1.001f))
+        return params;
+    __try
+    {
+        std::memcpy(&copy, params, sizeof(copy));
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return params; }
+    if (!copy.bSetup || !std::isfinite(copy.proxySize) || copy.proxySize <= 0.f)
+        return params;
+    copy.proxySize *= scale;
+    static int s_log;
+    if (s_log < 6)
+    {
+        ++s_log;
+        Game::logMsg("Glow proxy scale %.2f: proxySize %.4f -> %.4f aspect %.2f screenspace=%d",
+            scale, copy.proxySize / scale, copy.proxySize, copy.proxyAspect, copy.bSizeInScreenspace ? 1 : 0);
+    }
+    return &copy;
+}
+
 static float __fastcall PixelVisFractionStats(void* ecx, void* edx, const void* params, void* handle)
 {
     (void)edx;
+    PixelVisParamsCopy scaled;
+    params = ScaledPixelVisParams(params, scaled);
     const bool smooth = bmvr::g_GlowSmooth > 0.f;
     if (!smooth && !g_PixelVisStatsOn && !bmvr::glowtrace::Active())
         return g_OrigPixelVisFraction(ecx, params, handle);

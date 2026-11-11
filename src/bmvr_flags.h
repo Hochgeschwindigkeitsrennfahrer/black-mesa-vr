@@ -468,6 +468,17 @@ namespace bmvr
     // 0 this long shows the glow at 0 at once (no glow through walls).
     extern float g_GlowSmooth;
     extern float g_GlowHideMs;
+    // Tests (VR panel Debug -> TESTS), default off:
+    // GlowProxyScale (bmvr_glow_proxy_scale, 1 = stock): the glow occlusion
+    // test area is this many times wider, so a query counts more pixels and
+    // its visible fraction moves in finer steps.
+    // PoseHoldDeg / PoseHoldMm (bmvr_pose_hold_deg / _mm, 0 = off): the game
+    // keeps the previous head pose until the head turns or moves more than
+    // this; the frame goes out with that pose, SteamVR reprojects the rest.
+    // A still head then renders identical frames (no glow / shimmer crawl).
+    extern float g_GlowProxyScale;
+    extern float g_PoseHoldDeg;
+    extern float g_PoseHoldMm;
     // LOADING card on in-game loads (bmvr_loading_card, default on). Test switch
     // for the 2026-11-11 stuck-head-pose-after-load report.
     extern bool g_LoadingCard;

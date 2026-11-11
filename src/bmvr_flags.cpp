@@ -190,6 +190,9 @@ namespace bmvr
     float g_GlowSmooth = 0.15f;
     float g_GlowHideMs = 100.f;
     bool g_LoadingCard = true;
+    float g_GlowProxyScale = 1.f;
+    float g_PoseHoldDeg = 0.f;
+    float g_PoseHoldMm = 0.f;
     float g_GlowTraceSeconds = 0.f;
     bool g_FollowScriptedCamera = true;
     bool g_OccluderViewPerEye = true;
@@ -768,6 +771,12 @@ namespace bmvr
                 g_GlowSmooth = std::clamp(static_cast<float>(atof(val)), 0.f, 0.5f);
             else if (std::strcmp(n, "GlowHideMs") == 0)
                 g_GlowHideMs = std::clamp(static_cast<float>(atof(val)), 0.f, 500.f);
+            else if (std::strcmp(n, "GlowProxyScale") == 0)
+                g_GlowProxyScale = std::clamp(static_cast<float>(atof(val)), 1.f, 8.f);
+            else if (std::strcmp(n, "PoseHoldDeg") == 0)
+                g_PoseHoldDeg = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "PoseHoldMm") == 0)
+                g_PoseHoldMm = std::clamp(static_cast<float>(atof(val)), 0.f, 20.f);
             else if (std::strcmp(n, "FlareFadeAngle") == 0)
                 g_FlareFadeAngle = std::clamp(static_cast<float>(atof(val)), 0.f, 90.f);
             else if (std::strcmp(n, "FlareLightScale") == 0)

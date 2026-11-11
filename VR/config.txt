@@ -178,8 +178,8 @@ FlareSharedLayout=true
 # In the headset every small head movement changes it, differently per eye: the glows flicker
 # and the eyes disagree. GlowSmooth averages each glow over both eyes and smooths it over this
 # many seconds (bmvr_glow_smooth, 0 = off). A glow hidden for GlowHideMs in an eye goes dark
-# at once, so it does not shine through walls (bmvr_glow_hide_ms).
-GlowHideMs=100
+# at once, so it does not shine through walls (bmvr_glow_hide_ms). Both in the VR settings
+# panel (Graphics -> LIGHT GLOWS).
 # Strength of the layers on the light (bmvr_flare_light).
 # Flare layers placed away from the light are off by default: they wash out the view in a headset.
 # Strength of the large square ones: 0 off, 1 stock (bmvr_flare_haze).
