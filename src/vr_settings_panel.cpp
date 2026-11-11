@@ -741,9 +741,9 @@ void VR::UpdateSettingsPanel()
         // The FXAA values back at their defaults; on or off stays as it is.
         if (r.fmt && std::strcmp(r.fmt, "fxaa_default") == 0)
         {
-            bmvr::g_FxaaSubpixel = 0.25f;
-            bmvr::g_FxaaEdgeThreshold = 0.166f;
-            bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
+            bmvr::g_FxaaSubpixel = 0.35f;
+            bmvr::g_FxaaEdgeThreshold = 0.13f;
+            bmvr::g_FxaaEdgeThresholdMin = 0.025f;
             break;
         }
         // The bloom/flare values back at their defaults; on or off stays as it is.

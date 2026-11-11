@@ -125,8 +125,8 @@ namespace bmvr
     float g_ThrowScale = 5.5f;
     bool g_VrSkipMotionBlur = true;
     bool g_VrSkipScreenEffects = true;
-    float g_EnvmapScaleWorld = 1.f;
-    float g_EnvmapScaleModels = 1.f;
+    float g_EnvmapScaleWorld = 0.4f;
+    float g_EnvmapScaleModels = 0.8f;
     bool g_StereoEnginePost = true;
     uint32_t g_MaxEyeSize = 4096;
     float g_ReflectionRtScale = 0.5f;
@@ -183,10 +183,10 @@ namespace bmvr
     float g_FlareLightScale = 1.f;
     bool g_ViewProjNormalFix = true;
     bool g_EyeBloom = true;
-    bool g_FxaaApply = false;
-    float g_FxaaSubpixel = 0.25f;
-    float g_FxaaEdgeThreshold = 0.166f;
-    float g_FxaaEdgeThresholdMin = 0.0833f;
+    bool g_FxaaApply = true;
+    float g_FxaaSubpixel = 0.35f;
+    float g_FxaaEdgeThreshold = 0.13f;
+    float g_FxaaEdgeThresholdMin = 0.025f;
     float g_GlowHold = 0.f;
     float g_GlowSmooth = 0.15f;
     float g_GlowHideMs = 100.f;

@@ -30,13 +30,13 @@ ReflectionRtScale=0.5
 # ReflectionRtScale=0. -1 (or unset) = same as ReflectionRtScale, 0 = 1024x1024.
 RefractCopyRtScale=0.5
 
-# Cubemap reflection strength (0..1, default 1 = as the game). Lower values
+# Cubemap reflection strength (0..1, 1 = as the game; default 0.4 / 0.8). Lower values
 # calm shiny surfaces that shimmer in the headset, without mat_specular 0
 # losing all shine. World = walls, floors, glass; Models = props and NPCs.
 # Your own weapons and hands are never changed. Also in the VR panel and as
 # bmvr_envmap_scale_world / bmvr_envmap_scale_models (live).
-EnvmapScaleWorld=1
-EnvmapScaleModels=1
+EnvmapScaleWorld=0.4
+EnvmapScaleModels=0.8
 
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
@@ -226,11 +226,11 @@ FlareGhostScale=0
 
 # FXAA settings, also in the VR settings panel and as bmvr_fxaa_* console commands.
 # The game never passes the mat_fxaa_* cvars to the shader and runs FXAA with all values at 0.
-# FxaaApply=true sends these values instead. false keeps the stock behaviour.
-FxaaApply=false
-# Sub-pixel smoothing: 0 off, 0.25 about as sharp as with FxaaApply=false, 0.75 FXAA's own default, 1 softest.
-FxaaSubpixel=0.25
+# FxaaApply=true (default) sends these values instead. false keeps the stock behaviour.
+FxaaApply=true
+# Sub-pixel smoothing: 0 off, 0.25 about as sharp as with FxaaApply=false, 0.35 mod default, 0.75 FXAA's own default, 1 softest.
+FxaaSubpixel=0.35
 # Edge contrast needed to smooth: 0.063 most edges, 0.166 FXAA default, 0.333 fewest.
-FxaaEdgeThreshold=0.166
+FxaaEdgeThreshold=0.13
 # Darks below this contrast are skipped: 0.0312 treats most, 0.0833 FXAA default.
-FxaaEdgeThresholdMin=0.0833
+FxaaEdgeThresholdMin=0.025

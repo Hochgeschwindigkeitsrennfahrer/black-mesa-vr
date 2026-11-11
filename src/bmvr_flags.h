@@ -276,7 +276,7 @@ namespace bmvr
     extern float g_ThrowScale;           // hand speed x 2/3 x this, capped at 1500 u/s (Lambda1VR vr_throw_scale)
     extern bool g_VrSkipMotionBlur;      // skip the engine motion blur pass in VR
     extern bool g_VrSkipScreenEffects;   // skip env_screeneffect overlays (stun / intro blur) in VR
-    // EnvmapScaleWorld / EnvmapScaleModels (0..1, default 1): cubemap reflection
+    // EnvmapScaleWorld / EnvmapScaleModels (0..1, default 0.4 / 0.8): cubemap reflection
     // strength ($envmaptint) of brush materials / model materials in VR.
     // models/weapons/* (view models, hands) are never scaled.
     extern float g_EnvmapScaleWorld;
@@ -444,8 +444,8 @@ namespace bmvr
     // on the eyes unchanged. false = the eye skip (2026-09-03 ghosts).
     extern bool g_EyeBloom;
     // FXAA quality parameters. The game never passes the mat_fxaa_* cvars to the
-    // shader, so it runs with all of them at 0. FxaaApply (default false = that
-    // stock behaviour) sends these instead. Values are FXAA 3.11's own terms.
+    // shader, so it runs with all of them at 0. FxaaApply (default true; false =
+    // that stock behaviour) sends these instead. Values are FXAA 3.11's own terms.
     extern bool g_FxaaApply;
     extern float g_FxaaSubpixel;
     extern float g_FxaaEdgeThreshold;
