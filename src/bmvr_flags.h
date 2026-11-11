@@ -217,6 +217,15 @@ namespace bmvr
     extern bool g_VrHandsDebugBoxes;
     // Wrist HUD: health+suit flat on the off-hand, ammo sideways beside the gun hand.
     extern bool g_HandHud;
+    // Off-hand (health/suit) panel placement, relative to the controller after
+    // the tilt/roll: size and offsets in game units, angles in degrees. Roll is
+    // mirrored for a right-hand panel (left-handed play).
+    extern float g_HandHudSize;
+    extern float g_HandHudUp;
+    extern float g_HandHudForward;
+    extern float g_HandHudSide;
+    extern float g_HandHudTilt;
+    extern float g_HandHudRoll;
     // World-space aim reticle at the controller firing ray. Off by default;
     // VrCrosshair=true in config.txt turns it on.
     extern bool g_VrCrosshair;

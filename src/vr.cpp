@@ -11465,7 +11465,6 @@ namespace
         bool valid = false;
     };
 
-    constexpr float kHandHudSize = 2.5f;
     constexpr float kAmmoHudSize = 2.0f;
 
     void HudMakePanel(const Vector& lowerLeft, const Vector& xaxis, const Vector& left,
@@ -11502,18 +11501,18 @@ namespace
         Vector fwd, right, up;
         QAngle::AngleVectors(ctrlAng, &fwd, &right, &up);
         Vector left = right * -1.f;
-        constexpr float kPitch = -18.f;
-        const float kRoll = rightHand ? 14.f : -14.f;
+        const float kPitch = bmvr::g_HandHudTilt;
+        const float kRoll = rightHand ? bmvr::g_HandHudRoll : -bmvr::g_HandHudRoll;
         fwd = HudRotate(fwd, left, kPitch);
         up = HudRotate(up, left, kPitch);
         left = HudRotate(left, fwd, kRoll);
         up = HudRotate(up, fwd, kRoll);
-        constexpr float kLift = 2.2f;
-        constexpr float kAlong = -0.55f;
-        constexpr float kAcross = 0.3f;
-        const Vector center = ctrlPos + up * kLift + fwd * kAlong + left * kAcross;
-        const Vector origin = center - fwd * (kHandHudSize * 0.5f) - left * (kHandHudSize * 0.5f);
-        HudMakePanel(origin, fwd, left, up, kHandHudSize, out);
+        // Size/offsets/angles from the panel (Graphics -> HAND HUD) / bmvr_hand_hud_*.
+        const float size = bmvr::g_HandHudSize;
+        const Vector center = ctrlPos + up * bmvr::g_HandHudUp + fwd * bmvr::g_HandHudForward
+            + left * bmvr::g_HandHudSide;
+        const Vector origin = center - fwd * (size * 0.5f) - left * (size * 0.5f);
+        HudMakePanel(origin, fwd, left, up, size, out);
     }
 
     // Beside the gun-hand controller, one-sided, inward. Same Cross order as

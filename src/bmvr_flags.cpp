@@ -96,6 +96,12 @@ namespace bmvr
     float g_VrHandsModelScale = 0.85f;
     bool g_VrHandsDebugBoxes = false;
     bool g_HandHud = true;
+    float g_HandHudSize = 2.5f;
+    float g_HandHudUp = 2.2f;
+    float g_HandHudForward = -0.55f;
+    float g_HandHudSide = 0.3f;
+    float g_HandHudTilt = -18.f;
+    float g_HandHudRoll = 14.f;
     bool g_VrCrosshair = true;
     float g_VrCrosshairScale = 0.5f;
     bool g_VrCrosshairDot = true;
@@ -627,6 +633,18 @@ namespace bmvr
                 g_VrHandsDebugBoxes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandHud") == 0)
                 g_HandHud = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "HandHudSize") == 0)
+                g_HandHudSize = std::clamp(static_cast<float>(atof(val)), 1.f, 6.f);
+            else if (std::strcmp(n, "HandHudUp") == 0)
+                g_HandHudUp = std::clamp(static_cast<float>(atof(val)), -4.f, 8.f);
+            else if (std::strcmp(n, "HandHudForward") == 0)
+                g_HandHudForward = std::clamp(static_cast<float>(atof(val)), -8.f, 8.f);
+            else if (std::strcmp(n, "HandHudSide") == 0)
+                g_HandHudSide = std::clamp(static_cast<float>(atof(val)), -6.f, 6.f);
+            else if (std::strcmp(n, "HandHudTilt") == 0)
+                g_HandHudTilt = std::clamp(static_cast<float>(atof(val)), -90.f, 90.f);
+            else if (std::strcmp(n, "HandHudRoll") == 0)
+                g_HandHudRoll = std::clamp(static_cast<float>(atof(val)), -90.f, 90.f);
             else if (std::strcmp(n, "VrCrosshair") == 0)
                 g_VrCrosshair = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrCrosshairScale") == 0)

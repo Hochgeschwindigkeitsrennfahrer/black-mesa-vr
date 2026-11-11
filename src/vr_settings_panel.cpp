@@ -140,6 +140,15 @@ namespace
             { "REFLECTIONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
             { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
+            { "HAND HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Reset hand HUD values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
+            { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
+            { "Panel size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
+            { "Up from the hand", RowKind::Number, "HandHudUp", nullptr, &bmvr::g_HandHudUp, 0.25f, -4.f, 8.f, "%+.2f" },
+            { "Forward (- = to the wrist)", RowKind::Number, "HandHudForward", nullptr, &bmvr::g_HandHudForward, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Sideways (+ = left)", RowKind::Number, "HandHudSide", nullptr, &bmvr::g_HandHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
+            { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
+            { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "WEAPON MENU", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Tilt to face the eye", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
             // The gear only hides while the Triangle hold can open this panel.
@@ -882,8 +891,43 @@ void VR::UpdateSettingsPanel()
         CloseSettingsPanel("circle");
         return;
     }
-    if (!clickEdge || row < 0)
+    // Holding the trigger on a number row's -/+ repeats the step: first repeat
+    // after 0.4 s, then ~11/s, ~25/s once held 1.5 s. Moving off the zone stops it.
+    static int s_repeatRow = -1, s_repeatZone = -1;
+    static DWORD s_holdStart = 0, s_nextRepeat = 0;
+    static bool s_repeated = false;
+    const DWORD now = GetTickCount();
+    bool repeat = false;
+    if (clickEdge)
+    {
+        s_repeatRow = row;
+        s_repeatZone = zone;
+        s_holdStart = now;
+        s_nextRepeat = now + 400;
+        s_repeated = false;
+    }
+    else if (click && s_repeatRow >= 0)
+    {
+        if (row != s_repeatRow || zone != s_repeatZone)
+            s_repeatRow = -1;
+        else if (Rows()[row].kind == RowKind::Number && zone != 1
+            && static_cast<int>(now - s_nextRepeat) >= 0)
+        {
+            repeat = true;
+            s_nextRepeat = now + (now - s_holdStart > 1500 ? 40 : 90);
+        }
+    }
+    else if (!click && s_repeatRow >= 0)
+    {
+        if (s_repeated)
+            Game::logMsg("VR settings: %s = %s (held)", Rows()[s_repeatRow].label,
+                FormatValue(Rows()[s_repeatRow]).c_str());
+        s_repeatRow = -1;
+    }
+    if ((!clickEdge && !repeat) || row < 0)
         return;
+    if (repeat)
+        s_repeated = true;
     Row& r = Rows()[row];
     switch (r.kind)
     {
@@ -913,6 +957,17 @@ void VR::UpdateSettingsPanel()
             bmvr::g_FxaaSubpixel = 0.25f;
             bmvr::g_FxaaEdgeThreshold = 0.166f;
             bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
+            break;
+        }
+        // The hand HUD placement back at its defaults; on or off stays as it is.
+        if (r.fmt && std::strcmp(r.fmt, "handhud_default") == 0)
+        {
+            bmvr::g_HandHudSize = 2.5f;
+            bmvr::g_HandHudUp = 2.2f;
+            bmvr::g_HandHudForward = -0.55f;
+            bmvr::g_HandHudSide = 0.3f;
+            bmvr::g_HandHudTilt = -18.f;
+            bmvr::g_HandHudRoll = 14.f;
             break;
         }
         // The glow values back at their defaults.
@@ -990,6 +1045,11 @@ void VR::UpdateSettingsPanel()
     else
         m_SettingsChanged = true;
     m_SettingsDirty = true;
+    if (repeat)
+    {
+        PulseHandHaptic(vr::TrackedControllerRole_RightHand, 200, 0.1f);
+        return;
+    }
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
     Game::logMsg("VR settings: %s = %s", r.label, FormatValue(r).c_str());
 }
