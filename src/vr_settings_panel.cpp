@@ -31,6 +31,9 @@ namespace
     constexpr int kHeaderPx = 96;
     constexpr int kRowPx = 64;
     constexpr int kSectionPx = 48;
+    constexpr int kTabPx = 72;          // tab bar under the title
+    constexpr int kTabGapPx = 16;
+    constexpr int kContentTop = kHeaderPx + kTabPx + 24;
     constexpr float kPanelWidthHu = 40.f;      // ~1 m: two ~51 cm columns, same text size as before
     constexpr float kPanelMinDistanceHu = 44.f;  // ~1.12 m in front of the eyes, near the game menu
     constexpr float kPanelHalfFovDeg = 22.f;      // pushed back until the panel is about +-22 deg tall
@@ -41,7 +44,7 @@ namespace
     constexpr int kPlusX0 = 880, kPlusX1 = 970;
     constexpr int kPillX0 = 790, kPillX1 = 970;
 
-    enum class RowKind { Section, Toggle, Number, Button, Close };
+    enum class RowKind { Tab, Section, Toggle, Number, Button, Close };
 
     struct Row
     {
@@ -56,7 +59,9 @@ namespace
 
     std::vector<Row>& Rows()
     {
+        // A Tab row starts a tab; its rows follow until the next Tab row.
         static std::vector<Row> rows = {
+            { "INTERACTION", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
             { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
@@ -71,26 +76,6 @@ namespace
             { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
             { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
             { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
-            { "LENS FLARES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Reset flare values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "flare_default" },
-            { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
-            { "Fade out at angle", RowKind::Number, "FlareFadeAngle", nullptr, &bmvr::g_FlareFadeAngle, 5.f, 0.f, 90.f, "%.0f\xB0" },
-            { "Strength on the light", RowKind::Number, "FlareLightScale", nullptr, &bmvr::g_FlareLightScale, 0.05f, 0.f, 1.f, "%.2f" },
-            { "Large round haze", RowKind::Number, "FlareHazeScale", nullptr, &bmvr::g_FlareHazeScale, 0.05f, 0.f, 1.f, "%.2f" },
-            { "Haze from size", RowKind::Number, "FlareHazeMinSize", nullptr, &bmvr::g_FlareHazeMinSize, 0.05f, 0.05f, 4.f, "%.2f" },
-            { "Ghosts away from light", RowKind::Number, "FlareGhostScale", nullptr, &bmvr::g_FlareGhostScale, 0.05f, 0.f, 1.f, "%.2f" },
-            { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
-            { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
-            { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
-            { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
-            { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
-            { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
-            { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Frame cap (0 off, 1 +10, 2 x2)", RowKind::Number, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "%.0f" },
-            { "REFLECTIONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
-            { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
             { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -114,27 +99,51 @@ namespace
             { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
             { "SHOULDER GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip: left save, right crowbar", RowKind::Toggle, "ShoulderGestures", &bmvr::g_ShoulderGestures, nullptr, 0, 0, 0, nullptr },
-            { "WEAPON MENU", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Tilt to face the eye", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
-            // The gear only hides while the Triangle hold can open this panel.
-            { "VR gear slot", RowKind::Toggle, "WeaponMenuSettingsGear", &bmvr::g_WeaponMenuSettingsGear, nullptr, 0, 0, 0, nullptr },
-            { "Hold Triangle/Y for this panel", RowKind::Toggle, "SettingsTriangleHold", &bmvr::g_SettingsTriangleHold, nullptr, 0, 0, 0, nullptr },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter resets turning", RowKind::Toggle, "RecenterResetsYaw", &bmvr::g_RecenterResetsYaw, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
+            { "GRAPHICS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "LENS FLARES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Reset flare values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "flare_default" },
+            { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
+            { "Fade out at angle", RowKind::Number, "FlareFadeAngle", nullptr, &bmvr::g_FlareFadeAngle, 5.f, 0.f, 90.f, "%.0f\xB0" },
+            { "Strength on the light", RowKind::Number, "FlareLightScale", nullptr, &bmvr::g_FlareLightScale, 0.05f, 0.f, 1.f, "%.2f" },
+            { "Large round haze", RowKind::Number, "FlareHazeScale", nullptr, &bmvr::g_FlareHazeScale, 0.05f, 0.f, 1.f, "%.2f" },
+            { "Haze from size", RowKind::Number, "FlareHazeMinSize", nullptr, &bmvr::g_FlareHazeMinSize, 0.05f, 0.05f, 4.f, "%.2f" },
+            { "Ghosts away from light", RowKind::Number, "FlareGhostScale", nullptr, &bmvr::g_FlareGhostScale, 0.05f, 0.f, 1.f, "%.2f" },
+            { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
+            { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
+            { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
+            { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
+            { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
+            { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
+            { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Frame cap (0 off, 1 +10, 2 x2)", RowKind::Number, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "%.0f" },
+            { "REFLECTIONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
+            { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
+            { "WEAPON MENU", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Tilt to face the eye", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
+            // The gear only hides while the Triangle hold can open this panel.
+            { "VR gear slot", RowKind::Toggle, "WeaponMenuSettingsGear", &bmvr::g_WeaponMenuSettingsGear, nullptr, 0, 0, 0, nullptr },
+            { "Hold Triangle/Y for this panel", RowKind::Toggle, "SettingsTriangleHold", &bmvr::g_SettingsTriangleHold, nullptr, 0, 0, 0, nullptr },
             { "MENU", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
             { "Menu size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
             { "Menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
             { "Pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
+            { "DEBUG", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Not saved (no key): always off after a restart.
-            { "DEBUG", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "CAPTURE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
-            { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
             { "Glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
+            { "VIEW TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
+            // Drawn at the bottom of every tab.
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
         return rows;
@@ -142,11 +151,19 @@ namespace
 
     int RowHeight(const Row& r) { return r.kind == RowKind::Section ? kSectionPx : kRowPx; }
 
-    // Rows split into two columns at the section heading that best halves
-    // the height. The row table is fixed, so this is built once.
+    // Tab shown on the panel; kept while the game runs.
+    int g_Tab = 0;
+
+    // Each tab's rows split into two columns at the section heading that best
+    // halves that tab's height. The panel is as tall as the tallest tab, so it
+    // does not change size or move when you switch tabs. Tab buttons sit in a
+    // bar under the title, Close at the bottom of every tab. The row table is
+    // fixed, so this is built once.
     struct Layout
     {
-        std::vector<int> col, top;
+        std::vector<int> tab, col, top, x0, x1;   // tab -1 = shown on every tab
+        int tabCount = 0;
+        int closeTop = 0;
         int bottom = 0;
     };
     const Layout& GetLayout()
@@ -154,42 +171,80 @@ namespace
         static Layout l = [] {
             const auto& rows = Rows();
             const int n = static_cast<int>(rows.size());
-            int total = 0;
-            for (const Row& r : rows)
-                total += RowHeight(r);
-            int split = n, best = total, acc = 0;
-            for (int i = 0; i < n; ++i)
-            {
-                if (i > 0 && rows[i].kind == RowKind::Section)
-                {
-                    const int worst = acc > total - acc ? acc : total - acc;
-                    if (worst < best)
-                    {
-                        best = worst;
-                        split = i;
-                    }
-                }
-                acc += RowHeight(rows[i]);
-            }
             Layout out;
-            out.col.resize(n);
-            out.top.resize(n);
-            int y[2] = { kHeaderPx, kHeaderPx };
+            out.tab.assign(n, -1);
+            out.col.assign(n, 0);
+            out.top.assign(n, 0);
+            out.x0.assign(n, 0);
+            out.x1.assign(n, 0);
+            std::vector<int> tabRows;
+            for (int i = 0; i < n; ++i)
+                if (rows[i].kind == RowKind::Tab)
+                    tabRows.push_back(i);
+            out.tabCount = static_cast<int>(tabRows.size());
+            const int tabW = out.tabCount > 0 ? (kTexW - 80 - (out.tabCount - 1) * kTabGapPx) / out.tabCount : 0;
+            int contentBottom = kContentTop;
+            for (int t = 0; t < out.tabCount; ++t)
+            {
+                const int ti = tabRows[t];
+                out.top[ti] = kHeaderPx;
+                out.x0[ti] = 40 + t * (tabW + kTabGapPx);
+                out.x1[ti] = out.x0[ti] + tabW;
+                const int first = ti + 1;
+                int last = first;   // one past this tab's rows
+                while (last < n && rows[last].kind != RowKind::Tab && rows[last].kind != RowKind::Close)
+                    ++last;
+                int total = 0;
+                for (int i = first; i < last; ++i)
+                    total += RowHeight(rows[i]);
+                int split = last, best = total, acc = 0;
+                for (int i = first; i < last; ++i)
+                {
+                    if (i > first && rows[i].kind == RowKind::Section)
+                    {
+                        const int worst = acc > total - acc ? acc : total - acc;
+                        if (worst < best)
+                        {
+                            best = worst;
+                            split = i;
+                        }
+                    }
+                    acc += RowHeight(rows[i]);
+                }
+                int y[2] = { kContentTop, kContentTop };
+                for (int i = first; i < last; ++i)
+                {
+                    const int c = i < split ? 0 : 1;
+                    out.tab[i] = t;
+                    out.col[i] = c;
+                    out.top[i] = y[c];
+                    y[c] += RowHeight(rows[i]);
+                }
+                contentBottom = (std::max)({ contentBottom, y[0], y[1] });
+            }
+            out.closeTop = contentBottom + 16;
+            out.bottom = out.closeTop + kRowPx;
             for (int i = 0; i < n; ++i)
             {
-                const int c = i < split ? 0 : 1;
-                out.col[i] = c;
-                out.top[i] = y[c];
-                y[c] += RowHeight(rows[i]);
+                if (rows[i].kind != RowKind::Close)
+                    continue;
+                out.top[i] = out.closeTop;
+                out.x0[i] = 0;
+                out.x1[i] = kTexW;
             }
-            out.bottom = y[0] > y[1] ? y[0] : y[1];
             return out;
         }();
         return l;
     }
     int RowTop(int index) { return GetLayout().top[index]; }
     int RowX(int index) { return GetLayout().col[index] * kColW; }
-    // Row under texture x/y, or -1 (headings are not interactive).
+    bool RowVisible(int index)
+    {
+        const int t = GetLayout().tab[index];
+        return t < 0 || t == g_Tab;
+    }
+    // Row under texture x/y, or -1 (headings are not interactive). Tab
+    // buttons and Close are rows too.
     int RowAt(int px, int py)
     {
         const auto& rows = Rows();
@@ -197,17 +252,25 @@ namespace
         const int c = px < kColW ? 0 : 1;
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
         {
-            if (l.col[i] != c)
+            const RowKind k = rows[i].kind;
+            if (k == RowKind::Tab || k == RowKind::Close)
+            {
+                const int h = k == RowKind::Tab ? kTabPx : kRowPx;
+                if (px >= l.x0[i] && px < l.x1[i] && py >= l.top[i] && py < l.top[i] + h)
+                    return i;
+                continue;
+            }
+            if (l.tab[i] != g_Tab || l.col[i] != c)
                 continue;
             if (py >= l.top[i] && py < l.top[i] + RowHeight(rows[i]))
-                return rows[i].kind == RowKind::Section ? -1 : i;
+                return k == RowKind::Section ? -1 : i;
         }
         return -1;
     }
     int TexH() { return GetLayout().bottom + 16; }
     float PanelHeightHu() { return kPanelWidthHu * static_cast<float>(TexH()) / kTexW; }
-    // The panel grows with every row, so it moves back instead of making you
-    // look far up and down (two columns keep it near the minimum distance).
+    // The panel grows with the tallest tab, so it moves back instead of making
+    // you look far up and down (two columns keep it near the minimum distance).
     float PanelDistanceHu()
     {
         const float fit = PanelHeightHu() * 0.5f / tanf(kPanelHalfFovDeg * kPi / 180.f);
@@ -394,22 +457,37 @@ namespace
         c.fill(0, 0, c.w, 6, kAmber);
         c.text("VR SETTINGS", 40, 10, c.w - 40, kHeaderPx - 10, kAmber, 46, true, DT_LEFT);
         c.text("trigger: change   circle: close", 40, 10, c.w - 40, kHeaderPx - 10, kDim, 24, false, DT_RIGHT);
+        const Layout& l = GetLayout();
+        // Tab bar: active tab amber, the others like buttons.
+        c.fill(40, kHeaderPx + kTabPx + 4, c.w - 40, kHeaderPx + kTabPx + 6, kAmber);
         // Column divider.
-        c.fill(kColW - 1, kHeaderPx, kColW + 1, c.h - 16, RGB(90, 70, 20));
+        c.fill(kColW - 1, kContentTop, kColW + 1, l.closeTop - 8, RGB(90, 70, 20));
         const auto& rows = Rows();
+        int tabIndex = 0;
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
         {
             const Row& r = rows[i];
-            const int y0 = RowTop(i), y1 = y0 + RowHeight(r);
-            const int x = RowX(i), cw = kColW, mid = x + cw / 2;
             const bool hover = (i == hoverRow);
+            if (r.kind == RowKind::Tab)
+            {
+                const bool active = (tabIndex++ == g_Tab);
+                const int y0 = l.top[i], y1 = y0 + kTabPx;
+                c.fill(l.x0[i], y0 + 4, l.x1[i], y1, active ? kAmber : hover ? kRowHover : kBtn);
+                c.text(r.label, l.x0[i], y0 + 4, l.x1[i], y1, active ? RGB(0, 0, 0) : kText, 32, true, DT_CENTER);
+                continue;
+            }
+            if (!RowVisible(i))
+                continue;
+            const int y0 = RowTop(i), y1 = y0 + RowHeight(r);
+            const int x = r.kind == RowKind::Close ? 0 : RowX(i);
+            const int cw = r.kind == RowKind::Close ? c.w : kColW, mid = x + cw / 2;
             if (r.kind == RowKind::Section)
             {
                 c.text(r.label, x + 40, y0 + 8, x + cw - 40, y1, kAmber, 26, true, DT_LEFT);
                 c.fill(x + 40, y1 - 4, x + cw - 40, y1 - 2, RGB(90, 70, 20));
                 continue;
             }
-            if (hover)
+            if (hover && r.kind != RowKind::Close)
                 c.fill(x + 16, y0 + 2, x + cw - 16, y1 - 2, kRowHover);
             if (r.kind == RowKind::Close)
             {
@@ -639,6 +717,20 @@ void VR::UpdateSettingsPanel()
     {
     case RowKind::Section:
         return;
+    case RowKind::Tab:
+    {
+        int t = 0;
+        for (int i = 0; i < row; ++i)
+            t += Rows()[i].kind == RowKind::Tab ? 1 : 0;
+        if (t != g_Tab)
+        {
+            g_Tab = t;
+            m_SettingsDirty = true;
+            PulseHandHaptic(vr::TrackedControllerRole_RightHand, 500, 0.25f);
+            Game::logMsg("VR settings tab: %s", r.label);
+        }
+        return;
+    }
     case RowKind::Close:
         CloseSettingsPanel("close row");
         return;
