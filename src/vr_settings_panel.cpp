@@ -70,12 +70,6 @@ namespace
             { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
-            { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
-            { "Hand on gun: right", RowKind::Number, "VrHandsGunGripRight", nullptr, &bmvr::g_VrHandsGunGripRight, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
-            { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
             { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -88,6 +82,7 @@ namespace
             { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
             { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
+            { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
             { "TURNING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Snap turning", RowKind::Toggle, "SnapTurning", &bmvr::g_SnapTurning, nullptr, 0, 0, 0, nullptr },
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
@@ -136,13 +131,20 @@ namespace
             { "Menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
             { "Pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
             { "DEBUG", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            // Not saved (no key): always off after a restart.
+            // Capture/view tests are not saved (no key): always off after a restart.
             { "CAPTURE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
             { "VIEW TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
+            // Hand/glove placement tuning; saved like the other settings.
+            { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
+            { "Hand on gun: right", RowKind::Number, "VrHandsGunGripRight", nullptr, &bmvr::g_VrHandsGunGripRight, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
+            { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
             // Drawn at the bottom of every tab.
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
@@ -459,9 +461,9 @@ namespace
         c.text("trigger: change   circle: close", 40, 10, c.w - 40, kHeaderPx - 10, kDim, 24, false, DT_RIGHT);
         const Layout& l = GetLayout();
         // Tab bar: active tab amber, the others like buttons.
-        c.fill(40, kHeaderPx + kTabPx + 4, c.w - 40, kHeaderPx + kTabPx + 6, kAmber);
+        c.fill(40, kHeaderPx + kTabPx + 4, c.w - 40, kHeaderPx + kTabPx + 8, kAmber);
         // Column divider.
-        c.fill(kColW - 1, kContentTop, kColW + 1, l.closeTop - 8, RGB(90, 70, 20));
+        c.fill(kColW - 2, kContentTop, kColW + 2, l.closeTop - 8, RGB(90, 70, 20));
         const auto& rows = Rows();
         int tabIndex = 0;
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
@@ -484,7 +486,8 @@ namespace
             if (r.kind == RowKind::Section)
             {
                 c.text(r.label, x + 40, y0 + 8, x + cw - 40, y1, kAmber, 26, true, DT_LEFT);
-                c.fill(x + 40, y1 - 4, x + cw - 40, y1 - 2, RGB(90, 70, 20));
+                // 4 px: the panel is drawn minified without mipmaps, so 2 px lines dropped out.
+                c.fill(x + 40, y1 - 6, x + cw - 40, y1 - 2, RGB(90, 70, 20));
                 continue;
             }
             if (hover && r.kind != RowKind::Close)
