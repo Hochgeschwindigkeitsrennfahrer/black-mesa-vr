@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <mutex>
 #include <vector>
 
 namespace
@@ -45,6 +46,17 @@ namespace
     constexpr int kValueX0 = 690, kValueX1 = 880;
     constexpr int kPlusX0 = 880, kPlusX1 = 970;
     constexpr int kPillX0 = 790, kPillX1 = 970;
+
+    // Panel copies of engine cvars (rows with a "cvar:" key).
+    bool g_EngSvCheats = false;
+    bool g_EngOcclusion = true;
+    bool g_EngPixelVis = true;
+    bool g_Eng3dSky = true;
+    float g_EngRopeMinWidth = 0.3f;
+    std::mutex g_EngCmdLock;
+    std::vector<std::string> g_EngCmds;   // run by FlushPanelEngineCommands (game thread)
+
+    bool IsEngineCvarKey(const char* key) { return key && std::strncmp(key, "cvar:", 5) == 0; }
 
     enum class RowKind { Tab, Section, Toggle, Number, Button, Close };
 
@@ -150,6 +162,14 @@ namespace
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
             { "Head hold: angle", RowKind::Number, "PoseHoldDeg", nullptr, &bmvr::g_PoseHoldDeg, 0.02f, 0.f, 1.f, "%.2f\xB0" },
             { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
+            // Engine cvars: "cvar:" keys go to the console on the game thread
+            // (never saved); the shown value is read back while the panel is open.
+            { "ENGINE (CONSOLE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "sv_cheats", RowKind::Toggle, "cvar:sv_cheats", &g_EngSvCheats, nullptr, 0, 0, 0, nullptr },
+            { "r_occlusion", RowKind::Toggle, "cvar:r_occlusion", &g_EngOcclusion, nullptr, 0, 0, 0, nullptr },
+            { "r_dopixelvisibility", RowKind::Toggle, "cvar:r_dopixelvisibility", &g_EngPixelVis, nullptr, 0, 0, 0, nullptr },
+            { "r_3dsky", RowKind::Toggle, "cvar:r_3dsky", &g_Eng3dSky, nullptr, 0, 0, 0, nullptr },
+            { "rope_smooth_minwidth", RowKind::Number, "cvar:rope_smooth_minwidth", nullptr, &g_EngRopeMinWidth, 0.1f, 0.f, 3.f, "%.1f" },
             // Hand/glove placement tuning; saved like the other settings.
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
@@ -157,6 +177,30 @@ namespace
             { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
             { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
             { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
+            // bmvr_* fixes and tests (on/off for A/B); not saved: a restart
+            // brings back the defaults.
+            { "MOD SWITCHES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Glow queries per eye", RowKind::Toggle, nullptr, &bmvr::g_PixelVisPerEye, nullptr, 0, 0, 0, nullptr },
+            { "Glow through objects fix", RowKind::Toggle, nullptr, &bmvr::g_GlowCountDepthFix, nullptr, 0, 0, 0, nullptr },
+            { "Lights culled per eye", RowKind::Toggle, nullptr, &bmvr::g_LightCullEyeView, nullptr, 0, 0, 0, nullptr },
+            { "Flares: one layout", RowKind::Toggle, nullptr, &bmvr::g_FlareSharedLayout, nullptr, 0, 0, 0, nullptr },
+            { "Flares level with horizon", RowKind::Toggle, nullptr, &bmvr::g_FlareLevel, nullptr, 0, 0, 0, nullptr },
+            { "Flares on each eye's axis", RowKind::Toggle, nullptr, &bmvr::g_FlareEyeAxis, nullptr, 0, 0, 0, nullptr },
+            { "Sky water per eye", RowKind::Toggle, nullptr, &bmvr::g_SkyWaterPerEye, nullptr, 0, 0, 0, nullptr },
+            { "Underwater world fix", RowKind::Toggle, nullptr, &bmvr::g_EyeUnderwaterWorld, nullptr, 0, 0, 0, nullptr },
+            { "Rope normals fix", RowKind::Toggle, nullptr, &bmvr::g_ViewProjNormalFix, nullptr, 0, 0, 0, nullptr },
+            { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
+            { "Guns skip draw animation", RowKind::Toggle, nullptr, &bmvr::g_SkipDrawAnim, nullptr, 0, 0, 0, nullptr },
+            { "Tau/crossbow switch fix", RowKind::Toggle, nullptr, &bmvr::g_DeltaSeqIdle, nullptr, 0, 0, 0, nullptr },
+            { "No crossbow scope animation", RowKind::Toggle, nullptr, &bmvr::g_ScopeClipIdle, nullptr, 0, 0, 0, nullptr },
+            { "Mute weapon fidget sounds", RowKind::Toggle, nullptr, &bmvr::g_MuteFidgetSounds, nullptr, 0, 0, 0, nullptr },
+            { "LOADING card", RowKind::Toggle, nullptr, &bmvr::g_LoadingCard, nullptr, 0, 0, 0, nullptr },
+            { "Glow hold", RowKind::Number, nullptr, nullptr, &bmvr::g_GlowHold, 0.1f, 0.f, 2.f, "%.1f s" },
+            { "G-MAN GESTURE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Force gesture (tuning)", RowKind::Toggle, nullptr, &bmvr::g_VrGmanGestureForce, nullptr, 0, 0, 0, nullptr },
+            { "Finger straight", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanFingerStraight, 0.05f, 0.f, 0.5f, "%.2f" },
+            { "Thumb curl", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanThumbCurl, 0.1f, 0.f, 2.f, "%.1f" },
+            { "Thumb swing", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanThumbSwing, 0.1f, 0.f, 1.5f, "%.1f" },
             // Drawn at the bottom of every tab.
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
         };
@@ -589,6 +633,51 @@ void bmvr::CapturePanelDefaults()
     g_DefaultsCaptured = true;
 }
 
+// Game thread (FlushPendingGameUi): runs the panel's engine console commands
+// and, while the panel is open, reads the engine cvars back into the rows so
+// a refused command (cheat-protected) shows the real value.
+void VR::FlushPanelEngineCommands()
+{
+    if (!m_Game)
+        return;
+    std::vector<std::string> cmds;
+    {
+        std::lock_guard<std::mutex> lock(g_EngCmdLock);
+        cmds.swap(g_EngCmds);
+    }
+    for (const std::string& c : cmds)
+    {
+        const bool ok = m_Game->ClientCmd_Unrestricted(c.c_str());
+        Game::logMsg("VR settings console '%s' ok=%d", c.c_str(), ok ? 1 : 0);
+    }
+    static DWORD s_lastRead;
+    const DWORD now = GetTickCount();
+    if (!m_SettingsOpen || (cmds.empty() && now - s_lastRead < 500))
+        return;
+    s_lastRead = now;
+    bool changed = false;
+    for (Row& r : Rows())
+    {
+        if (!IsEngineCvarKey(r.key))
+            continue;
+        float v = 0.f;
+        if (!m_Game->GetConVarFloat(r.key + 5, v))
+            continue;
+        if (r.kind == RowKind::Toggle && r.b && *r.b != (v != 0.f))
+        {
+            *r.b = v != 0.f;
+            changed = true;
+        }
+        else if (r.kind == RowKind::Number && r.f && std::fabs(*r.f - v) > 1e-4f)
+        {
+            *r.f = v;
+            changed = true;
+        }
+    }
+    if (changed)
+        m_SettingsDirty = true;
+}
+
 IDirect3DTexture9* VR::SettingsGearTexture(IDirect3DDevice9* device)
 {
     if (!device)
@@ -670,7 +759,7 @@ void VR::CloseSettingsPanel(const char* why)
         std::vector<std::string> drop;
         for (const Row& r : Rows())
         {
-            if (!r.key)
+            if (!r.key || IsEngineCvarKey(r.key))
                 continue;
             if (IsDefault(r))
                 drop.emplace_back(r.key);
@@ -859,7 +948,18 @@ void VR::UpdateSettingsPanel()
             return;
         break;
     }
-    m_SettingsChanged = true;
+    if (IsEngineCvarKey(r.key))
+    {
+        char cmd[96]{};
+        if (r.kind == RowKind::Toggle)
+            _snprintf(cmd, sizeof(cmd) - 1, "%s %d", r.key + 5, (r.b && *r.b) ? 1 : 0);
+        else
+            _snprintf(cmd, sizeof(cmd) - 1, "%s %g", r.key + 5, r.f ? *r.f : 0.f);
+        std::lock_guard<std::mutex> lock(g_EngCmdLock);
+        g_EngCmds.emplace_back(cmd);
+    }
+    else
+        m_SettingsChanged = true;
     m_SettingsDirty = true;
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
     Game::logMsg("VR settings: %s = %s", r.label, FormatValue(r).c_str());

@@ -8058,6 +8058,7 @@ void VR::FlushPendingGameUi()
 {
     FlushPendingQuit();
     ExecVrConfigsOnce();
+    FlushPanelEngineCommands();
     if (bmvr::g_FakeRuntime && m_Game)
     {
         char cmd[512];

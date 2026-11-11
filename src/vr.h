@@ -1072,6 +1072,7 @@ public:
     void QueueVirtualKey(int vk);
     void QueueGameUiToggle(bool currentlyPaused);
     void FlushPendingGameUi();
+    void FlushPanelEngineCommands();
     void FlushPendingQuit();
     void PollVrMenuEvents();
     void NoteEngineVGui(void* engineVgui);
