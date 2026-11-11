@@ -407,6 +407,7 @@ namespace bmvr
                 }
                 continue;
             }
+            Game::logMsg("VR cvar %s: console value %g copied into the flag (was %g)", c.name, v, CurrentDefault(c));
             c.lastSeen = v;
             if (!(v >= c.minVal))
                 v = c.minVal;

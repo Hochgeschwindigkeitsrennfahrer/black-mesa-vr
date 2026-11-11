@@ -811,6 +811,7 @@ void VR::UpdateSettingsPanel()
     Vector dir;
     QAngle::AngleVectors(GetRightControllerAbsAngle(), &dir, nullptr, nullptr);
     int row = -1, zone = -1;
+    int hitPx = -1, hitPy = -1;
     m_SettingsHitValid = false;
     const float denom = dir.Dot(fwd);
     if (fabsf(denom) > 1e-4f)
@@ -830,6 +831,8 @@ void VR::UpdateSettingsPanel()
                 const int px = static_cast<int>((x / kPanelWidthHu + 0.5f) * kTexW);
                 const int py = static_cast<int>((0.5f - y / PanelHeightHu()) * TexH());
                 const int r = RowAt(px, py);
+                hitPx = px;
+                hitPy = py;
                 if (r >= 0)
                 {
                     row = r;
@@ -855,6 +858,16 @@ void VR::UpdateSettingsPanel()
     const bool back = PressedDigitalAction(m_ActionMenuBack);
     const bool clickEdge = click && !m_SettingsClickHeld;
     const bool backEdge = back && !m_SettingsBackHeld;
+    // Diagnostic (2026-11-11: clicks on some Debug rows seemed lost): every
+    // trigger press/release with what is under the pointer.
+    if (click != m_SettingsClickHeld)
+    {
+        vr::InputAnalogActionData_t trig{};
+        const bool haveTrig = GetAnalogActionData(m_ActionPrimaryAttack, trig);
+        Game::logMsg("VR settings trigger %s: row %d (%s) zone %d at %d,%d tab %d trigger %.2f",
+            click ? "press" : "release", row, row >= 0 ? Rows()[row].label : "-", zone, hitPx, hitPy, g_Tab,
+            haveTrig ? trig.x : -1.f);
+    }
     m_SettingsClickHeld = click;
     m_SettingsBackHeld = back;
     if (backEdge)
