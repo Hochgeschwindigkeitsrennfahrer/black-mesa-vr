@@ -6116,7 +6116,11 @@ void VR::ProcessInput()
     }
 
     const bool nextHeld = PressedDigitalAction(m_ActionNextItem);
-    const bool prevHeld = PressedDigitalAction(m_ActionPrevItem);
+    // FlashlightOnSquare: left Square (OpenXR left x/click = PrevItem) toggles
+    // the flashlight instead of switching to the previous weapon.
+    const bool prevRaw = PressedDigitalAction(m_ActionPrevItem);
+    const bool squareFlash = bmvr::g_FlashlightOnSquare && prevRaw;
+    const bool prevHeld = bmvr::g_FlashlightOnSquare ? false : prevRaw;
     const bool pauseHeld = PressedDigitalAction(m_ActionPause);
     const bool resetHeld = PressedDigitalAction(m_ActionResetPosition);
     // Shoulder gestures (HL2VR style): left hand behind the left shoulder +
@@ -6130,10 +6134,11 @@ void VR::ProcessInput()
     static bool s_flashLatched = false;
     static DWORD s_flashImpulseMs = 0;
     static int s_flashReleasePolls = 0;
-    if (GetDigitalActionData(m_ActionFlashlight, flash))
+    const bool flashOk = GetDigitalActionData(m_ActionFlashlight, flash);
+    if (flashOk || bmvr::g_FlashlightOnSquare)
     {
         const DWORD nowTick = GetTickCount();
-        if (flash.bState)
+        if ((flashOk && flash.bState) || squareFlash)
         {
             s_flashReleasePolls = 0;
             // A grip squeezed for the shoulder crowbar is still held when
@@ -6145,7 +6150,8 @@ void VR::ProcessInput()
                 m_PendingImpulse.store(100, std::memory_order_release);
                 s_flashImpulseMs = nowTick;
                 s_flashLatched = true;
-                Game::logMsg("Flashlight queued impulse 100 (CreateMove only; vanilla ImpulseCommands) handle=%llu",
+                Game::logMsg("Flashlight queued impulse 100 (CreateMove only; vanilla ImpulseCommands) from=%s handle=%llu",
+                    squareFlash ? "left square" : "right grip",
                     static_cast<unsigned long long>(m_ActionFlashlight));
             }
         }

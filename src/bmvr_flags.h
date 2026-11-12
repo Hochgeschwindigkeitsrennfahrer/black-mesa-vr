@@ -283,6 +283,7 @@ namespace bmvr
     extern bool g_PauseMenuColourFromFrame; // pause-menu layer colour from the presented desktop frame (VR repaint stacks windows wrongly)
     extern float g_PauseMenuAlphaPasses; // pause-menu layer: N passes of a -> a + a(1-a), i.e. 1-(1-a)^(2^N); 0 = off
     extern bool g_FlashlightLeftHand;    // flashlight from the left hand (along the gun while two-handed)
+    extern bool g_FlashlightOnSquare;    // left Square toggles the flashlight (replaces previous weapon)
     extern float g_FrameCapMode;         // fps_max: 0 = game's own, 1 = headset rate + 10, 2 = 2x headset rate
     extern bool g_VrHandThrow;           // frag leaves the hand at the hand's speed (Lambda1VR-style throw)
     extern float g_MountedGunGain;       // mounted gun: barrel turn per degree of hand swing around the mount (1 = handle stays in the hand)

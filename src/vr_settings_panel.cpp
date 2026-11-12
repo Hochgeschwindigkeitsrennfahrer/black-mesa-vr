@@ -89,6 +89,7 @@ namespace
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
+            { "Left square toggles light", RowKind::Toggle, "FlashlightOnSquare", &bmvr::g_FlashlightOnSquare, nullptr, 0, 0, 0, nullptr },
             { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Zoom follows the gun", RowKind::Toggle, "ScopeFollowsGun", &bmvr::g_ScopeFollowsGun, nullptr, 0, 0, 0, nullptr },
             { "Raise to face zooms (2 hands)", RowKind::Toggle, "ScopeRaiseToZoom", &bmvr::g_ScopeRaiseToZoom, nullptr, 0, 0, 0, nullptr },
