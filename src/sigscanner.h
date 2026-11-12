@@ -8,6 +8,10 @@
 class SigScanner
 {
 public:
+	// Matches the last VerifyOffset scan found (0 when the current offset matched and no scan ran).
+	// More than one = the signature is ambiguous and the nearest match was a guess.
+	static inline thread_local int s_LastScanHits = 0;
+
 	// Returns 0 if current offset matches, -1 if no matches found.
 	// A value > 0 is the new offset.
 	static int VerifyOffset(std::string moduleName, int currentOffset, std::string signature, int sigOffset = 0)
@@ -33,6 +37,7 @@ public:
 		}
 
 		const int patternLen = (int)pattern.size();
+		s_LastScanHits = 0;
 
 		// Check if current offset is good when a known offset exists.
 		if (currentOffset > 0)
@@ -73,6 +78,7 @@ public:
 				continue;
 
 			const int candidate = i + sigOffset;
+			++s_LastScanHits;
 
 			// No prior offset: keep old behavior (first match).
 			if (currentOffset <= 0)

@@ -1,6 +1,7 @@
 #include "vr.h"
 #include "game.h"
 #include "sdk.h"
+#include "offsets.h"
 
 #include <Windows.h>
 #include <mmdeviceapi.h>
@@ -32,7 +33,6 @@ namespace
     constexpr DWORD kDsLost = 0x00000002;
     constexpr DWORD kDsPlayLooping = 0x00000001;
     // engine.dll image 0x10000000, Play(0,0,DSBPLAY_LOOPING) of the mix buffer.
-    constexpr uintptr_t kMixPlayInsnRva = 0x5FAE3; // beta 26627981 (26234270: 0x5FA73)
 
     struct ComUse
     {
@@ -133,7 +133,7 @@ namespace
     {
         if (!g_Game || !g_Game->m_BaseEngine)
             return nullptr;
-        const auto* insn = reinterpret_cast<const uint8_t*>(g_Game->m_BaseEngine + kMixPlayInsnRva);
+        const auto* insn = reinterpret_cast<const uint8_t*>(g_Game->m_BaseEngine + Offsets::kMixPlayInsnRva);
         BMVR_TRY
         {
             if (insn[0] != 0xA1)

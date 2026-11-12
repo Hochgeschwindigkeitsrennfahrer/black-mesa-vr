@@ -1,4 +1,5 @@
 #include "hooks.h"
+#include "offset_checks.h"
 #include "game.h"
 #include "sdk.h"
 #include "bmvr_seh.h"
@@ -7108,6 +7109,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 void __fastcall Hooks::dLevelInit(void* ecx, void* edx, const char* newmap)
 {
     (void)edx;
+    // server.dll is loaded by now; check its offsets before the server hooks patch them.
+    bmvr::VerifyGameOffsets();
     EnsureServerFlashlightHook();
     EnsureClientFlashlightHook();
     EnsureFogColorPatch();
@@ -9431,8 +9434,7 @@ namespace
     // cannon's fire routine (called only from CWeapon_Tau, vtable +0x49C),
     // `mov eax,[eax+0x474]; call eax` (AimDebug weaponFire=0 before; tau
     // shots started at the head on stable too).
-    constexpr uint32_t kServerWeaponFireOriginReturnRvas[] = {
-        0x34EFB9, 0x4903C4, 0x4862A5, 0x48652B, 0x48CA55, 0x48DEB5 }; // beta 26627981 (26234270: 0x34E859 0x48F9F4 0x4858D5 0x485B5B 0x48C085 0x48D4E5)
+    // RVAs: Offsets::kServerWeaponFireOriginReturnRvas.
 }
 
 Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out)
@@ -9442,7 +9444,7 @@ Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out
     bool weaponFire = false;
     if (bmvr::g_VrShotOriginFix)
     {
-        for (uint32_t rva : kServerWeaponFireOriginReturnRvas)
+        for (uint32_t rva : Offsets::kServerWeaponFireOriginReturnRvas)
             weaponFire = weaponFire || (rva != 0 && callerRva == rva);
     }
     if (bmvr::g_AimDebug && m_VR

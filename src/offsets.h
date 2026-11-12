@@ -31,9 +31,33 @@ struct Offset
         if (!GetModuleHandleA(this->moduleName.c_str()))
             return;
 
+        // A jump at the known offset = the mod's own early hook (GetScreenAspectRatio,
+        // GetBackBufferDimensions, GetScreenSize, installed from dllmain before Offsets exists): the
+        // offset is right. Scanning on would pick another copy of a short signature (GetScreenSize
+        // has 6) and report it as ambiguous.
+        if (currentOffset > 0 && !optional
+            && *(reinterpret_cast<const unsigned char*>(GetModuleHandleA(this->moduleName.c_str())) + currentOffset) == 0xE9)
+        {
+            this->address = (int)((uintptr_t)GetModuleHandleA(this->moduleName.c_str()) + this->offset);
+            this->valid = true;
+            return;
+        }
+
         int newOffset = SigScanner::VerifyOffset(this->moduleName, currentOffset, this->signature, this->sigOffset);
         if (newOffset > 0)
+        {
             this->offset = newOffset;
+            // The bytes at the known offset no longer match (game update) and the scan found the
+            // signature more than once: the nearest match is a guess, so say so in the headset.
+            if (SigScanner::s_LastScanHits > 1 && !optional)
+            {
+                Game::logMsg("Signature ambiguous in %s (%d matches, nearest 0x%X used, was 0x%X): %s",
+                    this->moduleName.c_str(), SigScanner::s_LastScanHits, newOffset, currentOffset, this->signature.c_str());
+                Game::noteMissingOffset(("ambiguous " + this->moduleName + ": " + this->signature).c_str());
+            }
+            else
+                Game::logMsg("Signature moved in %s: 0x%X -> 0x%X (unique)", this->moduleName.c_str(), currentOffset, newOffset);
+        }
         if (newOffset == -1)
         {
             // A jump at the old offset = the mod's own early hook (GetScreenAspectRatio, GetBackBufferDimensions),
@@ -173,6 +197,12 @@ public:
     // fire upward. These are server offsets; the client copies the mod already
     // zeroes live at different addresses and only drive the viewmodel.
     static constexpr int kBlackMesaPlayer_GetShootAngles_Server = 0x4802B0; // beta 26627981 (26234270: 0x47F8E0)
+    // server.dll return addresses of the weapon-fire +0x474 (shoot source) calls; see
+    // Hooks::dServerBmShootSource. Bullet routine, then 4 weapon fire calls, then the tau.
+    static constexpr uint32_t kServerWeaponFireOriginReturnRvas[6] = {
+        0x34EFB9, 0x4903C4, 0x4862A5, 0x48652B, 0x48CA55, 0x48DEB5 }; // beta 26627981 (26234270: 0x34E859 0x48F9F4 0x4858D5 0x485B5B 0x48C085 0x48D4E5)
+    // engine.dll: Play(0, 0, DSBPLAY_LOOPING) of the sound mix buffer (vr_audio_focus.cpp).
+    static constexpr int kMixPlayInsnRva = 0x5FAE3; // beta 26627981 (26234270: 0x5FA73)
 
     // server.dll grenade spawn, cdecl (type, Vector* velocity, AngularImpulse*,
     // CBaseEntity* owner, CBaseEntity* thrower, int mode) -> grenade. Type 1 =
@@ -538,7 +568,7 @@ public:
     // the query for the view) and EndView 0xD41F0 (issue that view's queries).
     // The debug-spew calls in the same code are left alone. Beta 26234270.
     static constexpr uint32_t kClientCurrentViewIdRva = 0x1F91F0; // beta 26627981 (26234270: 0x1F6A00)
-    static constexpr uint32_t kPixelVisViewIdCallRvas[] = { 0xD48D4, 0xD48F6, 0xD4215, 0xD42EB, 0xD43EA };
+    static constexpr uint32_t kPixelVisViewIdCallRvas[] = { 0xD4944, 0xD4966, 0xD4285, 0xD435B, 0xD445A }; // beta 26627981 (26234270: 0xD48D4 0xD48F6 0xD4215 0xD42EB 0xD43EA)
     // `cmp eax, 1` (83 F8 01) on framecount - issued frame: DeleteUnusedQueries 0xD4080
     // (per query) and the per-set check in EndScene 0xD4110. The immediate becomes
     // kPixelVisQueryGraceFrames. Beta 26234270.

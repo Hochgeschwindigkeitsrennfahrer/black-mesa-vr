@@ -1,4 +1,5 @@
 #include "game.h"
+#include "offset_checks.h"
 #include "sdk.h"
 #include "vr.h"
 #include "hooks.h"
@@ -136,6 +137,8 @@ Game::Game()
         SehVtableSlot(m_EngineClient, 107),
         SehVtableSlot(m_EngineClient, 108));
 
+    // Before any hook patches the bytes the checks read.
+    bmvr::VerifyGameOffsets();
     m_Offsets = new Offsets();
     ResolveMaterialThreadSlots();
     m_VR = new VR(this);
