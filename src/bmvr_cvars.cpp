@@ -164,6 +164,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_FlareLevel, nullptr },
             { "bmvr_sprite_level", "VR: light glows and other view-facing sprites face each eye and stay level (0 = stock: they roll and turn with the head)",
               Kind::Bool, 0.f, 1.f, &g_SpriteLevel, nullptr },
+            { "bmvr_particle_level", "VR: smoke/fog particles stay upright when the head rolls (0 = stock: they roll with the head)",
+              Kind::Bool, 0.f, 1.f, &g_ParticleLevel, nullptr },
             { "bmvr_vm_fx_catchup", "VR: muzzle flashes follow the gun while moving (0 = old: they trail behind when strafing)",
               Kind::Bool, 0.f, 1.f, &g_ViewmodelFxCatchUp, nullptr },
             { "bmvr_flare_eye_axis", "VR: lens flares lay out around each eye's view axis instead of the image centre",

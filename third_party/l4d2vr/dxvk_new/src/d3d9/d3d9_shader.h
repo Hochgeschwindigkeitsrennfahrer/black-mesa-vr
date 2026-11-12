@@ -175,6 +175,10 @@ namespace dxvk {
     // BMVR: the module was built from bytecode whose cViewProj-turned normals
     // read c253-c255 instead of c8-c10 (filled per draw by the device).
     bool bmvrViewProjNormals = false;
+    // BMVR: screen-aligned particle shader (spritecard): first registers of
+    // cModelView (3) and cProj (4), both read only by dp4. -1 = not one.
+    int bmvrParticleModelView = -1;
+    int bmvrParticleProj = -1;
 
   };
 

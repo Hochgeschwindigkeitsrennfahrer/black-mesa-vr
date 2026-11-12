@@ -444,6 +444,9 @@ namespace bmvr
     // View-parallel sprites (light glows) face each eye with world up instead
     // of copying the eye's right/up (which roll and turn with the head).
     extern bool g_SpriteLevel;
+    // Screen-aligned particles (spritecard: smoke, fog, steam) keep their
+    // up with world up when the head rolls; they still turn with head yaw.
+    extern bool g_ParticleLevel;
     // Muzzle flashes etc. follow the gun while moving (control point shifted
     // by the player's move since last frame's view).
     extern bool g_ViewmodelFxCatchUp;

@@ -4465,13 +4465,174 @@ namespace dxvk {
     SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(kBmvrVpnReg, saved, 3);
   }
 
+  // Screen-aligned particles (Source spritecard, ORIENTATION 0: smoke, fog,
+  // steam) add their corner offsets in view space: viewPos = mul4x3(pos,
+  // cModelView); viewPos.xy += corner; projPos = mul(viewPos, cProj). In a
+  // headset the view rolls with the head, so the sprites rolled with it.
+  // Per draw, cModelView gets the view turned about its forward axis until
+  // world up is straight up in it, and cProj the opposite turn: every particle
+  // centre lands where it did, only the corner offsets are turned so the
+  // sprite's up follows world up. They still turn with head yaw (billboards).
+  // One angle per draw (world up through the image centre); fades out looking
+  // straight up or down, where the horizon has no direction.
+  namespace {
+    // CTAB register (first index) of a float constant, or -1.
+    int BmvrCtabFloatReg(const DWORD* code, const char* name, uint32_t minCount) {
+      size_t i = 1;
+      for (int guard = 0; guard < 65536; ++guard) {
+        const DWORD tok = code[i];
+        if (tok == 0x0000FFFFu)
+          return -1;
+        if ((tok & 0xFFFFu) != 0xFFFEu)
+          return -1;  // the constant table comes before the first instruction
+        const uint32_t words = (tok >> 16) & 0x7FFFu;
+        if (words >= 7 && code[i + 1] == 0x42415443u /* 'CTAB' */) {
+          const auto* base = reinterpret_cast<const uint8_t*>(&code[i + 2]);
+          const uint32_t bytes = (words - 1) * 4;
+          const auto* hdr = reinterpret_cast<const uint32_t*>(base);
+          const uint32_t count = hdr[3], info = hdr[4];
+          if (info >= bytes || count > 4096 || info + count * 20ull > bytes)
+            return -1;
+          for (uint32_t c = 0; c < count; ++c) {
+            const uint8_t* e = base + info + c * 20;
+            uint32_t nameOff;
+            uint16_t set, reg, regCount;
+            std::memcpy(&nameOff, e, 4);
+            std::memcpy(&set, e + 4, 2);
+            std::memcpy(&reg, e + 6, 2);
+            std::memcpy(&regCount, e + 8, 2);
+            if (nameOff >= bytes)
+              continue;
+            const char* n = reinterpret_cast<const char*>(base + nameOff);
+            if (strnlen(n, bytes - nameOff) < bytes - nameOff && std::strcmp(n, name) == 0)
+              return (set == 2 /* D3DXRS_FLOAT4 */ && regCount >= minCount) ? int(reg) : -1;
+          }
+          return -1;
+        }
+        i += 1 + words;
+      }
+      return -1;
+    }
+
+    // True when every instruction that reads c[mv..mv+2] or c[proj..proj+3]
+    // is a dp4 (the column layout the per-draw turn assumes).
+    bool BmvrParticleRegsDp4Only(const DWORD* code, int mv, int proj) {
+      constexpr uint32_t kConst = 2;
+      size_t i = 1;
+      bool seenMv = false, seenProj = false;
+      for (int guard = 0; guard < 65536; ++guard) {
+        const DWORD tok = code[i];
+        if (tok == 0x0000FFFFu)
+          break;
+        const uint32_t op = tok & 0xFFFFu;
+        if (op == 0xFFFEu) {
+          i += 1 + ((tok >> 16) & 0x7FFFu);
+          continue;
+        }
+        const uint32_t len = (tok >> 24) & 0xFu;
+        if (op == 0x51 || op == 0x30 || op == 0x2F) {  // def/defi/defb
+          const DWORD t = code[i + 1];
+          const int reg = int(t & 0x7FFu);
+          if (BmvrRegType(t) == kConst && ((reg >= mv && reg < mv + 3) || (reg >= proj && reg < proj + 4)))
+            return false;
+          i += 1 + len;
+          continue;
+        }
+        for (uint32_t k = 2; k <= len; ++k) {
+          const DWORD t = code[i + k];
+          if (!(t & 0x80000000u) || BmvrRegType(t) != kConst)
+            continue;
+          const int reg = int(t & 0x7FFu);
+          const bool inMv = reg >= mv && reg < mv + 3;
+          const bool inProj = reg >= proj && reg < proj + 4;
+          if (!inMv && !inProj)
+            continue;
+          if (op != 9 /* dp4 */ || (t & (1u << 13)) /* relative */)
+            return false;
+          seenMv |= inMv;
+          seenProj |= inProj;
+        }
+        i += 1 + len;
+      }
+      return seenMv && seenProj;
+    }
+  }
+
+  bool D3D9DeviceEx::BmvrParticleLevelBegin(float saved[28]) {
+    auto* vs = m_state.vertexShader.ptr();
+    if (likely(!vs || vs->bmvrParticleModelView < 0))
+      return false;
+    if (!bmvr::g_ParticleLevel || !g_Game || !g_Game->m_VR || !g_Game->m_VR->m_IsVREnabled)
+      return false;
+    const uint32_t mv = uint32_t(vs->bmvrParticleModelView);
+    const uint32_t pr = uint32_t(vs->bmvrParticleProj);
+    const auto& c = m_state.vsConsts->fConsts;
+    // World up in view space = the z column of the view rotation.
+    const float ux = c[mv].data[2], uy = c[mv + 1].data[2];
+    const float n = std::sqrt(ux * ux + uy * uy);
+    if (n < 1e-4f)
+      return false;
+    // Turn that maps the view's up (0,1) onto world up's direction (ux,uy).
+    float phi = std::atan2(-ux, uy);
+    // Looking almost straight up/down: no horizon, ease back to stock.
+    const float fullFrom = 0.2f;
+    const float len = std::sqrt(ux * ux + uy * uy + c[mv + 2].data[2] * c[mv + 2].data[2]);
+    if (len > 1e-6f && n / len < fullFrom)
+      phi *= (n / len) / fullFrom;
+    if (std::fabs(phi) < 1e-4f)
+      return false;
+    const float cs = std::cos(phi), sn = std::sin(phi);
+    for (uint32_t k = 0; k < 4; k++) {
+      saved[k] = c[mv].data[k];
+      saved[4 + k] = c[mv + 1].data[k];
+    }
+    for (uint32_t r = 0; r < 4; r++)
+      for (uint32_t k = 0; k < 4; k++)
+        saved[12 + r * 4 + k] = c[pr + r].data[k];
+    // View position in the levelled view: v' = Rz(-phi) v.
+    float rows[2][4];
+    for (uint32_t k = 0; k < 4; k++) {
+      rows[0][k] = cs * saved[k] + sn * saved[4 + k];
+      rows[1][k] = -sn * saved[k] + cs * saved[4 + k];
+    }
+    // Projection of Rz(phi) v': each output's x/y coefficients turned by Rz(phi)^T.
+    float proj[4][4];
+    for (uint32_t r = 0; r < 4; r++) {
+      const float* p = &saved[12 + r * 4];
+      proj[r][0] = cs * p[0] + sn * p[1];
+      proj[r][1] = -sn * p[0] + cs * p[1];
+      proj[r][2] = p[2];
+      proj[r][3] = p[3];
+    }
+    SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(mv, &rows[0][0], 2);
+    SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(pr, &proj[0][0], 4);
+    static std::atomic<int> s_log{0};
+    if (s_log.fetch_add(1) < 4)
+      bmvr::Log("ParticleLevel: VS %p turned %.1f deg (eye %d)", (void*)vs, phi * 57.2958f, g_Game->m_VR->m_StereoEye);
+    return true;
+  }
+
+  void D3D9DeviceEx::BmvrParticleLevelEnd(const float saved[28]) {
+    auto* vs = m_state.vertexShader.ptr();
+    SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(uint32_t(vs->bmvrParticleModelView), saved, 2);
+    SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(uint32_t(vs->bmvrParticleProj), saved + 12, 4);
+  }
+
   namespace {
     struct BmvrViewProjNormalScope {
       D3D9DeviceEx* dev;
       bool on;
+      bool particle;
       float saved[12];
-      explicit BmvrViewProjNormalScope(D3D9DeviceEx* d) : dev(d) { on = dev->BmvrViewProjNormalsBegin(saved); }
-      ~BmvrViewProjNormalScope() { if (on) dev->BmvrViewProjNormalsEnd(saved); }
+      float particleSaved[28];
+      explicit BmvrViewProjNormalScope(D3D9DeviceEx* d) : dev(d) {
+        on = dev->BmvrViewProjNormalsBegin(saved);
+        particle = dev->BmvrParticleLevelBegin(particleSaved);
+      }
+      ~BmvrViewProjNormalScope() {
+        if (particle) dev->BmvrParticleLevelEnd(particleSaved);
+        if (on) dev->BmvrViewProjNormalsEnd(saved);
+      }
     };
   }
 
@@ -5050,6 +5211,21 @@ namespace dxvk {
       vs->bmvrViewProjNormals = true;
       bmvr::Log("ViewProjNormalFix: VS %p turns normals with cViewProj (%u dp3 sources -> c%u-c%u)",
         (void*)vs, bmvrPatched, kBmvrVpnReg, kBmvrVpnReg + 2);
+    }
+    {
+      const int mv = BmvrCtabFloatReg(pFunction, "cModelView", 3);
+      const int pr = mv >= 0 ? BmvrCtabFloatReg(pFunction, "cProj", 4) : -1;
+      if (mv >= 0 && pr >= 0) {
+        const bool dp4 = BmvrParticleRegsDp4Only(pFunction, mv, pr);
+        if (dp4) {
+          vs->bmvrParticleModelView = mv;
+          vs->bmvrParticleProj = pr;
+        }
+        static std::atomic<int> s_pl{0};
+        if (s_pl.fetch_add(1) < 16)
+          bmvr::Log("ParticleLevel: VS %p cModelView c%d cProj c%d %s", (void*)vs, mv, pr,
+            dp4 ? "(screen-aligned particles, levelled)" : "(not dp4-only, left alone)");
+      }
     }
     *ppShader = ref(vs);
 

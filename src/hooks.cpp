@@ -1040,6 +1040,213 @@ static void InstallBoneParticleProf(uintptr_t client)
     }
 }
 
+// Old-style particles (CParticleMgr: smoke stacks, smoke trails, dust; material
+// e.g. particle/particle_smokegrenade1) are built on the CPU in camera space:
+// RenderStart stores the view as their model-view and loads an identity view,
+// and each particle's quad corners are added in camera space. In a headset the
+// camera rolls with the head, so the smoke rolled with it. In a VR eye pass the
+// view given to RenderStart is turned about its forward axis until world up is
+// straight up in it (the "levelled" view the particles are built in), and the
+// view loaded for the draw turns it back: particle centres land where they did,
+// the quads keep world up. They still turn with head yaw. bmvr_particle_level.
+namespace
+{
+    using ParticleRenderStartFn = void(__thiscall*)(void* self, float* tempModel, float* tempView);
+    ParticleRenderStartFn g_OrigParticleRenderStart = nullptr;
+
+    // Angle that turns the view's up onto world up as seen in it (fades out
+    // looking straight up/down); 0 = nothing to do. view: VMatrix, row major.
+    float ParticleLevelAngle(const float* view)
+    {
+        const float ux = view[2], uy = view[6], uz = view[10];
+        const float n = std::sqrt(ux * ux + uy * uy);
+        const float len = std::sqrt(ux * ux + uy * uy + uz * uz);
+        if (n < 1e-4f || len < 1e-6f)
+            return 0.f;
+        float phi = std::atan2(-ux, uy);
+        if (n / len < 0.2f)
+            phi *= (n / len) / 0.2f;
+        return phi;
+    }
+
+    void __fastcall ParticleRenderStartLevel(void* self, void* edx, float* tempModel, float* tempView)
+    {
+        (void)edx;
+        BMVR_PROF("hook ParticleRenderStart");
+        const bool cameraSpace = self && (*(reinterpret_cast<unsigned char*>(self) + 0x94) & 0x80) != 0;
+        if (!bmvr::g_ParticleLevel || !cameraSpace || !Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled
+            || Hooks::m_VR->m_StereoEye == 0 || !tempView)
+        {
+            g_OrigParticleRenderStart(self, tempModel, tempView);
+            return;
+        }
+        void* mgr = *reinterpret_cast<void**>(reinterpret_cast<char*>(self) + 0x90);
+        void* materials = mgr ? *reinterpret_cast<void**>(reinterpret_cast<char*>(mgr) + 0x64) : nullptr;
+        using GetContextFn = void*(__thiscall*)(void*);
+        void* ctx = materials ? (*reinterpret_cast<GetContextFn**>(materials))[0x19C / 4](materials) : nullptr;
+        if (!ctx)
+        {
+            g_OrigParticleRenderStart(self, tempModel, tempView);
+            return;
+        }
+        using VoidFn = void(__thiscall*)(void*);
+        using IntFn = void(__thiscall*)(void*, int);
+        using GetMatrixFn = void(__thiscall*)(void*, int, float*);
+        using MatFn = void(__thiscall*)(void*, const float*);
+        void** vt = *reinterpret_cast<void***>(ctx);
+        reinterpret_cast<VoidFn>(vt[0x08 / 4])(ctx);
+        float view[16] = {};
+        reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 0 /* MATERIAL_VIEW */, view);
+        const float phi = ParticleLevelAngle(view);
+        if (std::fabs(phi) < 1e-4f)
+        {
+            reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
+            reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
+            g_OrigParticleRenderStart(self, tempModel, tempView);
+            return;
+        }
+        const float c = std::cos(phi), s = std::sin(phi);
+        // Levelled view: Rz(-phi) * view (rows 0 and 1 mixed).
+        float level[16];
+        std::memcpy(level, view, sizeof(level));
+        for (int k = 0; k < 4; ++k)
+        {
+            level[k] = c * view[k] + s * view[4 + k];
+            level[4 + k] = -s * view[k] + c * view[4 + k];
+        }
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0 /* MATERIAL_VIEW */);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, level);
+        // Stores the levelled view as tempView + the particles' model-view, sets
+        // the user clip transform, loads identity model and view.
+        g_OrigParticleRenderStart(self, tempModel, tempView);
+        // Draw view: levelled camera space -> real camera space.
+        const float back[16] = { c, -s, 0.f, 0.f, s, c, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f };
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0 /* MATERIAL_VIEW */);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, back);
+        // World -> clip is the real view again for the user clip planes, and
+        // RenderEnd (inlined in DrawModel) restores the real view from tempView.
+        reinterpret_cast<MatFn>(vt[0x1F8 / 4])(ctx, view);
+        std::memcpy(tempView, view, sizeof(view));
+        reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
+        reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
+        static int s_log;
+        if (s_log < 4)
+        {
+            ++s_log;
+            Game::logMsg("particle level: camera-space effect turned %.1f deg (eye %d)", phi * 57.2958f,
+                Hooks::m_VR->m_StereoEye);
+        }
+    }
+}
+
+// Black Mesa's precipitation renderer (rain, and the smoke/fog volumes made with
+// it) builds its quads in camera space the same way, per entity inside one
+// function. Around the whole call: the view becomes the levelled view (the quads
+// are built in it) and the projection gets the turn back (P * Rz(phi)), so
+// world -> clip is unchanged for the quad centres and the user clip planes;
+// both are restored afterwards.
+namespace
+{
+    using PrecipRenderFn = void(__cdecl*)();
+    PrecipRenderFn g_OrigPrecipRender = nullptr;
+
+    void __cdecl PrecipRenderLevel()
+    {
+        BMVR_PROF("hook PrecipRender");
+        void* materials = (g_FlareMaterials && *g_FlareMaterials) ? *g_FlareMaterials : nullptr;
+        if (!bmvr::g_ParticleLevel || !materials || !Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled
+            || Hooks::m_VR->m_StereoEye == 0)
+        {
+            g_OrigPrecipRender();
+            return;
+        }
+        using GetContextFn = void*(__thiscall*)(void*);
+        void* ctx = (*reinterpret_cast<GetContextFn**>(materials))[0x19C / 4](materials);
+        if (!ctx)
+        {
+            g_OrigPrecipRender();
+            return;
+        }
+        using VoidFn = void(__thiscall*)(void*);
+        using IntFn = void(__thiscall*)(void*, int);
+        using GetMatrixFn = void(__thiscall*)(void*, int, float*);
+        using MatFn = void(__thiscall*)(void*, const float*);
+        void** vt = *reinterpret_cast<void***>(ctx);
+        reinterpret_cast<VoidFn>(vt[0x08 / 4])(ctx);
+        float view[16] = {}, proj[16] = {};
+        reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 0 /* MATERIAL_VIEW */, view);
+        reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 1 /* MATERIAL_PROJECTION */, proj);
+        const float phi = ParticleLevelAngle(view);
+        if (std::fabs(phi) < 1e-4f)
+        {
+            reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
+            reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
+            g_OrigPrecipRender();
+            return;
+        }
+        const float c = std::cos(phi), s = std::sin(phi);
+        float level[16], turned[16];
+        std::memcpy(level, view, sizeof(level));
+        std::memcpy(turned, proj, sizeof(turned));
+        for (int k = 0; k < 4; ++k)
+        {
+            level[k] = c * view[k] + s * view[4 + k];
+            level[4 + k] = -s * view[k] + c * view[4 + k];
+        }
+        for (int r = 0; r < 4; ++r)
+        {
+            turned[r * 4 + 0] = c * proj[r * 4 + 0] + s * proj[r * 4 + 1];
+            turned[r * 4 + 1] = -s * proj[r * 4 + 0] + c * proj[r * 4 + 1];
+        }
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 1);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, turned);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, level);
+        g_OrigPrecipRender();
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 1);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, proj);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, view);
+        reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
+        reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
+        static int s_log;
+        if (s_log < 4)
+        {
+            ++s_log;
+            Game::logMsg("particle level: precipitation/smoke volumes turned %.1f deg (eye %d)", phi * 57.2958f,
+                Hooks::m_VR->m_StereoEye);
+        }
+    }
+}
+
+static void InstallParticleLevel(uintptr_t client)
+{
+    {
+        static const unsigned char kPrecip[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x38, 0x02, 0x00, 0x00, 0xA1 };
+        auto* pfn = reinterpret_cast<unsigned char*>(client + Offsets::kClientPrecipRenderRva);
+        if (std::memcmp(pfn, kPrecip, sizeof(kPrecip)) != 0)
+            Game::logMsg("particle level: precipitation render MISMATCH (not hooked)");
+        else
+        {
+            const bool pok = MH_CreateHook(pfn, reinterpret_cast<LPVOID>(&PrecipRenderLevel),
+                                 reinterpret_cast<LPVOID*>(&g_OrigPrecipRender)) == MH_OK
+                && MH_EnableHook(pfn) == MH_OK;
+            Game::logMsg("particle level: precipitation render hook %s", pok ? "on" : "FAILED");
+        }
+    }
+    static const unsigned char kStart[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x48, 0xA1 };
+    auto* fn = reinterpret_cast<unsigned char*>(client + Offsets::kClientParticleRenderStartRva);
+    if (std::memcmp(fn, kStart, sizeof(kStart)) != 0 || fn[0x1D] != 0xF6 || fn[0x1F] != 0x94)
+    {
+        Game::logMsg("particle level: RenderStart MISMATCH (not hooked)");
+        return;
+    }
+    const bool ok = MH_CreateHook(fn, reinterpret_cast<LPVOID>(&ParticleRenderStartLevel),
+                        reinterpret_cast<LPVOID*>(&g_OrigParticleRenderStart)) == MH_OK
+        && MH_EnableHook(fn) == MH_OK;
+    Game::logMsg("particle level: RenderStart hook %s", ok ? "on" : "FAILED");
+}
+
 static void InstallPixelVisStats(uintptr_t client)
 {
     // Always hooked (one flag test per glow when idle) so bmvr_glow_trace
@@ -1101,6 +1308,7 @@ static void InstallPixelVisPerEye()
     }
     g_ClientCurrentViewId = reinterpret_cast<ClientCurrentViewIdFn>(target);
     InstallPixelVisStats(client);
+    InstallParticleLevel(client);
     InstallEngineWorldBatchStats();
     InstallBoneParticleProf(client);
     InstallFlareHooks(client);

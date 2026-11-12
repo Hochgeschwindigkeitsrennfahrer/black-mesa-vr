@@ -633,6 +633,9 @@ namespace dxvk {
     // Off-centre eyes: shaders that turn normals with cViewProj rows (see d3d9_device.cpp).
     bool BmvrViewProjNormalsBegin(float saved[12]);
     void BmvrViewProjNormalsEnd(const float saved[12]);
+    // Screen-aligned particles stay level with world up (see d3d9_device.cpp).
+    bool BmvrParticleLevelBegin(float saved[28]);
+    void BmvrParticleLevelEnd(const float saved[28]);
 
     HRESULT STDMETHODCALLTYPE SetPixelShaderConstantF(
             UINT   StartRegister,

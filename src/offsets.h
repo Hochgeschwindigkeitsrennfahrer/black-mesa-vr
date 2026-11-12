@@ -580,6 +580,16 @@ public:
     // CParticleCollection::Simulate (float dt, bool; ret 8).
     static constexpr uint32_t kClientParticleCollectionSimulateRva = 0x313ED0;
     // CParticleMgr::Simulate (float dt; ret 4).
+    // CParticleEffectBinding::RenderStart(VMatrix& tempModel, VMatrix& tempView), thiscall ret 8
+    // (beta 26234270; found by its GetMatrix(VIEW/MODEL) + UserClipTransform + 2x MatrixMode/LoadIdentity
+    // sequence, flags +0x94 bit 0x80 = camera-space effect, manager +0x90, its material system +0x64,
+    // m_mModelView at manager +0x68). Its RenderEnd is inlined in DrawModel (LoadMatrix = ctx vt 0x60).
+    static constexpr uint32_t kClientParticleRenderStartRva = 0x193C60;
+    // Black Mesa's precipitation renderer (cdecl, no args; debug string "Rain render    : %du"; called from
+    // 0x20444A): per precipitation entity GetMatrix(VIEW) -> local, LoadIdentity view, clip override, quads
+    // built in camera space, LoadMatrix(local) back. Also draws smoke/fog volumes (particle_smokegrenade1 in
+    // bm_c2a5g).
+    static constexpr uint32_t kClientPrecipRenderRva = 0x2B0700;
     static constexpr uint32_t kClientParticleMgrSimulateRva = 0x1948A0;
     static constexpr uint32_t kEngineWorldStaticMeshesRva = 0x8E6224;
     // CLensflare's world-to-pixel helper (cdecl: world, size[2], out).  Reads the
