@@ -1,5 +1,13 @@
 # Black Mesa VR
 
+> [!IMPORTANT]
+> **New here? Start with the newest experimental release.** Most of the current development happens on the
+> `experimental-beta` branch, for the **Black Mesa public beta** (Steam → Black Mesa → Properties → Betas →
+> `public-beta`). Those releases are marked *Pre-release* on GitHub, but they get the current fixes and
+> features first, and they are what we test against.
+> Switch Black Mesa to the public beta, then get the top *Experimental* entry on the
+> **[Releases page](https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr/releases)**. If you're on Linux, make sure to use the Proton version of the game.
+
 <a href="https://www.youtube.com/watch?v=S9kmK95yqgM">
   <img src="assets/release-2026-09-06.jpg" alt="Black Mesa VR — Weapon Menu" width="90%">
 </a>
@@ -12,6 +20,9 @@ The foundation of the VR implementation is based heavily on the approach pioneer
 
 L4D2VR source:
 https://github.com/keyou91/l4d2vr
+
+MacOS version here:
+https://github.com/armax9/black-mesa-vr-macos
 
 ## Current Status
 
@@ -57,10 +68,13 @@ Blue Shift session. The weapon wheel and wrist HUD use Calhoun blue instead of
 HEV amber.
 
 
-## Huge thanks wormslayer for HL2VR & to my testers for their patience and help:
+## Huge thanks wormslayer for HL2VR & to my testers and contributors for their patience and help:
 
+marnovdm for quality of life features and polish + beta support (https://github.com/marnovdm)
 TheRealBubble
-
 SilentVortiguant - [Check out his youtube](https://www.youtube.com/@SilentVortigauntVR).
 
 yakupagagaming
+
+Credits for the custom models:
+https://steamcommunity.com/sharedfiles/filedetails/?id=2969302231 (HEV Gloves)
