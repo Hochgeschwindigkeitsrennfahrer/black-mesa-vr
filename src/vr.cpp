@@ -5684,6 +5684,24 @@ void VR::SyncTurnToRestoredYaw(float engineYaw)
     m_LastCmdMs = now;
     if (m_YawSyncTicks <= 0)
         return;
+    if (!m_LastCmdYawValid && !m_FirstCmdYawPending && std::isfinite(engineYaw) && L4D2VR_FakeHelperActive())
+    {
+        m_FirstCmdYawPending = true;
+        m_FirstCmdYaw = engineYaw;
+    }
+    if (m_FirstCmdYawPending && m_HmdPoseValid && m_GameplayEligible)
+    {
+        m_FirstCmdYawPending = false;
+        m_YawSyncTicks = 0;
+        const float viewYaw = GetViewAngle().y;
+        const float before = m_RotationOffsetY.load(std::memory_order_acquire);
+        float offset = before + WrapYaw(m_FirstCmdYaw - viewYaw);
+        offset -= 360.f * floorf(offset / 360.f);
+        m_RotationOffsetY.store(offset, std::memory_order_release);
+        Game::logMsg("Turn synced to the start view (no earlier command): engine yaw %.1f, view %.1f, turn offset %.1f -> %.1f",
+            m_FirstCmdYaw, viewYaw, before, offset);
+        return;
+    }
     if (!m_LastCmdYawValid || !m_HmdPoseValid || !m_GameplayEligible || !std::isfinite(engineYaw))
         return;
     --m_YawSyncTicks;

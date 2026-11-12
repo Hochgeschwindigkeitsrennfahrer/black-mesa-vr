@@ -64,3 +64,5 @@ void L4D2VR_PublishOpenXrMenuQuad(const L4D2VROpenXrMenuQuadDesc& menu);
 // bridge in-process, and hands console commands from VR\cmd.txt to the game.
 void L4D2VR_StartFakeOpenXrHelper(L4D2VROpenXrBridgeState* state, bool gameRendersRuntimeFov);
 bool L4D2VR_FakeHelperPopCommand(char* out, size_t outSize);
+// True once the fake VR runtime (headless harness only) has been started.
+bool L4D2VR_FakeHelperActive();

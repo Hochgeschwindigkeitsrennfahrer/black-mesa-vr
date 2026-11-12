@@ -694,6 +694,12 @@ public:
     int m_YawSyncTicks = 0;
     ULONGLONG m_LastCmdMs = 0;
     bool m_LastCmdYawValid = false;
+    // Headless harness only (fake VR runtime): it starts straight into a save
+    // (+load on the command line), so there is no earlier command to compare
+    // with and the engine yaw of the first command is the restored view.
+    // Real sessions load from the menu map and use the jump check instead.
+    bool m_FirstCmdYawPending = false;
+    float m_FirstCmdYaw = 0.f;
     float m_LastCmdYaw = 0.f;
     void SyncTurnToRestoredYaw(float engineYaw);
     float m_LastCmdPitch = 0.f;

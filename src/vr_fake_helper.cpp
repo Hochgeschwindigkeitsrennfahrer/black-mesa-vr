@@ -517,8 +517,16 @@ namespace
     }
 }
 
+static std::atomic<bool> g_FakeHelperActive{ false };
+
+bool L4D2VR_FakeHelperActive()
+{
+    return g_FakeHelperActive.load(std::memory_order_relaxed);
+}
+
 void L4D2VR_StartFakeOpenXrHelper(L4D2VROpenXrBridgeState* state, bool gameRendersRuntimeFov)
 {
+    g_FakeHelperActive.store(true, std::memory_order_relaxed);
     std::thread(FakeHelperThread, state, gameRendersRuntimeFov).detach();
 }
 
