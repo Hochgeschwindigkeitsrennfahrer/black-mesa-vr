@@ -9432,7 +9432,7 @@ namespace
     // `mov eax,[eax+0x474]; call eax` (AimDebug weaponFire=0 before; tau
     // shots started at the head on stable too).
     constexpr uint32_t kServerWeaponFireOriginReturnRvas[] = {
-        0x34E859, 0x48F9F4, 0x4858D5, 0x485B5B, 0x48C085, 0x48D4E5 }; // beta 26234270: all +0x280
+        0x34EFB9, 0x4903C4, 0x4862A5, 0x48652B, 0x48CA55, 0x48DEB5 }; // beta 26627981 (26234270: 0x34E859 0x48F9F4 0x4858D5 0x485B5B 0x48C085 0x48D4E5)
 }
 
 Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out)
@@ -11592,7 +11592,7 @@ void bmvr::InstallEarlyFramebufferHook()
         Log("GetScreenSize: engine.dll not loaded yet");
         return;
     }
-    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6D30,
+    int screenOff = SigScanner::VerifyOffset("engine.dll", 0xA6DC0,
         "55 8B EC 8B 0D ? ? ? ? 56 8B 01 FF 90 9C 01 00 00");
     if (screenOff == -1)
     {
@@ -11600,7 +11600,7 @@ void bmvr::InstallEarlyFramebufferHook()
         return;
     }
     if (screenOff == 0)
-        screenOff = 0xA6D30;
+        screenOff = 0xA6DC0;
     void* screenTarget = reinterpret_cast<uint8_t*>(eng) + screenOff;
     if (!Hooks::hkGetScreenSize.pTarget)
     {
@@ -11614,14 +11614,14 @@ void bmvr::InstallEarlyFramebufferHook()
     }
     if (!Hooks::hkGetScreenAspectRatio.pTarget)
     {
-        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x101560,
+        int aspectOff = SigScanner::VerifyOffset("engine.dll", 0x101670,
             "55 8B EC 8B 0D ? ? ? ? 83 EC 0C 81 F9 ? ? ? ? 75 16 F3 0F 10 0D");
         if (aspectOff == -1)
             Log("GetScreenAspectRatio signature not found");
         else
         {
             if (aspectOff == 0)
-                aspectOff = 0x101560;
+                aspectOff = 0x101670;
             void* aspectTarget = reinterpret_cast<uint8_t*>(eng) + aspectOff;
             if (Hooks::hkGetScreenAspectRatio.createHook(aspectTarget, &Hooks::dGetScreenAspectRatio) != 0
                 || Hooks::hkGetScreenAspectRatio.enableHook() != 0)
