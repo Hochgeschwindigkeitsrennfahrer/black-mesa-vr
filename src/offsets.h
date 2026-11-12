@@ -590,6 +590,11 @@ public:
     // built in camera space, LoadMatrix(local) back. Also draws smoke/fog volumes (particle_smokegrenade1 in
     // bm_c2a5g).
     static constexpr uint32_t kClientPrecipRenderRva = 0x2B0700;
+    // .pcf sprite renderer for non-spritecard materials (SDK C_OP_RenderSprites::RenderNonSpriteCardCameraFacing;
+    // e.g. particle_smokegrenade1 in c2a5g_collapse_smoke, the room haze in bm_c2a5h): thiscall(particles,
+    // context, IMatRenderContext*, material), ret 0x10; GetMatrix(VIEW) -> UserClipTransform -> push identity
+    // view, quads built in camera space. Single caller at 0x32BDD6.
+    static constexpr uint32_t kClientPcfCameraFacingRva = 0x32C5E0;
     static constexpr uint32_t kClientParticleMgrSimulateRva = 0x1948A0;
     static constexpr uint32_t kEngineWorldStaticMeshesRva = 0x8E6224;
     // CLensflare's world-to-pixel helper (cdecl: world, size[2], out).  Reads the

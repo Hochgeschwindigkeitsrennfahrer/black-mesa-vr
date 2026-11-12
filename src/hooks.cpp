@@ -1219,8 +1219,85 @@ namespace
     }
 }
 
+// .pcf sprites with a non-spritecard material (most room haze/smoke) are built
+// on the CPU in camera space from the current view (the SDK's
+// RenderNonSpriteCardCameraFacing). Same turn as the precipitation renderer,
+// on the render context the renderer is given.
+namespace
+{
+    using PcfCameraFacingFn = void(__thiscall*)(void* self, void* particles, void* context, void* ctx, void* material);
+    PcfCameraFacingFn g_OrigPcfCameraFacing = nullptr;
+
+    void __fastcall PcfCameraFacingLevel(void* self, void* edx, void* particles, void* context, void* ctx, void* material)
+    {
+        (void)edx;
+        BMVR_PROF("hook PcfCameraFacing");
+        if (!bmvr::g_ParticleLevel || !ctx || !Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled || Hooks::m_VR->m_StereoEye == 0)
+        {
+            g_OrigPcfCameraFacing(self, particles, context, ctx, material);
+            return;
+        }
+        using IntFn = void(__thiscall*)(void*, int);
+        using GetMatrixFn = void(__thiscall*)(void*, int, float*);
+        using MatFn = void(__thiscall*)(void*, const float*);
+        void** vt = *reinterpret_cast<void***>(ctx);
+        float view[16] = {}, proj[16] = {};
+        reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 0 /* MATERIAL_VIEW */, view);
+        reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 1 /* MATERIAL_PROJECTION */, proj);
+        const float phi = ParticleLevelAngle(view);
+        if (std::fabs(phi) < 1e-4f)
+        {
+            g_OrigPcfCameraFacing(self, particles, context, ctx, material);
+            return;
+        }
+        const float c = std::cos(phi), s = std::sin(phi);
+        float level[16], turned[16];
+        std::memcpy(level, view, sizeof(level));
+        std::memcpy(turned, proj, sizeof(turned));
+        for (int k = 0; k < 4; ++k)
+        {
+            level[k] = c * view[k] + s * view[4 + k];
+            level[4 + k] = -s * view[k] + c * view[4 + k];
+        }
+        for (int r = 0; r < 4; ++r)
+        {
+            turned[r * 4 + 0] = c * proj[r * 4 + 0] + s * proj[r * 4 + 1];
+            turned[r * 4 + 1] = -s * proj[r * 4 + 0] + c * proj[r * 4 + 1];
+        }
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 1);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, turned);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, level);
+        g_OrigPcfCameraFacing(self, particles, context, ctx, material);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 1);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, proj);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, view);
+        static int s_log;
+        if (s_log < 4)
+        {
+            ++s_log;
+            Game::logMsg("particle level: pcf camera-facing sprites turned %.1f deg (eye %d)", phi * 57.2958f,
+                Hooks::m_VR->m_StereoEye);
+        }
+    }
+}
+
 static void InstallParticleLevel(uintptr_t client)
 {
+    {
+        static const unsigned char kPcf[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xC8, 0x02, 0x00, 0x00, 0xA1 };
+        auto* cfn = reinterpret_cast<unsigned char*>(client + Offsets::kClientPcfCameraFacingRva);
+        if (std::memcmp(cfn, kPcf, sizeof(kPcf)) != 0)
+            Game::logMsg("particle level: pcf camera-facing renderer MISMATCH (not hooked)");
+        else
+        {
+            const bool cok = MH_CreateHook(cfn, reinterpret_cast<LPVOID>(&PcfCameraFacingLevel),
+                                 reinterpret_cast<LPVOID*>(&g_OrigPcfCameraFacing)) == MH_OK
+                && MH_EnableHook(cfn) == MH_OK;
+            Game::logMsg("particle level: pcf camera-facing renderer hook %s", cok ? "on" : "FAILED");
+        }
+    }
     {
         static const unsigned char kPrecip[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x38, 0x02, 0x00, 0x00, 0xA1 };
         auto* pfn = reinterpret_cast<unsigned char*>(client + Offsets::kClientPrecipRenderRva);
