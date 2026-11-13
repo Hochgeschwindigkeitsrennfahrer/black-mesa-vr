@@ -1025,7 +1025,26 @@ public:
     bool QueueMcPauseHudBegin();
     bool QueueMcPauseHudEnd();
     void McBindPlaybackEye(int stereoEye, bool flushGpu);
-    void McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose);
+    // MulticoreMode: what the hand/laser overlay of one stereo frame needs, taken on the game thread when the
+    // frame's composite is queued, so both eyes are drawn from that frame's state. Reading live members on the
+    // render thread raced the next frame's updates: one eye without hand or laser, or the laser from the wrong
+    // place for a frame (2026-11-13, heavy scenes).
+    struct HandDrawSnap
+    {
+        bool valid = false;
+        bool leftOk = false, rightOk = false;
+        QAngle leftAng{}, rightAng{};
+        Vector leftPos{}, rightPos{}, body{};
+        Vector fwd{}, right{}, up{};
+        Vector eyeOrig[3]{};
+        Vector viewAngles{};
+        bool havePoints = false;
+        Vector beamA{}, beamB{}, dot{};
+        bool aimBeamValid = false, aimBeamHit = false, aimCrosshairValid = false;
+        Vector aimCrosshairWorld{};
+    };
+    void CaptureHandDrawSnap(HandDrawSnap& s);
+    void McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose, const HandDrawSnap* hands = nullptr);
     bool CopyEyesToOpenXrPublishSlot(IDirect3DSurface9* left, IDirect3DSurface9* right,
         const OpenXrPendingPublish& pend);
     IDirect3DSurface9* McPlaybackEyeSurface() const;

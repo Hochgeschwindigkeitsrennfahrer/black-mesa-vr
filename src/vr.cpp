@@ -2905,7 +2905,7 @@ public:
     }
 
     McMatFunctor(VR* vr, Kind kind, int stereoEye, uint32_t band, bool flushGpu,
-        const L4D2VROpenXrPoseDesc* pose)
+        const L4D2VROpenXrPoseDesc* pose, const VR::HandDrawSnap* hands = nullptr)
         : m_vr(vr)
         , m_kind(kind)
         , m_stereoEye(stereoEye)
@@ -2915,6 +2915,8 @@ public:
     {
         if (m_havePose)
             m_pose = *pose;
+        if (hands)
+            m_hands = *hands;
     }
 
     int AddRef() override
@@ -2935,7 +2937,7 @@ public:
         if (!m_vr)
             return;
         if (m_kind == Kind::Composite)
-            m_vr->McCompositeEyesToRing(m_band, m_havePose ? &m_pose : nullptr);
+            m_vr->McCompositeEyesToRing(m_band, m_havePose ? &m_pose : nullptr, m_hands.valid ? &m_hands : nullptr);
         else
             m_vr->McBindPlaybackEye(m_stereoEye, m_flushGpu);
     }
@@ -2948,6 +2950,7 @@ private:
     bool m_flushGpu;
     bool m_havePose = false;
     L4D2VROpenXrPoseDesc m_pose{};
+    VR::HandDrawSnap m_hands{};
     std::atomic<int> m_refs{ 0 };
 };
 
@@ -10687,6 +10690,62 @@ void VR::TryCompositorPostPresentHandoff(DWORD nowMs, DWORD poseAgeMs)
     }
 }
 
+namespace
+{
+    // Set by McCompositeEyesToRing (render thread) while it draws both eyes.
+    thread_local const VR::HandDrawSnap* t_HandSnap = nullptr;
+}
+
+void VR::CaptureHandDrawSnap(HandDrawSnap& s)
+{
+    s = HandDrawSnap{};
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        if (m_StereoFramePoseActive)
+        {
+            s.leftOk = m_StereoFrameLeftCtrlValid;
+            s.rightOk = m_StereoFrameRightCtrlValid;
+            s.leftAng = m_StereoFrameLeftCtrlAng;
+            s.rightAng = m_StereoFrameRightCtrlAng;
+            s.leftPos = m_StereoFrameLeftCtrlPos;
+            s.rightPos = m_StereoFrameRightCtrlPos;
+        }
+        else
+        {
+            s.leftOk = m_LeftControllerTrackingValid;
+            s.rightOk = m_PhysicalRightTrackingValid;
+            s.leftAng = m_LeftControllerAngAbs;
+            s.rightAng = m_PhysicalRightAngAbs;
+            s.leftPos = m_LeftControllerPosAbs;
+            s.rightPos = m_PhysicalRightPosAbs;
+        }
+        s.body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+        Vector snapPos{};
+        QAngle snapAng{};
+        if (TryGetTwoHandOffhandDrawPose(true, snapPos, snapAng))
+        {
+            s.leftPos = snapPos;
+            s.leftAng = snapAng;
+        }
+        if (TryGetTwoHandOffhandDrawPose(false, snapPos, snapAng))
+        {
+            s.rightPos = snapPos;
+            s.rightAng = snapAng;
+        }
+    }
+    GetViewBasis(&s.fwd, &s.right, &s.up);
+    s.eyeOrig[0] = GetViewOrigin(s.body);
+    s.eyeOrig[1] = GetViewOriginLeft(s.body);
+    s.eyeOrig[2] = GetViewOriginRight(s.body);
+    s.viewAngles = GetViewAngle();
+    s.havePoints = AimOverlayPointsNow(s.beamA, s.beamB, s.dot);
+    s.aimBeamValid = m_AimBeamValid;
+    s.aimBeamHit = m_AimBeamHit;
+    s.aimCrosshairValid = m_AimCrosshairValid;
+    s.aimCrosshairWorld = m_AimCrosshairWorld;
+    s.valid = true;
+}
+
 bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, bool drawOverlays, bool drawGloves)
 {
     BMVR_PROF("vr DrawIndependentHandMarkers");
@@ -10758,6 +10817,17 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             rightAng = snapAng;
         }
     }
+    const HandDrawSnap* snap = t_HandSnap;
+    if (snap)
+    {
+        leftOk = snap->leftOk;
+        rightOk = snap->rightOk;
+        leftAng = snap->leftAng;
+        rightAng = snap->rightAng;
+        leftPos = snap->leftPos;
+        rightPos = snap->rightPos;
+        body = snap->body;
+    }
     if (!leftOk && !rightOk)
         return false;
 
@@ -10766,10 +10836,25 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     };
 
     Vector fwd, right, up;
-    GetViewBasis(&fwd, &right, &up);
-    const Vector eyeOrig = (stereoEye == 1)
-        ? GetViewOriginLeft(body)
-        : (stereoEye == 2) ? GetViewOriginRight(body) : GetViewOrigin(body);
+    Vector eyeOrig{};
+    if (snap)
+    {
+        fwd = snap->fwd;
+        right = snap->right;
+        up = snap->up;
+        eyeOrig = snap->eyeOrig[(stereoEye == 1 || stereoEye == 2) ? stereoEye : 0];
+    }
+    else
+    {
+        GetViewBasis(&fwd, &right, &up);
+        eyeOrig = (stereoEye == 1)
+            ? GetViewOriginLeft(body)
+            : (stereoEye == 2) ? GetViewOriginRight(body) : GetViewOrigin(body);
+    }
+    const bool aimBeamValid = snap ? snap->aimBeamValid : m_AimBeamValid;
+    const bool aimBeamHit = snap ? snap->aimBeamHit : m_AimBeamHit;
+    const bool aimCrosshairValid = snap ? snap->aimCrosshairValid : m_AimCrosshairValid;
+    const Vector aimCrosshairWorld = snap ? snap->aimCrosshairWorld : m_AimCrosshairWorld;
 
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
@@ -11140,7 +11225,16 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
             device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
             Vector beamA{}, beamB{}, dotNow{};
-            const bool havePoints = AimOverlayPointsNow(beamA, beamB, dotNow);
+            bool havePoints = false;
+            if (snap)
+            {
+                havePoints = snap->havePoints;
+                beamA = snap->beamA;
+                beamB = snap->beamB;
+                dotNow = snap->dot;
+            }
+            else
+                havePoints = AimOverlayPointsNow(beamA, beamB, dotNow);
             const bool beamHidden = m_ViewmodelBeamHidden.load(std::memory_order_relaxed);
             // Beam and dot are depth-tested against the eye's scene depth
             // (world + gun, as for the gloves), so the gun hides them. Depth
@@ -11171,7 +11265,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                     depthBefore->Release();
                 depthBefore = nullptr;
             };
-            if (m_AimBeamValid && !beamHidden && havePoints && (beamB - beamA).LengthSqr() > 1.f)
+            if (aimBeamValid && !beamHidden && havePoints && (beamB - beamA).LengthSqr() > 1.f)
             {
                 // Clip to just in front of the eye, then a quad whose width is
                 // a fixed world size at each end (perspective taper), never
@@ -11212,7 +11306,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                         const float wa = (std::max)(0.5f, beamWidthHu * pxPerHu / az);
                         const float wb = (std::max)(0.5f, beamWidthHu * pxPerHu / bz);
                         const D3DCOLOR ca = D3DCOLOR_ARGB(170, 255, 40, 25);
-                        const D3DCOLOR cb = m_AimBeamHit
+                        const D3DCOLOR cb = aimBeamHit
                             ? D3DCOLOR_ARGB(110, 255, 40, 25) : D3DCOLOR_ARGB(0, 255, 40, 25);
                         beginSceneDepth();
                         const float da = sceneDepth ? depthAt(az) : 0.f;
@@ -11229,7 +11323,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 }
             }
             float cx = 0.f, cy = 0.f;
-            if (m_AimCrosshairValid && project(havePoints ? dotNow : m_AimCrosshairWorld, cx, cy))
+            if (aimCrosshairValid && project(havePoints ? dotNow : aimCrosshairWorld, cx, cy))
             {
                 if (bmvr::g_VrCrosshairDot)
                 {
@@ -11238,7 +11332,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                         scale = 1.f;
                     // World radius 0.25 u (~6 mm) x scale; floor 1.25 px per
                     // 1440 px of eye height x scale.
-                    const Vector dotWorld = havePoints ? dotNow : m_AimCrosshairWorld;
+                    const Vector dotWorld = havePoints ? dotNow : aimCrosshairWorld;
                     const float z = (std::max)(4.f, (dotWorld - eyeOrig).Dot(fwd));
                     const float pxPerHu = static_cast<float>(w) * 0.5f * ocSx / tanHalf;
                     const float floorPx = 1.25f * static_cast<float>(h) / 1440.f * scale;
@@ -11314,7 +11408,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             s_gloveFlag = 1;
             bmvr::BeginRisky(L"vr_gloves");
         }
-        const Vector viewAngles = GetViewAngle();
+        const Vector viewAngles = snap ? snap->viewAngles : GetViewAngle();
         drewGloves = g_VrGloves.DrawForEye(
             device,
             stereoEye,
@@ -14392,7 +14486,7 @@ void VR::McBindPlaybackEye(int stereoEye, bool flushGpu)
     }
 }
 
-void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
+void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose, const HandDrawSnap* hands)
 {
     IDirect3DSurface9* left = m_D9LeftEyeSurface;
     IDirect3DSurface9* right = m_D9RightEyeSurface;
@@ -14400,8 +14494,10 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose)
         && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
             || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible() || ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
     {
+        t_HandSnap = (hands && hands->valid && bmvr::g_McHandSnapshot) ? hands : nullptr;
         DrawIndependentHandMarkers(left, 1, true, true);
         DrawIndependentHandMarkers(right, 2, true, true);
+        t_HandSnap = nullptr;
     }
 
     OpenXrPendingPublish pend{};
@@ -14472,8 +14568,10 @@ bool VR::QueueMcCompositeToRing(uint32_t band)
     BMVR_PROF("vr QueueMcCompositeToRing");
     const L4D2VROpenXrPoseDesc* pose = m_OpenXrStereoRenderPoseValid
         ? &m_OpenXrStereoRenderPose : nullptr;
+    HandDrawSnap hands{};
+    CaptureHandDrawSnap(hands);
     auto* functor = new (std::nothrow) McMatFunctor(
-        this, McMatFunctor::Kind::Composite, 0, band, false, pose);
+        this, McMatFunctor::Kind::Composite, 0, band, false, pose, &hands);
     if (!functor)
         return false;
     functor->AddRef();

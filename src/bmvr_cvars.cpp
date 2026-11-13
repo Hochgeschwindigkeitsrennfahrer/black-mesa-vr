@@ -174,6 +174,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_PixelVisPerEye, nullptr },
             { "bmvr_glow_count_depth_fix", "VR: glow visibility counts the full proxy (0 = glows show at full brightness through objects when a sliver peeks out)",
               Kind::Bool, 0.f, 1.f, &g_GlowCountDepthFix, nullptr },
+            { "bmvr_mc_hand_snapshot", "VR (MulticoreMode): hands and laser of both eyes come from one snapshot per frame (0 = live state, can differ per eye)",
+              Kind::Bool, 0.f, 1.f, &g_McHandSnapshot, nullptr },
             { "bmvr_viewproj_normal_fix", "VR: ropes get the same normals in both off-centre eyes (0 = stock: one eye's ropes can sit in their own shadow)",
               Kind::Bool, 0.f, 1.f, &g_ViewProjNormalFix, nullptr },
             { "bmvr_eye_bloom", "VR: bloom + auto-exposure on the eyes (0 = skipped on the eyes)",
