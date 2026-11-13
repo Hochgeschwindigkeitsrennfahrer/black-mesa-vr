@@ -105,7 +105,7 @@ namespace dxvk {
         return GetRenderTargetView(Srgb);
       Rc<DxvkImageView>& view = (Srgb && m_isSrgbCompatible) ? m_bmvrRetiredRtvSrgb : m_bmvrRetiredRtv;
       if (unlikely(!view)) {
-        const Rc<DxvkImage>& img = m_texture->BmvrActiveImage();
+        const Rc<DxvkImage>& img = m_texture->GetResolveImage();
         view = m_texture->CreateView(m_face, m_mipLevel, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Srgb && m_isSrgbCompatible, &img);
       }
@@ -115,9 +115,16 @@ namespace dxvk {
     inline const Rc<DxvkImageView>& GetActiveDepthStencilView(bool Writable) {
       if (likely(!m_texture->BmvrRetired()))
         return GetDepthStencilView(Writable);
+      return GetResolveDepthStencilView(Writable);
+    }
+
+    // 1x depth on the resolve image of a multisampled depth surface: the
+    // retired eye depth, and the stand-in when a 1x pass (water reflection /
+    // refraction) binds the 4x eye depth (cleared at eye start).
+    inline const Rc<DxvkImageView>& GetResolveDepthStencilView(bool Writable) {
       Rc<DxvkImageView>& view = Writable ? m_bmvrRetiredDsvRW : m_bmvrRetiredDsvRO;
       if (unlikely(!view)) {
-        const Rc<DxvkImage>& img = m_texture->BmvrActiveImage();
+        const Rc<DxvkImage>& img = m_texture->GetResolveImage();
         view = m_texture->CreateView(m_face, m_mipLevel, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
           Writable ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                    : VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL, false, &img);

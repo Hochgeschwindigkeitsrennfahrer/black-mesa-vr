@@ -15099,6 +15099,16 @@ void VR::NoteMsaaEyeScene(IDirect3DSurface9* dst, bool copied)
         m_RightEyeMsaaHasScene = true;
 }
 
+void VR::MsaaEyesTo1x(IDirect3DDevice9* device)
+{
+    // 2D menu / loading frames are copied or painted straight into the eye
+    // surfaces: do that on their 1x images (no scaled copy into 4 samples).
+    if (!UseVrMsaa() || !device)
+        return;
+    bmvr::MsaaEyeRetire(device, m_D9LeftEyeSurface, m_D9LeftEyeDepthSurface);
+    bmvr::MsaaEyeRetire(device, m_D9RightEyeSurface, m_D9RightEyeDepthSurface);
+}
+
 void VR::RetireMsaaEyeForPost()
 {
     // Only the thread drawing this eye knows it: multicore playback TLS, or
@@ -15148,7 +15158,11 @@ void VR::ResolveMsaaEyesToSubmit(IDirect3DDevice9* device)
     if (!device)
         return;
     m_CaptureReentry = true;
-    if (m_LeftEyeMsaaHasScene && m_D9LeftEyeSurface && m_D9LeftEyeSubmitSurface
+    // Eye MSAA: always refresh the 1x submit copies. Multicore gameplay never
+    // sets the HasScene flags (it publishes from the ring), so menus, loading
+    // screens and the loading card were published from never-written submit
+    // surfaces = black. DXVK serves this copy from the eye's 1x resolve.
+    if (m_D9LeftEyeSurface && m_D9LeftEyeSubmitSurface
         && m_D9LeftEyeSurface != m_D9LeftEyeSubmitSurface)
     {
         const HRESULT hr = device->StretchRect(
@@ -15156,7 +15170,7 @@ void VR::ResolveMsaaEyesToSubmit(IDirect3DDevice9* device)
         if (FAILED(hr))
             Game::logMsg("MSAA left eye resolve hr=0x%08X", (unsigned)hr);
     }
-    if (m_RightEyeMsaaHasScene && m_D9RightEyeSurface && m_D9RightEyeSubmitSurface
+    if (m_D9RightEyeSurface && m_D9RightEyeSubmitSurface
         && m_D9RightEyeSurface != m_D9RightEyeSubmitSurface)
     {
         const HRESULT hr = device->StretchRect(
@@ -15434,10 +15448,12 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
     // engine's final material pass re-rasterises scene geometry into them
     // (single-threaded via StereoEyeBlitDest, multicore via McPlaybackEyeSurface).
     // Idea from a Discord user's AA4-GEOMETRY4 Pimax build.
-    m_AntiAliasing = (bmvr::g_MsaaAllowed && !m_EyeMsaaAllocFailed)
-        ? bmvr::NormalizeMsaa(static_cast<int>(bmvr::g_Msaa)) : 0;
-    if (m_AntiAliasing < 2)
-        m_AntiAliasing = 0;
+    // The VR panel row changes g_MsaaF; a new value recreates the eyes like a
+    // live SteamVR resolution change.
+    bmvr::g_Msaa = bmvr::NormalizeMsaa(static_cast<int>(bmvr::g_MsaaF + 0.5f));
+    uint32_t wantAa = (bmvr::g_MsaaAllowed && !m_EyeMsaaAllocFailed) ? bmvr::g_Msaa : 0;
+    if (wantAa < 2)
+        wantAa = 0;
     ChooseEyeRenderSize();
     UINT w = m_RenderWidth;
     UINT h = m_RenderHeight;
@@ -15454,12 +15470,22 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
     {
         const UINT haveW = m_VKLeftEye.m_VulkanData.m_nWidth;
         const UINT haveH = m_VKLeftEye.m_VulkanData.m_nHeight;
-        if (haveW == w && haveH == h)
+        const bool aaChange = wantAa != m_AntiAliasing;
+        if (haveW == w && haveH == h && !aaChange)
         {
             if (bmvr::g_MulticoreMode)
                 EnsureMcRing(device);
             return true;
         }
+        if (haveW == w && haveH == h && aaChange)
+        {
+            if (m_StereoEyeBlitActive)
+                return true;   // mid-eye: next call
+            Game::logMsg("Recreating D3D eyes %ux%u for MSAA %u -> %u (VR panel)", haveW, haveH, m_AntiAliasing, wantAa);
+            m_CreatedVRTextures.store(false, std::memory_order_release);
+        }
+        else
+        {
         const bool liveOffscreenResize = bmvr::TryOffscreenHmd()
             && !m_StereoEyeBlitActive
             && (w + 32 < haveW || h + 32 < haveH || haveW + 32 < w || haveH + 32 < h);
@@ -15484,9 +15510,11 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
         // after 120 frames; a recreate+quit false-banned the path.
         Game::logMsg("Recreating D3D eyes %ux%u -> %ux%u (SteamVR live SS)", haveW, haveH, w, h);
         m_CreatedVRTextures.store(false, std::memory_order_release);
+        }
     }
 
     std::lock_guard<TextureStateMutex> lock(m_TextureMutex);
+    m_AntiAliasing = wantAa;
 
     auto createEye = [&](TextureID id, IDirect3DTexture9** tex, IDirect3DSurface9** surf, SharedTextureHolder& vk) -> bool {
         ReleaseT(*surf);
@@ -15592,6 +15620,14 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
         EnsureFrameCopySurface(device, copyW, copyH);
 
     bool submitOk = !UseVrMsaa();
+    if (!UseVrMsaa())
+    {
+        // MSAA switched off in the panel: the 1x submit copies are not used.
+        ReleaseT(m_D9LeftEyeSubmitSurface);
+        ReleaseT(m_D9RightEyeSubmitSurface);
+        ReleaseT(m_D9LeftEyeSubmitTexture);
+        ReleaseT(m_D9RightEyeSubmitTexture);
+    }
     if (UseVrMsaa())
     {
         auto createSubmit = [&](TextureID id, IDirect3DTexture9** tex, IDirect3DSurface9** surf, SharedTextureHolder& vk) -> bool {
@@ -17469,6 +17505,15 @@ void VR::SubmitVRTextures()
                 ShowToast("LOADING", 120000);
                 Game::logMsg("Loading card: in-game load, LOADING painted on the held eye pair");
             }
+            if (UseVrMsaa() && g_D3DVR9)
+            {
+                IDirect3DDevice9* cardDev = nullptr;
+                if (SUCCEEDED(g_D3DVR9->GetD3DDevice(&cardDev)) && cardDev)
+                {
+                    MsaaEyesTo1x(cardDev);
+                    cardDev->Release();
+                }
+            }
             DrawToastOnEyeSurface(m_D9LeftEyeSurface, 1);
             DrawToastOnEyeSurface(m_D9RightEyeSurface, 2);
             if (m_LoadingCardForcePublish)
@@ -17517,6 +17562,7 @@ void VR::SubmitVRTextures()
             if (SUCCEEDED(g_D3DVR9->GetD3DDevice(&copyDev)) && copyDev)
             {
                 m_CaptureReentry = true;
+                MsaaEyesTo1x(copyDev);
                 DrawMenuCursorOnSurface(copyDev, m_D9FrameColorSurface);
                 const bool leftOk = CopySurfaceLetterboxed(copyDev, m_D9FrameColorSurface, m_D9LeftEyeSurface,
                     bmvr::g_MenuPanelScale);
@@ -17669,6 +17715,7 @@ void VR::SubmitVRTextures()
         if (haveSrc && haveDst && m_D9LeftEyeSurface)
         {
             m_CaptureReentry = true;
+            MsaaEyesTo1x(device);
             if (m_StereoCopyOffset && m_D9RightEyeSurface)
             {
                 LONG useOff = m_StereoOffsetPx;

@@ -84,6 +84,7 @@ namespace bmvr
     bool g_MulticoreMode = true;
     uint32_t g_Msaa = 0; // >= 2 switches FXAA off and only reaches the lighting buffers
     bool g_MsaaPostSwitch = true;
+    float g_MsaaF = 0.f;
     bool g_MsaaAllowed = true;
     bool g_Haptics = true;
     bool g_HideCrosshair = true;
@@ -605,7 +606,10 @@ namespace bmvr
             else if (std::strcmp(n, "FlashlightShadowMatrixFix") == 0)
                 g_BmvrFlashlightMatrixFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0) ? 1 : 0;
             else if (std::strcmp(n, "Msaa") == 0 || std::strcmp(n, "msaa") == 0)
+            {
                 g_Msaa = NormalizeMsaa(atoi(val));
+                g_MsaaF = static_cast<float>(g_Msaa);
+            }
             else if (std::strcmp(n, "Haptics") == 0)
                 g_Haptics = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "HideCrosshair") == 0)

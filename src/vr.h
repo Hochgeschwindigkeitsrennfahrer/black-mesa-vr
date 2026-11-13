@@ -949,6 +949,7 @@ public:
     IDirect3DSurface9* ColorTargetForStereoEye(int stereoEye) const;
     // Eye MSAA: post chain of the eye this thread is drawing runs on its 1x resolve.
     void RetireMsaaEyeForPost();
+    void MsaaEyesTo1x(IDirect3DDevice9* device);
     void BeginStereoEyeBlit(IDirect3DSurface9* dst);
     void ClearStereoEyeSurfaces();
     bool EndStereoEyeBlit();

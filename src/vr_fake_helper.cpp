@@ -31,6 +31,7 @@
 //   poselag <every> <ms>         every <every>-th pose reports the hand where it was
 //                                <ms> earlier (the PS VR2 Sense on SteamVR: every third
 //                                pose at 90/s barely moves, then the next ones catch up)
+//   msaa <0|2|4>                 eye MSAA, like the VR panel row (live eye recreate)
 // <VR dir>\cmd.txt: console commands, one per line, appended by the test; each new
 // line is run once (ClientCmd_Unrestricted on the engine thread).
 
@@ -190,6 +191,13 @@ namespace
             else if (key == "size") ss >> fresh.width >> fresh.height;
             else if (key == "fov") ss >> fresh.tanOut >> fresh.tanIn >> fresh.tanUp >> fresh.tanDown;
             else if (key == "ipd") ss >> fresh.ipd;
+            else if (key == "msaa")
+            {
+                // Same as the VR panel's MSAA row: 0/2/4, applied live.
+                float aa = 0.f;
+                ss >> aa;
+                bmvr::g_MsaaF = aa;
+            }
             else if (key == "move") ss >> fresh.moveX >> fresh.moveY;
             else if (key == "turn") ss >> fresh.turnX >> fresh.turnY;
             else if (key == "poserate")

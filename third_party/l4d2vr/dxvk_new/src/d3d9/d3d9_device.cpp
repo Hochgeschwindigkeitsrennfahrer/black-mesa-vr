@@ -70,7 +70,7 @@ namespace {
   // Eye MSAA cost counters (per second): full resolves when a multisampled
   // texture is sampled, StretchRect resolves (same size) and MS blits (scaled).
   struct BmvrMsaaStats {
-    uint32_t sampleResolves = 0, rectResolves = 0, rectBlits = 0, cachedCopies = 0, dirtyMarks = 0, retiredCopies = 0, retires = 0;
+    uint32_t sampleResolves = 0, rectResolves = 0, rectBlits = 0, cachedCopies = 0, dirtyMarks = 0, retiredCopies = 0, retires = 0, depthStandIns = 0;
     uint64_t pixels = 0;
     DWORD last = 0;
   } g_bmvrMsaaStats;
@@ -80,9 +80,9 @@ namespace {
     if (!g_bmvrMsaaStats.last) { g_bmvrMsaaStats.last = now; return; }
     if (now - g_bmvrMsaaStats.last < 1000) return;
     auto& s = g_bmvrMsaaStats;
-    if (s.sampleResolves || s.rectResolves || s.rectBlits || s.cachedCopies)
-      bmvr::Log("Eye MSAA cost/s: resolves=%u (Mpix=%llu) copies from resolved=%u (from 1x post=%u) new writes=%u post switches=%u direct ms resolves=%u direct ms blits=%u",
-        s.sampleResolves, (unsigned long long)(s.pixels / 1000000ull), s.cachedCopies, s.retiredCopies, s.dirtyMarks, s.retires, s.rectResolves, s.rectBlits);
+    if (s.sampleResolves || s.rectResolves || s.rectBlits || s.cachedCopies || s.depthStandIns)
+      bmvr::Log("Eye MSAA cost/s: resolves=%u (Mpix=%llu) copies from resolved=%u (from 1x post=%u) new writes=%u post switches=%u 1x depth stand-ins=%u direct ms resolves=%u direct ms blits=%u",
+        s.sampleResolves, (unsigned long long)(s.pixels / 1000000ull), s.cachedCopies, s.retiredCopies, s.dirtyMarks, s.retires, s.depthStandIns, s.rectResolves, s.rectBlits);
     s = BmvrMsaaStats{};
     s.last = now;
   }
@@ -9554,7 +9554,19 @@ namespace dxvk {
         || dsInfo.extent.height < renderArea.height
         || dsInfo.sampleCount != sampleCount;
       const bool bindDS = !mismatch || noRT0Bound || ignoreRT0;
-      if (unlikely(!bindDS && dsInfo.sampleCount != sampleCount)) {
+      // Eye MSAA: a 1x pass (water reflection / refraction) with the 4x eye
+      // depth bound used to lose depth entirely. Give it the eye's 1x depth
+      // image instead (cleared at eye start, like the 1x eye depth was).
+      const bool msDepthFor1x = !bindDS && !ds->BmvrRetired()
+        && dsInfo.sampleCount != VK_SAMPLE_COUNT_1_BIT && sampleCount == VK_SAMPLE_COUNT_1_BIT
+        && ds->Desc()->MultiSample != D3DMULTISAMPLE_NONE
+        && dsInfo.extent.width >= renderArea.width && dsInfo.extent.height >= renderArea.height;
+      if (msDepthFor1x) {
+        attachments.depth.view = m_state.depthStencil->GetResolveDepthStencilView(
+          m_state.renderStates[D3DRS_ZWRITEENABLE] || m_state.renderStates[D3DRS_STENCILENABLE]);
+        ++g_bmvrMsaaStats.depthStandIns;
+      }
+      if (unlikely(!bindDS && !msDepthFor1x && dsInfo.sampleCount != sampleCount)) {
         static uint32_t s_dsDrop;
         if (s_dsDrop++ < 24)
           bmvr::Log("Eye MSAA: depth dropped (samples ds=%u rt0=%u, ds %ux%u rt0 %ux%u) #%u",
@@ -11946,7 +11958,9 @@ namespace dxvk {
       if (!s)
         continue;
       D3D9CommonTexture* tex = static_cast<D3D9Surface*>(s)->GetCommonTexture();
-      if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE || tex->BmvrRetired() == retire)
+      if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE)
+        continue;
+      if (tex->BmvrRetired() == retire && (retire || !tex->IsDepthStencil()))
         continue;
       if (retire) {
         // Depth: always resolve (sample 0); later passes (hands, glows) test against it.
@@ -11955,8 +11969,20 @@ namespace dxvk {
         BmvrResolveMsaaForSample(tex);
         ++g_bmvrMsaaStats.retires;
       }
+      if (tex->BmvrRetired() != retire)
+        changed = true;
       tex->BmvrSetRetired(retire);
-      changed = true;
+      if (!retire && tex->IsDepthStencil()) {
+        // The 1x depth doubles as the stand-in for this eye's 1x passes: start
+        // each eye from a cleared buffer, as the 1x eye depth did.
+        VkClearValue cv = { };
+        cv.depthStencil = { 1.0f, 0u };
+        const Rc<DxvkImageView>& dsv = static_cast<D3D9Surface*>(s)->GetResolveDepthStencilView(true);
+        const VkImageAspectFlags aspects = dsv->formatInfo()->aspectMask;
+        EmitCs([cView = dsv, cAspects = aspects, cValue = cv] (DxvkContext* ctx) {
+          ctx->clearRenderTarget(cView, cAspects, cValue, 0u);
+        });
+      }
     }
     if (changed)
       m_dirty.set(D3D9DeviceDirtyFlag::Framebuffer);

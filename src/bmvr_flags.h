@@ -198,6 +198,7 @@ namespace bmvr
     // dropdown stays stock (None / FXAA); rewriting it crashes that page.
     // A crash during the scoped create persist-skips it (g_MsaaAllowed = false).
     extern uint32_t g_Msaa;
+    extern float g_MsaaF;           // VR panel copy of g_Msaa (0/2/4); applied live by recreating the eyes
     extern bool g_MsaaPostSwitch;   // MsaaPostSwitch (default true): post chain on the 1x resolve
     extern bool g_MsaaAllowed;
     uint32_t NormalizeMsaa(int samples);
