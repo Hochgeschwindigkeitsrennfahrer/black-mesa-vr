@@ -1102,7 +1102,8 @@ namespace dxvk {
     void BmvrNoteMsaaAttachmentsWritten();
     bool m_bmvrMsRaster = false;
     void BmvrSetMsaaEyeRetired(IDirect3DSurface9* color, IDirect3DSurface9* depth, bool retire);
-    void BmvrResolveMsaaForSample(D3D9CommonTexture* tex);
+    void BmvrResolveMsaaForSample(D3D9CommonTexture* tex, bool force = false);
+    void BmvrResolvePendingDepth();
 
     void EnsureSamplerLimit();
 

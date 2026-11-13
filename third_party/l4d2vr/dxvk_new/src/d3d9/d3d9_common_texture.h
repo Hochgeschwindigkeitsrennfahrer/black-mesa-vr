@@ -367,6 +367,13 @@ namespace dxvk {
     // clear, copy or sample of this multisampled texture uses its 1x resolve
     // image (post-processing, HUD, hands, OpenXR ring copy run at 1x).
     bool BmvrRetired() const { return m_bmvrRetired; }
+    // Retired depth not resolved yet: done before the first draw that tests or
+    // writes depth (often none: only gloves / hand HUD use it after post).
+    bool BmvrDepthPending() const { return m_bmvrDepthPending; }
+    void BmvrSetDepthPending(bool pending) { m_bmvrDepthPending = pending; }
+    // 1x depth stand-in (water passes) to be cleared before its first use this eye.
+    bool BmvrStandInClear() const { return m_bmvrStandInClear; }
+    void BmvrSetStandInClear(bool clear) { m_bmvrStandInClear = clear; }
     void BmvrSetRetired(bool retired) { m_bmvrRetired = retired; }
     const Rc<DxvkImage>& BmvrActiveImage() {
       return m_bmvrRetired ? GetResolveImage() : m_image;
@@ -509,6 +516,8 @@ namespace dxvk {
     Rc<DxvkImage>                 m_image;
     Rc<DxvkImage>                 m_resolveImage;
     bool                          m_bmvrRetired = false;
+    bool                          m_bmvrDepthPending = false;
+    bool                          m_bmvrStandInClear = false;
     Rc<DxvkBuffer>                m_buffer;
     MemoryFileRegion              m_data = { };
 
