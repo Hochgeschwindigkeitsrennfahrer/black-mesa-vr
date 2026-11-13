@@ -70,7 +70,7 @@ namespace {
   // Eye MSAA cost counters (per second): full resolves when a multisampled
   // texture is sampled, StretchRect resolves (same size) and MS blits (scaled).
   struct BmvrMsaaStats {
-    uint32_t sampleResolves = 0, rectResolves = 0, rectBlits = 0, cachedCopies = 0, dirtyMarks = 0;
+    uint32_t sampleResolves = 0, rectResolves = 0, rectBlits = 0, cachedCopies = 0, dirtyMarks = 0, retiredCopies = 0, retires = 0;
     uint64_t pixels = 0;
     DWORD last = 0;
   } g_bmvrMsaaStats;
@@ -81,8 +81,8 @@ namespace {
     if (now - g_bmvrMsaaStats.last < 1000) return;
     auto& s = g_bmvrMsaaStats;
     if (s.sampleResolves || s.rectResolves || s.rectBlits || s.cachedCopies)
-      bmvr::Log("Eye MSAA cost/s: resolves=%u (Mpix=%llu) copies from resolved=%u new writes=%u direct ms resolves=%u direct ms blits=%u",
-        s.sampleResolves, (unsigned long long)(s.pixels / 1000000ull), s.cachedCopies, s.dirtyMarks, s.rectResolves, s.rectBlits);
+      bmvr::Log("Eye MSAA cost/s: resolves=%u (Mpix=%llu) copies from resolved=%u (from 1x post=%u) new writes=%u post switches=%u direct ms resolves=%u direct ms blits=%u",
+        s.sampleResolves, (unsigned long long)(s.pixels / 1000000ull), s.cachedCopies, s.retiredCopies, s.dirtyMarks, s.retires, s.rectResolves, s.rectBlits);
     s = BmvrMsaaStats{};
     s.last = now;
   }
@@ -2492,7 +2492,7 @@ namespace dxvk {
                  srcTextureInfo->Desc()->Pool != D3DPOOL_DEFAULT))
       return D3DERR_INVALIDCALL;
 
-    Rc<DxvkImage> dstImage = dstTextureInfo->GetImage();
+    Rc<DxvkImage> dstImage = dstTextureInfo->BmvrActiveImage();
     Rc<DxvkImage> srcImage = srcTextureInfo->GetImage();
 
     if (dstImage == nullptr || srcImage == nullptr)
@@ -2508,6 +2508,8 @@ namespace dxvk {
         && dstImage->info().sampleCount == VK_SAMPLE_COUNT_1_BIT) {
       if (!srcTextureInfo->MsaaNeedsResolve())
         ++g_bmvrMsaaStats.cachedCopies;
+      if (srcTextureInfo->BmvrRetired())
+        ++g_bmvrMsaaStats.retiredCopies;
       BmvrResolveMsaaForSample(srcTextureInfo);
       srcImage = srcTextureInfo->GetResolveImage();
       if (srcImage == nullptr)
@@ -2781,7 +2783,7 @@ namespace dxvk {
     VkClearValue clearValue = { };
     DecodeD3DCOLOR(Color, clearValue.color.float32);
 
-    Rc<DxvkImage> image = dstTextureInfo->GetImage();
+    Rc<DxvkImage> image = dstTextureInfo->BmvrActiveImage();
 
     if (image->formatInfo()->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT)
       return D3DERR_INVALIDCALL;
@@ -3281,7 +3283,7 @@ namespace dxvk {
       VkExtent3D         extent) {
       // Clear depth if we need to.
       if (depthAspectMask != 0)
-        ClearImageView(alignment, offset, extent, m_state.depthStencil->GetDepthStencilView(true), depthAspectMask, clearValueDepth);
+        ClearImageView(alignment, offset, extent, m_state.depthStencil->GetActiveDepthStencilView(true), depthAspectMask, clearValueDepth);
 
       // Clear render targets if we need to.
       if (Flags & D3DCLEAR_TARGET) {
@@ -3289,7 +3291,7 @@ namespace dxvk {
           if (!HasRenderTargetBound(rt))
             continue;
           const auto& rts = m_state.renderTargets[rt];
-          const auto& rtv = rts->GetRenderTargetView(srgb);
+          const auto& rtv = rts->GetActiveRenderTargetView(srgb);
 
           if (likely(rtv != nullptr)) {
             ClearImageView(alignment, offset, extent, rtv, VK_IMAGE_ASPECT_COLOR_BIT, clearValueColor);
@@ -9518,16 +9520,16 @@ namespace dxvk {
 
     VkSampleCountFlags sampleCount = VK_SAMPLE_COUNT_1_BIT;
     VkExtent2D renderArea = { 0u, 0u };
-    const D3D9CommonTexture* rt0 = GetCommonTexture(m_state.renderTargets[0].ptr());
+    D3D9CommonTexture* rt0 = GetCommonTexture(m_state.renderTargets[0].ptr());
     if (likely(rt0 != nullptr && !rt0->IsNull())) {
-      const DxvkImageCreateInfo& rt0Info = rt0->GetImage()->info();
+      const DxvkImageCreateInfo& rt0Info = rt0->BmvrActiveImage()->info();
       sampleCount = rt0Info.sampleCount;
       renderArea = { rt0Info.extent.width, rt0Info.extent.height };
     }
 
     if (m_state.depthStencil != nullptr) {
-      const D3D9CommonTexture* ds = m_state.depthStencil->GetCommonTexture();
-      const DxvkImageCreateInfo& dsInfo = ds->GetImage()->info();
+      D3D9CommonTexture* ds = m_state.depthStencil->GetCommonTexture();
+      const DxvkImageCreateInfo& dsInfo = ds->BmvrActiveImage()->info();
 
       uint32_t boundRTCount = 0;
       for (uint32_t i = 0; i < m_state.renderTargets.size(); i++) {
@@ -9577,7 +9579,7 @@ namespace dxvk {
         // if it has been transitioned to the feedback loop layout.
         readOnly &= !m_state.depthStencil->GetCommonTexture()->HasBeenTransitionedToHazardLayout();
 
-        attachments.depth.view = m_state.depthStencil->GetDepthStencilView(!readOnly);
+        attachments.depth.view = m_state.depthStencil->GetActiveDepthStencilView(!readOnly);
       }
     }
 
@@ -9585,8 +9587,8 @@ namespace dxvk {
       if (!HasRenderTargetBound(i))
         continue;
 
-      const D3D9CommonTexture* rt = m_state.renderTargets[i]->GetCommonTexture();
-      const DxvkImageCreateInfo& rtInfo = rt->GetImage()->info();
+      D3D9CommonTexture* rt = m_state.renderTargets[i]->GetCommonTexture();
+      const DxvkImageCreateInfo& rtInfo = rt->BmvrActiveImage()->info();
       if (unlikely(rtInfo.extent.width != renderArea.width
           || rtInfo.extent.height != renderArea.height
           || rtInfo.sampleCount != sampleCount)) {
@@ -9623,7 +9625,7 @@ namespace dxvk {
       if (hasHazard && !writtenTo)
         continue;
 
-      attachments.color[i].view = m_state.renderTargets[i]->GetRenderTargetView(srgb);
+      attachments.color[i].view = m_state.renderTargets[i]->GetActiveRenderTargetView(srgb);
     }
 
     // Eye MSAA: the engine sets D3DRS_MULTISAMPLEANTIALIAS=0, and with sample
@@ -10145,7 +10147,7 @@ namespace dxvk {
       if (!surf)
         return;
       D3D9CommonTexture* tex = surf->GetCommonTexture();
-      if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE)
+      if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE || tex->BmvrRetired())
         return;
       if (!tex->MsaaNeedsResolve())
         ++g_bmvrMsaaStats.dirtyMarks;
@@ -11914,4 +11916,49 @@ namespace dxvk {
       return GpuFlushType::ImplicitWeakHint;
   }
 
+}
+
+
+namespace bmvr {
+  // Eye MSAA post switch (see D3D9CommonTexture::BmvrRetired). Retire: resolve
+  // the eye colour (if written) and depth (sample 0) once, then the rest of the
+  // eye's frame runs at 1x. Begin: back to the multisampled images for the
+  // next scene (the caller clears them right after).
+  static void MsaaEyeSet(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth, bool retire) {
+    if (!device)
+      return;
+    auto* dev = static_cast<dxvk::D3D9DeviceEx*>(device);
+    dev->BmvrSetMsaaEyeRetired(color, depth, retire);
+  }
+  void MsaaEyeRetire(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth) {
+    MsaaEyeSet(device, color, depth, true);
+  }
+  void MsaaEyeBegin(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth) {
+    MsaaEyeSet(device, color, depth, false);
+  }
+}
+
+namespace dxvk {
+  void D3D9DeviceEx::BmvrSetMsaaEyeRetired(IDirect3DSurface9* color, IDirect3DSurface9* depth, bool retire) {
+    D3D9DeviceLock lock = LockDevice();
+    bool changed = false;
+    for (IDirect3DSurface9* s : { color, depth }) {
+      if (!s)
+        continue;
+      D3D9CommonTexture* tex = static_cast<D3D9Surface*>(s)->GetCommonTexture();
+      if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE || tex->BmvrRetired() == retire)
+        continue;
+      if (retire) {
+        // Depth: always resolve (sample 0); later passes (hands, glows) test against it.
+        if (tex->IsDepthStencil())
+          tex->MarkMsaaDirty();
+        BmvrResolveMsaaForSample(tex);
+        ++g_bmvrMsaaStats.retires;
+      }
+      tex->BmvrSetRetired(retire);
+      changed = true;
+    }
+    if (changed)
+      m_dirty.set(D3D9DeviceDirtyFlag::Framebuffer);
+  }
 }

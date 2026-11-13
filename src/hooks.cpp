@@ -8378,6 +8378,16 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             dstRect ? dstRect->x : -1, dstRect ? dstRect->y : -1, dstRect ? dstRect->width : -1, dstRect ? dstRect->height : -1, grew);
     if (hkCopyRenderTargetToTextureEx.fOriginal)
         hkCopyRenderTargetToTextureEx.fOriginal(ecx, texture, renderTargetId, srcRect, dstRect);
+    // Eye MSAA: the first copy into _rt_FullFrameFB starts the post chain
+    // (bloom, engine_post, bms_postprocess, FXAA, HUD, hands). Run all of it on
+    // the eye's 1x resolve instead of full-screen passes on 4 samples.
+    if (m_VR && m_VR->UseVrMsaa() && bmvr::g_MsaaPostSwitch)
+    {
+        const char* dn = SafeTextureName(texture);
+        // Material system names come back lower case.
+        if (dn && _stricmp(dn, "_rt_FullFrameFB") == 0)
+            m_VR->RetireMsaaEyeForPost();
+    }
 }
 
 void __fastcall Hooks::dVGui_Paint(void* ecx, void* edx, int mode)

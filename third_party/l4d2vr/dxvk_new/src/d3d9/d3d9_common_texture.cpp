@@ -661,7 +661,8 @@ namespace dxvk {
           UINT                   Lod,
           VkImageUsageFlags      UsageFlags,
           VkImageLayout          Layout,
-          bool                   Srgb) {
+          bool                   Srgb,
+    const Rc<DxvkImage>*         OnImage) {
     DxvkImageViewKey viewInfo;
     viewInfo.format    = m_mapping.ConversionFormatInfo.FormatColor != VK_FORMAT_UNDEFINED
                        ? PickSRGB(m_mapping.ConversionFormatInfo.FormatColor, m_mapping.ConversionFormatInfo.FormatSrgb, Srgb)
@@ -690,7 +691,7 @@ namespace dxvk {
       viewInfo.packedSwizzle = 0u;
 
     // Create the underlying image view object
-    return GetImage()->createView(viewInfo);
+    return (OnImage ? *OnImage : GetImage())->createView(viewInfo);
   }
 
 

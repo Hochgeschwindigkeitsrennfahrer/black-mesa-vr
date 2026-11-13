@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <string>
 
+struct IDirect3DDevice9;
+struct IDirect3DSurface9;
+
 // Crash-sticky retries of L4D2VR mechanisms the old OpenXR prototype banned.
 // If Black Mesa dies mid-attempt, the in-progress flag remains on disk and
 // that attempt is skipped next launch. Successful completion deletes the flag.
@@ -57,6 +60,12 @@ namespace bmvr
     // Set around MaterialSystem CreateNamedRenderTarget for one scene RT.
     // DXVK stamps hlvr_msaa on color and depth created on this thread at
     // that size. Width/height 0 means "whatever size this call creates".
+    // Eye MSAA post switch (implemented in DXVK d3d9_device.cpp): Retire at
+    // the start of post-processing resolves the eye colour + depth once and
+    // makes every later use of those surfaces 1x; Begin undoes it at eye start.
+    void MsaaEyeRetire(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth);
+    void MsaaEyeBegin(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth);
+
     struct Hl2vrMsaaScope
     {
         static int& Depth()
@@ -189,6 +198,7 @@ namespace bmvr
     // dropdown stays stock (None / FXAA); rewriting it crashes that page.
     // A crash during the scoped create persist-skips it (g_MsaaAllowed = false).
     extern uint32_t g_Msaa;
+    extern bool g_MsaaPostSwitch;   // MsaaPostSwitch (default true): post chain on the 1x resolve
     extern bool g_MsaaAllowed;
     uint32_t NormalizeMsaa(int samples);
     extern bool g_Haptics;

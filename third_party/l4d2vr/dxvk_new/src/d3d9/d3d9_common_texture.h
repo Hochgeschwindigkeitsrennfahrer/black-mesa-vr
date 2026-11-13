@@ -359,16 +359,26 @@ namespace dxvk {
 
     const Rc<DxvkImageView>& GetResolveSampleView(bool srgb);
 
-    void MarkMsaaDirty() { m_msaaDirty = true; }
+    void MarkMsaaDirty() { if (!m_bmvrRetired) m_msaaDirty = true; }
     void MarkMsaaResolved() { m_msaaDirty = false; }
-    bool MsaaNeedsResolve() const { return m_msaaDirty; }
+    bool MsaaNeedsResolve() const { return m_msaaDirty && !m_bmvrRetired; }
+
+    // Eye MSAA "retired": the scene is done and resolved; every later bind,
+    // clear, copy or sample of this multisampled texture uses its 1x resolve
+    // image (post-processing, HUD, hands, OpenXR ring copy run at 1x).
+    bool BmvrRetired() const { return m_bmvrRetired; }
+    void BmvrSetRetired(bool retired) { m_bmvrRetired = retired; }
+    const Rc<DxvkImage>& BmvrActiveImage() {
+      return m_bmvrRetired ? GetResolveImage() : m_image;
+    }
 
     Rc<DxvkImageView> CreateView(
             UINT                   Layer,
             UINT                   Lod,
             VkImageUsageFlags      UsageFlags,
             VkImageLayout          Layout,
-            bool                   Srgb);
+            bool                   Srgb,
+            const Rc<DxvkImage>*   OnImage = nullptr);
     D3D9SubresourceBitset& GetUploadBitmask() { return m_needsUpload; }
 
     void SetAllNeedUpload() {
@@ -498,6 +508,7 @@ namespace dxvk {
 
     Rc<DxvkImage>                 m_image;
     Rc<DxvkImage>                 m_resolveImage;
+    bool                          m_bmvrRetired = false;
     Rc<DxvkBuffer>                m_buffer;
     MemoryFileRegion              m_data = { };
 

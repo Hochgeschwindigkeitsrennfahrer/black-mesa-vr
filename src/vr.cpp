@@ -15099,6 +15099,33 @@ void VR::NoteMsaaEyeScene(IDirect3DSurface9* dst, bool copied)
         m_RightEyeMsaaHasScene = true;
 }
 
+void VR::RetireMsaaEyeForPost()
+{
+    // Only the thread drawing this eye knows it: multicore playback TLS, or
+    // the single-threaded stereo blit. Anything else (main thread) does nothing.
+    IDirect3DSurface9* color = McPlaybackEyeSurface();
+    IDirect3DSurface9* depth = McPlaybackEyeDepth();
+    if (!color && !McPipelineEnabled() && StereoEyeBlitActive())
+    {
+        color = StereoEyeBlitDest();
+        depth = color == m_D9LeftEyeSurface ? m_D9LeftEyeDepthSurface
+            : color == m_D9RightEyeSurface ? m_D9RightEyeDepthSurface : nullptr;
+    }
+    if (!color || !g_D3DVR9)
+        return;
+    IDirect3DDevice9* device = nullptr;
+    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
+        return;
+    bmvr::MsaaEyeRetire(device, color, depth);
+    static int s_log;
+    if (s_log < 4)
+    {
+        Game::logMsg("Eye MSAA: post chain switched to 1x (eye surface %p)", (void*)color);
+        ++s_log;
+    }
+    device->Release();
+}
+
 IDirect3DSurface9* VR::ColorTargetForStereoEye(int stereoEye) const
 {
     if (stereoEye == 1)
@@ -16834,6 +16861,10 @@ void VR::ClearStereoEyeSurfaces()
         g_OrigSetViewport(device, &eyeVp);
     else
         device->SetViewport(&eyeVp);
+
+    // Eye MSAA: back to the multisampled surfaces for this eye's scene.
+    if (UseVrMsaa())
+        bmvr::MsaaEyeBegin(device, color, depth);
 
     DWORD flags = D3DCLEAR_TARGET;
     if (depth)

@@ -947,6 +947,8 @@ public:
     bool BlitHmdViewFromBackbuffer(IDirect3DSurface9* dst, bool flushGpu = false);
     void FlushStereoBlitGpu();
     IDirect3DSurface9* ColorTargetForStereoEye(int stereoEye) const;
+    // Eye MSAA: post chain of the eye this thread is drawing runs on its 1x resolve.
+    void RetireMsaaEyeForPost();
     void BeginStereoEyeBlit(IDirect3DSurface9* dst);
     void ClearStereoEyeSurfaces();
     bool EndStereoEyeBlit();
