@@ -65,6 +65,29 @@ extern "C" volatile int g_BmvrD3dDrawTrace;
 extern "C" volatile int g_BmvrFlashlightMatrixFix;
 namespace bmvr { void Log(const char* fmt, ...); }
 
+
+namespace {
+  // Eye MSAA cost counters (per second): full resolves when a multisampled
+  // texture is sampled, StretchRect resolves (same size) and MS blits (scaled).
+  struct BmvrMsaaStats {
+    uint32_t sampleResolves = 0, rectResolves = 0, rectBlits = 0, cachedCopies = 0, dirtyMarks = 0;
+    uint64_t pixels = 0;
+    DWORD last = 0;
+  } g_bmvrMsaaStats;
+
+  void BmvrMsaaStatsTick() {
+    const DWORD now = GetTickCount();
+    if (!g_bmvrMsaaStats.last) { g_bmvrMsaaStats.last = now; return; }
+    if (now - g_bmvrMsaaStats.last < 1000) return;
+    auto& s = g_bmvrMsaaStats;
+    if (s.sampleResolves || s.rectResolves || s.rectBlits || s.cachedCopies)
+      bmvr::Log("Eye MSAA cost/s: resolves=%u (Mpix=%llu) copies from resolved=%u new writes=%u direct ms resolves=%u direct ms blits=%u",
+        s.sampleResolves, (unsigned long long)(s.pixels / 1000000ull), s.cachedCopies, s.dirtyMarks, s.rectResolves, s.rectBlits);
+    s = BmvrMsaaStats{};
+    s.last = now;
+  }
+}
+
 namespace dxvk {
 
 
@@ -2475,6 +2498,22 @@ namespace dxvk {
     if (dstImage == nullptr || srcImage == nullptr)
         return D3DERR_INVALIDCALL;
 
+    // Eye MSAA: every copy out of a multisampled eye (refraction / FullFrame
+    // copies, OpenXR ring, desktop mirror) used to resolve all 4 samples again,
+    // ~10 full-eye resolves per frame. Resolve once per written version into
+    // the texture's 1x resolve image and copy from that.
+    if (srcImage->info().sampleCount != VK_SAMPLE_COUNT_1_BIT
+        && srcTextureInfo->Desc()->MultiSample != D3DMULTISAMPLE_NONE
+        && !srcTextureInfo->IsDepthStencil()
+        && dstImage->info().sampleCount == VK_SAMPLE_COUNT_1_BIT) {
+      if (!srcTextureInfo->MsaaNeedsResolve())
+        ++g_bmvrMsaaStats.cachedCopies;
+      BmvrResolveMsaaForSample(srcTextureInfo);
+      srcImage = srcTextureInfo->GetResolveImage();
+      if (srcImage == nullptr)
+        return D3DERR_INVALIDCALL;
+    }
+
     const DxvkFormatInfo* dstFormatInfo = lookupFormatInfo(dstImage->info().format);
     const DxvkFormatInfo* srcFormatInfo = lookupFormatInfo(srcImage->info().format);
 
@@ -2624,6 +2663,12 @@ namespace dxvk {
       // Compressed destination formats are forbidden for blits.
       if (dstFormatInfo->flags.test(DxvkFormatFlag::BlockCompressed))
         return D3DERR_INVALIDCALL;
+    }
+
+    if (srcImage->info().sampleCount != VK_SAMPLE_COUNT_1_BIT) {
+      if (fastPath) ++g_bmvrMsaaStats.rectResolves; else ++g_bmvrMsaaStats.rectBlits;
+      g_bmvrMsaaStats.pixels += uint64_t(srcCopyExtent.width) * srcCopyExtent.height;
+      BmvrMsaaStatsTick();
     }
 
     if (fastPath) {
@@ -10102,11 +10147,25 @@ namespace dxvk {
       D3D9CommonTexture* tex = surf->GetCommonTexture();
       if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE)
         return;
+      if (!tex->MsaaNeedsResolve())
+        ++g_bmvrMsaaStats.dirtyMarks;
       tex->MarkMsaaDirty();
     };
-    for (uint32_t i = 0; i < m_state.renderTargets.size(); i++)
+    // Only colour targets this draw really writes: glow visibility queries and
+    // depth/stencil-only passes into the eye left it "dirty", so every later
+    // copy resolved all samples again.
+    const auto& psMasks = PSShaderMasks();
+    for (uint32_t i = 0; i < m_state.renderTargets.size(); i++) {
+      if ((psMasks.rtMask & (1u << i)) == 0 || m_state.renderStates[ColorWriteIndex(i)] == 0)
+        continue;
       note(m_state.renderTargets[i].ptr());
-    note(m_state.depthStencil.ptr());
+    }
+    // Depth is only resolved when sampled; keep marking it on every draw.
+    if (m_state.depthStencil != nullptr) {
+      D3D9CommonTexture* ds = m_state.depthStencil->GetCommonTexture();
+      if (ds && ds->Desc()->MultiSample != D3DMULTISAMPLE_NONE)
+        ds->MarkMsaaDirty();
+    }
   }
 
 
@@ -10150,6 +10209,9 @@ namespace dxvk {
       ctx->resolveImage(cDst, cSrc, cRegion, cFormat, cMode, VK_RESOLVE_MODE_SAMPLE_ZERO_BIT);
     });
     tex->MarkMsaaResolved();
+    ++g_bmvrMsaaStats.sampleResolves;
+    g_bmvrMsaaStats.pixels += uint64_t(region.extent.width) * region.extent.height;
+    BmvrMsaaStatsTick();
   }
 
 
