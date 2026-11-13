@@ -1867,15 +1867,17 @@ namespace dxvk {
         VR::TextureID texID = g_Game->m_VR->m_CreatingTextureID;
         HRESULT vrDescResult = D3DERR_INVALIDCALL;
 
+        // texture->, not texture.ref()->: Com::ref() adds a reference, so every
+        // VR texture created here was leaked (eye MSAA panel switches filled VRAM).
         if (texID == VR::Texture_LeftEye) {
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9LeftEyeSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9LeftEyeSurface);
           if (desc.MultiSample == D3DMULTISAMPLE_NONE) {
             textureTarget = &g_Game->m_VR->m_VKLeftEye;
             vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9LeftEyeSurface, &texDesc);
           }
         }
         else if (texID == VR::Texture_RightEye) {
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9RightEyeSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9RightEyeSurface);
           if (desc.MultiSample == D3DMULTISAMPLE_NONE) {
             textureTarget = &g_Game->m_VR->m_VKRightEye;
             vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9RightEyeSurface, &texDesc);
@@ -1883,41 +1885,41 @@ namespace dxvk {
         }
         else if (texID == VR::Texture_LeftEyeSubmit) {
           textureTarget = &g_Game->m_VR->m_VKLeftEye;
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9LeftEyeSubmitSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9LeftEyeSubmitSurface);
           vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9LeftEyeSubmitSurface, &texDesc);
         }
         else if (texID == VR::Texture_RightEyeSubmit) {
           textureTarget = &g_Game->m_VR->m_VKRightEye;
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9RightEyeSubmitSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9RightEyeSubmitSurface);
           vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9RightEyeSubmitSurface, &texDesc);
         }
         else if (texID == VR::Texture_NekoPostLinearInput) {
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9NekoPostLinearInputSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9NekoPostLinearInputSurface);
         }
         else if (texID == VR::Texture_NekoPostSmallInput) {
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9NekoPostSmallInputSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9NekoPostSmallInputSurface);
         }
         else if (texID == VR::Texture_HUD) {
           textureTarget = &g_Game->m_VR->m_VKHUD;
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9HUDSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9HUDSurface);
           vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9HUDSurface, &texDesc);
         }
         else if (texID == VR::Texture_Scope) {
           textureTarget = &g_Game->m_VR->m_VKScope;
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9ScopeSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9ScopeSurface);
           vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9ScopeSurface, &texDesc);
         }
         else if (texID == VR::Texture_RearMirror) {
           textureTarget = &g_Game->m_VR->m_VKRearMirror;
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9RearMirrorSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9RearMirrorSurface);
           vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9RearMirrorSurface, &texDesc);
         }
         else if (texID == VR::Texture_DesktopMirror) {
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9DesktopMirrorSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9DesktopMirrorSurface);
         }
         else if (texID == VR::Texture_Blank) {
           textureTarget = &g_Game->m_VR->m_VKBlankTexture;
-          texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9BlankSurface);
+          texture->GetSurfaceLevel(0, &g_Game->m_VR->m_D9BlankSurface);
           vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9BlankSurface, &texDesc);
         }
 
