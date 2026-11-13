@@ -57,6 +57,15 @@ namespace
     std::vector<std::string> g_EngCmds;   // run by FlushPanelEngineCommands (game thread)
 
     bool IsEngineCvarKey(const char* key) { return key && std::strncmp(key, "cvar:", 5) == 0; }
+    // Toggle console commands (god, noclip, notarget): "cmd:" rows send the
+    // command on every click and are never saved. Noclip is read back from
+    // the player's move type; god/notarget live only in server flags, so
+    // their rows show what the panel last set this run.
+    bool g_DevGod = false;
+    bool g_DevNoclip = false;
+    bool g_DevNotarget = false;
+    bool IsEngineCmdKey(const char* key) { return key && std::strncmp(key, "cmd:", 4) == 0; }
+    bool IsEngineKey(const char* key) { return IsEngineCvarKey(key) || IsEngineCmdKey(key); }
 
     enum class RowKind { Tab, Section, Toggle, Number, Button, Close };
 
@@ -190,6 +199,10 @@ namespace
             { "r_dopixelvisibility", RowKind::Toggle, "cvar:r_dopixelvisibility", &g_EngPixelVis, nullptr, 0, 0, 0, nullptr },
             { "r_3dsky", RowKind::Toggle, "cvar:r_3dsky", &g_Eng3dSky, nullptr, 0, 0, 0, nullptr },
             { "rope_smooth_minwidth", RowKind::Number, "cvar:rope_smooth_minwidth", nullptr, &g_EngRopeMinWidth, 0.1f, 0.f, 3.f, "%.1f" },
+            // Turning one on also sets sv_cheats 1.
+            { "God mode", RowKind::Toggle, "cmd:god", &g_DevGod, nullptr, 0, 0, 0, nullptr },
+            { "No clip", RowKind::Toggle, "cmd:noclip", &g_DevNoclip, nullptr, 0, 0, 0, nullptr },
+            { "No target", RowKind::Toggle, "cmd:notarget", &g_DevNotarget, nullptr, 0, 0, 0, nullptr },
             // Hand/glove placement tuning; saved like the other settings.
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
@@ -677,6 +690,13 @@ void VR::FlushPanelEngineCommands()
         return;
     s_lastRead = now;
     bool changed = false;
+    // MOVETYPE_NOCLIP = 8.
+    const int moveType = m_Game->LocalPlayerMoveType();
+    if (moveType >= 0 && g_DevNoclip != (moveType == 8))
+    {
+        g_DevNoclip = moveType == 8;
+        changed = true;
+    }
     for (Row& r : Rows())
     {
         if (!IsEngineCvarKey(r.key))
@@ -780,7 +800,7 @@ void VR::CloseSettingsPanel(const char* why)
         std::vector<std::string> drop;
         for (const Row& r : Rows())
         {
-            if (!r.key || IsEngineCvarKey(r.key))
+            if (!r.key || IsEngineKey(r.key))
                 continue;
             if (IsDefault(r))
                 drop.emplace_back(r.key);
@@ -1039,7 +1059,14 @@ void VR::UpdateSettingsPanel()
         m_SettingsPausedGame = bmvr::g_VrSettingsPause;
         m_PendingPauseCmd.store(m_SettingsPausedGame ? 1 : 2, std::memory_order_release);
     }
-    if (IsEngineCvarKey(r.key))
+    if (IsEngineCmdKey(r.key))
+    {
+        std::lock_guard<std::mutex> lock(g_EngCmdLock);
+        if (r.b && *r.b)
+            g_EngCmds.emplace_back("sv_cheats 1");
+        g_EngCmds.emplace_back(r.key + 4);
+    }
+    else if (IsEngineCvarKey(r.key))
     {
         char cmd[96]{};
         if (r.kind == RowKind::Toggle)

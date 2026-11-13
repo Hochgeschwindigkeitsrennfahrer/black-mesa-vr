@@ -8407,7 +8407,11 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     // per frame behind the train windows). With this on, only the first copy of
     // each eye's frame runs; later glass refracts that copy (glass behind glass
     // is then missing from the refraction). Any other writer resets it.
-    if (bmvr::g_RefractOncePerEye && m_VR)
+    // Off while the player's eyes are under water: the underwater screen warp
+    // copies after the gun is drawn, and skipping that copy hid the gun and
+    // hand (2026-11-13). (The viewmodel pass is not visible on the drawing
+    // thread with MulticoreMode, so the water level decides.)
+    if (bmvr::g_RefractOncePerEye && m_VR && !(m_Game && m_Game->LocalPlayerWaterLevel() == 3))
     {
         const char* rn = SafeTextureName(texture);
         if (rn && _stricmp(rn, "_rt_PowerOfTwoFB") == 0)

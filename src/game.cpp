@@ -879,6 +879,28 @@ int Game::LocalPlayerMoveType()
     return value;
 }
 
+// m_nWaterLevel of the local player (3 = eyes under water), -1 when unavailable.
+int Game::LocalPlayerWaterLevel()
+{
+    ScanWristHudNetVars();
+    if (g_nvWaterLevel < 0 || !m_EngineClient || !m_ClientEntityList)
+        return -1;
+    const int local = m_EngineClient->GetLocalPlayer();
+    void* player = local > 0 ? m_ClientEntityList->GetClientEntity(local) : nullptr;
+    if (!player)
+        return -1;
+    unsigned char value = 0;
+    BMVR_TRY
+    {
+        value = *reinterpret_cast<volatile unsigned char*>(static_cast<unsigned char*>(player) + g_nvWaterLevel);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1;
+    }
+    return value <= 3 ? value : -1;
+}
+
 // m_fFlags of the local player, -1 when unavailable. Retired when FL_CLIENT
 // (bit 8) is missing: then the scan did not land on the player's flags.
 int Game::LocalPlayerFlags()
