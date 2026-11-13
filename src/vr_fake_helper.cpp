@@ -32,6 +32,7 @@
 //                                <ms> earlier (the PS VR2 Sense on SteamVR: every third
 //                                pose at 90/s barely moves, then the next ones catch up)
 //   msaa <0|2|4>                 eye MSAA, like the VR panel row (live eye recreate)
+//   perflog <0|1>                PerfLog, like the VR panel Debug row (live)
 // <VR dir>\cmd.txt: console commands, one per line, appended by the test; each new
 // line is run once (ClientCmd_Unrestricted on the engine thread).
 
@@ -191,6 +192,13 @@ namespace
             else if (key == "size") ss >> fresh.width >> fresh.height;
             else if (key == "fov") ss >> fresh.tanOut >> fresh.tanIn >> fresh.tanUp >> fresh.tanDown;
             else if (key == "ipd") ss >> fresh.ipd;
+            else if (key == "perflog")
+            {
+                // Same as the VR panel's Debug -> Performance log row.
+                int on = 0;
+                ss >> on;
+                bmvr::g_PerfLog = on != 0;
+            }
             else if (key == "msaa")
             {
                 // Same as the VR panel's MSAA row: 0/2/4, applied live.

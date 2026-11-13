@@ -1325,6 +1325,29 @@ static void InstallParticleLevel(uintptr_t client)
     Game::logMsg("particle level: RenderStart hook %s", ok ? "on" : "FAILED");
 }
 
+static uintptr_t g_PerfLogClient;
+static bool g_PerfLogApplied;
+static void InstallEngineWorldBatchStats();
+static void InstallBoneParticleProf(uintptr_t client);
+
+// VR panel Debug -> PerfLog switched while playing: the stats that are only
+// hooked when PerfLog is on at startup are hooked now; the rest are flag checks
+// (the wait profiler starts on the next frame by itself).
+static void ApplyPerfLogLive()
+{
+    if (bmvr::g_PerfLog == g_PerfLogApplied || !g_PerfLogClient)
+        return;
+    g_PerfLogApplied = bmvr::g_PerfLog;
+    char v[8] = {};
+    g_PixelVisStatsOn = (GetEnvironmentVariableA("BMVR_PIXELVIS_STATS", v, sizeof(v)) && v[0] == '1') || bmvr::g_PerfLog;
+    if (bmvr::g_PerfLog)
+    {
+        InstallEngineWorldBatchStats();
+        InstallBoneParticleProf(g_PerfLogClient);
+    }
+    Game::logMsg("PerfLog %s (VR panel)", bmvr::g_PerfLog ? "on" : "off");
+}
+
 static void InstallPixelVisStats(uintptr_t client)
 {
     // Always hooked (one flag test per glow when idle) so bmvr_glow_trace
@@ -1385,6 +1408,8 @@ static void InstallPixelVisPerEye()
         }
     }
     g_ClientCurrentViewId = reinterpret_cast<ClientCurrentViewIdFn>(target);
+    g_PerfLogClient = client;
+    g_PerfLogApplied = bmvr::g_PerfLog;
     InstallPixelVisStats(client);
     InstallParticleLevel(client);
     InstallEngineWorldBatchStats();
@@ -6015,6 +6040,7 @@ ITexture* __fastcall Hooks::dGetRenderTarget(void* ecx, void* edx)
 
 void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int nClearFlags, int whatToDraw)
 {
+    ApplyPerfLogLive();
     (void)edx;
     struct ProfFrame
     {
