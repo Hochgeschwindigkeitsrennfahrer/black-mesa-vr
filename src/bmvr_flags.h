@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+class Game;
+
 // Crash-sticky retries of L4D2VR mechanisms the old OpenXR prototype banned.
 // If Black Mesa dies mid-attempt, the in-progress flag remains on disk and
 // that attempt is skipped next launch. Successful completion deletes the flag.
@@ -485,6 +487,10 @@ namespace bmvr
     // only values that differ from it, so a later default change reaches players
     // who never touched that setting.
     void CapturePanelDefaults();
+    // Debug capture: the VR panel's switches and engine settings as bm-scenario
+    // "cmd" lines (bmvr_* cvars, engine cvars), so a headless restore runs with
+    // exactly the session's settings. Game thread (reads engine cvars).
+    std::string CaptureSettingsScenario(Game* game);
     extern float g_FxaaSubpixel;
     extern float g_FxaaEdgeThreshold;
     extern float g_FxaaEdgeThresholdMin;

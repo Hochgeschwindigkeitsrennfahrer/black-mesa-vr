@@ -444,4 +444,14 @@ namespace bmvr
                 *c.floatTarget = v;
         }
     }
+
+    const char* VrCvarNameFor(const void* target)
+    {
+        if (!target)
+            return nullptr;
+        for (const VrCvar& c : g_Cvars)
+            if (static_cast<const void*>(c.boolTarget) == target || static_cast<const void*>(c.floatTarget) == target)
+                return c.name;
+        return nullptr;
+    }
 }

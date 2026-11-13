@@ -12,4 +12,8 @@ namespace bmvr
     // (once client.dll's cvars exist), later calls copy their values into the
     // bmvr::g_* flags the VR code reads.
     void TickVrCvars(Game* game);
+
+    // Name of the bmvr_* cvar whose flag is *target (bool* or float*), or
+    // nullptr (capture restore files set panel switches through these).
+    const char* VrCvarNameFor(const void* target);
 }

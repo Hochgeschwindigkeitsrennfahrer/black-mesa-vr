@@ -28,6 +28,10 @@
 //                                Optional 7th value <arc>: extra up-and-down bump of
 //                                <arc> metres (sin over the move), so the direction
 //                                changes along the swing like an overhand arc.
+//   raw <hmd|gripl|gripr|aiml|aimr> <px> <py> <pz> <qx> <qy> <qz> <qw>
+//                                exact OpenXR pose (metres, x right, y up, -z forward) for that
+//                                slot, as a capture recorded it (VR/capture-*-state.txt); replaces
+//                                the hmd/left/right line for it (grip and aim set separately)
 //   poselag <every> <ms>         every <every>-th pose reports the hand where it was
 //                                <ms> earlier (the PS VR2 Sense on SteamVR: every third
 //                                pose at 90/s barely moves, then the next ones catch up)
@@ -64,6 +68,14 @@ namespace
         float x = 0, y = 0, z = 0, pitch = 0, yaw = 0, roll = 0;
     };
 
+    struct RawPose
+    {
+        bool set = false;
+        float pos[3] = {};
+        float quat[4] = { 0, 0, 0, 1 };
+    };
+    enum RawSlot { kRawHmd, kRawGripL, kRawGripR, kRawAimL, kRawAimR, kRawCount };
+
     struct FakeScript
     {
         uint32_t width = 2884, height = 2940;
@@ -81,6 +93,7 @@ namespace
         float throwArc = 0.f;
         int poseLagEvery = 0;
         float poseLagMs = 0.f;
+        RawPose raw[kRawCount];
     };
 
     std::mutex g_CmdMutex;
@@ -177,6 +190,8 @@ namespace
         fresh.throwArc = 0.f;
         fresh.poseLagEvery = 0;
         fresh.poseLagMs = 0.f;
+        for (RawPose& r : fresh.raw)
+            r = RawPose{};
         std::string line;
         while (std::getline(in, line))
         {
@@ -203,6 +218,19 @@ namespace
                    >> fresh.throwSec >> fresh.throwRelease;
                 if (!(ss >> fresh.throwArc))
                     fresh.throwArc = 0.f;
+            }
+            else if (key == "raw")
+            {
+                std::string slot;
+                ss >> slot;
+                const int i = slot == "hmd" ? kRawHmd : slot == "gripl" ? kRawGripL : slot == "gripr" ? kRawGripR
+                    : slot == "aiml" ? kRawAimL : slot == "aimr" ? kRawAimR : -1;
+                RawPose r{};
+                if (i >= 0 && (ss >> r.pos[0] >> r.pos[1] >> r.pos[2] >> r.quat[0] >> r.quat[1] >> r.quat[2] >> r.quat[3]))
+                {
+                    r.set = true;
+                    fresh.raw[i] = r;
+                }
             }
             else if (key == "poselag")
                 ss >> fresh.poseLagEvery >> fresh.poseLagMs;
@@ -375,6 +403,11 @@ namespace
             hmd.viewStateFlags = 0xF;
             hmd.displayTime = t;
             ToOpenXr(script.hmd, hmd.position, hmd.orientation);
+            if (script.raw[kRawHmd].set)
+            {
+                std::memcpy(hmd.position, script.raw[kRawHmd].pos, sizeof(hmd.position));
+                std::memcpy(hmd.orientation, script.raw[kRawHmd].quat, sizeof(hmd.orientation));
+            }
             std::memcpy(&hmd.reserved0, &script.ipd, sizeof(float));
             ++state->trackingPoseGeneration;
             std::atomic_thread_fence(std::memory_order_release);
@@ -425,8 +458,21 @@ namespace
                 p.locationFlags = 0xF;
                 p.displayTime = t;
                 ToOpenXr(*hands[h], p.position, p.orientation);
-                in.controllerPoses[h] = p;
-                in.controllerAimPoses[h] = p;
+                L4D2VROpenXrControllerPoseDesc grip = p, aim = p;
+                const RawPose& rg = script.raw[h == 0 ? kRawGripL : kRawGripR];
+                const RawPose& ra = script.raw[h == 0 ? kRawAimL : kRawAimR];
+                if (rg.set && !(throwActive && h == 1))
+                {
+                    std::memcpy(grip.position, rg.pos, sizeof(grip.position));
+                    std::memcpy(grip.orientation, rg.quat, sizeof(grip.orientation));
+                }
+                if (ra.set && !(throwActive && h == 1))
+                {
+                    std::memcpy(aim.position, ra.pos, sizeof(aim.position));
+                    std::memcpy(aim.orientation, ra.quat, sizeof(aim.orientation));
+                }
+                in.controllerPoses[h] = grip;
+                in.controllerAimPoses[h] = aim;
             }
             for (uint32_t a = 1; a < L4D2VR_OPENXR_ACTION_COUNT; ++a)
             {
