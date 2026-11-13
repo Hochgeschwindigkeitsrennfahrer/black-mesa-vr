@@ -199,6 +199,12 @@ namespace
                 ss >> on;
                 bmvr::g_PerfLog = on != 0;
             }
+            else if (key == "lodbias")
+            {
+                float v = 0.f;
+                ss >> v;
+                bmvr::g_LodBias = v;
+            }
             else if (key == "a2c")
             {
                 int on = 0;

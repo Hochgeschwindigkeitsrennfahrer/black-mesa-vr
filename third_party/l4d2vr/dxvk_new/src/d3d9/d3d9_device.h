@@ -1101,6 +1101,7 @@ namespace dxvk {
     void BmvrApplyHl2vrMsaa(D3D9_COMMON_TEXTURE_DESC& desc);
     void BmvrNoteMsaaAttachmentsWritten();
     bool m_bmvrMsRaster = false;
+    float m_bmvrLodBias = 0.0f;   // bmvr::g_LodBias as applied to the bound samplers (0 off the 3D views)
     void BmvrSetMsaaEyeRetired(IDirect3DSurface9* color, IDirect3DSurface9* depth, bool retire);
     void BmvrResolveMsaaForSample(D3D9CommonTexture* tex, bool force = false);
     void BmvrResolvePendingDepth();

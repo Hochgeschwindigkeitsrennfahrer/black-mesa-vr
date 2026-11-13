@@ -145,6 +145,9 @@ namespace
             // Leaves, grass, fences: their cut-out edges get the MSAA samples
             // too (softer, less crawl; can look a bit thinner). Needs MSAA on.
             { "MSAA on foliage edges", RowKind::Toggle, "AlphaToCoverage", &bmvr::g_AlphaToCoverage, nullptr, 0, 0, 0, nullptr },
+            // Mip LOD bias in the 3D views: + = calmer, softer textures (sand,
+            // gravel, grates shimmer less); menus and the HUD stay sharp.
+            { "Texture calm (LOD bias)", RowKind::Number, "LodBias", nullptr, &bmvr::g_LodBias, 0.25f, -0.5f, 2.f, "%+.2f" },
             { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },

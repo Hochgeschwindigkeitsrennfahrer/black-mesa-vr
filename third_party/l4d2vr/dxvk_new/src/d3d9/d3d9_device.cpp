@@ -10130,7 +10130,8 @@ namespace dxvk {
       cIsMultiMip = tex && (tex->Desc()->MipLevels > 1u),
       cIsDepth    = bool(m_textureSlotTracking.depth & (1u << Sampler)),
       cView       = std::move(imageView),
-      cBindId     = m_samplerBindCount
+      cBindId     = m_samplerBindCount,
+      cBmvrBias   = m_bmvrLodBias
     ] (DxvkContext* ctx) {
       DxvkSamplerKey key = { };
 
@@ -10170,6 +10171,7 @@ namespace dxvk {
 
         float lodBias = cState.mipLodBias;
         lodBias += m_d3d9Options.samplerLodBias;
+        lodBias += cBmvrBias;   // no effect on single-level textures
 
         if (m_d3d9Options.clampNegativeLodBias)
           lodBias = std::max(lodBias, 0.0f);
@@ -10462,6 +10464,23 @@ namespace dxvk {
 
     if (unlikely(m_dirty.test(D3D9DeviceDirtyFlag::ViewportScissor)))
       BindViewportAndScissor();
+
+    // BMVR LodBias (VR panel): mipmapped textures sample a little blurrier in
+    // the 3D views (eyes, water reflection/refraction: RT0 taller than the
+    // 1080 window/HUD), calming texture shimmer. Menus, HUD and the window
+    // keep the stock bias. A change rebinds every sampler.
+    {
+      float bias = 0.0f;
+      if (bmvr::g_LodBias != 0.0f) {
+        const D3D9CommonTexture* rt0 = GetCommonTexture(m_state.renderTargets[0].ptr());
+        if (rt0 != nullptr && rt0->Desc()->Height > 1100u)
+          bias = bmvr::g_LodBias;
+      }
+      if (unlikely(bias != m_bmvrLodBias)) {
+        m_bmvrLodBias = bias;
+        m_textureSlotTracking.samplerStateDirty = ~0u;
+      }
+    }
 
     const uint32_t activeDirtySamplers = m_textureSlotTracking.samplerStateDirty & usedTextureMask;
     if (unlikely(activeDirtySamplers))

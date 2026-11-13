@@ -86,6 +86,7 @@ namespace bmvr
     bool g_MsaaPostSwitch = true;
     float g_MsaaF = 0.f;
     bool g_AlphaToCoverage = false;
+    float g_LodBias = 0.f;
     bool g_RefractOncePerEye = false;
     bool g_MsaaAllowed = true;
     bool g_Haptics = true;
@@ -730,6 +731,8 @@ namespace bmvr
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassTiming") == 0)
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "LodBias") == 0)
+                g_LodBias = std::clamp(static_cast<float>(atof(val)), -1.f, 2.f);
             else if (std::strcmp(n, "AlphaToCoverage") == 0)
                 g_AlphaToCoverage = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RefractOncePerEye") == 0)
