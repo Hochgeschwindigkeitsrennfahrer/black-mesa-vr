@@ -82,7 +82,10 @@ if [[ $profile != live ]]; then
 	# run with the live mode's settings (2026-11-05: CSM on in "VR" runs). With the mod in place, have the mod's
 	# bmvr_local.cfg exec the profile's values after that. A flat run sees the live cloud copy: check the live mode.
 	if [[ -z ${BMVR_FLAT:-} ]]; then
-		put "$pdir/config.cfg" bms/cfg/bmvr_harness_profile.cfg
+		# Map state the game archives in config.cfg (sv_skyname = the sky of the map played last when the profile was
+		# saved) is not a setting: re-exec'd after a load it put a stale underground sky on bm_c2a5a (2026-11-13).
+		grep -v -E '^sv_skyname ' "$pdir/config.cfg" > "$out/overlay/profile.cfg" || true
+		put "$out/overlay/profile.cfg" bms/cfg/bmvr_harness_profile.cfg
 		{ printf 'exec bmvr_harness_profile\r\n'; cat "$GAME/bms/cfg/bmvr_local.cfg" 2>/dev/null || true; } > "$out/overlay/local.cfg"
 		put "$out/overlay/local.cfg" bms/cfg/bmvr_local.cfg
 	elif [[ $profile != "$(cat "$GAME/.bmvr-settings/live" 2>/dev/null)" ]]; then
@@ -181,7 +184,7 @@ if [[ -z ${BMVR_FLAT:-} && $profile != live ]]; then
 		[[ $line =~ ^([A-Za-z_][A-Za-z0-9_]*)\ \"([^\"]*)\"$ ]] || continue
 		[[ -n ${BASH_REMATCH[2]} && ${BASH_REMATCH[2]} != *" "* ]] || continue
 		profile_args+=("+${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")
-	done < <(tr -d '\r' < "$pdir/config.cfg" | grep -v -E '^(bind|unbind)')
+	done < <(tr -d '\r' < "$pdir/config.cfg" | grep -v -E '^(bind|unbind|sv_skyname) ')
 	echo "profile cvars on the command line: $(( ${#profile_args[@]} / 2 ))" >> "$out/run.log"
 fi
 # BMVR_CVARS="name=value ...": a deliberate off-profile run. Overrides those cvars at startup AND in the expected
