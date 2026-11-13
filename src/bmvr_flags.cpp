@@ -179,6 +179,8 @@ namespace bmvr
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
     bool g_GlowCountDepthFix = true;
+    // MulticoreMode: hands/laser of both eyes drawn from one per-frame snapshot (VR::HandDrawSnap).
+    bool g_McHandSnapshot = true;
     bool g_SkyWaterPerEye = true;
     bool g_EyeUnderwaterWorld = true;
     bool g_FlareEyeAxis = true;

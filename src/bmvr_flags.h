@@ -443,6 +443,7 @@ namespace bmvr
     // draw keeps its DepthRange(0, 0.01) instead of the viewmodel 0..1 rewrite;
     // false = glows behind objects show full bright when a sliver peeks out.
     extern bool g_GlowCountDepthFix;
+    extern bool g_McHandSnapshot;
     extern bool g_SkyWaterPerEye;
     extern bool g_EyeUnderwaterWorld;
     extern bool g_FlareEyeAxis;

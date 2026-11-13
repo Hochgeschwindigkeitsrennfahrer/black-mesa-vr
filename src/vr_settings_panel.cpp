@@ -199,6 +199,7 @@ namespace
             { "Pose valid never blinks", RowKind::Toggle, nullptr, &bmvr::g_PoseFlagsNoBlink, nullptr, 0, 0, 0, nullptr },
             { "Glow queries per eye", RowKind::Toggle, nullptr, &bmvr::g_PixelVisPerEye, nullptr, 0, 0, 0, nullptr },
             { "Glow through objects fix", RowKind::Toggle, nullptr, &bmvr::g_GlowCountDepthFix, nullptr, 0, 0, 0, nullptr },
+            { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
             { "Lights culled per eye", RowKind::Toggle, nullptr, &bmvr::g_LightCullEyeView, nullptr, 0, 0, 0, nullptr },
             { "Flares: one layout", RowKind::Toggle, nullptr, &bmvr::g_FlareSharedLayout, nullptr, 0, 0, 0, nullptr },
             { "Flares level with horizon", RowKind::Toggle, nullptr, &bmvr::g_FlareLevel, nullptr, 0, 0, 0, nullptr },
