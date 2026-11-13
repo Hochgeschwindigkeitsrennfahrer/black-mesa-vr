@@ -65,6 +65,8 @@ namespace bmvr
     // makes every later use of those surfaces 1x; Begin undoes it at eye start.
     void MsaaEyeRetire(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth);
     void MsaaEyeBegin(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth);
+    // Audit: " ms=N ret=R pend=P sic=S" for a depth surface (eye MSAA state), "" when not multisampled.
+    void MsaaDepthStateText(IDirect3DSurface9* depth, char* out, size_t outSize);
 
     struct Hl2vrMsaaScope
     {

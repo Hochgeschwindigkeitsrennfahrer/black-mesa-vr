@@ -723,13 +723,15 @@ namespace
                 device->GetRenderState(D3DRS_STENCILENABLE, &stencilOn);
                 IDirect3DSurface9* depthSurface = nullptr;
                 D3DSURFACE_DESC depthDesc{};
+                char msState[64] = {};
                 if (SUCCEEDED(device->GetDepthStencilSurface(&depthSurface)) && depthSurface)
                 {
                     depthSurface->GetDesc(&depthDesc);
+                    bmvr::MsaaDepthStateText(depthSurface, msState, sizeof(msState));
                     depthSurface->Release();
                 }
-                char zb[64];
-                std::snprintf(zb, sizeof(zb), " z=%lu zw=%lu st=%lu ds=%ux%u", zOn, zWrite, stencilOn, depthDesc.Width, depthDesc.Height);
+                char zb[128];
+                std::snprintf(zb, sizeof(zb), " z=%lu zw=%lu st=%lu ds=%ux%u%s", zOn, zWrite, stencilOn, depthDesc.Width, depthDesc.Height, msState);
                 line += zb;
             }
             std::string reads;
@@ -973,7 +975,7 @@ namespace
 
     void AuditClear(IDirect3DDevice9* device, DWORD flags)
     {
-        if (g_AuditFramesLeft.load(std::memory_order_acquire) <= 0 || !device || !(flags & D3DCLEAR_TARGET))
+        if (g_AuditFramesLeft.load(std::memory_order_acquire) <= 0 || !device)
             return;
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
         std::lock_guard<std::recursive_mutex> lock(g_AuditMutex);
@@ -987,11 +989,24 @@ namespace
         if (AuditLogging() && g_AuditLines < kAuditMaxLines)
         {
             AuditFlushGroup();
-            Game::logMsg("audit f%u e%d%s: Clear RT0 %p %ux%u[%s]", g_AuditFrame, eye,
-                vr && vr->HudPaintActive() ? " HUD" : "", key, rw, rh, AuditSizeLabel(vr, rw, rh));
+            // Depth-only clears too (water passes): which depth, and its eye MSAA state.
+            IDirect3DSurface9* ds = nullptr;
+            D3DSURFACE_DESC dd{};
+            char msState[64] = {};
+            if (SUCCEEDED(device->GetDepthStencilSurface(&ds)) && ds)
+            {
+                ds->GetDesc(&dd);
+                bmvr::MsaaDepthStateText(ds, msState, sizeof(msState));
+                ds->Release();
+            }
+            Game::logMsg("audit f%u e%d%s: Clear%s%s%s RT0 %p %ux%u[%s] ds %p %ux%u%s", g_AuditFrame, eye,
+                vr && vr->HudPaintActive() ? " HUD" : "",
+                (flags & D3DCLEAR_TARGET) ? " C" : "", (flags & D3DCLEAR_ZBUFFER) ? " Z" : "", (flags & D3DCLEAR_STENCIL) ? " S" : "",
+                key, rw, rh, AuditSizeLabel(vr, rw, rh), (void*)ds, dd.Width, dd.Height, msState);
             ++g_AuditLines;
         }
-        AuditMarkWritten(vr, key, rw, rh, eye);
+        if (flags & D3DCLEAR_TARGET)
+            AuditMarkWritten(vr, key, rw, rh, eye);
     }
 
     void AuditSetDrawHooks(bool on)

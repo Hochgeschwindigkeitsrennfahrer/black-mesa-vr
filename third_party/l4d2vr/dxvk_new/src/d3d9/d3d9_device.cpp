@@ -12056,6 +12056,18 @@ namespace bmvr {
   void MsaaEyeBegin(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth) {
     MsaaEyeSet(device, color, depth, false);
   }
+  void MsaaDepthStateText(IDirect3DSurface9* depth, char* out, size_t outSize) {
+    if (!out || !outSize)
+      return;
+    out[0] = 0;
+    if (!depth)
+      return;
+    dxvk::D3D9CommonTexture* tex = static_cast<dxvk::D3D9Surface*>(depth)->GetCommonTexture();
+    if (!tex || tex->Desc()->MultiSample == D3DMULTISAMPLE_NONE)
+      return;
+    std::snprintf(out, outSize, " ms=%u ret=%d pend=%d sic=%d", uint32_t(tex->Desc()->MultiSample),
+      tex->BmvrRetired() ? 1 : 0, tex->BmvrDepthPending() ? 1 : 0, tex->BmvrStandInClear() ? 1 : 0);
+  }
 }
 
 namespace dxvk {
