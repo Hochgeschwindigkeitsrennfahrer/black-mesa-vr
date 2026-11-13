@@ -142,6 +142,9 @@ namespace
             { "Smoke stays upright", RowKind::Toggle, "ParticleLevel", &bmvr::g_ParticleLevel, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (MSAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "MSAA on edges (0 = off)", RowKind::Number, "Msaa", nullptr, &bmvr::g_MsaaF, 2.f, 0.f, 4.f, "%.0fx" },
+            // Leaves, grass, fences: their cut-out edges get the MSAA samples
+            // too (softer, less crawl; can look a bit thinner). Needs MSAA on.
+            { "MSAA on foliage edges", RowKind::Toggle, "AlphaToCoverage", &bmvr::g_AlphaToCoverage, nullptr, 0, 0, 0, nullptr },
             { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },

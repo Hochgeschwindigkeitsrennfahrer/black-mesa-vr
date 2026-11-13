@@ -3715,6 +3715,8 @@ namespace dxvk {
         case D3DRS_SRCBLEND:
         case D3DRS_SRCBLENDALPHA:
           m_dirty.set(D3D9DeviceDirtyFlag::BlendState);
+          if (State == D3DRS_ALPHABLENDENABLE && bmvr::g_AlphaToCoverage)
+            UpdateAlphaToCoverangeAndAlphaTest();   // BMVR alpha to coverage skips blended draws
           break;
 
         case D3DRS_COLORWRITEENABLE:
@@ -9803,18 +9805,25 @@ namespace dxvk {
       const bool isNVATOCEnabled  = m_state.renderStates[D3DRS_ADAPTIVETESS_Y] == uint32_t(D3D9Format::ATOC)
                                       && m_state.renderStates[D3DRS_ALPHATESTENABLE] != 0;
       const bool isAMD = m_adapter->GetVendorId() == uint32_t(DxvkGpuVendor::Amd);
-      alphaToCoverageEnabled &= (isAMD && isAMDATOCEnabled) || (!isAMD && isNVATOCEnabled);
+      // BMVR AlphaToCoverage (VR panel): every alpha-tested draw into the
+      // multisampled eye uses alpha to coverage instead (foliage, fences).
+      const bool isBmvrATOC = bmvr::g_AlphaToCoverage && m_state.renderStates[D3DRS_ALPHATESTENABLE] != 0
+        && m_state.renderStates[D3DRS_ALPHABLENDENABLE] == 0;   // blended draws need their alpha as is
+      alphaToCoverageEnabled &= (isAMD && isAMDATOCEnabled) || (!isAMD && isNVATOCEnabled) || isBmvrATOC;
 
       // Check sample count of RT 0
       const D3D9CommonTexture* rt0 = GetCommonTexture(m_state.renderTargets[0].ptr());
       const bool isMultisampled = rt0 != nullptr && (
         rt0->Desc()->MultiSample >= D3DMULTISAMPLE_2_SAMPLES
         || (rt0->Desc()->MultiSample == D3DMULTISAMPLE_NONMASKABLE && rt0->Desc()->MultisampleQuality > 0)
-      );
+      )
+        // Eye MSAA: a retired eye (post chain) draws into its 1x resolve image.
+        && const_cast<D3D9CommonTexture*>(rt0)->BmvrActiveImage()->info().sampleCount != VK_SAMPLE_COUNT_1_BIT;
       alphaToCoverageEnabled &= isMultisampled;
 
       if (m_atocEnabled != alphaToCoverageEnabled) {
         m_dirty.set(D3D9DeviceDirtyFlag::MultiSampleState);
+        m_dirty.set(D3D9DeviceDirtyFlag::AlphaTestState);   // BmvrAlphaSharpen
         m_atocEnabled = alphaToCoverageEnabled;
       }
     }
@@ -10074,6 +10083,14 @@ namespace dxvk {
       : 0u;
 
     UpdateAlphaTestSpec(alphaOp, precision);
+
+    // BMVR AlphaToCoverage: the alpha test became coverage. Sharpen the
+    // shader's alpha around the reference first (alpha - ref) / fwidth(alpha)
+    // + 0.5, so only the cut-out edge gets partial coverage; with the raw
+    // texture alpha whole leaves went thin and dithered.
+    const bool sharpen = m_atocEnabled && bmvr::g_AlphaToCoverage && rs[D3DRS_ALPHATESTENABLE] != 0;
+    if (m_specInfo.set<SpecBmvrAlphaSharpen>(sharpen ? 1u : 0u))
+      m_dirty.set(D3D9DeviceDirtyFlag::SpecializationEntries);
   }
 
 
@@ -12054,7 +12071,10 @@ namespace dxvk {
         tex->BmvrSetStandInClear(true);
       }
     }
-    if (changed)
+    if (changed) {
       m_dirty.set(D3D9DeviceDirtyFlag::Framebuffer);
+      // RT0's active sample count changed: alpha to coverage may switch.
+      UpdateAlphaToCoverangeAndAlphaTest();
+    }
   }
 }

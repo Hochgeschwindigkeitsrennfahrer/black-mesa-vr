@@ -3688,6 +3688,29 @@ void DxsoCompiler::emitControlFlowGenericLoop(
         1, &alphaComponentId);
 
       DoFixedFunctionAlphaTest(m_module, alphaTestContext);
+
+      // BMVR alpha to coverage (SpecBmvrAlphaSharpen, set only while the test
+      // is replaced by coverage): alpha = saturate((a - ref) / fwidth(a) + 0.5).
+      {
+        uint32_t vec4Type = m_module.defVectorType(floatType, 4);
+        uint32_t boolType = m_module.defBoolType();
+        uint32_t sharpen = m_module.opINotEqual(boolType,
+          m_spec.get(m_module, m_specUbo, SpecBmvrAlphaSharpen), m_module.constu32(0));
+        uint32_t color = m_module.opLoad(vec4Type, oC0.id);
+        uint32_t a = m_module.opCompositeExtract(floatType, color, 1, &alphaComponentId);
+        uint32_t ref = m_module.opFDiv(floatType,
+          m_module.opConvertUtoF(floatType, m_module.opBitwiseAnd(uintType, alphaTestContext.alphaRefId, m_module.constu32(0xFF))),
+          m_module.constf32(255.0f));
+        uint32_t w = m_module.opFAdd(floatType,
+          m_module.opFAbs(floatType, m_module.opDpdx(floatType, a)),
+          m_module.opFAbs(floatType, m_module.opDpdy(floatType, a)));
+        w = m_module.opFMax(floatType, w, m_module.constf32(1.0e-4f));
+        uint32_t sharp = m_module.opFClamp(floatType,
+          m_module.opFAdd(floatType, m_module.opFDiv(floatType, m_module.opFSub(floatType, a, ref), w), m_module.constf32(0.5f)),
+          m_module.constf32(0.0f), m_module.constf32(1.0f));
+        uint32_t outA = m_module.opSelect(floatType, sharpen, sharp, a);
+        m_module.opStore(oC0.id, m_module.opCompositeInsert(vec4Type, outA, color, 1, &alphaComponentId));
+      }
     }
   }
 

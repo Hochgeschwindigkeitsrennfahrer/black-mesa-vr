@@ -33,6 +33,8 @@ namespace dxvk {
     SpecPointMode,          // Range: 0 -> 3                  | Bits: 2
     SpecDrefScaling,        // Range: 0-31 | Bits: 5
 
+    SpecBmvrAlphaSharpen,   // Range: 0 -> 1 (BMVR alpha to coverage) | Bits: 1
+
     SpecConstantCount,
   };
 
@@ -75,6 +77,8 @@ namespace dxvk {
       { 5, 21, 3 },  // ClipPlaneCount
       { 5, 24, 2 },  // PointMode
       { 5, 26, 5 },  // DrefScaling
+
+      { 4, 16, 1 },  // BmvrAlphaSharpen
     }};
 
     template <D3D9SpecConstantId Id, typename T>
