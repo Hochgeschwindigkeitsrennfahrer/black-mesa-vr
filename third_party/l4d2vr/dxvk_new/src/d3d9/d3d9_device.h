@@ -1100,6 +1100,7 @@ namespace dxvk {
     void PrepareDraw(D3DPRIMITIVETYPE PrimitiveType, bool UploadVBOs, bool UploadIBOs);
     void BmvrApplyHl2vrMsaa(D3D9_COMMON_TEXTURE_DESC& desc);
     void BmvrNoteMsaaAttachmentsWritten();
+    bool m_bmvrMsRaster = false;
     void BmvrResolveMsaaForSample(D3D9CommonTexture* tex);
 
     void EnsureSamplerLimit();

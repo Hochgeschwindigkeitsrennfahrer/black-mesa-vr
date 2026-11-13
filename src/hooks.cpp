@@ -11364,59 +11364,12 @@ ITexture* __fastcall Hooks::dCreateNamedRTEx(void* ecx, void* edx, const char* n
     }
     if (!hkCreateNamedRTEx.fOriginal)
         return nullptr;
-    const bool sceneName = name && (std::strstr(name, "_rt_FullFrame")
-        || std::strstr(name, "_rt_Resolved")
-        || (std::strstr(name, "_rt_gb")
-            && !std::strstr(name, "shadow") && !std::strstr(name, "Shadow")
-            && !std::strstr(name, "flashlight") && !std::strstr(name, "Flashlight")
-            && !std::strstr(name, "csm") && !std::strstr(name, "CSM")));
-    const bool separateDepth = depth == MATERIAL_RT_DEPTH_SEPARATE || depth == MATERIAL_RT_DEPTH_ONLY;
-    if (sceneName && !separateDepth)
-    {
-        static int s_sharedDepth;
-        if (s_sharedDepth < 8)
-        {
-            Game::logMsg("HL2VR MSAA skip %s depth=%d (needs a separate depth buffer)", name, depth);
-            ++s_sharedDepth;
-        }
-    }
-    const bool msaaScope = sceneName && separateDepth && bmvr::g_MsaaAllowed
-        && bmvr::NormalizeMsaa(static_cast<int>(bmvr::g_Msaa)) >= 2
-        && !skipGrow;
-    if (msaaScope)
-    {
-        static int s_scopeLog;
-        if (s_scopeLog < 12)
-        {
-            Game::logMsg("HL2VR MSAA %s %dx%d depth=%d samples=%u",
-                name, w, h, depth, bmvr::g_Msaa);
-            ++s_scopeLog;
-        }
-    }
-    const uint32_t scopeW = w > 0 ? static_cast<uint32_t>(w) : 0;
-    const uint32_t scopeH = h > 0 ? static_cast<uint32_t>(h) : 0;
-    // No C++ guard here: this function uses __try, and MSVC rejects
-    // unwinding objects in the same function.
-    if (msaaScope)
-    {
-        if (bmvr::Hl2vrMsaaScope::Depth() == 0)
-        {
-            bmvr::Hl2vrMsaaScope::Width() = scopeW;
-            bmvr::Hl2vrMsaaScope::Height() = scopeH;
-        }
-        ++bmvr::Hl2vrMsaaScope::Depth();
-    }
-    static bool s_msaaArmed;
-    if (msaaScope && !s_msaaArmed)
-    {
-        s_msaaArmed = true;
-        bmvr::BeginRisky(L"msaa");
-    }
+    // Named engine RTs (G-buffer, light buffers, FullFrame) stay 1x. The old
+    // name-based HL2VR MSAA scope made only the light buffers 4x; DXVK then
+    // dropped their 1x depth attachment. MSAA now lives on the private eye
+    // targets only (VR::EnsurePrivateEyeSurfaces). Idea from a Discord user's
+    // AA4-GEOMETRY4 Pimax build.
     ITexture* tex = hkCreateNamedRTEx.fOriginal(ecx, name, w, h, sizeMode, format, depth, textureFlags, renderTargetFlags);
-    if (msaaScope && bmvr::Hl2vrMsaaScope::Depth() > 0)
-        --bmvr::Hl2vrMsaaScope::Depth();
-    if (msaaScope && s_msaaArmed)
-        bmvr::EndRisky(L"msaa");
     LogRtTrace(ecx, name, rtReqW, rtReqH, rtReqMode, tex, rtCaller);
     if (tex && name && (fullMode || namedFb || namedGb || wantGrow))
     {

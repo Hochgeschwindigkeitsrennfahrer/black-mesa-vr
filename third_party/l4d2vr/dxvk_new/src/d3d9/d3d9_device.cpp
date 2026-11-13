@@ -9507,6 +9507,13 @@ namespace dxvk {
         || dsInfo.extent.height < renderArea.height
         || dsInfo.sampleCount != sampleCount;
       const bool bindDS = !mismatch || noRT0Bound || ignoreRT0;
+      if (unlikely(!bindDS && dsInfo.sampleCount != sampleCount)) {
+        static uint32_t s_dsDrop;
+        if (s_dsDrop++ < 24)
+          bmvr::Log("Eye MSAA: depth dropped (samples ds=%u rt0=%u, ds %ux%u rt0 %ux%u) #%u",
+            uint32_t(dsInfo.sampleCount), uint32_t(sampleCount),
+            dsInfo.extent.width, dsInfo.extent.height, renderArea.width, renderArea.height, s_dsDrop);
+      }
 
       if (likely(bindDS)) {
         if (unlikely(noRT0Bound || ignoreRT0)) {
@@ -9537,8 +9544,15 @@ namespace dxvk {
       const DxvkImageCreateInfo& rtInfo = rt->GetImage()->info();
       if (unlikely(rtInfo.extent.width != renderArea.width
           || rtInfo.extent.height != renderArea.height
-          || rtInfo.sampleCount != sampleCount))
+          || rtInfo.sampleCount != sampleCount)) {
+        if (rtInfo.sampleCount != sampleCount) {
+          static uint32_t s_rtDrop;
+          if (s_rtDrop++ < 24)
+            bmvr::Log("Eye MSAA: colour RT%u dropped (samples %u vs rt0 %u) #%u",
+              i, uint32_t(rtInfo.sampleCount), uint32_t(sampleCount), s_rtDrop);
+        }
         continue;
+      }
 
       // Check if the render target is also bound as a texture for sampling.
       // If that's the case, check whether we can skip binding the render target
@@ -9565,6 +9579,15 @@ namespace dxvk {
         continue;
 
       attachments.color[i].view = m_state.renderTargets[i]->GetRenderTargetView(srgb);
+    }
+
+    // Eye MSAA: the engine sets D3DRS_MULTISAMPLEANTIALIAS=0, and with sample
+    // count 1 on a multisampled attachment DXVK rasterises at centred sample
+    // positions (= no edge AA). Only the private eyes are multisampled.
+    const bool msRaster = sampleCount != VK_SAMPLE_COUNT_1_BIT;
+    if (msRaster != m_bmvrMsRaster) {
+      m_bmvrMsRaster = msRaster;
+      m_dirty.set(D3D9DeviceDirtyFlag::RasterizerState);
     }
 
     // Work out feedback loop layouts based on bound render targets
@@ -9856,7 +9879,7 @@ namespace dxvk {
     state.setFrontFace(VK_FRONT_FACE_CLOCKWISE);
     state.setPolygonMode(DecodeFillMode(D3DFILLMODE(rs[D3DRS_FILLMODE])));
     state.setFlatShading(m_state.renderStates[D3DRS_SHADEMODE] == D3DSHADE_FLAT);
-    state.setSampleCount(m_state.renderStates[D3DRS_MULTISAMPLEANTIALIAS]
+    state.setSampleCount((m_bmvrMsRaster || m_state.renderStates[D3DRS_MULTISAMPLEANTIALIAS])
       ? VkSampleCountFlags(0u)
       : VkSampleCountFlags(VK_SAMPLE_COUNT_1_BIT));
 

@@ -91,7 +91,7 @@ verify_settings() {
 		got=
 		for _ in $(seq 1 120); do   # the game may still be loading: up to 60 s
 			sleep 0.5
-			got=$(tr -d '\r' < "$CONSOLE" | grep -aoE "\"$cv\" = \"[^\"]*\"" | tail -1 | sed 's/.* = "//; s/"$//')   # other output can share the line
+			got=$(tr -d '\r' < "$CONSOLE" | grep -aoE "\"$cv\" = \"[^\"]*\"" | tail -1 | sed 's/.* = "//; s/"$//' || true)   # other output can share the line; no answer yet must not trip set -e
 			[[ -n $got ]] && break
 		done
 		echo "$cv want=$want got=${got:-no answer}" >> "$out/effective-settings.txt"

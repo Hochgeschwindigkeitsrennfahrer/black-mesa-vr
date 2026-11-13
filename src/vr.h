@@ -214,8 +214,9 @@ public:
     // (hmd_native) or fits HMD aspect in the window if that crash-stickies.
     uint32_t m_RenderWidth = 0;
     uint32_t m_RenderHeight = 0;
-    // Retired L4D2VR eye-copy MSAA. Left at 0 so private eyes stay single-sample
-    // submit targets. Scene AA is bmvr::g_Msaa (HL2VR), not this field.
+    // Eye MSAA sample count (from bmvr::g_Msaa, 0 = off). Only the private eye
+    // colour + depth surfaces are multisampled; 1x submit textures carry the
+    // Vulkan desc.
     uint32_t m_AntiAliasing = 0;
     bool UseVrMsaa() const
     {
@@ -1461,6 +1462,7 @@ private:
     std::mutex m_OpenXrPublishMutex;
     IDirect3DSurface9* m_StereoEyeBlitDest = nullptr;
     bool m_StereoEyeBlitActive = false;
+    bool m_EyeMsaaAllocFailed = false;
     bool m_LeftEyeMsaaHasScene = false;
     bool m_RightEyeMsaaHasScene = false;
     bool m_StereoRedirectedToEye = false;

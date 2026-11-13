@@ -13148,9 +13148,9 @@ void VR::UpdateHl2vrMsaa()
     if (!m_Game || m_Hl2vrMsaaCvarReady)
         return;
     m_Hl2vrMsaaCvarReady = true;
-    if (bmvr::g_Msaa >= 2)
-        m_Game->SetConVarInt("mat_fxaa_enabled", 0);
-    Game::logMsg("HL2VR MSAA %u from VR/config.txt. Restart after editing Msaa.",
+    // FXAA (engine_post on the eyes) stays on: eye MSAA only smooths triangle
+    // edges, FXAA still helps alpha-tested and shading edges.
+    Game::logMsg("Eye MSAA %u from VR/config.txt. Restart after editing Msaa.",
         bmvr::g_Msaa);
 }
 
@@ -15403,7 +15403,14 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
     if (!device)
         return false;
 
-    m_AntiAliasing = 0;
+    // Eye MSAA: only the private eye colour + depth surfaces get samples; the
+    // engine's final material pass re-rasterises scene geometry into them
+    // (single-threaded via StereoEyeBlitDest, multicore via McPlaybackEyeSurface).
+    // Idea from a Discord user's AA4-GEOMETRY4 Pimax build.
+    m_AntiAliasing = (bmvr::g_MsaaAllowed && !m_EyeMsaaAllocFailed)
+        ? bmvr::NormalizeMsaa(static_cast<int>(bmvr::g_Msaa)) : 0;
+    if (m_AntiAliasing < 2)
+        m_AntiAliasing = 0;
     ChooseEyeRenderSize();
     UINT w = m_RenderWidth;
     UINT h = m_RenderHeight;
@@ -15458,7 +15465,11 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
         ReleaseT(*surf);
         ReleaseT(*tex);
         m_CreatingTextureID = id;
-        const HRESULT hr = device->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, tex, nullptr);
+        HRESULT hr;
+        {
+            bmvr::Hl2vrMsaaScopeGuard msaa(UseVrMsaa(), w, h);
+            hr = device->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, tex, nullptr);
+        }
         m_CreatingTextureID = Texture_None;
         if (FAILED(hr) || !*tex)
         {
@@ -15467,6 +15478,17 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
         }
         if (!*surf)
             (*tex)->GetSurfaceLevel(0, surf);
+        if (UseVrMsaa())
+        {
+            D3DSURFACE_DESC actual{};
+            if (!*surf || FAILED((*surf)->GetDesc(&actual))
+                || static_cast<uint32_t>(actual.MultiSampleType) != m_AntiAliasing)
+            {
+                Game::logMsg("Eye MSAA colour id=%d got samples=%d (wanted %u)",
+                    (int)id, *surf ? (int)actual.MultiSampleType : -1, m_AntiAliasing);
+                return false;
+            }
+        }
         // MSAA eyes cannot be OpenVR submit targets (GetVRDesc is skipped).
         if (!UseVrMsaa())
         {
@@ -15489,21 +15511,47 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
     auto createDepth = [&](TextureID id, IDirect3DSurface9** depth) -> bool {
         ReleaseT(*depth);
         m_CreatingTextureID = id;
-        const HRESULT hr = device->CreateDepthStencilSurface(
-            w, h, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, TRUE, depth, nullptr);
+        HRESULT hr;
+        {
+            bmvr::Hl2vrMsaaScopeGuard msaa(UseVrMsaa(), w, h);
+            hr = device->CreateDepthStencilSurface(
+                w, h, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, TRUE, depth, nullptr);
+        }
         m_CreatingTextureID = Texture_None;
         if (FAILED(hr) || !*depth)
         {
             Game::logMsg("CreateDepthStencil eye id=%d hr=0x%08X", (int)id, (unsigned)hr);
             return false;
         }
+        if (UseVrMsaa())
+        {
+            D3DSURFACE_DESC actual{};
+            if (FAILED((*depth)->GetDesc(&actual))
+                || static_cast<uint32_t>(actual.MultiSampleType) != m_AntiAliasing)
+            {
+                Game::logMsg("Eye MSAA depth id=%d got samples=%d (wanted %u)",
+                    (int)id, (int)actual.MultiSampleType, m_AntiAliasing);
+                return false;
+            }
+        }
         return true;
     };
 
     bool leftOk = createEye(Texture_LeftEye, &m_D9LeftEyeTexture, &m_D9LeftEyeSurface, m_VKLeftEye);
     bool rightOk = createEye(Texture_RightEye, &m_D9RightEyeTexture, &m_D9RightEyeSurface, m_VKRightEye);
-    const bool depthOk = createDepth(Texture_LeftEye, &m_D9LeftEyeDepthSurface)
+    bool depthOk = createDepth(Texture_LeftEye, &m_D9LeftEyeDepthSurface)
         && createDepth(Texture_RightEye, &m_D9RightEyeDepthSurface);
+    if (UseVrMsaa() && !(leftOk && rightOk && depthOk))
+    {
+        // Never mix sample counts: all four surfaces go back to 1x.
+        Game::logMsg("Eye MSAA %u allocation failed; eyes stay 1x until restart", m_AntiAliasing);
+        m_EyeMsaaAllocFailed = true;
+        m_AntiAliasing = 0;
+        leftOk = createEye(Texture_LeftEye, &m_D9LeftEyeTexture, &m_D9LeftEyeSurface, m_VKLeftEye);
+        rightOk = createEye(Texture_RightEye, &m_D9RightEyeTexture, &m_D9RightEyeSurface, m_VKRightEye);
+        depthOk = createDepth(Texture_LeftEye, &m_D9LeftEyeDepthSurface)
+            && createDepth(Texture_RightEye, &m_D9RightEyeDepthSurface);
+    }
     // Capture stays at HWND size. Growing this to the eye wiped the 2560x1440
     // GameUI copy and left OpenXR publishing an empty 3168 RT (HMD black).
     UINT copyW = KnownWindowWidth();
@@ -15555,6 +15603,9 @@ bool VR::EnsurePrivateEyeSurfaces(IDirect3DDevice9* device)
             const bool rightRetry = createEye(Texture_RightEye, &m_D9RightEyeTexture, &m_D9RightEyeSurface, m_VKRightEye);
             leftOk = leftRetry;
             rightOk = rightRetry;
+            m_EyeMsaaAllocFailed = true;
+            depthOk = createDepth(Texture_LeftEye, &m_D9LeftEyeDepthSurface)
+                && createDepth(Texture_RightEye, &m_D9RightEyeDepthSurface);
             submitOk = leftRetry && rightRetry
                 && m_VKLeftEye.m_VulkanData.m_nImage && m_VKRightEye.m_VulkanData.m_nImage;
         }
