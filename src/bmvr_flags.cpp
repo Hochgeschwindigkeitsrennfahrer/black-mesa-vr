@@ -175,6 +175,7 @@ namespace bmvr
     bool g_DebugDumps = false;
     bool g_RightEyeFirst = false;
     bool g_McFrameReset = true;
+    bool g_PoseFlagsNoBlink = true;
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
     bool g_GlowCountDepthFix = true;

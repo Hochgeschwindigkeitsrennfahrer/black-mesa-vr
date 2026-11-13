@@ -6718,7 +6718,22 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
     const Vector& hmdPos = m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs;
     const float yaw = m_RotationOffsetY.load(std::memory_order_acquire);
     if (!m_ControllerPoseValid && !m_StereoFramePoseActive)
+    {
+        // Diag: in gameplay this fallback puts gun/laser/gloves at the eye.
+        // Counted so a blinking "pose valid" flag shows in the log.
+        static std::atomic<int> s_eyeFallbacks{ 0 };
+        static std::atomic<DWORD> s_lastLogMs{ 0 };
+        if (m_GameplayEligible && m_HmdOriginLatched)
+        {
+            const int n = ++s_eyeFallbacks;
+            const DWORD now = GetTickCount();
+            DWORD last = s_lastLogMs.load(std::memory_order_relaxed);
+            if (now - last > 2000 && s_lastLogMs.compare_exchange_strong(last, now))
+                Game::logMsg("Controller pose fallback to the eye: %d so far (thread %lu, noblink=%d)",
+                    n, GetCurrentThreadId(), bmvr::g_PoseFlagsNoBlink ? 1 : 0);
+        }
         return GetViewOrigin(setupOrigin);
+    }
 
     Vector arm = trackingPos - hmdPos;
     PivotYaw(arm, yaw);
@@ -10262,10 +10277,37 @@ bool VR::WantsWeaponActionAnim() const
 void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
 {
     BMVR_PROF("vr UpdateControllerTracking");
-    m_ControllerPoseValid = false;
-    m_LeftControllerTrackingValid = false;
-    m_PhysicalRightTrackingValid = false;
-    m_RightControllerTrackingValid = false;
+    // UpdateTracking runs on the game thread (pose wait) and, in
+    // MulticoreMode, on the render thread too (VR::Update at Present), while
+    // the other thread places the gun, laser and gloves. Clearing the valid
+    // flags up front and setting them again ~300 lines later let that thread
+    // see "no controller pose" for a moment: ControllerTrackingToWorld then
+    // returned the eye position, so the laser started at the forehead (or a
+    // glove vanished) for a frame, mostly in heavy scenes (2026-11-13). Keep
+    // the last published pose until this update either publishes a new one
+    // (under m_ControllerMutex, below) or fails (flags cleared on the way out).
+    struct ClearIfNotPublished
+    {
+        VR* vr;
+        bool published = false;
+        ~ClearIfNotPublished()
+        {
+            if (published || !bmvr::g_PoseFlagsNoBlink)
+                return;
+            std::lock_guard<std::recursive_mutex> lock(vr->m_ControllerMutex);
+            vr->m_ControllerPoseValid = false;
+            vr->m_LeftControllerTrackingValid = false;
+            vr->m_PhysicalRightTrackingValid = false;
+            vr->m_RightControllerTrackingValid = false;
+        }
+    } clearGuard{ this };
+    if (!bmvr::g_PoseFlagsNoBlink)
+    {
+        m_ControllerPoseValid = false;
+        m_LeftControllerTrackingValid = false;
+        m_PhysicalRightTrackingValid = false;
+        m_RightControllerTrackingValid = false;
+    }
     if (!bmvr::TryCtrlPose())
         return;
     if (!m_OpenXrHelperBridgeActive && !m_System)
@@ -10549,6 +10591,7 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
     ApplyViewmodelBasisOffsets();
 
     m_ControllerPoseValid = true;
+    clearGuard.published = true;
     static int s_ctrlLog;
     if (s_ctrlLog < 4)
     {
@@ -17802,7 +17845,21 @@ void VR::SubmitVRTextures()
 void VR::UpdateTracking()
 {
     BMVR_PROF("vr UpdateTracking");
-    m_HmdPoseValid = false;
+    // Same as the controller flags (UpdateControllerTracking): no transient
+    // "HMD pose invalid" that the other thread can see mid-update (the
+    // hand/laser overlay skips its whole draw on it = hands gone a frame).
+    struct ClearHmdIfNotPublished
+    {
+        VR* vr;
+        bool published = false;
+        ~ClearHmdIfNotPublished()
+        {
+            if (!published && bmvr::g_PoseFlagsNoBlink)
+                vr->m_HmdPoseValid = false;
+        }
+    } hmdGuard{ this };
+    if (!bmvr::g_PoseFlagsNoBlink)
+        m_HmdPoseValid = false;
     vr::TrackedDevicePose_t hmd{};
     const vr::EVRCompositorError err = static_cast<vr::EVRCompositorError>(
         m_LastPoseWaitError.load(std::memory_order_acquire));
@@ -17843,6 +17900,7 @@ void VR::UpdateTracking()
         m_HmdTrackingPose = hmd.mDeviceToAbsoluteTracking;
         QAngle::AngleVectors(m_HmdAngAbs, &m_HmdForward, &m_HmdRight, &m_HmdUp);
         m_HmdPoseValid = true;
+        hmdGuard.published = true;
     }
     m_IpdScale = bmvr::g_IPDScale;
     RefreshIpdFromHmd();

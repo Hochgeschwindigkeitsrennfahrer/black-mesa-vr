@@ -58,6 +58,8 @@ namespace bmvr
         VrCvar g_Cvars[] = {
             { "bmvr_mc_frame_reset", "VR: MulticoreMode resets per-frame eye/pose flags at the game thread's frame end (0 = at the render thread's Present, skips frames when it lags)",
               Kind::Bool, 0.f, 1.f, &g_McFrameReset, nullptr },
+            { "bmvr_pose_flags_noblink", "VR: pose valid flags never blink off during a tracking update (0 = old: laser could start at the eye for a frame)",
+              Kind::Bool, 0.f, 1.f, &g_PoseFlagsNoBlink, nullptr },
             { "bmvr_crouch_hold", "VR: right stick down crouches only while held (0 = each push toggles)",
               Kind::Bool, 0.f, 1.f, &g_CrouchStickHold, nullptr },
             { "bmvr_stick_jump_crouch", "VR: how far the right stick goes up/down before it jumps/crouches (0.3..0.95)",

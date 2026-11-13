@@ -418,6 +418,11 @@ namespace bmvr
     // instead of the render thread's Present (which skipped every other
     // frame's view when the render thread lagged). 0 = old behaviour.
     extern bool g_McFrameReset;
+    // bmvr_pose_flags_noblink (default on): HMD/controller "pose valid" flags
+    // keep their last value while a tracking update runs (cleared only if the
+    // update fails), so the other thread never sees a mid-update "invalid"
+    // (laser from the forehead / hands gone for a frame). 0 = old behaviour.
+    extern bool g_PoseFlagsNoBlink;
     // OcclusionTrackerPerEye (default true): Black Mesa's occlusion tracker
     // (r_occlusion_tracker_enabled) keys its results by view id, and both
     // eyes render as the same main view, so objects hidden from the first

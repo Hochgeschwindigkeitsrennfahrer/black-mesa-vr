@@ -195,6 +195,7 @@ namespace
             // bmvr_* fixes and tests (on/off for A/B); not saved: a restart
             // brings back the defaults.
             { "MOD SWITCHES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Pose valid never blinks", RowKind::Toggle, nullptr, &bmvr::g_PoseFlagsNoBlink, nullptr, 0, 0, 0, nullptr },
             { "Glow queries per eye", RowKind::Toggle, nullptr, &bmvr::g_PixelVisPerEye, nullptr, 0, 0, 0, nullptr },
             { "Glow through objects fix", RowKind::Toggle, nullptr, &bmvr::g_GlowCountDepthFix, nullptr, 0, 0, 0, nullptr },
             { "Lights culled per eye", RowKind::Toggle, nullptr, &bmvr::g_LightCullEyeView, nullptr, 0, 0, 0, nullptr },
