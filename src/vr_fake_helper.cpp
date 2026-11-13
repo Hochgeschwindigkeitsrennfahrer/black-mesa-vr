@@ -199,6 +199,12 @@ namespace
                 ss >> on;
                 bmvr::g_PerfLog = on != 0;
             }
+            else if (key == "refractonce")
+            {
+                int on = 0;
+                ss >> on;
+                bmvr::g_RefractOncePerEye = on != 0;
+            }
             else if (key == "msaa")
             {
                 // Same as the VR panel's MSAA row: 0/2/4, applied live.

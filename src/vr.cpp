@@ -15109,6 +15109,14 @@ void VR::MsaaEyesTo1x(IDirect3DDevice9* device)
     bmvr::MsaaEyeRetire(device, m_D9RightEyeSurface, m_D9RightEyeDepthSurface);
 }
 
+IDirect3DSurface9* VR::ThreadEyeSurface() const
+{
+    IDirect3DSurface9* eye = McPlaybackEyeSurface();
+    if (!eye && !McPipelineEnabled() && StereoEyeBlitActive())
+        eye = StereoEyeBlitDest();
+    return eye;
+}
+
 void VR::RetireMsaaEyeForPost()
 {
     // Only the thread drawing this eye knows it: multicore playback TLS, or
@@ -16898,6 +16906,7 @@ void VR::ClearStereoEyeSurfaces()
     else
         device->SetViewport(&eyeVp);
 
+    m_RefractEyeDone = nullptr;   // RefractOncePerEye: new eye frame
     // Eye MSAA: back to the multisampled surfaces for this eye's scene.
     if (UseVrMsaa())
         bmvr::MsaaEyeBegin(device, color, depth);

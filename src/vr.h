@@ -950,6 +950,10 @@ public:
     // Eye MSAA: post chain of the eye this thread is drawing runs on its 1x resolve.
     void RetireMsaaEyeForPost();
     void MsaaEyesTo1x(IDirect3DDevice9* device);
+    // Eye surface the calling thread is drawing (multicore TLS or the stereo blit).
+    IDirect3DSurface9* ThreadEyeSurface() const;
+    IDirect3DSurface9* m_RefractEyeDone = nullptr;   // RefractOncePerEye: eye already copied
+    uint32_t m_RefractCopiesSkipped = 0;
     void BeginStereoEyeBlit(IDirect3DSurface9* dst);
     void ClearStereoEyeSurfaces();
     bool EndStereoEyeBlit();

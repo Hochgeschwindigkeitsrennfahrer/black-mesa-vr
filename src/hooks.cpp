@@ -8402,8 +8402,53 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             SafeTextureName(texture), destW, destH, srcName, srcW, srcH,
             srcRect ? srcRect->x : -1, srcRect ? srcRect->y : -1, srcRect ? srcRect->width : -1, srcRect ? srcRect->height : -1,
             dstRect ? dstRect->x : -1, dstRect ? dstRect->y : -1, dstRect ? dstRect->width : -1, dstRect ? dstRect->height : -1, grew);
+    // Glass refraction once per eye (VR panel, default off): Source refreshes
+    // _rt_PowerOfTwoFB for every refractive object it draws (up to ~50 per eye
+    // per frame behind the train windows). With this on, only the first copy of
+    // each eye's frame runs; later glass refracts that copy (glass behind glass
+    // is then missing from the refraction). Any other writer resets it.
+    if (bmvr::g_RefractOncePerEye && m_VR)
+    {
+        const char* rn = SafeTextureName(texture);
+        if (rn && _stricmp(rn, "_rt_PowerOfTwoFB") == 0)
+        {
+            IDirect3DSurface9* eyeNow = m_VR->ThreadEyeSurface();
+            if (eyeNow && srcEye)
+            {
+                if (m_VR->m_RefractEyeDone == eyeNow)
+                {
+                    ++m_VR->m_RefractCopiesSkipped;
+                    return;
+                }
+                m_VR->m_RefractEyeDone = eyeNow;
+            }
+            else
+                m_VR->m_RefractEyeDone = nullptr;
+        }
+    }
     if (hkCopyRenderTargetToTextureEx.fOriginal)
         hkCopyRenderTargetToTextureEx.fOriginal(ecx, texture, renderTargetId, srcRect, dstRect);
+    {
+        // Engine eye copies per second, logged when > 1500/s (refraction storms).
+        static DWORD s_t; static int s_n; static char s_last[8][64]; static int s_cnt[8];
+        const char* nm = SafeTextureName(texture);
+        int k = 0;
+        for (; k < 8 && s_last[k][0]; ++k)
+            if (nm && std::strncmp(s_last[k], nm, 63) == 0) break;
+        if (k < 8) { if (!s_last[k][0] && nm) strncpy_s(s_last[k], nm, 63); ++s_cnt[k]; }
+        ++s_n;
+        const DWORD now = GetTickCount();
+        if (now - s_t >= 1000)
+        {
+            if (s_n > 1500)
+                Game::logMsg("Engine copies/s: %d: %s=%d %s=%d %s=%d %s=%d, refraction copies skipped %u", s_n, s_last[0], s_cnt[0], s_last[1], s_cnt[1],
+                    s_last[2], s_cnt[2], s_last[3], s_cnt[3], m_VR ? m_VR->m_RefractCopiesSkipped : 0u);
+            if (m_VR)
+                m_VR->m_RefractCopiesSkipped = 0;
+            s_t = now; s_n = 0;
+            for (int i = 0; i < 8; ++i) { s_last[i][0] = 0; s_cnt[i] = 0; }
+        }
+    }
     // Eye MSAA: the first copy into _rt_FullFrameFB starts the post chain
     // (bloom, engine_post, bms_postprocess, FXAA, HUD, hands). Run all of it on
     // the eye's 1x resolve instead of full-screen passes on 4 samples.

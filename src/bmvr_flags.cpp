@@ -85,6 +85,7 @@ namespace bmvr
     uint32_t g_Msaa = 0; // >= 2 switches FXAA off and only reaches the lighting buffers
     bool g_MsaaPostSwitch = true;
     float g_MsaaF = 0.f;
+    bool g_RefractOncePerEye = false;
     bool g_MsaaAllowed = true;
     bool g_Haptics = true;
     bool g_HideCrosshair = true;
@@ -726,6 +727,8 @@ namespace bmvr
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassTiming") == 0)
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "RefractOncePerEye") == 0)
+                g_RefractOncePerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MsaaPostSwitch") == 0)
                 g_MsaaPostSwitch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PerfLog") == 0)
