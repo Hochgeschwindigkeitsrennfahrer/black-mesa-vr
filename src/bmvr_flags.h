@@ -191,6 +191,7 @@ namespace bmvr
     // dropdown stays stock (None / FXAA); rewriting it crashes that page.
     // A crash during the scoped create persist-skips it (g_MsaaAllowed = false).
     extern uint32_t g_Msaa;
+    extern bool g_RefractOncePerEye; // RefractOncePerEye (default false): glass refraction copied once per eye
     extern bool g_MsaaAllowed;
     uint32_t NormalizeMsaa(int samples);
     extern bool g_Haptics;

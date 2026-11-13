@@ -219,6 +219,12 @@ namespace
                 if (!(ss >> fresh.throwArc))
                     fresh.throwArc = 0.f;
             }
+            else if (key == "refractonce")
+            {
+                int on = 0;
+                ss >> on;
+                bmvr::g_RefractOncePerEye = on != 0;
+            }
             else if (key == "raw")
             {
                 std::string slot;

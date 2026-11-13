@@ -17163,6 +17163,7 @@ void VR::ClearStereoEyeSurfaces()
         return;
 
     IDirect3DSurface9* color = m_StereoEyeBlitDest;
+    m_RefractEyeDone = nullptr;   // RefractOncePerEye: new eye frame
     IDirect3DSurface9* depth = nullptr;
     if (color == m_D9LeftEyeSurface)
         depth = m_D9LeftEyeDepthSurface;
@@ -17243,6 +17244,14 @@ void VR::ClearStereoEyeSurfaces()
         ++s_clr;
     }
     device->Release();
+}
+
+IDirect3DSurface9* VR::ThreadEyeSurface() const
+{
+    IDirect3DSurface9* eye = McPlaybackEyeSurface();
+    if (!eye && !McPipelineEnabled() && StereoEyeBlitActive())
+        eye = StereoEyeBlitDest();
+    return eye;
 }
 
 bool VR::EndStereoEyeBlit()

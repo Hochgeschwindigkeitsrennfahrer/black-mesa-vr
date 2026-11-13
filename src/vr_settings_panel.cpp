@@ -132,6 +132,7 @@ namespace
             { "Dark when hidden after", RowKind::Number, "GlowHideMs", nullptr, &bmvr::g_GlowHideMs, 10.f, 0.f, 500.f, "%.0f ms" },
             { "Glows level, face you", RowKind::Toggle, "SpriteLevel", &bmvr::g_SpriteLevel, nullptr, 0, 0, 0, nullptr },
             { "Smoke stays upright", RowKind::Toggle, "ParticleLevel", &bmvr::g_ParticleLevel, nullptr, 0, 0, 0, nullptr },
+            { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
             { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
