@@ -1061,6 +1061,7 @@ public:
         bool havePoints = false;
         Vector beamA{}, beamB{}, dot{};
         bool aimBeamValid = false, aimBeamHit = false, aimCrosshairValid = false;
+        int aimStage = 0;
         Vector aimCrosshairWorld{};
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
@@ -1560,6 +1561,7 @@ private:
     Vector m_AimCrosshairWorld{};
     bool m_AimCrosshairValid = false;
     bool m_AimBeamValid = false;
+    int m_AimUpdateStage = 0;   // UpdateAimCrosshair: last stage reached (laser dropout log)
     bool m_AimBeamHit = false;
     Vector m_AimBeamLocal{};          // muzzle in the gun model frame (fwd, right, up)
     bool m_AimBeamLocalValid = false;

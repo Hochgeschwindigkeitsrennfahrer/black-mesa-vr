@@ -10111,8 +10111,26 @@ bool VR::TryGetMeleeAim(Vector& origin, QAngle& angles) const
 void VR::UpdateAimCrosshair()
 {
     BMVR_PROF("vr UpdateAimCrosshair");
-    m_AimCrosshairValid = false;
-    m_AimBeamValid = false;
+    // The two valid flags are written once, when this returns. Clearing them
+    // here and setting them again after the trace left them false for the
+    // whole update; the render thread's overlay gate read them in that window
+    // and dropped beam and dot for a frame (heavy scenes, 2026-11-14).
+    struct AimCommit
+    {
+        VR* vr;
+        bool cross = false, beam = false;
+        int stage = 0;   // how far the update got (laser dropout log)
+        ~AimCommit() { vr->m_AimCrosshairValid = cross; vr->m_AimBeamValid = beam; vr->m_AimUpdateStage = stage; }
+    } commit{ this };
+    {
+        // Test only (BMVR_TEST_AIM_BLINK=1): the old behaviour, to count the race headless.
+        static const bool s_blink = [] { char v[4] = {}; return GetEnvironmentVariableA("BMVR_TEST_AIM_BLINK", v, sizeof(v)) && v[0] == '1'; }();
+        if (s_blink)
+        {
+            m_AimCrosshairValid = false;
+            m_AimBeamValid = false;
+        }
+    }
     // VrShootFromMuzzle needs the muzzle offset (UpdateMuzzleLocal) even with
     // the marker and beam off; without it shots used the raw attachment,
     // which drifts toward the view edges.
@@ -10120,6 +10138,7 @@ void VR::UpdateAimCrosshair()
     if (!(wantAimAid || bmvr::g_VrShootFromMuzzle) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen
         || m_SettingsOpen)
         return;
+    commit.stage = 1;
     // Guns only: no laser on the crowbar, thrown weapons, snarks or bare hands.
     // The RPG keeps its own guidance dot and gets no beam; the hivehand gets
     // neither (below).
@@ -10134,32 +10153,38 @@ void VR::UpdateAimCrosshair()
         gun = gun || weaponKey == k;
     if (!gun)
         return;
+    commit.stage = 2;
     const bool wantBeam = bmvr::g_VrLaserBeam && weaponKey != "rpg";
     // The scope draws its own centred crosshair, and while zoomed the shot no
     // longer follows the controller ray this would trace.
     if (m_ScopeZoomActive)
         return;
+    commit.stage = 3;
     if (!m_Game || !m_Game->m_EngineTrace || !m_Game->m_EngineClient)
         return;
     if (PauseUiActive())
         return;
 
+    commit.stage = 5;
     UpdateMuzzleLocal(weaponKey);
     // The hivehand's hornets home in on their own (primary fire): no laser
     // and no dot on the organic Xen weapon. The muzzle above is still kept
     // up to date, the hornets spawn there.
     if (!wantAimAid || weaponKey == "hgun")
         return;
+    commit.stage = 6;
     // Same origin and direction the bullet uses, so the reticle cannot disagree
     // with where the shot goes.
     Vector origin{};
     if (!TryGetVrShootOrigin(origin))
         return;
+    commit.stage = 7;
     Vector dir{};
     QAngle::AngleVectors(GetAimAngles(), &dir, nullptr, nullptr);
     if (VectorNormalize(dir) <= 0.01f)
         return;
 
+    commit.stage = 8;
     C_BaseEntity* player = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
     CTraceFilterSkipSelf filter(player, 0);
     constexpr float kMaxRangeHu = 8192.f;
@@ -10175,6 +10200,7 @@ void VR::UpdateAimCrosshair()
     Vector pivot{}, f{}, r{}, u{};
     if (!AimFrameNow(pivot, f, r, u))
         return;
+    commit.stage = 9;
     m_AimShootAlong = (origin - pivot).Dot(f);
     m_AimHitDist = hit ? (tr.endpos - origin).Length() - 1.5f : 0.f;
 
@@ -10184,9 +10210,10 @@ void VR::UpdateAimCrosshair()
         if (m_AimBeamLocalValid)
         {
             m_AimBeamHit = hit;
-            m_AimBeamValid = wantBeam;
+            commit.beam = wantBeam;
         }
     }
+    commit.stage = 10;
     if (!bmvr::g_VrCrosshair || !hit)
         return;
 
@@ -10194,7 +10221,7 @@ void VR::UpdateAimCrosshair()
     // draws without depth testing, so this is only to keep it from sinking into
     // geometry the glove pass does depth-test against.
     m_AimCrosshairWorld = tr.endpos - dir * 1.5f;
-    m_AimCrosshairValid = true;
+    commit.cross = true;
 }
 
 bool VR::AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const
@@ -11063,6 +11090,7 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
     s.viewAngles = GetViewAngle();
     s.havePoints = AimOverlayPointsNow(s.beamA, s.beamB, s.dot);
     s.aimBeamValid = m_AimBeamValid;
+    s.aimStage = m_AimUpdateStage;
     s.aimBeamHit = m_AimBeamHit;
     s.aimCrosshairValid = m_AimCrosshairValid;
     s.aimCrosshairWorld = m_AimCrosshairWorld;
@@ -11541,8 +11569,28 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             DrawSettingsPanel(device, stereoEye, w, h, eyeOrig, fwd, right, up);
         else if (WeaponMenuOpen())
             DrawWeaponMenu(device, stereoEye, w, h, eyeOrig, fwd, right, up);
-        else if (AimCrosshairVisible() || RpgLockRingVisible())
+        // Laser dropout log (below): keep entering for 300 ms after a beam.
+        static DWORD s_lastDrawn[3];
+        static int s_lines;
+        const bool beamRecent = bmvr::g_VrLaserBeam && (stereoEye == 1 || stereoEye == 2) && s_lastDrawn[stereoEye]
+            && GetTickCount() - s_lastDrawn[stereoEye] < 300;
+        if (SettingsPanelOpen() || WeaponMenuOpen())
+            s_lastDrawn[1] = s_lastDrawn[2] = 0;
+        else if ((snap ? (aimBeamValid || aimCrosshairValid) : AimCrosshairVisible()) || RpgLockRingVisible() || beamRecent)
         {
+            if (snap && bmvr::g_PerfLog && !AimCrosshairVisible())
+            {
+                // The frame's snapshot has the aim overlay, the live flags do not.
+                static std::atomic<uint32_t> s_n{ 0 };
+                static std::atomic<DWORD> s_t{ 0 };
+                const uint32_t n = ++s_n;
+                const DWORD now = GetTickCount();
+                if (now - s_t.load() >= 5000)
+                {
+                    s_t = now;
+                    Game::logMsg("aim overlay: snapshot valid while the live flags were off, %u eye draws so far", n);
+                }
+            }
             device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
             device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
             device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
@@ -11588,6 +11636,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                     depthBefore->Release();
                 depthBefore = nullptr;
             };
+            bool beamDrawn = false;
+            float dropZa = 0.f, dropZb = 0.f, dropLen = -1.f;
             if (aimBeamValid && !beamHidden && havePoints && (beamB - beamA).LengthSqr() > 1.f)
             {
                 // Clip to just in front of the eye, then a quad whose width is
@@ -11598,6 +11648,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 constexpr float kNear = 4.f;
                 const float za = (a - eyeOrig).Dot(fwd);
                 const float zb = (b - eyeOrig).Dot(fwd);
+                dropZa = za;
+                dropZb = zb;
                 if (za >= kNear || zb >= kNear)
                 {
                     if (za < kNear)
@@ -11618,8 +11670,10 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                     float nx = -(by - ay);
                     float ny = bx - ax;
                     const float len = sqrtf(nx * nx + ny * ny);
+                    dropLen = len;
                     if (len > 0.5f)
                     {
+                        beamDrawn = true;
                         nx /= len;
                         ny /= len;
                         float beamWidthHu = bmvr::g_VrLaserWidth; // half width; 0.06 = 3 mm beam
@@ -11643,6 +11697,22 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                         device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vert));
                         endSceneDepth();
                     }
+                }
+            }
+            if (bmvr::g_VrLaserBeam && (stereoEye == 1 || stereoEye == 2))
+            {
+                // Laser dropout log: a frame without the beam within 300 ms
+                // of one with it, and why (at most 300 lines per session).
+                const DWORD nowMs = GetTickCount();
+                if (beamDrawn)
+                    s_lastDrawn[stereoEye] = nowMs;
+                else if (s_lines < 300 && s_lastDrawn[stereoEye] && nowMs - s_lastDrawn[stereoEye] < 300)
+                {
+                    ++s_lines;
+                    Game::logMsg("laser dropout e%d %lu ms after the last beam: snap=%d valid=%d (update stage %d) hidden=%d points=%d lenSq=%.1f za=%.1f zb=%.1f screenLen=%.2f liveValid=%d",
+                        stereoEye, static_cast<unsigned long>(nowMs - s_lastDrawn[stereoEye]), snap ? 1 : 0, aimBeamValid ? 1 : 0,
+                        snap ? snap->aimStage : m_AimUpdateStage, beamHidden ? 1 : 0, havePoints ? 1 : 0,
+                        (beamB - beamA).LengthSqr(), dropZa, dropZb, dropLen, m_AimBeamValid ? 1 : 0);
                 }
             }
             float cx = 0.f, cy = 0.f;
@@ -14827,7 +14897,9 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose, 
     IDirect3DSurface9* right = m_D9RightEyeSurface;
     if (!IsMenuUp()
         && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
-            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible() || ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
+            || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible()
+            || (hands && hands->valid && (hands->aimBeamValid || hands->aimCrosshairValid))
+            || ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
     {
         t_HandSnap = (hands && hands->valid && bmvr::g_McHandSnapshot) ? hands : nullptr;
         DrawIndependentHandMarkers(left, 1, true, true);
