@@ -6277,8 +6277,8 @@ void VR::ProcessInput()
         if (UpdateScopeRaise(!menuOwnsButtons && !emptyHands && !m_OnGun && !paused))
             buttons |= IN_ATTACK2;
         // Right stick up = jump, down = crouch. Only past
-        // StickJumpCrouchThreshold and within 30 degrees of straight up or
-        // down, so the diagonal a turn passes through does not count. With
+        // StickJumpCrouchThreshold and within StickJumpCrouchAngle (default
+        // 30) degrees of straight up or down, so the diagonal a turn passes through does not count. With
         // TurnBlocksJumpCrouch, a stick that went sideways (turn) does
         // neither until it is back near the centre. A started crouch lasts
         // until the stick is back near the centre (or pushed up), so sliding
@@ -6294,7 +6294,8 @@ void VR::ProcessInput()
                 s_stickTurned = false;
             else if (ax > 0.5f && ax > ay && !s_stickCrouchHeld)
                 s_stickTurned = true;
-            const bool vertical = ay >= bmvr::g_StickJumpCrouchThreshold && ax <= ay * 0.577f;
+            const float coneTan = tanf(bmvr::g_StickJumpCrouchAngle * 0.01745329f);
+            const bool vertical = ay >= bmvr::g_StickJumpCrouchThreshold && ax <= ay * coneTan;
             if (vertical && !(bmvr::g_TurnBlocksJumpCrouch && s_stickTurned))
             {
                 stickJump = turnY > 0.f;
@@ -6312,8 +6313,24 @@ void VR::ProcessInput()
             s_stickTurned = false;
             s_stickCrouchHeld = false;
         }
-        if (PressedDigitalAction(m_ActionJump) || stickJump)
+        const bool actionJump = PressedDigitalAction(m_ActionJump);
+        if (actionJump || stickJump)
             buttons |= IN_JUMP;
+        {
+            // One line per jump press: which path and the stick it saw.
+            static bool s_jumpWas;
+            static int s_jumpLogs;
+            const bool jumpNow = actionJump || stickJump;
+            if (jumpNow && !s_jumpWas && s_jumpLogs < 200)
+            {
+                ++s_jumpLogs;
+                Game::logMsg("Jump press: %s stick=(%.2f,%.2f) %.0f deg off vertical (cone %.0f, distance %.2f, turned %d)",
+                    actionJump ? "action" : "stick", turnX, turnY,
+                    atan2f(fabsf(turnX), fabsf(turnY)) * 57.2958f,
+                    bmvr::g_StickJumpCrouchAngle, bmvr::g_StickJumpCrouchThreshold, s_stickTurned ? 1 : 0);
+            }
+            s_jumpWas = jumpNow;
+        }
         // Left trigger is Use. Right trigger is Use only while holstered or
         // without any weapon.
         // Hold to hold a pickup; release pulses a second Use to drop.

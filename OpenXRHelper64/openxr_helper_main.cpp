@@ -5585,13 +5585,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
     void OpenXrInputBridge::PublishDerivedDpadActions(L4D2VROpenXrInputStateDesc& outState)
     {
         constexpr float kPress = 0.70f;
-        const L4D2VROpenXrAnalogActionDesc& turn = outState.analogActions[Index(L4D2VROpenXrActionId::Turn)];
-        if (turn.active)
-        {
-            // G2 SteamVR dpad: north=Jump, south=CrouchToggle. Do not steal
-            // this axis for weapon cycle (X/Y do that on Touch).
-            SetDerivedDigital(outState, L4D2VROpenXrActionId::Jump, turn.y > kPress);
-        }
+        // Turn stick up = jump is decided in the DLL (distance + angle cone +
+        // turn block). A derived Jump here (turn.y > 0.7) fired on diagonal
+        // turns up to ~45 deg off vertical, so none is published.
 
         const L4D2VROpenXrAnalogActionDesc& walk = outState.analogActions[Index(L4D2VROpenXrActionId::Walk)];
         if (walk.active)

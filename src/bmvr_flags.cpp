@@ -167,6 +167,7 @@ namespace bmvr
     bool g_WeaponMenuTilt = true;
     bool g_CrouchStickHold = true;
     float g_StickJumpCrouchThreshold = 0.8f;
+    float g_StickJumpCrouchAngle = 30.f;
     bool g_TurnBlocksJumpCrouch = true;
     bool g_SprintToggle = true;
     bool g_VrSettingsPause = true;
@@ -691,6 +692,12 @@ namespace bmvr
                 const float t = static_cast<float>(atof(val));
                 if (t >= 0.3f && t <= 0.95f)
                     g_StickJumpCrouchThreshold = t;
+            }
+            else if (std::strcmp(n, "StickJumpCrouchAngle") == 0)
+            {
+                const float a = static_cast<float>(atof(val));
+                if (a >= 10.f && a <= 45.f)
+                    g_StickJumpCrouchAngle = a;
             }
             else if (std::strcmp(n, "TurnBlocksJumpCrouch") == 0)
                 g_TurnBlocksJumpCrouch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);

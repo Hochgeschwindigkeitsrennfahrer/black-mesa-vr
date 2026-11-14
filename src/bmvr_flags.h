@@ -368,9 +368,10 @@ namespace bmvr
     // (default false = each push toggles crouch).
     extern bool g_CrouchStickHold;
     // StickJumpCrouchThreshold: how far (0..1) the right stick must go up/down
-    // for jump/crouch (default 0.8); it also has to point within 30 degrees
-    // of straight up/down.
+    // for jump/crouch (default 0.8); it also has to point within
+    // StickJumpCrouchAngle degrees of straight up/down (default 30).
     extern float g_StickJumpCrouchThreshold;
+    extern float g_StickJumpCrouchAngle;
     // TurnBlocksJumpCrouch=true: after the right stick went sideways (turn),
     // no stick jump/crouch until it returns near the centre.
     extern bool g_TurnBlocksJumpCrouch;
