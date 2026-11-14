@@ -235,6 +235,9 @@ namespace bmvr
     extern bool g_VrHandsDebugBoxes;
     // Wrist HUD: health+suit flat on the off-hand, ammo sideways beside the gun hand.
     extern bool g_HandHud;
+    // Red flash on the eye edges when health or armor drops; strength = peak alpha.
+    extern bool g_DamageFlash;
+    extern float g_DamageFlashStrength;
     // Off-hand (health/suit) panel placement, relative to the controller after
     // the tilt/roll: size and offsets in game units, angles in degrees. Roll is
     // mirrored for a right-hand panel (left-handed play).

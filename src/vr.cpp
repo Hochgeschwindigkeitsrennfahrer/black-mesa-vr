@@ -11850,6 +11850,20 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         }
     }
 
+    // Damage flash: a short red tint over the view, like the battery pickup's
+    // blue screen fade. The flat HUD's red damage edges are a 2D HUD element
+    // that never reaches the eyes.
+    UpdateDamageFlash(stereoEye);
+    if (drawOverlays && bmvr::g_DamageFlash && m_DmgFlashLevel > 0.f)
+    {
+        restoreEngineDrawState();
+        device->SetViewport(&eyeVp);
+        applyHandOverlayState();
+        DrawDamageFlash(device, stereoEye, w, h);
+        device->SetFVF(0);
+        restoreEngineDrawState();
+    }
+
     // HL2VR hand/weapon HUD: IgnoreZ (draw after the glove mesh, Z off) plus
     // IsBackfacing so the ammo plate is invisible from behind the gun.
     if (wantHandHud)
@@ -12067,6 +12081,119 @@ namespace
             return 10 + (c - 'A');
         return -1;
     }
+}
+
+void VR::UpdateDamageFlash(int stereoEye)
+{
+    // Once per frame (eye 1); eye 2 draws the same level.
+    if (stereoEye != 1)
+        return;
+    const double now = QpcNowMs();
+    constexpr double kFadeMs = 500.0;
+    if (m_DmgFlashLevel > 0.f && now - m_DmgFlashStartMs >= kFadeMs)
+        m_DmgFlashLevel = 0.f;
+    int health = -1, armor = -1, clip = -1, reserve = -1, secondary = -1, air = -1;
+    // Loads/menus change health without damage (a save with less health).
+    if (!bmvr::g_DamageFlash || m_VrPhase != VrPhase::Gameplay || PauseUiActive() || !m_Game
+        || !m_Game->ReadWristHudValues(health, armor, clip, reserve, secondary, air)
+        || health < 0 || health > 1000)
+    {
+        m_DmgLastHealth = m_DmgLastArmor = -1;
+        return;
+    }
+    if (armor < 0 || armor > 1000)
+        armor = 0;
+    if (m_DmgLastHealth >= 0)
+    {
+        const int lost = std::max(0, m_DmgLastHealth - health) + std::max(0, m_DmgLastArmor - armor);
+        if (lost > 0)
+        {
+            const float t = static_cast<float>((now - m_DmgFlashStartMs) / kFadeMs);
+            const float current = m_DmgFlashLevel * std::max(0.f, 1.f - t);
+            m_DmgFlashLevel = std::min(1.f, current + 0.4f + static_cast<float>(lost) / 40.f);
+            m_DmgFlashStartMs = now;
+            static int s_log;
+            if (s_log < 8)
+            {
+                Game::logMsg("Damage flash: health %d -> %d, armor %d -> %d, level %.2f",
+                    m_DmgLastHealth, health, m_DmgLastArmor, armor, m_DmgFlashLevel);
+                ++s_log;
+            }
+        }
+    }
+    m_DmgLastHealth = health;
+    m_DmgLastArmor = armor;
+}
+
+void VR::DrawDamageFlash(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h)
+{
+    if (!device || !(m_DmgFlashLevel > 0.f) || w == 0 || h == 0)
+        return;
+    constexpr double kFadeMs = 500.0;
+    const float t = static_cast<float>((QpcNowMs() - m_DmgFlashStartMs) / kFadeMs);
+    if (t >= 1.f)
+        return;
+    // Fast rise (first 10 %), then ease out.
+    const float rise = std::min(1.f, t / 0.1f);
+    const float fall = (1.f - t) * (1.f - t);
+    const float edgeA = std::clamp(bmvr::g_DamageFlashStrength * m_DmgFlashLevel * rise * fall, 0.f, 1.f);
+    if (edgeA < 0.004f)
+        return;
+    const float aspect = m_OffCenterActive ? m_OffCenterAspect
+        : static_cast<float>(w) / static_cast<float>(h);
+    const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
+    const float tanHalf = tanf(projFov * 0.5f * 3.14159265f / 180.f);
+    if (!(tanHalf > 0.01f))
+        return;
+    float ocSx = 1.f, ocOx = 0.f, ocSy = 1.f, ocOy = 0.f;
+    OffCenterNdc(stereoEye, ocSx, ocOx, ocSy, ocOy);
+
+    // Rings in view-tangent space (head-fixed, matches the off-centre eye
+    // projection): centre at half strength, full strength from tan 1.0 out
+    // (edge of what the lenses show), outer ring well past the image corners.
+    constexpr int kSeg = 40;
+    const float radius[4] = { 0.f, 0.5f, 1.0f, 4.f };
+    const float alphaMul[4] = { 0.45f, 0.55f, 1.f, 1.f };
+    struct Vert { float x, y, z, rhw; D3DCOLOR color; };
+    auto vtx = [&](int ring, int seg) {
+        const float ang = static_cast<float>(seg) * (6.2831853f / kSeg);
+        const float tx = cosf(ang) * radius[ring];
+        const float ty = sinf(ang) * radius[ring];
+        const float ndcX = tx / tanHalf * ocSx + ocOx;
+        const float ndcY = ty * aspect / tanHalf * ocSy + ocOy;
+        const int a = static_cast<int>(edgeA * alphaMul[ring] * 255.f + 0.5f);
+        return Vert{ (ndcX * 0.5f + 0.5f) * static_cast<float>(w),
+            (-ndcY * 0.5f + 0.5f) * static_cast<float>(h), 0.f, 1.f,
+            D3DCOLOR_ARGB(std::clamp(a, 0, 255), 200, 16, 12) };
+    };
+    static Vert verts[kSeg * 3 * 6];
+    int n = 0;
+    for (int seg = 0; seg < kSeg; ++seg)
+    {
+        verts[n++] = vtx(0, 0);
+        verts[n++] = vtx(1, seg);
+        verts[n++] = vtx(1, seg + 1);
+        for (int ring = 1; ring < 3; ++ring)
+        {
+            const Vert a = vtx(ring, seg), b = vtx(ring, seg + 1);
+            const Vert c = vtx(ring + 1, seg), d = vtx(ring + 1, seg + 1);
+            verts[n++] = a; verts[n++] = c; verts[n++] = b;
+            verts[n++] = b; verts[n++] = c; verts[n++] = d;
+        }
+    }
+    device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+    device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    device->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+    device->SetRenderState(D3DRS_COLORWRITEENABLE,
+        D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+    device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, n / 3, verts, sizeof(Vert));
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    device->SetRenderState(D3DRS_COLORWRITEENABLE,
+        D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
 }
 
 void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
@@ -14900,7 +15027,7 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose, 
     IDirect3DSurface9* left = m_D9LeftEyeSurface;
     IDirect3DSurface9* right = m_D9RightEyeSurface;
     if (!IsMenuUp()
-        && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
+        && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud || bmvr::g_DamageFlash
             || WeaponMenuOpen() || SettingsPanelOpen() || AimCrosshairVisible()
             || (hands && hands->valid && (hands->aimBeamValid || hands->aimCrosshairValid))
             || ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))

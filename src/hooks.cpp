@@ -6755,7 +6755,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 m_VR->FlushStereoBlitGpu();
             }
             if (!m_VR->IsMenuUp()
-                && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
+                && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud || bmvr::g_DamageFlash
                 || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
             {
                 const long long t0 = QpcNow();
@@ -6817,7 +6817,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 g_Cost.blitTicks += QpcNow() - t0;
             }
             if (!m_VR->IsMenuUp()
-                && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud
+                && (bmvr::g_VrHandsGlovesEnabled || bmvr::g_VrHandsDebugBoxes || bmvr::g_HandHud || bmvr::g_DamageFlash
                 || m_VR->WeaponMenuOpen() || m_VR->SettingsPanelOpen() || m_VR->AimCrosshairVisible() || m_VR->ToastVisible() || bmvr::g_DebugBlankEye >= 0.5f))
             {
                 const long long t0 = QpcNow();

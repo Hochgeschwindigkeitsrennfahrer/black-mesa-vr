@@ -1459,6 +1459,14 @@ private:
         bool leftOk, const Vector& leftOrigin, const QAngle& leftAng,
         bool rightOk, const Vector& rightOrigin, const QAngle& rightAng,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
+    // Red eye-edge flash when health/armor drop (the flat HUD's damage
+    // indicator is never drawn in the eyes). Sampled once per frame on eye 1.
+    void UpdateDamageFlash(int stereoEye);
+    void DrawDamageFlash(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h);
+    int m_DmgLastHealth = -1;
+    int m_DmgLastArmor = -1;
+    float m_DmgFlashLevel = 0.f;
+    double m_DmgFlashStartMs = 0.0;
     void RefreshActiveWeaponModel();
     void ToggleEmptyHands();
     void Recenter(const char* why);

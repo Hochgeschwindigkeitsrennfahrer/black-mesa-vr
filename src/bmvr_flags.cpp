@@ -103,6 +103,8 @@ namespace bmvr
     float g_VrHandsModelScale = 0.85f;
     bool g_VrHandsDebugBoxes = false;
     bool g_HandHud = true;
+    bool g_DamageFlash = true;
+    float g_DamageFlashStrength = 0.6f;
     float g_HandHudSize = 2.5f;
     float g_HandHudUp = 2.2f;
     float g_HandHudForward = -0.55f;
@@ -649,6 +651,10 @@ namespace bmvr
                 g_VrHandsDebugBoxes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandHud") == 0)
                 g_HandHud = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "DamageFlash") == 0)
+                g_DamageFlash = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "DamageFlashStrength") == 0)
+                g_DamageFlashStrength = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "HandHudSize") == 0)
                 g_HandHudSize = std::clamp(static_cast<float>(atof(val)), 1.f, 6.f);
             else if (std::strcmp(n, "HandHudUp") == 0)
