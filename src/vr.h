@@ -202,6 +202,26 @@ public:
     // published and the HUD/menu overlay surface to <VR dir>\<name>-*.bmp
     // (name = first word of dump.txt) and deletes dump.txt.
     void MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose);
+    // Debug capture restore (VR/<capture>-state.txt etc., tools/headless/bm-restore):
+    // render-thread part (raw OpenXR poses, view state), game-thread part
+    // (engine view, settings, the capture save), and the headless restore
+    // (fake runtime only: turn offset + recenter point set exactly, player
+    // moved until the engine eye matches the captured one).
+    void WriteCaptureState(const std::string& name, const L4D2VROpenXrPoseDesc* pose);
+    void FlushCaptureEngineState();
+    bool HandleRestoreCommand(const char* cmd);
+    void TickRestoreView();
+    std::mutex m_CaptureMutex;
+    std::string m_CaptureEngineName;          // set by the render thread, written by the game thread
+    Vector m_SetupVelPrev{};
+    DWORD m_SetupVelPrevMs = 0;
+    Vector m_SetupVelocity{};
+    bool m_RestoreActive = false;
+    Vector m_RestoreTarget{};
+    Vector m_RestoreSent{};
+    bool m_RestoreHaveSent = false;
+    int m_RestoreSteps = 0;
+    DWORD m_RestoreNextMs = 0;
 
     vr::IVRSystem* m_System = nullptr;
     vr::IVRInput* m_Input = nullptr;

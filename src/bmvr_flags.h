@@ -5,6 +5,7 @@
 
 struct IDirect3DDevice9;
 struct IDirect3DSurface9;
+class Game;
 
 // Crash-sticky retries of L4D2VR mechanisms the old OpenXR prototype banned.
 // If Black Mesa dies mid-attempt, the in-progress flag remains on disk and
@@ -434,6 +435,11 @@ namespace bmvr
     // instead of the render thread's Present (which skipped every other
     // frame's view when the render thread lagged). 0 = old behaviour.
     extern bool g_McFrameReset;
+    // bmvr_pose_flags_noblink (default on): HMD/controller "pose valid" flags
+    // keep their last value while a tracking update runs (cleared only if the
+    // update fails), so the other thread never sees a mid-update "invalid"
+    // (laser from the forehead / hands gone for a frame). 0 = old behaviour.
+    extern bool g_PoseFlagsNoBlink;
     // OcclusionTrackerPerEye (default true): Black Mesa's occlusion tracker
     // (r_occlusion_tracker_enabled) keys its results by view id, and both
     // eyes render as the same main view, so objects hidden from the first
@@ -497,6 +503,10 @@ namespace bmvr
     // only values that differ from it, so a later default change reaches players
     // who never touched that setting.
     void CapturePanelDefaults();
+    // Debug capture: the VR panel's switches and engine settings as bm-scenario
+    // "cmd" lines (bmvr_* cvars, engine cvars), so a headless restore runs with
+    // exactly the session's settings. Game thread (reads engine cvars).
+    std::string CaptureSettingsScenario(Game* game);
     extern float g_FxaaSubpixel;
     extern float g_FxaaEdgeThreshold;
     extern float g_FxaaEdgeThresholdMin;

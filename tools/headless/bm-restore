@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""bm-restore <capture>-state.txt <outdir> [--no-capture] [--timescale X] [--wait S] [-- extra scenario lines file]
+
+Puts a headless run (bm-scenario, fake VR runtime) exactly where a VR panel "Capture debug frame" was taken and takes
+the same capture again, so the two can be compared.
+
+What a capture records (written by the mod next to the eye dumps, VR/<capture>-*):
+  -state.txt     raw OpenXR poses of the dumped frame (HMD, both grips and aims), IPD, runtime eye size + FOV,
+                 the mod's turn offset and recenter point, the engine eye, check values (eyes, view angles, hand)
+  -engine.txt    engine eye + speed, engine angles, the save name (the mod saves the game right after the capture)
+  -settings.txt  VR panel switches (bmvr_* cvars) and engine picture cvars
+  -config.txt / -viewmodel_offsets.txt   copies of the session's mod files
+
+The view is NOT taken from the save: a load re-latches the recenter point and syncs the turn to the saved aim. The
+restore loads the save (position, duck, world state), replays the raw poses, sets turn offset + recenter point
+exactly (bmvr_restore_view) and moves the player until the engine eye is the captured one (setpos, corrected).
+Moving platforms (engine eye speed > 2 u/s at capture) get host_timescale 0.05 unless --timescale says otherwise.
+
+The save is looked up in the live save folder, then in an overlay next to the capture (headless captures need
+BMVR_KEEP_UPPER=1). Env as for bm-scenario (BMVR_DLL etc.); this sets BMVR_BASE_CONFIG, BMVR_EYE_SIZE,
+BMVR_FAKE_FOV, BMVR_PUT and, for engine settings that differ from the VR profile, BMVR_CVARS.
+"""
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+GAME = os.path.expanduser("~/.local/share/Steam/steamapps/common/Black Mesa")
+# Engine cvars that go to the startup line (some are only read at startup) and the settings guard.
+STARTUP_CVARS = {"cl_csm_enabled", "cl_csm_qualitymode", "cl_csm_memoryusage", "np_gr_quality",
+                 "mat_motion_blur_enabled", "mat_fxaa_enabled", "r_occlusion", "mat_hdr_level", "nr_lights_quality",
+                 "nr_shadow_quality", "nr_shadow_res", "nr_shadow_filter_quality"}
+
+
+def read_kv(path):
+    out = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if parts[0] == "raw":
+                out["raw " + parts[1]] = parts[2:9]
+            else:
+                out[parts[0]] = parts[1:]
+    return out
+
+
+def profile_value(name):
+    cfg = os.path.join(GAME, ".bmvr-settings", "vr", "config.cfg")
+    try:
+        with open(cfg, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r'^%s "([^"]*)"' % re.escape(name), line.strip())
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return None
+
+
+def same(a, b):
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return a == b
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) < 2 or args[0] in ("-h", "--help"):
+        print(__doc__)
+        return 2
+    state_path = os.path.abspath(args[0])
+    out = os.path.abspath(args[1])
+    do_capture = "--no-capture" not in args
+    timescale = None
+    if "--timescale" in args:
+        timescale = args[args.index("--timescale") + 1]
+    settle = args[args.index("--wait") + 1] if "--wait" in args else "6"
+    extra = None
+    if "--" in args:
+        extra = args[args.index("--") + 1]
+    if os.path.exists(out):
+        print(f"{out} exists; use a fresh dir", file=sys.stderr)
+        return 1
+    if not state_path.endswith("-state.txt"):
+        print("expected a VR/capture-*-state.txt", file=sys.stderr)
+        return 1
+    base = state_path[: -len("-state.txt")]
+    name = os.path.basename(base)
+    st = read_kv(state_path)
+    eng = read_kv(base + "-engine.txt") if os.path.exists(base + "-engine.txt") else {}
+    if not eng:
+        print(f"warning: no {name}-engine.txt (game thread part missing): no save, engine eye from the state file")
+
+    inputs = out + ".inputs"
+    os.makedirs(inputs, exist_ok=True)
+    put = []
+    env = dict(os.environ)
+    # The session's mod files.
+    if os.path.exists(base + "-config.txt"):
+        shutil.copy(base + "-config.txt", os.path.join(inputs, "config.txt"))
+        env["BMVR_BASE_CONFIG"] = os.path.join(inputs, "config.txt")
+    if os.path.exists(base + "-viewmodel_offsets.txt"):
+        shutil.copy(base + "-viewmodel_offsets.txt", os.path.join(inputs, "viewmodel_offsets.txt"))
+        put.append(os.path.join(inputs, "viewmodel_offsets.txt") + ":VR/viewmodel_offsets.txt")
+    if "runtime_size" in st:
+        env["BMVR_EYE_SIZE"] = " ".join(st["runtime_size"][:2])
+    if "runtime_fov" in st:
+        env["BMVR_FAKE_FOV"] = " ".join(st["runtime_fov"][:4])
+
+    # The save.
+    save = (eng.get("save") or [None])[0]
+    game_args = ["-condebug", "+sv_cheats", "1"]
+    if save:
+        live = os.path.join(GAME, "bms", "save", save + ".sav")
+        near = None
+        d = os.path.dirname(state_path)
+        for cand in (os.path.join(d, "..", "overlay", "upper", "bms", "save", save + ".sav"),):
+            if os.path.exists(cand):
+                near = cand
+        if os.path.exists(live):
+            game_args += ["+load", save]
+        elif near:
+            shutil.copy(near, os.path.join(inputs, save + ".sav"))
+            put.append(os.path.join(inputs, save + ".sav") + f":bms/save/{save}.sav")
+            game_args += ["+load", save]
+        else:
+            mp = (st.get("map") or ["-"])[0]
+            print(f"warning: save {save} not found; starting the map {mp} instead (world state will differ)")
+            game_args += ["+map", mp]
+    else:
+        game_args += ["+map", (st.get("map") or ["-"])[0]]
+    if put:
+        env["BMVR_PUT"] = " ".join(put)
+
+    # Settings: VR panel cvars (bmvr_*) as runtime commands. Engine cvars only on the startup line (BMVR_CVARS, also
+    # checked by the settings guard) and only when they differ from the VR profile: setting mat_specular /
+    # mat_picmip etc. at runtime reloads materials even to the same value (first restore test 2026-11-13: black sky).
+    settings_cmds = []
+    cvars = {}
+    sp = base + "-settings.txt"
+    skip = ("host_timescale", "mat_queue_mode", "fov_desired", "sv_cheats")
+    if os.path.exists(sp):
+        with open(sp, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                parts = line.split()
+                if line.startswith("cmd ") and len(parts) >= 3 and parts[1].startswith("bmvr_"):
+                    settings_cmds.append(line)
+                elif (line.startswith("cmd ") or line.startswith("engine ")) and len(parts) >= 3:
+                    cv, val = parts[1], parts[2]
+                    if cv in skip:
+                        continue
+                    prof = profile_value(cv)
+                    if prof is None or not same(prof, val):
+                        cvars[cv] = val
+                elif line.startswith("# NOT RESTORED"):
+                    print("note:", line[2:])
+    cvars = [f"{k}={v}" for k, v in cvars.items()]
+    if cvars:
+        env["BMVR_CVARS"] = " ".join(cvars)
+        print("engine settings that differ from the VR profile (startup + guard):", env["BMVR_CVARS"])
+
+    speed = 0.0
+    if "engine_velocity" in eng:
+        v = [float(x) for x in eng["engine_velocity"][:3]]
+        speed = (v[0] ** 2 + v[1] ** 2 + v[2] ** 2) ** 0.5
+    if timescale is None and speed > 2.0:
+        timescale = "0.05"
+        print(f"engine eye moved {speed:.1f} u/s at capture (train/lift): host_timescale {timescale}")
+
+    target = eng.get("engine_setup") or st.get("setup")
+    zp, za = st["zero_pos"], st["zero_ang"]
+    lines = [f"# bm-restore of {name} (map {(st.get('map') or ['-'])[0]})", "cmd sv_cheats 1"]
+    if "ipd" in st:
+        lines.append(f"fake ipd {st['ipd'][0]}")
+    for slot in ("hmd", "gripl", "gripr", "aiml", "aimr"):
+        if "raw " + slot in st:
+            lines.append(f"fake raw {slot} " + " ".join(st["raw " + slot]))
+    lines.append("wait 2")
+    lines += settings_cmds
+    if timescale:
+        lines.append(f"cmd host_timescale {timescale}")
+    lines.append(f"cmd bmvr_restore_view {st['turn'][0]} {' '.join(zp[:3])} {' '.join(za[:3])} {' '.join(target[:3])}")
+    lines.append("waitlog restore view: (engine eye at the captured spot|GAVE UP) 30")
+    lines.append(f"wait {settle}")
+    if extra:
+        with open(extra, encoding="utf-8") as f:
+            lines += [l.rstrip("\n") for l in f]
+    if do_capture:
+        lines += ["capture", "wait 10", "log"]
+    else:
+        lines += ["dump restored 1", "log"]
+    scen = os.path.join(inputs, "restore-scenario.txt")
+    with open(scen, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"scenario: {scen}")
+    print("game args:", " ".join(game_args))
+    rc = subprocess.call([os.path.join(HERE, "bm-scenario"), scen, out] + game_args, env=env)
+
+    # Compare the restored view with the capture.
+    log = os.path.join(out, "bmvr_log.txt")
+    if os.path.exists(log):
+        with open(log, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "restore view:" in line:
+                    print(line.rstrip())
+    new_states = sorted(p for p in os.listdir(os.path.join(out, "VR")) if p.endswith("-state.txt")) \
+        if os.path.isdir(os.path.join(out, "VR")) else []
+    if new_states:
+        ns = read_kv(os.path.join(out, "VR", new_states[-1]))
+        print(f"check vs the capture ({new_states[-1]}):")
+        for k in ("check_eye_left", "check_eye_right", "check_view_ang", "check_right_hand", "setup", "turn"):
+            if k in st and k in ns:
+                a = [float(x) for x in st[k]]
+                b = [float(x) for x in ns[k]]
+                d = max(abs(x - y) for x, y in zip(a, b))
+                print(f"  {k:18s} captured {' '.join(st[k])}  restored {' '.join(ns[k])}  max diff {d:.3f}")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

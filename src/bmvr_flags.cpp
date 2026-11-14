@@ -180,6 +180,7 @@ namespace bmvr
     bool g_DebugDumps = false;
     bool g_RightEyeFirst = false;
     bool g_McFrameReset = true;
+    bool g_PoseFlagsNoBlink = true;
     bool g_OcclusionTrackerPerEye = true;
     bool g_PixelVisPerEye = true;
     bool g_GlowCountDepthFix = true;
@@ -729,14 +730,14 @@ namespace bmvr
                 g_EnvmapScaleModels = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "StereoEnginePost") == 0)
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "RefractOncePerEye") == 0)
+                g_RefractOncePerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassTiming") == 0)
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LodBias") == 0)
                 g_LodBias = std::clamp(static_cast<float>(atof(val)), -1.f, 2.f);
             else if (std::strcmp(n, "AlphaToCoverage") == 0)
                 g_AlphaToCoverage = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "RefractOncePerEye") == 0)
-                g_RefractOncePerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MsaaPostSwitch") == 0)
                 g_MsaaPostSwitch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PerfLog") == 0)

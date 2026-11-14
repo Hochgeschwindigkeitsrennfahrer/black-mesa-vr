@@ -10,6 +10,7 @@
 #   unfake <key>                      removes that line
 #   shot <name>                       screenshot of the game window -> <outdir>/<name>.png
 #   log                               copy the mod log now
+#   waitlog <regex> [seconds]         wait until the mod log has a line matching <regex> (default 60 s; fails the run if not)
 #   capture                           what the VR panel's "Capture debug frame" button does (eyes, audit, water consts + RTs)
 #   audit [frames]                    render-target audit: per draw/copy/clear the RT written (size, viewport) and the RT
 #                                     textures sampled, with the eye/frame that last wrote each (OTHER-EYE, PREV-FRAME, UNSEEN flags)
@@ -46,6 +47,8 @@ echo "ready after ${i}s"
 
 set_fake() {
 	local key=${1%% *}
+	# "raw <slot> ...": one line per slot (hmd, gripl, gripr, aiml, aimr)
+	[[ $key == raw ]] && key="raw $(awk '{print $2}' <<< "$1")"
 	grep -v "^$key " "$out/VR/fake.txt" > "$out/VR/fake.tmp" || true
 	echo "$1" >> "$out/VR/fake.tmp"
 	mv "$out/VR/fake.tmp" "$out/VR/fake.txt"
@@ -139,6 +142,11 @@ while IFS= read -r line || [[ -n $line ]]; do
 			sleep 1 ;;
 		audit) echo "${arg:-2}" > "$out/VR/audit.txt"   # render-target audit (sizes, viewports, which eye wrote each sampled RT) + trace for <arg> Presents
 			sleep 1 ;;
+		waitlog) re=${arg% *}; secs=60
+			[[ $arg =~ \ ([0-9]+)$ ]] && secs=${BASH_REMATCH[1]} || re=$arg
+			ok=0
+			for _ in $(seq 1 $((secs * 2))); do grep -qE "$re" "$out/bmvr_log.txt" 2>/dev/null && { ok=1; break; }; sleep 0.5; done
+			if (( ok )); then echo "waitlog '$re'"; else echo "waitlog '$re': TIMEOUT after ${secs}s"; failed=1; fi ;;
 		capture) : > "$out/VR/capture.txt"   # = VR panel "Capture debug frame": eyes + audit + water/fog consts/RTs as VR/capture-*
 			for _ in $(seq 1 40); do [[ -e $out/VR/capture.txt ]] || break; sleep 0.25; done
 			[[ -e $out/VR/capture.txt ]] && echo "capture: not picked up" || echo "capture" ;;

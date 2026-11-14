@@ -854,6 +854,44 @@ namespace
                 if (vsh) vsh->Release();
                 if (psh) psh->Release();
             }
+            // Panel capture, first matching draw into each eye's own target:
+            // its full render state and the eye colour it is drawn over
+            // (handover 2026-11-13: these were the inputs no capture had).
+            if (vr && (eye == 1 || eye == 2) && g_AuditTexPrefix[0] && rw == vr->m_RenderWidth
+                && rh == vr->m_RenderHeight && g_AuditTexDumped.insert({ eye + 100, nullptr }).second)
+            {
+                auto rs = [&](D3DRENDERSTATETYPE st) { DWORD v = 0; device->GetRenderState(st, &v); return v; };
+                Game::logMsg("audit drawstate e%d %s: blend=%lu src=%lu dst=%lu op=%lu sepA=%lu srcA=%lu dstA=%lu opA=%lu "
+                    "atest=%lu aref=%lu afunc=%lu cwrite=0x%lx cwrite1=0x%lx cull=%lu z=%lu zw=%lu zfunc=%lu "
+                    "srgbw=%lu msaa=%lu msmask=0x%lx fill=%lu dbias=0x%lx sdbias=0x%lx st=%lu stfunc=%lu stref=%lu "
+                    "clip=0x%lx scissor=%lu",
+                    eye, t_AuditMaterial, rs(D3DRS_ALPHABLENDENABLE), rs(D3DRS_SRCBLEND), rs(D3DRS_DESTBLEND),
+                    rs(D3DRS_BLENDOP), rs(D3DRS_SEPARATEALPHABLENDENABLE), rs(D3DRS_SRCBLENDALPHA),
+                    rs(D3DRS_DESTBLENDALPHA), rs(D3DRS_BLENDOPALPHA), rs(D3DRS_ALPHATESTENABLE), rs(D3DRS_ALPHAREF),
+                    rs(D3DRS_ALPHAFUNC), rs(D3DRS_COLORWRITEENABLE), rs(D3DRS_COLORWRITEENABLE1), rs(D3DRS_CULLMODE),
+                    rs(D3DRS_ZENABLE), rs(D3DRS_ZWRITEENABLE), rs(D3DRS_ZFUNC), rs(D3DRS_SRGBWRITEENABLE),
+                    rs(D3DRS_MULTISAMPLEANTIALIAS), rs(D3DRS_MULTISAMPLEMASK), rs(D3DRS_FILLMODE), rs(D3DRS_DEPTHBIAS),
+                    rs(D3DRS_SLOPESCALEDEPTHBIAS), rs(D3DRS_STENCILENABLE), rs(D3DRS_STENCILFUNC), rs(D3DRS_STENCILREF),
+                    rs(D3DRS_CLIPPLANEENABLE), rs(D3DRS_SCISSORTESTENABLE));
+                IDirect3DSurface9* ds = nullptr;
+                D3DSURFACE_DESC dd{};
+                if (SUCCEEDED(device->GetDepthStencilSurface(&ds)) && ds)
+                {
+                    ds->GetDesc(&dd);
+                    ds->Release();
+                }
+                Game::logMsg("audit drawstate e%d %s: depth %p %ux%u fmt=%u ms=%u (not dumpable on this path; "
+                    "colour before the draw below)", eye, t_AuditMaterial, (void*)ds, dd.Width, dd.Height, dd.Format,
+                    dd.MultiSampleType);
+                IDirect3DSurface9* rt0 = nullptr;
+                if (SUCCEEDED(device->GetRenderTarget(0, &rt0)) && rt0)
+                {
+                    char name[160];
+                    std::snprintf(name, sizeof(name), "%s-e%d-d%u-eye-before-water.bmp", g_AuditTexPrefix, eye, g_AuditSeq);
+                    DumpSurfaceBmp(device, rt0, bmvr::VrFilePath(name), 2, false);
+                    rt0->Release();
+                }
+            }
             // With BMVR_AUDIT_TEXPREFIX (panel capture): every render-target
             // texture each matching draw samples, any size, once per texture
             // and eye, as VR/<prefix>-e<eye>-<draw>-s<stage>-<tex>.bmp.
@@ -4863,6 +4901,14 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         Game::logMsg("debug dump %s: tracking pos %.4f %.4f %.4f quat %.4f %.4f %.4f %.4f", name,
             pose->position[0], pose->position[1], pose->position[2],
             pose->orientation[0], pose->orientation[1], pose->orientation[2], pose->orientation[3]);
+    if (std::strncmp(name, "capture-", 8) == 0)
+    {
+        // Debug capture: everything a headless run needs to show this exact
+        // view again, from the frame dumped below.
+        WriteCaptureState(name, pose);
+        std::lock_guard<std::mutex> lock(m_CaptureMutex);
+        m_CaptureEngineName = name;   // game thread: engine view, settings, save
+    }
     if (slot < kOpenXrPublishSlots)
     {
         DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[0][slot], base + "-left.bmp", step);
@@ -4883,6 +4929,221 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         }
     }
     dev->Release();
+}
+
+namespace
+{
+    void FmtPose(std::string& out, const char* key, const float pos[3], const float q[4], bool valid)
+    {
+        char b[200];
+        std::snprintf(b, sizeof(b), "%s %.6f %.6f %.6f %.7f %.7f %.7f %.7f%s\n", key, pos[0], pos[1], pos[2],
+            q[0], q[1], q[2], q[3], valid ? "" : " # INVALID at capture");
+        out += b;
+    }
+    void FmtVec(std::string& out, const char* key, const Vector& v)
+    {
+        char b[160];
+        std::snprintf(b, sizeof(b), "%s %.4f %.4f %.4f\n", key, v.x, v.y, v.z);
+        out += b;
+    }
+    bool WriteTextFile(const std::string& path, const std::string& text)
+    {
+        FILE* f = std::fopen(path.c_str(), "wb");
+        if (!f)
+            return false;
+        std::fwrite(text.data(), 1, text.size(), f);
+        std::fclose(f);
+        return true;
+    }
+}
+
+// Render thread, at the capture: the raw OpenXR poses (exactly what the runtime
+// gave; the fake runtime replays them with "raw" lines), the mod's view state
+// (turn offset, recenter point) and, for checking the restore, the resulting
+// view. VR/<name>-state.txt; tools/headless/bm-restore turns it into a run.
+void VR::WriteCaptureState(const std::string& name, const L4D2VROpenXrPoseDesc* pose)
+{
+    std::string t = "# BMVR capture state v1 (tools/headless/bm-restore reads it)\n";
+    char b[256];
+    std::snprintf(b, sizeof(b), "name %s\nmap %s\n", name.c_str(),
+        m_CurrentMapName.empty() ? "-" : m_CurrentMapName.c_str());
+    t += b;
+    // HMD: the pose this published frame was rendered for (falls back to the
+    // newest runtime pose); hands: the newest input state.
+    if (pose && pose->valid)
+        FmtPose(t, "raw hmd", pose->position, pose->orientation, true);
+    else
+        FmtPose(t, "raw hmd", m_OpenXrLastHmdPose.position, m_OpenXrLastHmdPose.orientation,
+            m_OpenXrLastHmdPose.valid != 0);
+    const L4D2VROpenXrInputStateDesc& in = m_OpenXrLastInputState;
+    const auto& gl = in.controllerPoses[L4D2VR_OPENXR_HAND_LEFT];
+    const auto& gr = in.controllerPoses[L4D2VR_OPENXR_HAND_RIGHT];
+    const auto& al = in.controllerAimPoses[L4D2VR_OPENXR_HAND_LEFT];
+    const auto& ar = in.controllerAimPoses[L4D2VR_OPENXR_HAND_RIGHT];
+    FmtPose(t, "raw gripl", gl.position, gl.orientation, gl.valid != 0);
+    FmtPose(t, "raw gripr", gr.position, gr.orientation, gr.valid != 0);
+    FmtPose(t, "raw aiml", al.position, al.orientation, al.valid != 0);
+    FmtPose(t, "raw aimr", ar.position, ar.orientation, ar.valid != 0);
+    std::snprintf(b, sizeof(b), "ipd %.5f\n", m_Ipd);
+    t += b;
+    L4D2VROpenXrRuntimeViewConfigDesc vc{};
+    uint32_t vcGen = 0;
+    if (L4D2VR_ReadOpenXrRuntimeViewConfig(vc, &vcGen) && vc.valid)
+    {
+        const auto& l = vc.views[L4D2VR_OPENXR_EYE_LEFT];
+        std::snprintf(b, sizeof(b), "runtime_size %u %u\nruntime_fov %.5f %.5f %.5f %.5f\n", l.width, l.height,
+            tanf(-l.angleLeft), tanf(l.angleRight), tanf(l.angleUp), tanf(-l.angleDown));
+        t += b;
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        std::snprintf(b, sizeof(b), "turn %.5f\nlatched %d\n", m_RotationOffsetY.load(std::memory_order_acquire),
+            m_HmdOriginLatched ? 1 : 0);
+        t += b;
+        FmtVec(t, "zero_pos", m_HmdPosAbsZero);
+        std::snprintf(b, sizeof(b), "zero_ang %.4f %.4f %.4f\n", m_HmdAngAbsZero.x, m_HmdAngAbsZero.y, m_HmdAngAbsZero.z);
+        t += b;
+        FmtVec(t, "setup", m_SetupOrigin);
+        // Check values (bm-restore compares the restored run's log with these).
+        FmtVec(t, "check_hmd_abs", m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs);
+        const Vector va = GetViewAngle();
+        FmtVec(t, "check_view_ang", va);
+        FmtVec(t, "check_eye_left", GetViewOriginLeft(m_SetupOrigin));
+        FmtVec(t, "check_eye_right", GetViewOriginRight(m_SetupOrigin));
+        FmtVec(t, "check_right_hand", GetRightControllerAbsPos(m_SetupOrigin));
+        std::snprintf(b, sizeof(b), "eye_size %u %u\nheight_offset %.4f\neye_z %.4f\nvr_scale %.4f\nipd_scale %.4f\n",
+            m_RenderWidth, m_RenderHeight, bmvr::g_HeightOffset, m_EyeZ, m_VRScale, m_IpdScale);
+        t += b;
+    }
+    const std::string base = bmvr::VrFilePath(name.c_str());
+    const bool ok = WriteTextFile(base + "-state.txt", t);
+    // The session's mod files (gun placement + settings), so a later edit of
+    // the live ones does not change the restore.
+    CopyFileA(bmvr::VrFilePath("config.txt").c_str(), (base + "-config.txt").c_str(), FALSE);
+    CopyFileA(bmvr::VrFilePath("viewmodel_offsets.txt").c_str(), (base + "-viewmodel_offsets.txt").c_str(), FALSE);
+    Game::logMsg("debug capture %s: view state %s (restore headless: tools/headless/bm-restore \"%s-state.txt\" <outdir>)",
+        name.c_str(), ok ? "written" : "NOT written", base.c_str());
+}
+
+// Game thread: the engine side of a capture and the save that brings the
+// world back (position, duck, trains, NPCs, flags). The view is not taken from
+// the save (saves keep the aim, not the exact head pose): bm-restore sets it.
+void VR::FlushCaptureEngineState()
+{
+    // Engine eye speed (moving trains/lifts: bm-restore slows time for those).
+    {
+        const DWORD now = GetTickCount();
+        if (now - m_SetupVelPrevMs >= 100)
+        {
+            if (m_SetupVelPrevMs && now - m_SetupVelPrevMs < 1000)
+                m_SetupVelocity = (m_SetupOrigin - m_SetupVelPrev) * (1000.f / static_cast<float>(now - m_SetupVelPrevMs));
+            m_SetupVelPrev = m_SetupOrigin;
+            m_SetupVelPrevMs = now;
+        }
+    }
+    std::string name;
+    {
+        std::lock_guard<std::mutex> lock(m_CaptureMutex);
+        name.swap(m_CaptureEngineName);
+    }
+    if (name.empty() || !m_Game)
+        return;
+    std::string t = "# BMVR capture engine state v1 (game thread)\n";
+    char b[256];
+    FmtVec(t, "engine_setup", m_SetupOrigin);
+    FmtVec(t, "engine_velocity", m_SetupVelocity);
+    QAngle ea{};
+    if (m_Game->m_EngineClient)
+    {
+        m_Game->m_EngineClient->GetViewAngles(ea);
+        std::snprintf(b, sizeof(b), "engine_angles %.4f %.4f %.4f\n", ea.x, ea.y, ea.z);
+        t += b;
+    }
+    std::snprintf(b, sizeof(b), "save %s\n", name.c_str());
+    t += b;
+    const std::string base = bmvr::VrFilePath(name.c_str());
+    WriteTextFile(base + "-engine.txt", t);
+    WriteTextFile(base + "-settings.txt", bmvr::CaptureSettingsScenario(m_Game));
+    std::snprintf(b, sizeof(b), "save %s", name.c_str());
+    const bool ok = m_Game->ClientCmd_Unrestricted(b);
+    Game::logMsg("debug capture %s: engine state + settings written, '%s' ok=%d (eye speed %.1f u/s)", name.c_str(), b,
+        ok ? 1 : 0, m_SetupVelocity.Length());
+}
+
+// Game thread, fake runtime only (headless restore, from VR/cmd.txt):
+//   bmvr_restore_view <turn> <zero x y z> <zero pitch yaw roll> <engine eye x y z>
+// Sets the turn offset and the recenter point exactly as captured (the save
+// cannot: loads re-latch the recenter point and sync the turn to the saved
+// aim), then moves the player until the engine eye is the captured one.
+bool VR::HandleRestoreCommand(const char* cmd)
+{
+    static const char kVerb[] = "bmvr_restore_view";
+    if (!cmd || std::strncmp(cmd, kVerb, sizeof(kVerb) - 1) != 0)
+        return false;
+    float v[10] = {};
+    const int n = std::sscanf(cmd + sizeof(kVerb) - 1, "%f %f %f %f %f %f %f %f %f %f",
+        &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9]);
+    if (n != 10)
+    {
+        Game::logMsg("restore view: needs 10 numbers, got %d: '%s'", n, cmd);
+        return true;
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        m_HmdPosAbsZero = Vector(v[1], v[2], v[3]);
+        m_HmdAngAbsZero = QAngle(v[4], v[5], v[6]);
+        m_HmdOriginLatched = true;
+    }
+    m_RotationOffsetY.store(v[0], std::memory_order_release);
+    m_YawSyncTicks = 0;
+    m_FirstCmdYawPending = false;
+    m_RestoreTarget = Vector(v[7], v[8], v[9]);
+    m_RestoreActive = true;
+    m_RestoreHaveSent = false;
+    m_RestoreSteps = 0;
+    m_RestoreNextMs = GetTickCount() + 300;
+    Game::logMsg("restore view: turn %.3f, recenter point (%.2f %.2f %.2f / %.2f %.2f %.2f), moving the engine eye to (%.2f %.2f %.2f)",
+        v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]);
+    return true;
+}
+
+void VR::TickRestoreView()
+{
+    if (!m_RestoreActive || !m_Game)
+        return;
+    const DWORD now = GetTickCount();
+    if (static_cast<LONG>(now - m_RestoreNextMs) < 0)
+        return;
+    const Vector diff = m_RestoreTarget - m_SetupOrigin;
+    if (diff.Length() < 0.05f)
+    {
+        m_RestoreActive = false;
+        Game::logMsg("restore view: engine eye at the captured spot (off by %.3f u after %d setpos); eyes L (%.2f %.2f %.2f) R (%.2f %.2f %.2f), view ang (%.2f %.2f %.2f)",
+            diff.Length(), m_RestoreSteps, GetViewOriginLeft(m_SetupOrigin).x, GetViewOriginLeft(m_SetupOrigin).y,
+            GetViewOriginLeft(m_SetupOrigin).z, GetViewOriginRight(m_SetupOrigin).x, GetViewOriginRight(m_SetupOrigin).y,
+            GetViewOriginRight(m_SetupOrigin).z, GetViewAngle().x, GetViewAngle().y, GetViewAngle().z);
+        return;
+    }
+    if (m_RestoreSteps >= 8)
+    {
+        m_RestoreActive = false;
+        Game::logMsg("restore view: GAVE UP, engine eye still off by %.2f u (%.2f %.2f %.2f) after %d setpos",
+            diff.Length(), diff.x, diff.y, diff.z, m_RestoreSteps);
+        return;
+    }
+    // setpos takes the player origin; the eye sits a view offset above it
+    // (duck dependent). First guess 64 u, then correct by what is left over.
+    if (!m_RestoreHaveSent)
+        m_RestoreSent = m_RestoreTarget - Vector(0.f, 0.f, 64.f);
+    else
+        m_RestoreSent = m_RestoreSent + diff;
+    m_RestoreHaveSent = true;
+    char b[160];
+    std::snprintf(b, sizeof(b), "setpos %.4f %.4f %.4f", m_RestoreSent.x, m_RestoreSent.y, m_RestoreSent.z);
+    const bool ok = m_Game->ClientCmd_Unrestricted(b);
+    ++m_RestoreSteps;
+    m_RestoreNextMs = now + 400;
+    Game::logMsg("restore view: step %d, eye off by %.3f u -> '%s' ok=%d", m_RestoreSteps, diff.Length(), b, ok ? 1 : 0);
 }
 
 void VR::PublishOpenXrPair(uint32_t slot, const OpenXrPendingPublish& pend)
@@ -6736,7 +6997,22 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
     const Vector& hmdPos = m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs;
     const float yaw = m_RotationOffsetY.load(std::memory_order_acquire);
     if (!m_ControllerPoseValid && !m_StereoFramePoseActive)
+    {
+        // Diag: in gameplay this fallback puts gun/laser/gloves at the eye.
+        // Counted so a blinking "pose valid" flag shows in the log.
+        static std::atomic<int> s_eyeFallbacks{ 0 };
+        static std::atomic<DWORD> s_lastLogMs{ 0 };
+        if (m_GameplayEligible && m_HmdOriginLatched)
+        {
+            const int n = ++s_eyeFallbacks;
+            const DWORD now = GetTickCount();
+            DWORD last = s_lastLogMs.load(std::memory_order_relaxed);
+            if (now - last > 2000 && s_lastLogMs.compare_exchange_strong(last, now))
+                Game::logMsg("Controller pose fallback to the eye: %d so far (thread %lu, noblink=%d)",
+                    n, GetCurrentThreadId(), bmvr::g_PoseFlagsNoBlink ? 1 : 0);
+        }
         return GetViewOrigin(setupOrigin);
+    }
 
     Vector arm = trackingPos - hmdPos;
     PivotYaw(arm, yaw);
@@ -8103,11 +8379,15 @@ void VR::FlushPendingGameUi()
     FlushPendingQuit();
     ExecVrConfigsOnce();
     FlushPanelEngineCommands();
+    FlushCaptureEngineState();
+    TickRestoreView();
     if (bmvr::g_FakeRuntime && m_Game)
     {
         char cmd[512];
         while (L4D2VR_FakeHelperPopCommand(cmd, sizeof(cmd)))
         {
+            if (HandleRestoreCommand(cmd))
+                continue;
             const bool ok = m_Game->ClientCmd_Unrestricted(cmd);
             Game::logMsg("fakehelper cmd '%s' ok=%d", cmd, ok ? 1 : 0);
         }
@@ -10280,10 +10560,37 @@ bool VR::WantsWeaponActionAnim() const
 void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
 {
     BMVR_PROF("vr UpdateControllerTracking");
-    m_ControllerPoseValid = false;
-    m_LeftControllerTrackingValid = false;
-    m_PhysicalRightTrackingValid = false;
-    m_RightControllerTrackingValid = false;
+    // UpdateTracking runs on the game thread (pose wait) and, in
+    // MulticoreMode, on the render thread too (VR::Update at Present), while
+    // the other thread places the gun, laser and gloves. Clearing the valid
+    // flags up front and setting them again ~300 lines later let that thread
+    // see "no controller pose" for a moment: ControllerTrackingToWorld then
+    // returned the eye position, so the laser started at the forehead (or a
+    // glove vanished) for a frame, mostly in heavy scenes (2026-11-13). Keep
+    // the last published pose until this update either publishes a new one
+    // (under m_ControllerMutex, below) or fails (flags cleared on the way out).
+    struct ClearIfNotPublished
+    {
+        VR* vr;
+        bool published = false;
+        ~ClearIfNotPublished()
+        {
+            if (published || !bmvr::g_PoseFlagsNoBlink)
+                return;
+            std::lock_guard<std::recursive_mutex> lock(vr->m_ControllerMutex);
+            vr->m_ControllerPoseValid = false;
+            vr->m_LeftControllerTrackingValid = false;
+            vr->m_PhysicalRightTrackingValid = false;
+            vr->m_RightControllerTrackingValid = false;
+        }
+    } clearGuard{ this };
+    if (!bmvr::g_PoseFlagsNoBlink)
+    {
+        m_ControllerPoseValid = false;
+        m_LeftControllerTrackingValid = false;
+        m_PhysicalRightTrackingValid = false;
+        m_RightControllerTrackingValid = false;
+    }
     if (!bmvr::TryCtrlPose())
         return;
     if (!m_OpenXrHelperBridgeActive && !m_System)
@@ -10567,6 +10874,7 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
     ApplyViewmodelBasisOffsets();
 
     m_ControllerPoseValid = true;
+    clearGuard.published = true;
     static int s_ctrlLog;
     if (s_ctrlLog < 4)
     {
@@ -12161,6 +12469,18 @@ IDirect3DBaseTexture9* VR::EyeRtSubstitute(IDirect3DBaseTexture9* texture)
         if (static_cast<IDirect3DBaseTexture9*>(r.tex) != texture)
             continue;
         const int eye = HudPaintActive() ? 0 : GpuTimerEye(this);
+        if (AuditLogging() && g_AuditTexPrefix[0])
+        {
+            // Panel capture: every per-eye reflection/refraction decision of
+            // the audited frame (doorway reflection lead, 2026-11-13).
+            const bool sub = eye != 0 && r.writer != eye && (r.writer == 1 || r.writer == 2) && r.tracked
+                && r.valid[eye] && r.copy[eye];
+            Game::logMsg("audit eyert e%d mat=%s tex %p %ux%u writer e%d tracked=%d copies %p/%p valid %d/%d -> %s",
+                eye, t_AuditMaterial, (void*)r.tex, r.w, r.h, r.writer, r.tracked ? 1 : 0, (void*)r.copy[1],
+                (void*)r.copy[2], r.valid[1] ? 1 : 0, r.valid[2] ? 1 : 0,
+                sub ? "OWN PREVIOUS COPY" : (eye != 0 && r.writer != eye && (r.writer == 1 || r.writer == 2))
+                    ? "other eye's image (no copy yet)" : "as is");
+        }
         if (eye == 0 || r.writer == eye || (r.writer != 1 && r.writer != 2))
             return texture;
         if (!r.tracked)
@@ -18053,7 +18373,21 @@ void VR::SubmitVRTextures()
 void VR::UpdateTracking()
 {
     BMVR_PROF("vr UpdateTracking");
-    m_HmdPoseValid = false;
+    // Same as the controller flags (UpdateControllerTracking): no transient
+    // "HMD pose invalid" that the other thread can see mid-update (the
+    // hand/laser overlay skips its whole draw on it = hands gone a frame).
+    struct ClearHmdIfNotPublished
+    {
+        VR* vr;
+        bool published = false;
+        ~ClearHmdIfNotPublished()
+        {
+            if (!published && bmvr::g_PoseFlagsNoBlink)
+                vr->m_HmdPoseValid = false;
+        }
+    } hmdGuard{ this };
+    if (!bmvr::g_PoseFlagsNoBlink)
+        m_HmdPoseValid = false;
     vr::TrackedDevicePose_t hmd{};
     const vr::EVRCompositorError err = static_cast<vr::EVRCompositorError>(
         m_LastPoseWaitError.load(std::memory_order_acquire));
@@ -18094,6 +18428,7 @@ void VR::UpdateTracking()
         m_HmdTrackingPose = hmd.mDeviceToAbsoluteTracking;
         QAngle::AngleVectors(m_HmdAngAbs, &m_HmdForward, &m_HmdRight, &m_HmdUp);
         m_HmdPoseValid = true;
+        hmdGuard.published = true;
     }
     m_IpdScale = bmvr::g_IPDScale;
     RefreshIpdFromHmd();

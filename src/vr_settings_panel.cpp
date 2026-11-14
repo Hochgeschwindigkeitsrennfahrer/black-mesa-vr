@@ -15,6 +15,7 @@
 #include "game.h"
 #include "bmvr_flags.h"
 #include "d3d9_vr.h"
+#include "bmvr_cvars.h"
 
 #include <algorithm>
 #include <cmath>
@@ -219,6 +220,7 @@ namespace
             // bmvr_* fixes and tests (on/off for A/B); not saved: a restart
             // brings back the defaults.
             { "MOD SWITCHES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Pose valid never blinks", RowKind::Toggle, nullptr, &bmvr::g_PoseFlagsNoBlink, nullptr, 0, 0, 0, nullptr },
             { "Glow queries per eye", RowKind::Toggle, nullptr, &bmvr::g_PixelVisPerEye, nullptr, 0, 0, 0, nullptr },
             { "Glow through objects fix", RowKind::Toggle, nullptr, &bmvr::g_GlowCountDepthFix, nullptr, 0, 0, 0, nullptr },
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
@@ -660,6 +662,52 @@ namespace
         float x, y, z, rhw;
         D3DCOLOR color;
     };
+}
+
+std::string bmvr::CaptureSettingsScenario(Game* game)
+{
+    std::string out = "# VR panel switches and numbers (bmvr_* cvars) and engine settings at capture time\n";
+    char line[256];
+    for (const Row& r : Rows())
+    {
+        if (!r.b && !r.f && !IsEngineCvarKey(r.key))
+            continue;
+        if (IsEngineCvarKey(r.key))
+        {
+            float v = 0.f;
+            if (game && game->GetConVarFloat(r.key + 5, v))
+            {
+                std::snprintf(line, sizeof(line), "cmd %s %g\n", r.key + 5, v);
+                out += line;
+            }
+            continue;
+        }
+        const void* target = r.b ? static_cast<const void*>(r.b) : static_cast<const void*>(r.f);
+        const float v = r.b ? (*r.b ? 1.f : 0.f) : *r.f;
+        if (const char* cv = VrCvarNameFor(target))
+            std::snprintf(line, sizeof(line), "cmd %s %g\n", cv, v);
+        else if (r.key && r.key[0])
+            std::snprintf(line, sizeof(line), "# config.txt %s = %g (from the capture's config copy)\n", r.key, v);
+        else
+            std::snprintf(line, sizeof(line), "# NOT RESTORED (session-only switch, no cvar): %s = %g\n", r.label, v);
+        out += line;
+    }
+    // The settings the harness guard checks plus other picture cvars.
+    static const char* kEngine[] = { "cl_csm_enabled", "cl_csm_qualitymode", "cl_csm_memoryusage", "np_gr_quality",
+        "mat_motion_blur_enabled", "mat_fxaa_enabled", "r_occlusion", "mat_hdr_level", "nr_lights_quality",
+        "nr_shadow_quality", "nr_shadow_res", "nr_shadow_filter_quality", "mat_specular", "mat_bloomscale",
+        "r_waterforceexpensive", "r_waterforcereflectentities", "mat_antialias", "mat_picmip", "r_3dsky",
+        "r_dopixelvisibility", "mat_queue_mode", "host_timescale", "fov_desired" };
+    for (const char* name : kEngine)
+    {
+        float v = 0.f;
+        if (game && game->GetConVarFloat(name, v))
+        {
+            std::snprintf(line, sizeof(line), "engine %s %g\n", name, v);
+            out += line;
+        }
+    }
+    return out;
 }
 
 void bmvr::CapturePanelDefaults()
