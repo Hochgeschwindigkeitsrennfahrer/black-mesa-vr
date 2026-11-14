@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -6409,7 +6410,9 @@ void VR::ProcessInput()
     // grip = crowbar. The quick-save hand must rest there ~0.25 s first (a
     // buzz says it is armed), so a fast swing past the shoulder does
     // nothing; the crowbar arms at once (a buzz on entry), since the grip
-    // squeeze is needed anyway and the wait lost hurried grabs.
+    // squeeze is needed anyway and the wait lost hurried grabs. Hip
+    // holsters (HipGestures): right hand at the right hip + grip = pistol,
+    // a bit above the left hip = MP5, also armed at once.
     const bool rightShoulder = UpdateShoulderGestures(paused);
     vr::InputDigitalActionData_t flash{};
     static bool s_flashLatched = false;
@@ -6422,7 +6425,7 @@ void VR::ProcessInput()
         if ((flashOk && flash.bState) || squareFlash)
         {
             s_flashReleasePolls = 0;
-            // A grip squeezed for the shoulder crowbar is still held when
+            // A grip squeezed for a shoulder/hip grab is still held when
             // the hand comes forward: that press must not toggle the light.
             if (rightShoulder)
                 s_flashLatched = true;
@@ -13148,16 +13151,18 @@ void VR::ApplyTwoHandWeaponAim()
 
 bool VR::UpdateShoulderGestures(bool paused)
 {
-    // Returns true while the right hand is in its shoulder zone, so the right
-    // grip does not also toggle the flashlight there.
+    // Returns true while the right hand is in its shoulder or hip zone, so
+    // the right grip does not also toggle the flashlight there.
     struct Zone { DWORD enteredMs = 0; bool armed = false; bool gripDown = true; };
-    static Zone s_left, s_right;
-    const bool active = bmvr::g_ShoulderGestures && m_GameplayEligible && !paused && !MenuGameplayBlocked()
+    static Zone s_left, s_right, s_hipRight, s_hipLeft;
+    const bool active = (bmvr::g_ShoulderGestures || bmvr::g_HipGestures) && m_GameplayEligible && !paused && !MenuGameplayBlocked()
         && !m_WeaponMenuOpen && !m_SettingsOpen && m_HmdPoseValid;
     if (!active)
     {
         s_left = Zone{};
         s_right = Zone{};
+        s_hipRight = Zone{};
+        s_hipLeft = Zone{};
         return false;
     }
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
@@ -13214,9 +13219,9 @@ bool VR::UpdateShoulderGestures(bool paused)
         return false;
     };
 
-    const bool leftIn = m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
+    const bool leftIn = bmvr::g_ShoulderGestures && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
     // Not while both hands hold the gun: that grip squeeze is the gun's.
-    const bool rightIn = m_PhysicalRightTrackingValid && !m_TwoHandActive
+    const bool rightIn = bmvr::g_ShoulderGestures && m_PhysicalRightTrackingValid && !m_TwoHandActive
         && inZone(m_PhysicalRightPosAbs, 1.f);
     if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
     {
@@ -13224,34 +13229,70 @@ bool VR::UpdateShoulderGestures(bool paused)
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
         Game::logMsg("Shoulder gesture: quick save");
     }
-    if (step(s_right, rightIn, gripValue(m_ActionFlashlight), vr::TrackedControllerRole_RightHand, 0) && m_Game)
-    {
+    // Selects the first inventory weapon whose network or model name has one
+    // of the given parts. Already held = nothing to do (still counts).
+    auto grabWeapon = [&](const char* label, std::initializer_list<const char*> parts) {
+        if (!m_Game)
+            return;
+        auto matches = [&](const char* nm) {
+            if (!nm)
+                return false;
+            for (const char* part : parts)
+                if (strstr(nm, part))
+                    return true;
+            return false;
+        };
+        if (!m_LastViewmodelModel.empty() && matches(m_LastViewmodelModel.c_str()))
+        {
+            Game::logMsg("Grab gesture: %s already held", label);
+            return;
+        }
         Game::InventoryWeapon inv[32]{};
         const int n = m_Game->CollectInventoryWeapons(inv, 32);
         for (int i = 0; i < n; ++i)
         {
-            const char* names[] = { inv[i].networkName, inv[i].modelName };
-            bool crowbar = false;
-            for (const char* nm : names)
-                crowbar = crowbar || (nm && (strstr(nm, "crowbar") || strstr(nm, "wrench")));
-            if (crowbar && inv[i].entityIndex > 0)
-            {
-                m_EmptyHands = false;
-                m_PendingWeaponSelect.store(inv[i].entityIndex, std::memory_order_release);
-                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
-                const Vector d = m_PhysicalRightPosAbs - m_HmdPosAbs;
-                Game::logMsg("Shoulder gesture: crowbar entity=%d (hand %.2f m ahead, %.2f m up, %.2f m right of the head)",
-                    inv[i].entityIndex, d.Dot(fwd) / scale, d.z / scale, d.Dot(right) / scale);
-                break;
-            }
+            if (inv[i].entityIndex <= 0 || !(matches(inv[i].networkName) || matches(inv[i].modelName)))
+                continue;
+            m_EmptyHands = false;
+            m_PendingWeaponSelect.store(inv[i].entityIndex, std::memory_order_release);
+            PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
+            const Vector d = m_PhysicalRightPosAbs - m_HmdPosAbs;
+            Game::logMsg("Grab gesture: %s entity=%d (hand %.2f m ahead, %.2f m up, %.2f m right of the head)",
+                label, inv[i].entityIndex, d.Dot(fwd) / scale, d.z / scale, d.Dot(right) / scale);
+            return;
         }
-    }
-    // Also for 1 s after leaving the zone, so the grip squeeze that took the
-    // crowbar cannot toggle the flashlight on the way forward.
+        Game::logMsg("Grab gesture: %s not in the inventory", label);
+    };
+    const float rightGrip = gripValue(m_ActionFlashlight);
+    if (step(s_right, rightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
+        grabWeapon("crowbar", { "crowbar", "wrench" });
+
+    // Hip holsters (right hand only): right hip = pistol, a bit above the
+    // left hip (cross draw) = MP5. Close to the body (a gun aimed forward is
+    // ~0.3 m+ ahead) and well below the shoulder zone, so they never overlap.
+    auto inHip = [&](const Vector& hand, float side, float lo, float hi, float latLo, float latHi) {
+        const Vector d = hand - m_HmdPosAbs;
+        const float along = d.Dot(fwd) / scale;
+        const float lateral = d.Dot(right) / scale * side;
+        const float height = d.z / scale;
+        return along > -0.25f && along < 0.20f && height > lo && height < hi
+            && lateral > latLo && lateral < latHi;
+    };
+    const bool hipsOn = bmvr::g_HipGestures && m_PhysicalRightTrackingValid && !m_TwoHandActive;
+    const bool hipRightIn = hipsOn && inHip(m_PhysicalRightPosAbs, 1.f, -0.95f, -0.45f, 0.10f, 0.45f);
+    const bool hipLeftIn = hipsOn && inHip(m_PhysicalRightPosAbs, -1.f, -0.80f, -0.35f, 0.00f, 0.40f);
+    if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
+        grabWeapon("pistol", { "glock" });
+    if (step(s_hipLeft, hipLeftIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
+        grabWeapon("mp5", { "mp5" });
+
+    // Also for 1 s after leaving a zone, so the grip squeeze that took the
+    // weapon cannot toggle the flashlight on the way forward.
+    const bool anyRightIn = rightIn || hipRightIn || hipLeftIn;
     static DWORD s_rightLeftMs;
-    if (rightIn)
+    if (anyRightIn)
         s_rightLeftMs = GetTickCount();
-    return rightIn || (s_rightLeftMs && GetTickCount() - s_rightLeftMs < 1000);
+    return anyRightIn || (s_rightLeftMs && GetTickCount() - s_rightLeftMs < 1000);
 }
 
 float VR::LeftSupportGripValue() const

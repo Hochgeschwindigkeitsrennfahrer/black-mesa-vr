@@ -360,6 +360,7 @@ namespace bmvr
     extern bool g_MuteFidgetSounds;      // weapon fidget clips play no sound (the pose is frozen in VR)
     // Optional features, default off:
     extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
+    extern bool g_HipGestures;           // right hand + grip at right hip = pistol, above left hip = MP5
     extern bool g_SettingsTriangleHold;  // Triangle/Y hold opens the VR settings panel, tap pauses on release
     extern bool g_WeaponMenuSettingsGear; // VR gear slot in the weapon menu (always shown without SettingsTriangleHold)
     extern bool g_WeaponMenuTilt;        // weapon menu opened low tilts back to face the eye

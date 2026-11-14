@@ -161,6 +161,7 @@ namespace bmvr
     bool g_MuteFidgetSounds = true;
     // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = true;
+    bool g_HipGestures = true;
     bool g_SettingsTriangleHold = true;
     bool g_WeaponMenuSettingsGear = true;
     bool g_WeaponMenuTilt = true;
@@ -701,6 +702,8 @@ namespace bmvr
                 g_VrShootFromMuzzle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ShoulderGestures") == 0)
                 g_ShoulderGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "HipGestures") == 0)
+                g_HipGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SettingsTriangleHold") == 0)
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "WeaponMenuSettingsGear") == 0)
