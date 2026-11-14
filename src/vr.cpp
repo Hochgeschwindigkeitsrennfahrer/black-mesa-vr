@@ -13299,17 +13299,19 @@ bool VR::UpdateShoulderGestures(bool paused)
     // Hip holsters (right hand only): right hip = pistol, a bit above the
     // left hip (cross draw) = MP5. Close to the body (a gun aimed forward is
     // ~0.3 m+ ahead) and well below the shoulder zone, so they never overlap.
-    auto inHip = [&](const Vector& hand, float side, float lo, float hi, float latLo, float latHi) {
+    auto inHip = [&](const Vector& hand, float side, float back, float front, float lo, float hi, float latLo, float latHi) {
         const Vector d = hand - m_HmdPosAbs;
         const float along = d.Dot(fwd) / scale;
         const float lateral = d.Dot(right) / scale * side;
         const float height = d.z / scale;
-        return along > -0.25f && along < 0.20f && height > lo && height < hi
+        return along > back && along < front && height > lo && height < hi
             && lateral > latLo && lateral < latHi;
     };
     const bool hipsOn = bmvr::g_HipGestures && m_PhysicalRightTrackingValid && !m_TwoHandActive;
-    const bool hipRightIn = hipsOn && inHip(m_PhysicalRightPosAbs, 1.f, -0.95f, -0.45f, 0.10f, 0.45f);
-    const bool hipLeftIn = hipsOn && inHip(m_PhysicalRightPosAbs, -1.f, -0.80f, -0.35f, 0.00f, 0.40f);
+    // Pistol zone 8 cm further back and 8 cm lower than the first try
+    // (2026-11-14: it took the pistol 5-10 cm too far forward and too high).
+    const bool hipRightIn = hipsOn && inHip(m_PhysicalRightPosAbs, 1.f, -0.33f, 0.12f, -1.03f, -0.53f, 0.10f, 0.45f);
+    const bool hipLeftIn = hipsOn && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f);
     if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
         grabWeapon("pistol", { "glock" });
     if (step(s_hipLeft, hipLeftIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
