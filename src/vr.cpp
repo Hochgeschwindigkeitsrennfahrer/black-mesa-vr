@@ -13263,6 +13263,16 @@ bool VR::UpdateShoulderGestures(bool paused)
         };
         if (!m_LastViewmodelModel.empty() && matches(m_LastViewmodelModel.c_str()))
         {
+            // Empty hands keep the game's active weapon (holstering never
+            // switches it), so a grab of that same weapon must just show it
+            // again: before, the pistol grab did nothing with empty hands.
+            if (m_EmptyHands)
+            {
+                m_EmptyHands = false;
+                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
+                Game::logMsg("Grab gesture: %s already active, hands -> weapon", label);
+                return;
+            }
             Game::logMsg("Grab gesture: %s already held", label);
             return;
         }
