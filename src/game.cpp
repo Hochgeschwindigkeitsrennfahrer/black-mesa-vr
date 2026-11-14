@@ -1139,9 +1139,34 @@ int Game::VisibleEntityModelIndex(int entityIndex, Vector& origin)
 bool Game::LocalPlayerHasSuit()
 {
     ScanWristHudNetVars();
-    const int wearing = ReadPlayerFlagByte(g_nvWearingSuit);
+    int wearing = ReadPlayerFlagByte(g_nvWearingSuit);
     if (wearing < 0)
         return true;
+    // Dying strips the suit (PlayerDeathThink -> PackDeadPlayerItems ->
+    // RemoveAllItems(true)), so the gloves turned bare while dead. Keep the
+    // last alive value until the player lives again (reload restores it).
+    static int s_aliveWearing = -1;
+    int health = 1;
+    if (g_nvHealth > 0 && m_EngineClient && m_ClientEntityList)
+    {
+        const int local = m_EngineClient->GetLocalPlayer();
+        void* player = local > 0 ? m_ClientEntityList->GetClientEntity(local) : nullptr;
+        if (player)
+        {
+            BMVR_TRY
+            {
+                health = *reinterpret_cast<volatile int*>(static_cast<unsigned char*>(player) + g_nvHealth);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                health = 1;
+            }
+        }
+    }
+    if (health <= 0 && s_aliveWearing >= 0)
+        wearing = s_aliveWearing;
+    else if (health > 0)
+        s_aliveWearing = wearing;
     static int s_suitLog;
     static int s_lastWearing = -1;
     if (wearing != s_lastWearing && s_suitLog < 8)

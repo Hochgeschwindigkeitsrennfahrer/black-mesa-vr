@@ -10140,8 +10140,10 @@ void VR::UpdateAimCrosshair()
     // the marker and beam off; without it shots used the raw attachment,
     // which drifts toward the view edges.
     const bool wantAimAid = bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam;
+    // No weapon at all (new game, stripped on death): m_VmClass still names
+    // the last gun, so without this the laser stayed on bare hands.
     if (!(wantAimAid || bmvr::g_VrShootFromMuzzle) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen
-        || m_SettingsOpen)
+        || m_SettingsOpen || !m_HasHeldWeapon || !(m_Game && m_Game->GetActiveWeaponEntity()))
         return;
     commit.stage = 1;
     // Guns only: no laser on the crowbar, thrown weapons, snarks or bare hands.
