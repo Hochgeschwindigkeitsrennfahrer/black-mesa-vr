@@ -15626,7 +15626,7 @@ IDirect3DSurface9* VR::ThreadEyeSurface() const
 
 void VR::NoteTranslucentPassStart()
 {
-    if (!bmvr::g_MsaaTranslucent1x || !UseVrMsaa())
+    if (!UseVrMsaa())
         return;
     if (McPipelineEnabled())
     {

@@ -53,7 +53,7 @@ MODULES = {
         kCurrentViewOriginGlobal kCViewRenderBeams_DrawBeam kClientCurrentViewIdRva kPixelVisQueryAgeCmpRva
         kPixelVisSetAgeCmpRva kPixelVisQueryFractionRva kSaveShotWriterRva kSaveShotNowRva
         kPixelVisGetFractionRva kPixelVisQueryForViewRva kClientFrameStartRva kClientSetupBonesRva
-        kClientBuildTransformationsRva kClientParticleCollectionSimulateRva kClientParticleRenderStartRva kClientDrawTranslucentARva kClientDrawTranslucentBRva
+        kClientBuildTransformationsRva kClientParticleCollectionSimulateRva kClientParticleRenderStartRva kClientDrawTranslucentARva kClientDrawTranslucentBRva kClientDrawTranslucentRenderableRva
         kClientPrecipRenderRva kClientPcfCameraFacingRva kClientParticleMgrSimulateRva
         kLensflareWorldToScreenRva kClientFrameFrustumRva kGeneratePerspectiveFrustumRva
         kLensflareFractionRva kLensflareDrawQuadRva kLensflareElementRva kClientMaterialsPtrRva

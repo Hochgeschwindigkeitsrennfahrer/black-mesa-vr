@@ -613,9 +613,12 @@ public:
     // m_mModelView at manager +0x68). Its RenderEnd is inlined in DrawModel (LoadMatrix = ctx vt 0x60).
     // The two client functions that start a view's translucent pass (both carry the VPROF name
     // "CViewRender::DrawTranslucentRenderables"): thiscall, A takes one stack arg (ret 4, 2 callers),
-    // B none (7 callers). Hooked for "MSAA skips particles + gun". Beta 26627981.
+    // B none (7 callers). Hooked for "MSAA skips particles". Beta 26627981.
     static constexpr uint32_t kClientDrawTranslucentARva = 0x1FEEF0;
     static constexpr uint32_t kClientDrawTranslucentBRva = 0x1FF7F0;
+    // DrawTranslucentRenderable: cdecl (IClientRenderable* ent, bool twoPass, bool, bool, void* viewData),
+    // called per sorted translucent renderable from A, B and their helper 0x1FF510; viewData = view object + 0x988.
+    static constexpr uint32_t kClientDrawTranslucentRenderableRva = 0x1FED00;
     static constexpr uint32_t kClientParticleRenderStartRva = 0x196450; // beta 26627981 (26234270: 0x193C60)
     // Black Mesa's precipitation renderer (cdecl, no args; debug string "Rain render    : %du"; called from
     // 0x20444A): per precipitation entity GetMatrix(VIEW) -> local, LoadIdentity view, clip override, quads

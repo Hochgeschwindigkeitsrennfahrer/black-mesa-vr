@@ -1284,46 +1284,119 @@ namespace
     }
 }
 
-// "MSAA skips particles + gun" (VR panel): the main view's translucent pass
-// starts here; the multisampled eye switches to its 1x resolve for the rest of
-// the eye's frame (translucents, viewmodel, post). View 0 = VIEW_MAIN: the 3D
-// skybox (1) and the water views (3 / 4) run before the main view's opaque pass.
+// "MSAA skips particles" (VR panel): in the main view's translucent pass the
+// particle systems are held back; when the pass is done the multisampled eye
+// switches to its 1x resolve and they are drawn there (blended overdraw on 4
+// samples was ~40 % of the 4x cost in particle-heavy rooms). Models, ropes
+// and glass of that pass stay multisampled. Without particles in view nothing
+// switches. View 0 = VIEW_MAIN: the 3D skybox (1) and the water views (3 / 4)
+// are left alone.
 using DrawTranslucentAFn = void(__fastcall*)(void* ecx, void* edx, int arg);
 using DrawTranslucentBFn = void(__fastcall*)(void* ecx, void* edx);
+using DrawTranslucentRenderableFn = void(__cdecl*)(void* ent, int twoPass, int a3, int a4, void* viewData);
 static DrawTranslucentAFn g_OrigDrawTranslucentA = nullptr;
 static DrawTranslucentBFn g_OrigDrawTranslucentB = nullptr;
+static DrawTranslucentRenderableFn g_OrigDrawTranslucentRenderable = nullptr;
 
-static void NoteTranslucentPass()
+namespace
 {
-    if (!bmvr::g_MsaaTranslucent1x || !Hooks::m_VR || !g_ClientCurrentViewId || g_ClientCurrentViewId() != 0)
+    struct HeldParticle { void* ent; int twoPass, a3, a4; void* viewData; };
+    // Game thread only.
+    int g_TranslucentDepth = 0;
+    bool g_TranslucentHold = false;
+    std::vector<HeldParticle> g_HeldParticles;
+
+    // Particle system renderable? By the MSVC RTTI class name behind the
+    // renderable's vtable (CNewParticleEffect, CParticleEffectBinding, ...),
+    // looked up once per vtable.
+    bool IsParticleRenderable(void* ent)
+    {
+        static std::unordered_map<const void*, bool> s_byVtable;
+        const void* vt = nullptr;
+        BMVR_TRY { vt = *reinterpret_cast<const void* const*>(ent); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        const auto it = s_byVtable.find(vt);
+        if (it != s_byVtable.end())
+            return it->second;
+        bool particle = false;
+        char name[96] = {};
+        BMVR_TRY
+        {
+            const auto* col = reinterpret_cast<const uint32_t* const*>(vt)[-1];   // RTTICompleteObjectLocator
+            const char* raw = reinterpret_cast<const char*>(col[3]) + 8;         // TypeDescriptor name
+            strncpy_s(name, raw, _TRUNCATE);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { name[0] = 0; }
+        particle = std::strstr(name, "Particle") != nullptr;
+        s_byVtable.emplace(vt, particle);
+        if (particle)
+            Game::logMsg("MSAA skips particles: renderable class %s is drawn on the 1x resolve", name);
+        return particle;
+    }
+
+    void TranslucentPassEnter()
+    {
+        if (g_TranslucentDepth++ != 0)
+            return;
+        g_TranslucentHold = bmvr::g_MsaaParticles1x && Hooks::m_VR && Hooks::m_VR->UseVrMsaa()
+            && g_ClientCurrentViewId && g_ClientCurrentViewId() == 0;
+    }
+
+    void TranslucentPassLeave()
+    {
+        if (--g_TranslucentDepth != 0)
+            return;
+        g_TranslucentHold = false;
+        if (g_HeldParticles.empty())
+            return;
+        if (Hooks::m_VR)
+            Hooks::m_VR->NoteTranslucentPassStart();
+        for (const HeldParticle& h : g_HeldParticles)
+            g_OrigDrawTranslucentRenderable(h.ent, h.twoPass, h.a3, h.a4, h.viewData);
+        g_HeldParticles.clear();
+    }
+}
+
+static void __cdecl DrawTranslucentRenderableHook(void* ent, int twoPass, int a3, int a4, void* viewData)
+{
+    if (g_TranslucentHold && ent && IsParticleRenderable(ent))
+    {
+        g_HeldParticles.push_back({ ent, twoPass, a3, a4, viewData });
         return;
-    Hooks::m_VR->NoteTranslucentPassStart();
+    }
+    g_OrigDrawTranslucentRenderable(ent, twoPass, a3, a4, viewData);
 }
 
 static void __fastcall DrawTranslucentAHook(void* ecx, void* edx, int arg)
 {
-    NoteTranslucentPass();
+    TranslucentPassEnter();
     g_OrigDrawTranslucentA(ecx, edx, arg);
+    TranslucentPassLeave();
 }
 
 static void __fastcall DrawTranslucentBHook(void* ecx, void* edx)
 {
-    NoteTranslucentPass();
+    TranslucentPassEnter();
     g_OrigDrawTranslucentB(ecx, edx);
+    TranslucentPassLeave();
 }
 
 static void InstallTranslucentPassHooks(uintptr_t client)
 {
     static const unsigned char kA[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x54, 0xA1 };
     static const unsigned char kB[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0xA1 };
+    static const unsigned char kR[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0xA1 };
     auto* a = reinterpret_cast<unsigned char*>(client + Offsets::kClientDrawTranslucentARva);
     auto* b = reinterpret_cast<unsigned char*>(client + Offsets::kClientDrawTranslucentBRva);
-    if (std::memcmp(a, kA, sizeof(kA)) != 0 || std::memcmp(b, kB, sizeof(kB)) != 0)
+    auto* r = reinterpret_cast<unsigned char*>(client + Offsets::kClientDrawTranslucentRenderableRva);
+    if (std::memcmp(a, kA, sizeof(kA)) != 0 || std::memcmp(b, kB, sizeof(kB)) != 0 || std::memcmp(r, kR, sizeof(kR)) != 0)
     {
-        Game::logMsg("translucent pass: MISMATCH (not hooked; MSAA skips particles + gun has no effect)");
+        Game::logMsg("translucent pass: MISMATCH (not hooked; MSAA skips particles has no effect)");
         return;
     }
-    const bool ok = MH_CreateHook(a, reinterpret_cast<LPVOID>(&DrawTranslucentAHook), reinterpret_cast<LPVOID*>(&g_OrigDrawTranslucentA)) == MH_OK
+    const bool ok = MH_CreateHook(r, reinterpret_cast<LPVOID>(&DrawTranslucentRenderableHook), reinterpret_cast<LPVOID*>(&g_OrigDrawTranslucentRenderable)) == MH_OK
+        && MH_EnableHook(r) == MH_OK
+        && MH_CreateHook(a, reinterpret_cast<LPVOID>(&DrawTranslucentAHook), reinterpret_cast<LPVOID*>(&g_OrigDrawTranslucentA)) == MH_OK
         && MH_EnableHook(a) == MH_OK
         && MH_CreateHook(b, reinterpret_cast<LPVOID>(&DrawTranslucentBHook), reinterpret_cast<LPVOID*>(&g_OrigDrawTranslucentB)) == MH_OK
         && MH_EnableHook(b) == MH_OK;
