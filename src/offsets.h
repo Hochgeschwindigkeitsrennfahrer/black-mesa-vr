@@ -611,6 +611,11 @@ public:
     // (beta 26234270; found by its GetMatrix(VIEW/MODEL) + UserClipTransform + 2x MatrixMode/LoadIdentity
     // sequence, flags +0x94 bit 0x80 = camera-space effect, manager +0x90, its material system +0x64,
     // m_mModelView at manager +0x68). Its RenderEnd is inlined in DrawModel (LoadMatrix = ctx vt 0x60).
+    // The two client functions that start a view's translucent pass (both carry the VPROF name
+    // "CViewRender::DrawTranslucentRenderables"): thiscall, A takes one stack arg (ret 4, 2 callers),
+    // B none (7 callers). Hooked for "MSAA skips particles + gun". Beta 26627981.
+    static constexpr uint32_t kClientDrawTranslucentARva = 0x1FEEF0;
+    static constexpr uint32_t kClientDrawTranslucentBRva = 0x1FF7F0;
     static constexpr uint32_t kClientParticleRenderStartRva = 0x196450; // beta 26627981 (26234270: 0x193C60)
     // Black Mesa's precipitation renderer (cdecl, no args; debug string "Rain render    : %du"; called from
     // 0x20444A): per precipitation entity GetMatrix(VIEW) -> local, LoadIdentity view, clip override, quads

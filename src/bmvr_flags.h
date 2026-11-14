@@ -205,6 +205,7 @@ namespace bmvr
     extern float g_LodBias;          // LodBias (default 0): extra mip LOD bias in the 3D views (texture shimmer)   // AlphaToCoverage (default false): alpha-tested draws use the eye MSAA samples (foliage, fences)
     extern bool g_RefractOncePerEye; // RefractOncePerEye (default false): glass refraction copied once per eye
     extern float g_MsaaF;           // VR panel copy of g_Msaa (0/2/4); applied live by recreating the eyes
+    extern bool g_MsaaTranslucent1x; // MsaaTranslucent1x (default false): particles, glass and the gun drawn on the 1x resolve
     extern bool g_MsaaPostSwitch;   // MsaaPostSwitch (default true): post chain on the 1x resolve
     extern bool g_MsaaAllowed;
     uint32_t NormalizeMsaa(int samples);

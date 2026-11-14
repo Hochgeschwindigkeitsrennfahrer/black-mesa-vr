@@ -226,6 +226,12 @@ namespace
                 ss >> on;
                 bmvr::g_AlphaToCoverage = on != 0;
             }
+            else if (key == "translucent1x")
+            {
+                int on = 0;
+                ss >> on;
+                bmvr::g_MsaaTranslucent1x = on != 0;
+            }
             else if (key == "refractonce")
             {
                 int on = 0;

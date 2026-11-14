@@ -2950,7 +2950,7 @@ private:
 class McMatFunctor : public CFunctor
 {
 public:
-    enum class Kind { Bind, Composite };
+    enum class Kind { Bind, Composite, RetireMsaa };
 
     McMatFunctor(VR* vr, Kind kind, int stereoEye, uint32_t band, bool flushGpu)
         : McMatFunctor(vr, kind, stereoEye, band, flushGpu, nullptr)
@@ -2991,6 +2991,8 @@ public:
             return;
         if (m_kind == Kind::Composite)
             m_vr->McCompositeEyesToRing(m_band, m_havePose ? &m_pose : nullptr, m_hands.valid ? &m_hands : nullptr);
+        else if (m_kind == Kind::RetireMsaa)
+            m_vr->RetireMsaaEyeIfBound();
         else
             m_vr->McBindPlaybackEye(m_stereoEye, m_flushGpu);
     }
@@ -15620,6 +15622,43 @@ IDirect3DSurface9* VR::ThreadEyeSurface() const
     if (!eye && !McPipelineEnabled() && StereoEyeBlitActive())
         eye = StereoEyeBlitDest();
     return eye;
+}
+
+void VR::NoteTranslucentPassStart()
+{
+    if (!bmvr::g_MsaaTranslucent1x || !UseVrMsaa())
+        return;
+    if (McPipelineEnabled())
+    {
+        // Queued rendering: the switch has to sit in the draw stream, right
+        // before this view's translucent draws.
+        auto* functor = new (std::nothrow) McMatFunctor(this, McMatFunctor::Kind::RetireMsaa, 0, 0, false);
+        if (!functor)
+            return;
+        functor->AddRef();
+        QueueMcMatFunctor(functor, "RetireMsaaForTranslucents");
+        return;
+    }
+    RetireMsaaEyeIfBound();
+}
+
+void VR::RetireMsaaEyeIfBound()
+{
+    // Only when the eye itself is the render target: the caller filters on the
+    // main view, this also keeps reflection / refraction / monitor views out.
+    IDirect3DSurface9* eye = ThreadEyeSurface();
+    if (!eye || !g_D3DVR9)
+        return;
+    IDirect3DDevice9* device = nullptr;
+    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
+        return;
+    IDirect3DSurface9* rt0 = nullptr;
+    const bool bound = SUCCEEDED(device->GetRenderTarget(0, &rt0)) && rt0 == eye;
+    if (rt0)
+        rt0->Release();
+    device->Release();
+    if (bound)
+        RetireMsaaEyeForPost();
 }
 
 void VR::RetireMsaaEyeForPost()

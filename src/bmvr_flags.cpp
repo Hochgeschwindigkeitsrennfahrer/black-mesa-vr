@@ -84,6 +84,7 @@ namespace bmvr
     bool g_MulticoreMode = true;
     uint32_t g_Msaa = 0; // >= 2 switches FXAA off and only reaches the lighting buffers
     bool g_MsaaPostSwitch = true;
+    bool g_MsaaTranslucent1x = false;
     float g_MsaaF = 0.f;
     bool g_AlphaToCoverage = false;
     float g_LodBias = 0.f;
@@ -738,6 +739,8 @@ namespace bmvr
                 g_LodBias = std::clamp(static_cast<float>(atof(val)), -1.f, 2.f);
             else if (std::strcmp(n, "AlphaToCoverage") == 0)
                 g_AlphaToCoverage = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MsaaTranslucent1x") == 0)
+                g_MsaaTranslucent1x = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MsaaPostSwitch") == 0)
                 g_MsaaPostSwitch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PerfLog") == 0)

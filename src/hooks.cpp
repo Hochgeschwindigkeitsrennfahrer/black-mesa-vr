@@ -1284,6 +1284,52 @@ namespace
     }
 }
 
+// "MSAA skips particles + gun" (VR panel): the main view's translucent pass
+// starts here; the multisampled eye switches to its 1x resolve for the rest of
+// the eye's frame (translucents, viewmodel, post). View 0 = VIEW_MAIN: the 3D
+// skybox (1) and the water views (3 / 4) run before the main view's opaque pass.
+using DrawTranslucentAFn = void(__fastcall*)(void* ecx, void* edx, int arg);
+using DrawTranslucentBFn = void(__fastcall*)(void* ecx, void* edx);
+static DrawTranslucentAFn g_OrigDrawTranslucentA = nullptr;
+static DrawTranslucentBFn g_OrigDrawTranslucentB = nullptr;
+
+static void NoteTranslucentPass()
+{
+    if (!bmvr::g_MsaaTranslucent1x || !Hooks::m_VR || !g_ClientCurrentViewId || g_ClientCurrentViewId() != 0)
+        return;
+    Hooks::m_VR->NoteTranslucentPassStart();
+}
+
+static void __fastcall DrawTranslucentAHook(void* ecx, void* edx, int arg)
+{
+    NoteTranslucentPass();
+    g_OrigDrawTranslucentA(ecx, edx, arg);
+}
+
+static void __fastcall DrawTranslucentBHook(void* ecx, void* edx)
+{
+    NoteTranslucentPass();
+    g_OrigDrawTranslucentB(ecx, edx);
+}
+
+static void InstallTranslucentPassHooks(uintptr_t client)
+{
+    static const unsigned char kA[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x54, 0xA1 };
+    static const unsigned char kB[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0xA1 };
+    auto* a = reinterpret_cast<unsigned char*>(client + Offsets::kClientDrawTranslucentARva);
+    auto* b = reinterpret_cast<unsigned char*>(client + Offsets::kClientDrawTranslucentBRva);
+    if (std::memcmp(a, kA, sizeof(kA)) != 0 || std::memcmp(b, kB, sizeof(kB)) != 0)
+    {
+        Game::logMsg("translucent pass: MISMATCH (not hooked; MSAA skips particles + gun has no effect)");
+        return;
+    }
+    const bool ok = MH_CreateHook(a, reinterpret_cast<LPVOID>(&DrawTranslucentAHook), reinterpret_cast<LPVOID*>(&g_OrigDrawTranslucentA)) == MH_OK
+        && MH_EnableHook(a) == MH_OK
+        && MH_CreateHook(b, reinterpret_cast<LPVOID>(&DrawTranslucentBHook), reinterpret_cast<LPVOID*>(&g_OrigDrawTranslucentB)) == MH_OK
+        && MH_EnableHook(b) == MH_OK;
+    Game::logMsg("translucent pass: hooks %s", ok ? "on" : "FAILED");
+}
+
 static void InstallParticleLevel(uintptr_t client)
 {
     {
@@ -1412,6 +1458,7 @@ static void InstallPixelVisPerEye()
     g_PerfLogApplied = bmvr::g_PerfLog;
     InstallPixelVisStats(client);
     InstallParticleLevel(client);
+    InstallTranslucentPassHooks(client);
     InstallEngineWorldBatchStats();
     InstallBoneParticleProf(client);
     InstallFlareHooks(client);
