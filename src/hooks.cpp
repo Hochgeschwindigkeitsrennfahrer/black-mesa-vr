@@ -8411,7 +8411,8 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     // copies after the gun is drawn, and skipping that copy hid the gun and
     // hand (2026-11-13). (The viewmodel pass is not visible on the drawing
     // thread with MulticoreMode, so the water level decides.)
-    if (bmvr::g_RefractOncePerEye && m_VR && !(m_Game && m_Game->LocalPlayerWaterLevel() == 3))
+    // The water level is only looked up when a copy is about to be skipped.
+    if (bmvr::g_RefractOncePerEye && m_VR)
     {
         const char* rn = SafeTextureName(texture);
         if (rn && _stricmp(rn, "_rt_PowerOfTwoFB") == 0)
@@ -8419,7 +8420,7 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             IDirect3DSurface9* eyeNow = m_VR->ThreadEyeSurface();
             if (eyeNow && srcEye)
             {
-                if (m_VR->m_RefractEyeDone == eyeNow)
+                if (m_VR->m_RefractEyeDone == eyeNow && !(m_Game && m_Game->LocalPlayerWaterLevel() == 3))
                 {
                     ++m_VR->m_RefractCopiesSkipped;
                     return;
@@ -8432,6 +8433,7 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     }
     if (hkCopyRenderTargetToTextureEx.fOriginal)
         hkCopyRenderTargetToTextureEx.fOriginal(ecx, texture, renderTargetId, srcRect, dstRect);
+    if (bmvr::g_PerfLog)
     {
         // Engine eye copies per second, logged when > 1500/s (refraction storms).
         static DWORD s_t; static int s_n; static char s_last[8][64]; static int s_cnt[8];

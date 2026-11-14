@@ -9617,8 +9617,11 @@ namespace dxvk {
             ctx->clearRenderTarget(cView, cAspects, cValue, 0u);
           });
         }
-        attachments.depth.view = m_state.depthStencil->GetResolveDepthStencilView(
-          m_state.renderStates[D3DRS_ZWRITEENABLE] || m_state.renderStates[D3DRS_STENCILENABLE]);
+        // Always the writable view: a later ZWRITEENABLE=1 does not rebind the
+        // framebuffer, and the backend drops depth writes on a read-only view.
+        // A pass whose first draw had depth write off (shadow decal) then drew
+        // everything in painter's order (water refraction, 2026-11-13).
+        attachments.depth.view = m_state.depthStencil->GetResolveDepthStencilView(true);
         ++g_bmvrMsaaStats.depthStandIns;
       }
       if (unlikely(!bindDS && !msDepthFor1x && dsInfo.sampleCount != sampleCount)) {
