@@ -88,11 +88,8 @@ HudSize=0.70
 IPDScale=1.0
 HeightOffset=0.0
 
-# Scene MSAA. 0 / 2 / 4 / 8 / 16. Restart after editing. Not the video menu.
-# 0 = off (recommended): at 2 or more the mod switches the game's FXAA off,
-# and this MSAA only reaches the lighting buffers, so edges get little or no
-# anti-aliasing. With 0, pick FXAA in the video options.
-Msaa=0
+# MSAA on the eyes (0 = off / 2 / 4): set it in the VR settings panel,
+# Graphics -> ANTI-ALIASING (MSAA); applies live. Keep FXAA on next to it.
 
 # Render each eye's own (asymmetric) HMD frustum instead of one symmetric
 # frustum that covers both eyes. On asymmetric HMDs (PSVR2: 61.5 deg out,

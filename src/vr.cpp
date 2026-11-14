@@ -11701,10 +11701,12 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                     }
                 }
             }
-            if (bmvr::g_VrLaserBeam && (stereoEye == 1 || stereoEye == 2))
+            if (bmvr::g_AimDebug && bmvr::g_VrLaserBeam && (stereoEye == 1 || stereoEye == 2))
             {
-                // Laser dropout log: a frame without the beam within 300 ms
-                // of one with it, and why (at most 300 lines per session).
+                // Laser dropout log (AimDebug only: in normal play these are
+                // intended hides, reloads and beams shorter than 1 unit): a
+                // frame without the beam within 300 ms of one with it, and why
+                // (at most 300 lines per session).
                 const DWORD nowMs = GetTickCount();
                 if (beamDrawn)
                     s_lastDrawn[stereoEye] = nowMs;

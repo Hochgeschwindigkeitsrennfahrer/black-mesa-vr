@@ -82,13 +82,13 @@ namespace bmvr
     float g_HeightOffset = 0.f;
     bool g_AutoMatQueueMode = false;
     bool g_MulticoreMode = true;
-    uint32_t g_Msaa = 0; // >= 2 switches FXAA off and only reaches the lighting buffers
+    uint32_t g_Msaa = 0; // eye MSAA 0/2/4 (private eye targets only; FXAA stays on next to it)
     bool g_MsaaPostSwitch = true;
-    bool g_MsaaParticles1x = false;
+    bool g_MsaaParticles1x = true;   // no-op while Msaa is 0
     float g_MsaaF = 0.f;
-    bool g_AlphaToCoverage = false;
+    bool g_AlphaToCoverage = true;   // no-op while Msaa is 0
     float g_LodBias = 0.f;
-    bool g_RefractOncePerEye = false;
+    bool g_RefractOncePerEye = true;   // also on at 0x: no visible cost there, big saving with MSAA
     bool g_MsaaAllowed = true;
     bool g_Haptics = true;
     bool g_HideCrosshair = true;

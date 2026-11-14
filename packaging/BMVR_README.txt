@@ -157,8 +157,8 @@ Add OpenXRHelperFlipSubmitY=true only if a runtime is still upside-down.
 Those take effect on the next launch (config is read at DLL load).
 
 The same file also has Haptics, HideCrosshair, VrCrosshair, DisableViewBob,
-LeftHanded, IPDScale, HeightOffset, and Msaa (0 / 2 / 4 / 8 / 16; the video
-menu writes Msaa too). VRRuntimeBackend=openxr uses the 64-bit helper;
+LeftHanded, IPDScale, HeightOffset. MSAA (0 / 2 / 4) is set in the VR
+settings panel (Graphics tab). VRRuntimeBackend=openxr uses the 64-bit helper;
 openvr is the SteamVR compositor.
 
 Menu and load stay single-threaded. Gameplay switches to mat_queue_mode 2
