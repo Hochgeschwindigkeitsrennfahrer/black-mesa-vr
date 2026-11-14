@@ -150,8 +150,9 @@ namespace
             // much cheaper where particles fill the view. Models, wires and
             // glass keep MSAA; the gun loses it only while particles are in view.
             { "MSAA skips particles", RowKind::Toggle, "MsaaParticles1x", &bmvr::g_MsaaParticles1x, nullptr, 0, 0, 0, nullptr },
-            // Mip LOD bias in the 3D views: + = calmer, softer textures (sand,
-            // gravel, grates shimmer less); menus and the HUD stay sharp.
+            // Mip LOD bias in the 3D views (experimental): + = softer textures;
+            // foliage and fences look more solid, at the cost of detail. Does
+            // not fix the shimmering sand outdoors. Menus and the HUD stay sharp.
             { "Texture calm (LOD bias)", RowKind::Number, "LodBias", nullptr, &bmvr::g_LodBias, 0.25f, -0.5f, 2.f, "%+.2f" },
             { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
