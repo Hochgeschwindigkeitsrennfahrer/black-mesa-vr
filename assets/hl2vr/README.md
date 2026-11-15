@@ -31,6 +31,11 @@ one-line stubs that ship in the original asset packs. The crowbar material was
 completed from `Half-Life 2 VR\hlvr` because the pack only carried the `.vmt`
 and not the `vr_crowbar_d/nrm/exp` maps it points at.
 
+`sound/weapons/shotgun/single.wav`, `pump.wav` and `double.wav` are deliberate
+digital-silence files (identical 4454-byte all-zero wavs). They mute Black Mesa's
+stock shotgun pump/shell-insert events so only the HL2VR shotgun wavs are heard.
+They are not corrupt audio — do not "fix" them.
+
 ## What is deliberately not shipped
 
 | Omitted | Why |
