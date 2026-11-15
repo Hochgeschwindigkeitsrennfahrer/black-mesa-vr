@@ -1,7 +1,22 @@
 "VertexLitGeneric"
 {
-	"$basetexture" "models/player/v_hand"
-	"$model" "1"
-	"$halflambert" "1"
-	"$SHADERNAME" "model_standard"
+	"$baseTexture" "models/player/v_hand"
+	"$bumpmap" "models/player/v_hand_normal"
+	"$nodecal" "1"
+	"$model" 1
+
+	"$detail" "detail\detail_metal002"
+	"$detailscale" "3.996"
+	"$detailblendfactor" .75
+	"$detailblendmode" "0"
+
+	"$envmap" "env_cubemap"
+	"$normalmapalphaenvmapmask" "1"
+	"$envmaptint" "[0.051 0.041 0.041]"
+
+	"$phong" "1"
+	"$phongboost" "2"
+	"$phongexponent" "25"
+	"$phongalbedotint" "1"
+	"$phongfresnelranges"	"[0.4 0.9 2.8]"
 }

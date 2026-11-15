@@ -25,10 +25,24 @@ so a fresh clone can render the same weapons and hands.
 | `materials/` | Viewmodel/hand materials, detail and normal maps |
 | `sound/weapons/` | Pistol slide/reload, shotgun, MP5 and crowbar wavs |
 
-The extracted HL2VR `w_*` world models, left-handed duplicates, weapon scripts
-and `sound.cache` files are deliberately not shipped. Copying HL2VR's
-`scripts/game_sounds_weapons.txt` into `bms/scripts/` would replace Black Mesa's
-weapon sound script, so keep it out unless you are deliberately testing that.
+The `.vmt` files are the tuned ones used by the last Black Mesa test run
+(bump/normal maps, phong, rim light, fabric and metal detail), not the flat
+one-line stubs that ship in the original asset packs. The crowbar material was
+completed from `Half-Life 2 VR\hlvr` because the pack only carried the `.vmt`
+and not the `vr_crowbar_d/nrm/exp` maps it points at.
+
+## What is deliberately not shipped
+
+| Omitted | Why |
+|---|---|
+| `w_*.mdl` world models and `materials/models/world_models/w_*` | The mod only swaps the stock viewmodels (`v_crowbar/v_shotgun/v_mp5/v_grenade.mdl`, see `WeaponForNeedle` in `src/vr_hlvr_weapons.cpp`). Shipping the HL2VR world models would replace Black Mesa's world/NPC weapon art (HECU shotgun, dropped pistol) with HL2 models the mod never draws. |
+| `models/weapons/left_handed/*_l.*` | `bmvr::g_LeftHanded` only remaps controller roles and aim (`src/vr.cpp`); no `_l` model path is ever loaded. |
+| `scripts/weapon_*.txt`, `scripts/game_sounds_weapons.txt` | These are HL2/HL2VR tables. Copying them into `bms/scripts/` replaces Black Mesa's weapon data (viewmodel, clip size, bucket) and its whole weapon sound table. The code loads model paths directly and plays wavs by path, so it needs neither. |
+| `sound/sound.cache` | Generated index of a sound folder. A cache made on another install does not list these wavs, which makes them silently unplayable. The engine rebuilds it. |
+| `materials/models/weapons/vr_pistol/*` | HL2VR's original pistol materials. The calibrated model's material name is `v_glock`, so these are unused. |
+| `materials/models/player/player*.vtf` (67 MB) | HL2VR's own player-model set. The hands model shipped here uses `v_hand`/`v_hand_m`. |
+| `models/items/grenadeammo.*` | Ammo-pickup entity model; only the held `vr_grenade.mdl` is drawn, Black Mesa keeps its own pickup. |
+| `content.vpk`, `hlmvplusplus.dxvk-cache`, `unpack-log.txt`, `*.jpg`, `* - copy.vtf` | Packing artifacts, previews and duplicate textures. |
 
 ## Installed locations
 
