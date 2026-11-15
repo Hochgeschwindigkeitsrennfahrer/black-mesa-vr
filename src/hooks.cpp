@@ -814,11 +814,29 @@ namespace
     constexpr int kMaxStudioHdrPatches = 96;
     StudioHdrPatch g_ArmHdrPatches[kMaxStudioHdrPatches]{};
     int g_ArmHdrPatchCount = 0;
-    constexpr int kVmDrawSlots = 4;
+    constexpr int kVmDrawSlots = 16;
     thread_local int g_VmDrawSlot = 0;
+    // One buffer per queued draw. The mat thread reads these after we return,
+    // so a single reused array (or a 4-slot ring) hands the driver torn bones
+    // and nvoglv32 faults as soon as controller tracking starts the custom skin.
+    constexpr int kQueuedBoneDraws = 32;
+    thread_local float g_QueuedBoneDraws[kQueuedBoneDraws][kMaxStudioBones][3][4];
+    thread_local int g_QueuedBoneDraw = 0;
+    void ResetQueuedBoneDraws()
+    {
+        g_QueuedBoneDraw = 0;
+        g_VmDrawSlot = 0;
+    }
+    float (*NextQueuedBoneDraw())[3][4]
+    {
+        if (g_QueuedBoneDraw >= kQueuedBoneDraws)
+            g_QueuedBoneDraw = 0;
+        return g_QueuedBoneDraws[g_QueuedBoneDraw++];
+    }
     thread_local float g_ScaledViewmodelBones[kVmDrawSlots][kMaxStudioBones][3][4];
     thread_local float g_ScaledViewmodelModelToWorld[kVmDrawSlots][3][4];
     thread_local unsigned char g_ScaledViewmodelInfo[kVmDrawSlots][sizeof(ModelRenderInfo_t)];
+    thread_local Vector g_VmLightOrigin[kVmDrawSlots];
     // DT_LocalPlayerExclusive RecvTable (Ghidra FUN_100b7240): m_vecVelocity[0]
     // at +0xF8, not the L4D2 C_BasePlayer +0x100 (that is only .z here).
     constexpr int kLocalPlayerVecVelocity = 0xF8;
@@ -1104,6 +1122,36 @@ namespace
             else
                 ForceViewmodelIdlePose(viewmodel, hdr);
             return;
+        }
+
+        // Stock v_shotgun fire/reload sequences emit weapon_shotgun.Special1
+        // (pump.wav) partway through. That path is not client EmitSound.
+        // Hold the sequence after the muzzle frame so the later event never
+        // runs. The shot sound is the HL2VR fire wav.
+        if (Hooks::m_VR->ViewmodelIsShotgun() && label && label[0])
+        {
+            char buf[96]{};
+            for (int i = 0; i < 95 && label[i]; ++i)
+                buf[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+            // Leave reload sequences alone so shell inserts still play.
+            const bool pumpSeq = std::strstr(buf, "fire") || std::strstr(buf, "shoot")
+                || std::strstr(buf, "attack") || std::strstr(buf, "pump")
+                || std::strstr(buf, "primary") || std::strstr(buf, "secondary");
+            if (pumpSeq)
+            {
+                __try
+                {
+                    float* cycle = reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelCycle);
+                    float* rate = reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelPlaybackRate);
+                    // Pin just off frame 0 so a later pump/reload event never
+                    // advances, without retriggering a cycle-0 muzzle event.
+                    if (*cycle < 0.02f)
+                        *cycle = 0.02f;
+                    *rate = 0.f;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {}
+                return;
+            }
         }
 
         // Crowbar VR swing: pin cycle once without thrashing every frame
@@ -1543,7 +1591,9 @@ namespace
             const char* bpName = StudioRelString(bp, szname);
             if (bi == 0)
                 strncpy_s(r.gunName, bpName, _TRUNCATE);
-            if (_stricmp(bpName, "arms") != 0)
+            if (_stricmp(bpName, "arms") != 0
+                && _stricmp(bpName, "hands") != 0
+                && _stricmp(bpName, "gloves") != 0)
                 continue;
             r.armsPart = bi;
             r.armsModels = nummodels;
@@ -1575,6 +1625,55 @@ namespace
             }
         }
         return r;
+    }
+
+    bool StockArmBoneName(const char* name)
+    {
+        if (!name || !name[0])
+            return false;
+        char lower[64]{};
+        size_t n = 0;
+        for (; n + 1 < sizeof(lower) && name[n]; ++n)
+            lower[n] = static_cast<char>(tolower(static_cast<unsigned char>(name[n])));
+        auto has = [&](const char* s) { return std::strstr(lower, s) != nullptr; };
+        return has("finger") || has("thumb") || has("forearm") || has("upperarm")
+            || has("clavicle") || has("wrist") || has("glove") || has("_hand");
+    }
+
+    void HideStockViewmodelArms(unsigned char* hdr, float bones[][3][4], int nBones)
+    {
+        if (!hdr || !bones || nBones < 1)
+            return;
+        int num = 0;
+        int boneIndex = 0;
+        __try
+        {
+            num = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
+            boneIndex = *reinterpret_cast<int*>(hdr + kStudioHdrBoneIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        if (num < 1 || boneIndex < 64)
+            return;
+        if (num > nBones)
+            num = nBones;
+        const float ox = bones[0][0][3];
+        const float oy = bones[0][1][3];
+        const float oz = bones[0][2][3];
+        for (int i = 0; i < num; ++i)
+        {
+            unsigned char* bone = hdr + boneIndex + i * kStudioBoneSize;
+            int sz = 0;
+            __try { sz = *reinterpret_cast<int*>(bone); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+            if (!StockArmBoneName(StudioRelString(bone, sz)))
+                continue;
+            bones[i][0][0] = 0.001f; bones[i][0][1] = 0.f; bones[i][0][2] = 0.f; bones[i][0][3] = ox;
+            bones[i][1][0] = 0.f; bones[i][1][1] = 0.001f; bones[i][1][2] = 0.f; bones[i][1][3] = oy;
+            bones[i][2][0] = 0.f; bones[i][2][1] = 0.f; bones[i][2][2] = 0.001f; bones[i][2][3] = oz;
+        }
     }
 
     void ApplyViewmodelStudioWork(void* state, const char* modelName, int body, int skin,
@@ -3339,6 +3438,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         hkRenderView.fOriginal(ecx, setup, nClearFlags, whatToDraw);
         return;
     }
+    ResetQueuedBoneDraws();
+    if (m_VR)
+        m_VR->ResetHlvrHandDrawState();
 
     auto callOriginal = [&](CViewSetup& view, int clearFlags, int drawFlags) {
         hkRenderView.fOriginal(ecx, view, clearFlags, drawFlags);
@@ -3567,6 +3669,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         }
         m_VR->m_StereoEyesDrawnThisFrame = true;
         m_VR->BeginStereoFramePose();
+        if (m_VR->IsGameplayEligible())
+            m_VR->PreloadHlvrWeapons();
         static int s_enterLog;
         if (s_enterLog < 4)
         {
@@ -3674,7 +3778,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             const bool keepNative = bmvr::OffscreenWorldMatchesEyes()
                 && m_VR->StereoRedirectedToEye();
             bool glovesInBlit = false;
-            if (!keepNative)
+            if (!keepNative && !mc)
             {
                 const long long tHands = QpcNow();
                 if (!m_VR->IsMenuUp())
@@ -3744,7 +3848,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             const bool keepNative = bmvr::OffscreenWorldMatchesEyes()
                 && m_VR->StereoRedirectedToEye();
             bool glovesInBlit = false;
-            if (!keepNative)
+            if (!keepNative && !mc)
             {
                 const long long tHands = QpcNow();
                 if (!m_VR->IsMenuUp())
@@ -3894,15 +3998,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             haveAppliedAim = true;
             m_VR->RememberFireAim(QAngle(a.x, a.y, 0.f));
         };
-        // A live crowbar swing overrides the aim so the engine's melee trace
-        // follows the blade instead of the controller's forward ray.
-        Vector meleeOrigin{};
-        QAngle meleeAim{};
-        if (m_VR->TryGetMeleeAim(meleeOrigin, meleeAim))
-        {
-            apply(meleeAim);
-            return;
-        }
+        // Do not aim the eyes down the crowbar blade. That write is what
+        // spins the flashlight and the viewmodel when a swing connects.
+        // The hit still pulses IN_ATTACK and starts the trace at the contact.
         // Pickup follow uses the grab hand. Weapon fire / flashlight must not:
         // leftover left-Use latch used to keep viewangles and shoot origin on
         // that hand after a door, button, or charger.
@@ -3942,6 +4040,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             apply(QAngle(hmdVa.x, hmdVa.y, 0.f));
         }
     };
+
+    const bool pistolShot = m_VR && cmd->command_number
+        && m_VR->TakeHlvrPistolShot();
 
     void* localPlayer = nullptr;
     if (m_Game && m_Game->m_EngineClient && m_Game->m_ClientEntityList)
@@ -4003,6 +4104,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             cmd->sidemove += analogS;
         }
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+        if (pistolShot)
+            cmd->buttons |= IN_ATTACK;
         const int inv = m_VR->m_PendingInvDelta.exchange(0, std::memory_order_acq_rel);
         if (inv != 0 && m_Game)
         {
@@ -4043,11 +4146,15 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+        if (pistolShot)
+            cmd->buttons |= IN_ATTACK;
 
     EnsureServerFlashlightHook();
     EnsureWeaponShootOriginHooks();
 
     m_VR->AfterCreateMoveFireHaptics();
+    if (m_VR->IsGameplayEligible())
+        m_VR->PreloadHlvrWeapons();
     return result;
 }
 
@@ -4234,6 +4341,7 @@ namespace
 {
     bool g_HlvrRigid = false;
     bool g_HlvrPoseGun = false;
+    void* g_HlvrBonesEnt = nullptr;
     bool g_HlvrPosedBone0Valid = false;
     float g_HlvrPosedBone0[3][4]{};
     float g_HlvrRigidM[3][4]{};
@@ -4314,6 +4422,10 @@ bool __fastcall Hooks::dViewmodelSetupBones(void* ecx, void* edx, void* boneToWo
     (void)edx;
     if (!hkViewmodelSetupBones.fOriginal)
         return false;
+    // The hook sits on the shared animating vtable. Only the viewmodel
+    // renderable that entered DrawModelSetup may take the special path.
+    if (ecx != g_HlvrBonesEnt)
+        return hkViewmodelSetupBones.fOriginal(ecx, boneToWorld, maxBones, boneMask, currentTime);
     // Slide and magazine draws must not pose the viewmodel again.
     if (g_HlvrRigid && !g_HlvrPoseGun)
         return true;
@@ -4396,12 +4508,15 @@ bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* 
             g_HlvrPoseGun = true;
         else if (m_VR->IsHlvrPistolRigged(info->pModel) || m_VR->IsHlvrWeaponRigged(info->pModel))
             g_HlvrRigid = true;
+        if (g_HlvrPoseGun || g_HlvrRigid)
+            g_HlvrBonesEnt = info->pRenderable;
     }
     bool ok = false;
     if (hkDrawModelSetup.fOriginal)
         ok = hkDrawModelSetup.fOriginal(ecx, info, state, customBones, boneOut);
     g_HlvrRigid = false;
     g_HlvrPoseGun = false;
+    g_HlvrBonesEnt = nullptr;
     if (!ok && swapped && saved && hkDrawModelSetup.fOriginal)
     {
         info->pModel = saved;
@@ -4421,6 +4536,12 @@ bool __fastcall Hooks::dDrawModelSetup(void* ecx, void* edx, ModelRenderInfo_t* 
             Game::logMsg("HL2VR pistol setup swapped to vr_pistol");
             ++s_ok;
         }
+    }
+    if (ok && info && info->pRenderable && m_VR && m_Game)
+    {
+        C_BaseEntity* vm = m_Game->GetViewModelEntity();
+        if (vm && info->pRenderable == reinterpret_cast<unsigned char*>(vm) + 4)
+            m_VR->NoteViewmodelMuzzle(info->pRenderable);
     }
     return ok;
 }
@@ -4460,14 +4581,9 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     {
         if (hkDrawModelExecute.fOriginal)
         {
-            // The pistol DrawModelEx runs inside the viewmodel pass, before
-            // the glock draw widens depth to 0..1. Leave the range compressed
-            // and the world-space gun is clipped away.
-            if (m_VR && m_VR->StereoWorldPassActive())
-                ForceStereoViewmodelWorldDepth(g_MatCtx);
-            // SetupBones came from the glock viewmodel. Those matrices skin
-            // the pistol's own bones off the screen. Stamp every pistol bone
-            // with the model matrix so the mesh sits on the hand.
+            // SetupBones came from the viewmodel. Those matrices skin a
+            // different skeleton off the screen. Parts bring their own bones.
+            // Widening depth here used to stick to the following world draws.
             void* bonesOut = pCustomBoneToWorld;
             const float* src = info.pModelToWorld
                 ? reinterpret_cast<const float*>(info.pModelToWorld) : nullptr;
@@ -4480,9 +4596,27 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 if (lite->studioHdr)
                     nBones = *reinterpret_cast<const int*>(lite->studioHdr + kStudioHdrNumBones);
             }
-            thread_local float boneBuf[kMaxStudioBones][3][4];
-            if (src && nBones > 0 && nBones <= kMaxStudioBones)
+            float (*boneBuf)[3][4] = NextQueuedBoneDraw();
+            int skinned = 0;
+            if (m_VR && src)
             {
+                float placed[3][4];
+                std::memcpy(placed, src, sizeof(placed));
+                if (m_VR->IsHlvrPistolRigged(info.pModel) && !m_VR->IsHlvrPistolModel(info.pModel))
+                    skinned = m_VR->WriteHlvrPistolSkin(placed, info.pModel,
+                        &boneBuf[0][0][0], kMaxStudioBones);
+                else if (m_VR->IsHlvrWeaponRigged(info.pModel))
+                    skinned = m_VR->WriteHlvrWeaponSkin(placed, info.pModel,
+                        &boneBuf[0][0][0], kMaxStudioBones);
+            }
+            if (skinned > 0)
+                bonesOut = boneBuf;
+            else if (src && nBones > 0 && nBones <= kMaxStudioBones)
+            {
+                // Legacy whole-gun DrawModelEx, before the glock draw has
+                // widened depth. Parts above already sit in that pass.
+                if (m_VR && m_VR->StereoWorldPassActive())
+                    ForceStereoViewmodelWorldDepth(g_MatCtx);
                 for (int i = 0; i < nBones; ++i)
                     std::memcpy(boneBuf[i], src, sizeof(float) * 12);
                 bonesOut = boneBuf;
@@ -4518,7 +4652,10 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         // World props: skip GetModelName. Open maps call DME thousands of times
         // per eye; the name string was the hot cost next to the draw itself.
         isViewmodel = CachedModelIsViewmodel(pModel);
-        if (!isViewmodel && m_VR && (m_VR->IsHlvrPistolRigged(pModel) || m_VR->IsHlvrWeaponRigged(pModel)))
+        // Parts and the hand model are not viewmodels. Treating them as one
+        // ran the controller relocator and the depth-range widen on world props.
+        if (!isViewmodel && m_VR
+            && (m_VR->IsHlvrPistolRigged(pModel) || m_VR->IsHlvrWeaponModel(pModel)))
             isViewmodel = true;
         if (isViewmodel && m_Game && m_Game->m_ModelInfo)
         {
@@ -4609,8 +4746,11 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
     if (isViewmodel && m_VR && m_VR->EmptyHands() && m_VR->IsGameplayEligible() && EngineInGame())
     {
-        if (!m_VR->IsHlvrPistolRigged(pModel) && !m_VR->IsHlvrWeaponRigged(pModel))
-            m_VR->DrawHlvrFreeHands(ecx, true, true);
+        // Draw after this Execute returns. DrawModelEx from inside it takes
+        // the shader mutex and faults if it re-enters.
+        // Holstered HLVR guns used to return without noting a hand draw,
+        // so empty hands had neither the weapon mesh nor the hand model.
+        m_VR->NoteHlvrFreeHands(ecx, info);
         return;
     }
 
@@ -4625,7 +4765,11 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         && m_VR->DrawHlvrPistol(ecx, info))
         return;
 
-    if (isViewmodel && m_VR && m_VR->IsGameplayEligible() && EngineInGame())
+    // HL2VR guns and the hand model are not Black Mesa viewmodels. Baking
+    // their root bones alternates the shotgun and the hand pelvis every
+    // frame, which flickers the view and drags props to the controller.
+    if (isViewmodel && m_VR && m_VR->IsGameplayEligible() && EngineInGame()
+        && !m_VR->IsHlvrWeaponRigged(pModel) && !m_VR->IsHlvrPistolRigged(pModel))
         ApplyViewmodelStudioWork(state, modelName, body, skin, hideArms, pCustomBoneToWorld);
 
     void* bonesToDraw = pCustomBoneToWorld;
@@ -4639,9 +4783,9 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         const int slot = g_VmDrawSlot++ & (kVmDrawSlots - 1);
         float placed[3][4];
         std::memcpy(placed, info.pModelToWorld, sizeof(placed));
-        const int n = m_VR->IsHlvrWeaponRigged(pModel)
-            ? m_VR->WriteHlvrWeaponSkin(placed, pModel, &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones)
-            : m_VR->WriteHlvrPistolSkin(placed, pModel, &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
+        const int n = (m_VR->IsHlvrPistolRigged(pModel) && !m_VR->IsHlvrPistolModel(pModel))
+            ? m_VR->WriteHlvrPistolSkin(placed, pModel, &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones)
+            : m_VR->WriteHlvrWeaponSkin(placed, pModel, &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
         if (n > 0)
             bonesToDraw = g_ScaledViewmodelBones[slot];
     }
@@ -4650,10 +4794,10 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     {
         const float scale = [&]() -> float {
             float s = bmvr::g_ViewmodelScale;
-            // vr_pistol is real size. The 0.64 viewmodel shrink is for the
-            // oversized v_glock mesh and collapses this model.
-            if (m_VR->IsHlvrPistolRigged(pModel))
-                s = 1.f;
+            // HL2VR meshes are real size. The 0.64 shrink is for the stock
+            // v_shotgun and collapses these models. Return before that rule.
+            if (m_VR->IsHlvrPistolRigged(pModel) || m_VR->IsHlvrWeaponRigged(pModel))
+                return 1.f;
             if (modelName && (std::strstr(modelName, "crowbar") || std::strstr(modelName, "wrench")
                 || std::strstr(modelName, "Crowbar") || std::strstr(modelName, "Wrench")))
                 s = 1.f;
@@ -4755,7 +4899,10 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                         needYFix ? yFix : 1.f, rigidPtr))
                 {
                     float gunWorld[3][4];
-                    m_VR->AnchorHlvrWeapon(pModel, placed, targetAng, gunWorld);
+                    // Seat on the controller grip. The viewmodel bone sits the
+                    // MP5 above the hand.
+                    if (!m_VR->AnchorHlvrWeaponInHand(pModel, gunWorld))
+                        m_VR->AnchorHlvrWeapon(pModel, placed, targetAng, gunWorld);
                     const int n = m_VR->WriteHlvrWeaponSkin(gunWorld, pModel,
                         &g_ScaledViewmodelBones[slot][0][0][0], kMaxStudioBones);
                     if (n > 0)
@@ -4791,6 +4938,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     nBones, pivot3, needScale ? scale : 1.f, pivot3, right3, up3, fwd3,
                     needYFix ? yFix : 1.f, rigidPtr))
             {
+                HideStockViewmodelArms(hdr, g_ScaledViewmodelBones[slot], nBones);
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
             }
@@ -4799,6 +4947,17 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
             std::memcpy(g_ScaledViewmodelInfo[slot], &info, sizeof(ModelRenderInfo_t));
             auto* scaledInfo = reinterpret_cast<ModelRenderInfo_t*>(g_ScaledViewmodelInfo[slot]);
+            // bodygroup_pin base 2: body 0 keeps the pin, body 2 drops it.
+            // Hold the pin out while the trigger is down and through the throw.
+            if (modelName && (std::strstr(modelName, "grenade") || std::strstr(modelName, "Grenade")))
+            {
+                static DWORD s_pinOffUntil = 0;
+                const bool attack = m_VR && (m_VR->HeldButtons() & IN_ATTACK) != 0;
+                const DWORD now = GetTickCount();
+                if (attack)
+                    s_pinOffUntil = now + 800;
+                scaledInfo->body = (now < s_pinOffUntil) ? 2 : 0;
+            }
             scaledInfo->origin = targetOrigin;
             scaledInfo->angles = targetAng;
             float origin3[3] = { targetOrigin.x, targetOrigin.y, targetOrigin.z };
@@ -4811,6 +4970,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             scaledInfo->origin.x = origin3[0];
             scaledInfo->origin.y = origin3[1];
             scaledInfo->origin.z = origin3[2];
+            g_VmLightOrigin[slot] = pivot;
+            scaledInfo->pLightingOrigin = &g_VmLightOrigin[slot];
             if (info.pModelToWorld
                 && SehCopyAndFixViewmodelMatrices(&g_ScaledViewmodelModelToWorld[slot][0][0], info.pModelToWorld,
                     1, pivot3, needScale ? scale : 1.f, pivot3, right3, up3, fwd3,
@@ -4819,6 +4980,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 scaledInfo->pModelToWorld = reinterpret_cast<const matrix3x4_t*>(g_ScaledViewmodelModelToWorld[slot]);
             }
             infoToDraw = scaledInfo;
+            if (!pistolSkin && info.pRenderable)
+                m_VR->NoteHlvrFreeHands(ecx, *scaledInfo, true);
             static int s_scaleLog;
             if (s_scaleLog < 8)
             {
@@ -5546,21 +5709,13 @@ namespace
 
     int ServerEntityIndex(void* ent)
     {
-        if (!ent)
-            return 0;
-        int idx = 0;
-        __try
-        {
-            unsigned char* net = reinterpret_cast<unsigned char*>(ent) + 8;
-            void** vt = *reinterpret_cast<void***>(net);
-            using Fn = int(__thiscall*)(void*);
-            idx = reinterpret_cast<Fn>(vt[0x24 / 4])(net);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            idx = 0;
-        }
-        return idx;
+        (void)ent;
+        // entity+8 is not IServerNetworkable on the server player, and on
+        // other classes that share Weapon_ShootPosition it is a garbage
+        // pointer. Calling it jumps off into unmapped memory (EIP 0xea7050ff
+        // on map load, 2026-09-27) and the __try cannot catch that: the
+        // exception chain is already invalid, so the process dies.
+        return 0;
     }
 
     bool ShouldRewriteShootOrigin(void* player, const Vector* current)
@@ -5583,16 +5738,11 @@ namespace
             if (want > 0 && have == want)
                 return true;
         }
-        if (current)
-        {
-            Vector body = Hooks::m_VR->m_HasStereoBodyOrigin ? Hooks::m_VR->m_StereoBodyOrigin : Hooks::m_VR->m_SetupOrigin;
-            if (body.LengthSqr() > 1.f)
-            {
-                const Vector d = *current - body;
-                if (d.LengthSqr() < 96.f * 96.f)
-                    return true;
-            }
-        }
+        // Do not read *current here. This runs for the server shoot and grab
+        // hooks the moment a controller pose exists, and that pointer is not
+        // a readable Vector (access violation at d3d9+0x15548b, 2026-09-26,
+        // the frame the hands started tracking).
+        (void)current;
         return false;
     }
 
@@ -5624,6 +5774,18 @@ namespace
     {
         if (!player || !out || !ShouldRewriteShootAngles(player) || !Hooks::m_VR)
             return;
+        if (Hooks::m_VR->IsCrowbarEquipped())
+        {
+            Vector tip{};
+            QAngle blade{};
+            if (Hooks::m_VR->TryGetMeleeAim(tip, blade))
+            {
+                out->x = blade.x;
+                out->y = blade.y;
+                out->z = 0.f;
+                return;
+            }
+        }
         QAngle aim{};
         if (!Hooks::m_VR->TryGetFireAim(aim))
             return;
@@ -5652,13 +5814,9 @@ namespace
             return out;
         if (!ShouldRewriteShootOrigin(player, out))
             return out;
+        // Do not move Weapon_ShootPosition onto the crowbar contact. That
+        // origin is what made the next view render from inside the hit.
         Vector muzzle{};
-        QAngle meleeAim{};
-        if (!grabHold && Hooks::m_VR->TryGetMeleeAim(muzzle, meleeAim))
-        {
-            *out = muzzle;
-            return out;
-        }
         // Grab-controller hold origin and weapon fire share this hook family.
         // Only a live physics hold may move origin onto the Use hand. Leftover
         // left-Use latch used to keep gunshots and the flashlight on that hand.
@@ -5682,6 +5840,15 @@ namespace
             *out = muzzle;
             return out;
         }
+        if (Hooks::m_VR->IsCrowbarEquipped())
+        {
+            Vector tip{};
+            if (Hooks::m_VR->TryGetMeleeTraceOrigin(tip))
+            {
+                *out = tip;
+                return out;
+            }
+        }
         if (Hooks::m_VR->ScopeZoomActive())
             return out;
         if (!Hooks::m_VR->TryGetVrShootOrigin(muzzle))
@@ -5698,8 +5865,55 @@ namespace
     }
 }
 
+void __fastcall Hooks::dEmitSound(void* ecx, void* edx, const char* name, float soundtime, float* duration)
+{
+    (void)edx;
+    // Black Mesa's fire sequence also emits weapon_shotgun.Special1 (pump.wav).
+    // The shot itself is weapon_shotgun.Single. Drop the pump here so a shot
+    // is only the fire sound; the manual pump plays the wav itself.
+    if (name && m_VR && m_VR->ViewmodelIsShotgun())
+    {
+        // The stock fire sequence plays single.wav and then a reload/pump
+        // wave. Those are replaced by the HL2VR fire and pump wavs.
+        const bool stock = std::strstr(name, "pump") || std::strstr(name, "Pump")
+            || std::strstr(name, "cock") || std::strstr(name, "Cock")
+            || std::strstr(name, "reload") || std::strstr(name, "Reload")
+            || std::strstr(name, "single") || std::strstr(name, "Single")
+            || std::strstr(name, "double") || std::strstr(name, "Double")
+            || std::strstr(name, "empty") || std::strstr(name, "Empty")
+            || std::strstr(name, "Special") || std::strstr(name, "special");
+        if (stock)
+            return;
+    }
+    if (hkEmitSound.fOriginal)
+        hkEmitSound.fOriginal(ecx, name, soundtime, duration);
+}
+
 void Hooks::EnsureWeaponShootOriginHooks()
 {
+    if (!hkEmitSound.pTarget)
+    {
+        HMODULE client = GetModuleHandleA("client.dll");
+        if (client)
+        {
+            auto* p = reinterpret_cast<unsigned char*>(client) + Offsets::kCBaseEntity_EmitSound;
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(p, &mbi, sizeof(mbi))
+                && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+                && p[0] == 0x55 && p[1] == 0x8B && p[2] == 0xEC)
+            {
+                if (hkEmitSound.createHook(p, &dEmitSound) == 0 && hkEmitSound.enableHook() == 0)
+                    Game::logMsg("Hook enabled: client EmitSound rva=0x%X", Offsets::kCBaseEntity_EmitSound);
+                else
+                    Game::logMsg("client EmitSound hook failed");
+            }
+            else
+            {
+                Game::logMsg("client EmitSound skipped (prologue/rva 0x%X)", Offsets::kCBaseEntity_EmitSound);
+                hkEmitSound.pTarget = p;
+            }
+        }
+    }
     // Called 2-3 times per CreateMove tick and from RenderView. Once every
     // target is resolved (installed or marked skipped) the body is only
     // GetModuleHandleA calls under the loader lock; skip it.
@@ -5942,6 +6156,8 @@ int __fastcall Hooks::dGetAttachmentVec(void* ecx, void* edx, int number, Vector
     int result = 0;
     if (hkGetAttachmentVec.fOriginal)
         result = hkGetAttachmentVec.fOriginal(ecx, number, origin, angles);
+    if (result && m_VR && m_VR->ReplaceViewmodelMuzzleAttachment(ecx, number, origin, angles, nullptr))
+        return result;
     if (result && origin && m_VR)
         m_VR->ScaleViewmodelRenderableAttachment(ecx, *origin);
     return result;
@@ -5953,6 +6169,8 @@ int __fastcall Hooks::dGetAttachmentMatrix(void* ecx, void* edx, int number, flo
     int result = 0;
     if (hkGetAttachmentMatrix.fOriginal)
         result = hkGetAttachmentMatrix.fOriginal(ecx, number, matrix);
+    if (result && matrix && m_VR && m_VR->ReplaceViewmodelMuzzleAttachment(ecx, number, nullptr, nullptr, matrix))
+        return result;
     if (result && matrix && m_VR)
     {
         Vector origin(matrix[3], matrix[7], matrix[11]);

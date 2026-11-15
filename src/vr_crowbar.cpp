@@ -9,7 +9,9 @@
 
 namespace
 {
-    constexpr float kSwingThresholdIps = 400.f; // hlvr_crowbar_swing_threshold
+    // hlvr_crowbar_swing_threshold is 400 at the attachment tip. This hook
+    // sits closer to the grip than that bone, so the same swing reads slower.
+    constexpr float kSwingThresholdIps = 250.f;
     constexpr float kMotionCheckRateSec = 0.01f;
     constexpr float kBludgeonHullDim = 10.f;
     constexpr float kShaftHullDim = 2.0f;
@@ -231,6 +233,21 @@ bool VR::ComputePhysicalCrowbarPose(Vector& origin, QAngle& angles, Vector& topP
     return origin.LengthSqr() > 1.f;
 }
 
+bool VR::CopyHlvrCrowbarWorld(float outGun[3][4]) const
+{
+    Vector origin{}, top{}, topFwd{}, shaftStart{};
+    QAngle angles{};
+    if (!ComputePhysicalCrowbarPose(origin, angles, top, topFwd, shaftStart))
+        return false;
+    Vector fwd, right, up;
+    QAngle::AngleVectors(angles, &fwd, &right, &up);
+    // AngleMatrixSource: column 0 is forward, column 1 is -right, column 2 is up.
+    outGun[0][0] = fwd.x; outGun[0][1] = -right.x; outGun[0][2] = up.x; outGun[0][3] = origin.x;
+    outGun[1][0] = fwd.y; outGun[1][1] = -right.y; outGun[1][2] = up.y; outGun[1][3] = origin.y;
+    outGun[2][0] = fwd.z; outGun[2][1] = -right.z; outGun[2][2] = up.z; outGun[2][3] = origin.z;
+    return true;
+}
+
 bool VR::DrawPhysicalCrowbar(void* modelRender, const ModelRenderInfo_t& vmInfo)
 {
     thread_local int s_drawDepth = 0;
@@ -308,8 +325,6 @@ void VR::UpdateCrowbarMelee()
         return;
     }
 
-    EnsurePhysicalCrowbarModel();
-
     // Same crowbar/wrench test as IsCrowbarWeaponModel, classified once in
     // NoteViewmodelModel; the old per-frame std::string copy of the model
     // path under m_ControllerMutex heap-allocated every Present.
@@ -324,9 +339,18 @@ void VR::UpdateCrowbarMelee()
         return;
     }
 
-    Vector origin{}, top{}, topFwd{}, shaftStart{};
-    QAngle angles{};
-    if (!ComputePhysicalCrowbarPose(origin, angles, top, topFwd, shaftStart))
+    // HL2VR CheckSwingMotion samples attachment "top" on the drawn bar,
+    // not a second pose scaled off the controller.
+    Vector top{};
+    DWORD topMs = 0;
+    bool haveTop = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        haveTop = m_HlvrCrowbarTopValid;
+        top = m_HlvrCrowbarTop;
+        topMs = m_HlvrCrowbarTopMs;
+    }
+    if (!haveTop || GetTickCount() - topMs > 100)
     {
         m_PerformingMelee = attackWindow;
         return;
@@ -335,13 +359,12 @@ void VR::UpdateCrowbarMelee()
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     if (body.LengthSqr() <= 1.f)
         body = m_SetupOrigin;
-    const float yaw = GetViewAngle().y;
-    const Vector tipLocal = WorldToYawLocal(top, body, yaw);
 
     const DWORD nowMs = GetTickCount();
     if (m_CrowbarNextAttackMs != 0 && nowMs < m_CrowbarNextAttackMs)
     {
-        m_CrowbarPrevTipLocal = tipLocal;
+        m_CrowbarPrevTipLocal = top;
+        m_CrowbarPrevBody = body;
         m_CrowbarLastMotionCheckMs = nowMs;
         m_PerformingMelee = attackWindow;
         if (!m_PerformingMelee)
@@ -351,7 +374,8 @@ void VR::UpdateCrowbarMelee()
 
     if (m_CrowbarPrevTipLocal.LengthSqr() <= 0.01f || m_CrowbarLastMotionCheckMs == 0)
     {
-        m_CrowbarPrevTipLocal = tipLocal;
+        m_CrowbarPrevTipLocal = top;
+        m_CrowbarPrevBody = body;
         m_CrowbarLastMotionCheckMs = nowMs;
         m_PerformingMelee = attackWindow;
         return;
@@ -366,12 +390,27 @@ void VR::UpdateCrowbarMelee()
     if (dt > 0.08f)
         dt = 0.08f;
 
-    Vector motion = tipLocal - m_CrowbarPrevTipLocal;
+    // HL2VR CheckSwingMotion: displacement of attachment "top".
+    // That code then traces along the player-local delta as if it were a
+    // world direction, which points the opposite way once view yaw is large.
+    // Subtract only the body translation so the trace follows the drawn tip.
+    Vector motion = (top - m_CrowbarPrevTipLocal) - (body - m_CrowbarPrevBody);
+    // A bad tip sample (attachment beside the mesh, then the hook) must not
+    // count as a swing across the room.
+    if (motion.LengthSqr() > 48.f * 48.f)
+    {
+        m_CrowbarPrevTipLocal = top;
+        m_CrowbarPrevBody = body;
+        m_CrowbarLastMotionCheckMs = nowMs;
+        m_PerformingMelee = attackWindow;
+        return;
+    }
     const float distHu = VectorNormalize(motion);
     const float velocityIps = distHu / dt;
     const bool isSwinging = velocityIps > kSwingThresholdIps && distHu > 0.05f;
 
-    m_CrowbarPrevTipLocal = tipLocal;
+    m_CrowbarPrevTipLocal = top;
+    m_CrowbarPrevBody = body;
     m_CrowbarLastMotionCheckMs = nowMs;
 
     if (!isSwinging)
@@ -382,20 +421,15 @@ void VR::UpdateCrowbarMelee()
         return;
     }
 
-    Vector dir{};
-    {
-        float s = 0.f, c = 1.f;
-        SinCos(DEG2RAD(yaw), &s, &c);
-        dir.x = motion.x * c - motion.y * s;
-        dir.y = motion.x * s + motion.y * c;
-        dir.z = motion.z;
-    }
+    Vector dir = motion;
     if (VectorNormalize(dir) <= 0.01f)
-        dir = topFwd;
+        return;
 
-    // Whole-bar contact: HL2VR uses the mdl's vphysics hull. We don't own a
-    // server physics object, so sweep a tight hull along the visible shaft.
-    Vector shaftEnd = top + topFwd * kPastTipHu;
+    // HL2VR MotionSwing: TRACE_DISTANCE 2 inches back, then forward twice
+    // that, through attachment "top", along the swing. Not a ray from the eyes.
+    constexpr float kTraceDistance = 2.f;
+    const Vector swingStart = top - dir * kTraceDistance;
+    const Vector swingEnd = swingStart + dir * (2.f * kTraceDistance);
     C_BaseEntity* player = nullptr;
     if (m_Game->m_EngineClient)
         player = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
@@ -406,36 +440,19 @@ void VR::UpdateCrowbarMelee()
     bool hit = false;
     if (m_Game->m_EngineTrace)
     {
-        const Vector shaftMins(-kShaftHullDim, -kShaftHullDim, -kShaftHullDim);
-        const Vector shaftMaxs(kShaftHullDim, kShaftHullDim, kShaftHullDim);
-        Ray_t shaft;
-        shaft.Init(shaftStart, shaftEnd, shaftMins, shaftMaxs);
-        m_Game->m_EngineTrace->TraceRay(shaft, MASK_SHOT_HULL, &filter, &tr);
+        Ray_t tip;
+        tip.Init(swingStart, swingEnd);
+        m_Game->m_EngineTrace->TraceRay(tip, MASK_SHOT_HULL, &filter, &tr);
         hit = tr.fraction < 1.f && tr.m_pEnt && tr.m_pEnt != player;
         if (!hit)
         {
-            const Vector tipStart = top - dir * 2.f;
-            const Vector tipEnd = top + dir * (2.f + kPastTipHu);
-            Ray_t tip;
-            tip.Init(tipStart, tipEnd);
-            CGameTrace tipTr{};
-            tipTr.fraction = 1.f;
-            tipTr.m_pEnt = nullptr;
-            m_Game->m_EngineTrace->TraceRay(tip, MASK_SHOT_HULL, &filter, &tipTr);
-            if (tipTr.fraction < 1.f && tipTr.m_pEnt && tipTr.m_pEnt != player)
-            {
-                std::memcpy(&tr, &tipTr, sizeof(tr));
-                hit = true;
-            }
-        }
-        if (!hit)
-        {
-            const float hullR = 1.732f * kBludgeonHullDim;
-            const Vector hullMins(-kBludgeonHullDim, -kBludgeonHullDim, -kBludgeonHullDim);
-            const Vector hullMaxs(kBludgeonHullDim, kBludgeonHullDim, kBludgeonHullDim);
-            const Vector hullStart = top + dir * hullR;
+            constexpr float kMotionHull = 16.f;
+            const float hullR = 1.732f * kMotionHull;
+            const Vector hullMins(-kMotionHull, -kMotionHull, -kMotionHull);
+            const Vector hullMaxs(kMotionHull, kMotionHull, kMotionHull);
+            const Vector hullStart = swingStart + dir * hullR;
             Ray_t hull;
-            hull.Init(hullStart, shaftEnd, hullMins, hullMaxs);
+            hull.Init(hullStart, swingEnd, hullMins, hullMaxs);
             CGameTrace hullTr{};
             hullTr.fraction = 1.f;
             hullTr.m_pEnt = nullptr;
@@ -464,35 +481,15 @@ void VR::UpdateCrowbarMelee()
     }
 
     m_MeleeHitEntity = tr.m_pEnt;
-    // Client Weapon_ShootPosition can start at the bar. Server melee still
-    // comes from the player's eyes along cmd viewangles, so aim from the
-    // view origin at the contact so that 56 hu ray can actually land.
-    Vector hitPos = tr.endpos;
-    if (hitPos.LengthSqr() <= 1.f)
-        hitPos = top;
-    // Hull contact is on the box skin. Aim the server melee ray at the
-    // shaft centreline so hits don't register high / wide / past the tip.
-    {
-        Vector along = shaftEnd - shaftStart;
-        const float len = VectorNormalize(along);
-        if (len > 0.01f)
-        {
-            const float t = std::clamp(DotProduct(hitPos - shaftStart, along), 0.f, len);
-            hitPos = shaftStart + along * t;
-        }
-    }
-    Vector eye = m_SetupOrigin;
-    if (eye.LengthSqr() <= 1.f)
-        eye = body;
-    Vector toHit = hitPos - eye;
-    if (VectorNormalize(toHit) <= 0.01f)
-        toHit = dir;
-    m_MeleeTraceOrigin = hitPos;
-    QAngle::VectorAngles(toHit, m_MeleeBladeAngles);
+    // Server melee still traces from Weapon_ShootPosition along GetShootAngles.
+    // Those are the tip and the swing, not the eyes and not cmd->viewangles,
+    // so the camera stays on the HMD.
+    m_MeleeTraceOrigin = swingStart;
+    QAngle::VectorAngles(dir, m_MeleeBladeAngles);
+    // VectorAngles pitch is 0..360. Unwrap only. Clamping to ±89 turned a
+    // sideways swing into a ceiling or floor trace.
     if (m_MeleeBladeAngles.x > 180.f) m_MeleeBladeAngles.x -= 360.f;
     if (m_MeleeBladeAngles.x < -180.f) m_MeleeBladeAngles.x += 360.f;
-    if (m_MeleeBladeAngles.x < -89.f) m_MeleeBladeAngles.x = -89.f;
-    if (m_MeleeBladeAngles.x > 89.f) m_MeleeBladeAngles.x = 89.f;
     m_MeleeBladeAngles.z = 0.f;
     m_MeleeBladeAnglesValid = true;
     m_MeleeAttackUntilMs = nowMs + kAttackPulseMs;

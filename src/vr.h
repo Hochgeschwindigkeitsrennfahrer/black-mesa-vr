@@ -272,6 +272,7 @@ public:
     bool ViewmodelIsGluon() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGluon) != 0; }
     bool ViewmodelIsScoped() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagScoped) != 0; }
     bool ViewmodelIsCrowbar() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagCrowbar) != 0; }
+    bool ViewmodelIsShotgun() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagShotgun) != 0; }
     bool m_HasViewmodelBake = false;
     float m_ViewmodelBakeOx = 0.f;
     float m_ViewmodelBakeOy = 0.f;
@@ -587,6 +588,11 @@ public:
     bool m_UsedNamedRenderTargets = false;
     bool m_StereoRenderViewActive = false;
     bool m_StereoFramePoseActive = false;
+    bool m_CompositeHudValid = false;
+    QAngle m_CompositeHudAng{};
+    Vector m_CompositeHudHmd{};
+    Vector m_CompositeHudBody{};
+    float m_CompositeHudYaw = 0.f;
     QAngle m_StereoFrameAngles{};
     Vector m_StereoFrameHmdPosAbs{};
     bool m_StereoFrameLeftCtrlValid = false;
@@ -614,6 +620,10 @@ public:
     void WaitPosesForStereoFrame(bool allowQueued = true);
     void BeginStereoFramePose();
     void EndStereoFramePose();
+    // The multicore composite draws the HUD after this frame's pose latch
+    // is cleared. Project with the camera that rendered the gun, or the
+    // plate slides across it while you move.
+    void SetCompositeHudView(bool valid, const QAngle& ang, const Vector& hmd, const Vector& body, float yawOffset);
     void LogOpenXrPublishRate();
     void LogOpenXrPublishSetupFailure(const char* stage, uint32_t eye, uint32_t slot, unsigned hr);
     bool EnsureOpenXrPublishTextures(IDirect3DDevice9* device, UINT w, UINT h);
@@ -835,12 +845,42 @@ public:
     bool IsCrowbarEquipped() const;
     bool PhysicalCrowbarModelReady() const { return m_PhysicalCrowbarModel != nullptr; }
     bool ComputePhysicalCrowbarPose(Vector& origin, QAngle& angles, Vector& topPos, Vector& topFwd, Vector& shaftStart) const;
+    // Same hand * inverse(grip) matrix HL2VR uses to seat vr_crowbar.
+    bool CopyHlvrCrowbarWorld(float outGun[3][4]) const;
+    void NoteHlvrDrawnMuzzle(const Vector& world, const Vector& barrelDir);
+    void NoteHlvrCrowbarTop(const Vector& world);
+    bool TryGetHlvrBarrelDir(Vector& dir) const;
+    bool CopyDrawnMuzzle(Vector& origin, Vector& dir) const;
+    // Viewmodel GetAttachment("muzzle") still returns the stock bone. Effects
+    // and shotgun pellets spawn there, above or inside the held model.
+    void NoteViewmodelMuzzle(void* renderable);
+    bool ReplaceViewmodelMuzzleAttachment(void* renderable, int number, Vector* origin, QAngle* angles, float* matrix3x4);
+    void ResetHlvrHandDrawState();
+    bool HlvrHandCoversGlove(bool rightHand) const;
+    // Controller pose for one side of vr_hlvr_hands, written into an existing
+    // bone buffer. Used when the weapon's own hand bones are not on the grip.
+    void BlendHlvrControllerHand(bool right, float* boneRows, int boneCount);
+    void NoteHlvrHandCover(bool right);
+    void NoteHlvrHandHud(bool right, const float world[3][4]);
+    void NoteHlvrWeaponHud(const float world[3][4]);
+    void EnsureHlvrSlidePullPoses();
+    // Off hand follows a_slide_pull_XX, seated on the drawn slide.
+    bool ApplyHlvrSlidePullHand(float pull, const float basis[3][4], const float visualSlide[3][4], float* boneRows, int boneCount);
     bool DrawPhysicalCrowbar(void* modelRender, const ModelRenderInfo_t& vmInfo);
     void EnsurePhysicalCrowbarModel();
     // HL2VR pistol on weapon_glock: vr_pistol + slide + magazine. Stock v_glock
     // is skipped while the meshes are loaded. Ammo still lives on weapon_glock.
     bool DrawHlvrPistol(void* modelRender, const ModelRenderInfo_t& vmInfo);
     void UpdateHlvrPistol(uint32_t& buttons);
+    // One usercmd consumes this. ProcessInput only queues it; a 1ms button
+    // pulse was gone before CreateMove and the click did nothing.
+    bool TakeHlvrPistolShot();
+    // Drop the previous gun's world matrix when the viewmodel changes, or the
+    // right hand keeps drawing where the last weapon was.
+    void InvalidateHlvrHeldPose();
+    void InvalidateHlvrPistolAnchor();
+    // Left-hand bones from vr_pistol.mdl's idle, in the gun basis.
+    bool ApplyHlvrPistolSupportHand(void* pistolModel, const float basis[3][4], float* boneRows, int boneCount);
     // Engine model index for models/weapons/vr_pistol.mdl. 0 until it loads.
     int HlvrPistolModelIndex();
     void* HlvrPistolDrawModel();
@@ -858,14 +898,20 @@ public:
     void AnchorHlvrPistolGun(const float visibleBone0[3][4], const QAngle& aim, float outGun[3][4]) const;
     // Crowbar, shotgun, and MP5. Same draw path as the pistol: swap the stock
     // viewmodel, skin the HL2VR idle pose, bone-merge the right hand.
+    void PreloadHlvrWeapons();
     void* HlvrWeaponDrawModel(const char* stockModelName);
     bool IsHlvrWeaponModel(void* model) const;
     bool IsHlvrWeaponRigged(void* model) const;
     bool HlvrHandsReplaceGloves() const;
     int WriteHlvrWeaponSkin(const float modelToWorld[3][4], void* model, float* boneRows, int maxBones);
     void AnchorHlvrWeapon(void* model, const float visibleBone0[3][4], const QAngle& aim, float outGun[3][4]);
+    // Controller pose times the inverse of the idle grip attachment.
+    bool AnchorHlvrWeaponInHand(void* model, float outGun[3][4]);
+    void UpdateHlvrTwoHand();
+    void UpdateHlvrSmg(uint32_t& buttons);
     void DrawHlvrWeaponAttachments(void* modelRender, const ModelRenderInfo_t& gunInfo);
-    void DrawHlvrFreeHands(void* modelRender, bool left, bool right);
+    void DrawHlvrFreeHands(void* modelRender, bool left, bool right, const ModelRenderInfo_t* anchor);
+    void NoteHlvrFreeHands(void* modelRender, const ModelRenderInfo_t& info, bool leftOnly = false);
     void ClearHlvrWeaponPending();
     void NoteHlvrWeaponPending(void* modelRender, const ModelRenderInfo_t& info);
     void FlushHlvrWeaponPending();
@@ -1075,7 +1121,38 @@ private:
     Vector m_MeleeTraceOrigin{};
     QAngle m_MeleeBladeAngles{};
     bool m_MeleeBladeAnglesValid = false;
+    Vector m_HlvrDrawnMuzzle{};
+    Vector m_HlvrDrawnBarrel{};
+    bool m_HlvrDrawnMuzzleValid = false;
+    bool m_HlvrDrawnBarrelValid = false;
+    DWORD m_HlvrDrawnMuzzleMs = 0;
+    Vector m_HlvrCrowbarTop{};
+    bool m_HlvrCrowbarTopValid = false;
+    DWORD m_HlvrCrowbarTopMs = 0;
+    Vector m_HlvrForegripWorld{};
+    bool m_HlvrForegripValid = false;
+    float m_HandHudMat[2][3][4]{};
+    bool m_HandHudValid[2]{};
+    DWORD m_HandHudMs[2]{};
+    float m_WeaponHudMat[3][4]{};
+    bool m_WeaponHudValid = false;
+    DWORD m_WeaponHudMs = 0;
+    bool m_HlvrTwoHand = false;
+    float m_ShotgunPump = 0.f;
+    float m_ShotgunPumpRef = 0.f;
+    bool m_ShotgunPumpRefValid = false;
+    bool m_ShotgunNeedsPump = false;
+    bool m_ShotgunPumpBack = false;
+    bool m_ShotgunPumpWasNeeded = false;
+    bool m_ShotgunForendBack = false;
+    float m_WeaponHudLocal[3][4]{};
+    bool m_WeaponHudLocalValid = false;
+    bool m_ShotgunDryWas = false;
+    float m_ShotgunHandRef = 0.f;
+    int m_ShotgunLastClip = -1;
+    vr::VRActionHandle_t m_ActionInventoryGripLeft = vr::k_ulInvalidActionHandle;
     Vector m_CrowbarPrevTipLocal{};
+    Vector m_CrowbarPrevBody{};
     DWORD m_CrowbarLastMotionCheckMs = 0;
     DWORD m_CrowbarNextAttackMs = 0;
     DWORD m_CrowbarNextSwingSoundMs = 0;

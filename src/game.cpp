@@ -889,6 +889,24 @@ int Game::ReadWeaponClip(C_BaseEntity* weapon)
     return clip;
 }
 
+void Game::SetWeaponClip(C_BaseEntity* weapon, int clip)
+{
+    if (!weapon || clip < 0)
+        return;
+    if (!g_nvScanned)
+        ScanWristHudNetVars();
+    if (g_nvClip1 < 0)
+        return;
+    __try
+    {
+        *reinterpret_cast<volatile int*>(
+            reinterpret_cast<unsigned char*>(weapon) + g_nvClip1) = clip;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+}
+
 bool Game::WeaponHasNoAmmo(C_BaseEntity* weapon)
 {
     if (!weapon)

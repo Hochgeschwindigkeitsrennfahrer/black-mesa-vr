@@ -95,6 +95,7 @@ typedef void(__thiscall* tUpdateFlashlightState)(void* thisptr, void* flashlight
 typedef Vector*(__thiscall* tWeaponShootPosition)(void* thisptr, Vector* out);
 typedef void(__thiscall* tGrabSetTarget)(void* thisptr, Vector* pos, QAngle* ang);
 typedef void(__thiscall* tGetShootAngles)(void* thisptr, QAngle* out);
+typedef void(__thiscall* tEmitSoundName)(void* thisptr, const char* name, float soundtime, float* duration);
 typedef int(__thiscall* tGetAttachmentVec)(void* thisptr, int number, Vector* origin, QAngle* angles);
 typedef int(__thiscall* tGetAttachmentMatrix)(void* thisptr, int number, float* matrix);
 typedef void(__thiscall* tTauBeamView)(void* thisptr, Vector* startEnd, void* a2, float a3, int a4, int a5);
@@ -168,6 +169,7 @@ public:
     static inline Hook<tGrabSetTarget> hkGrabSetTarget;
     static inline Hook<tGetShootAngles> hkGetShootAngles;
     static inline Hook<tGetShootAngles> hkClientGetShootAngles;
+    static inline Hook<tEmitSoundName> hkEmitSound;
     static inline Hook<tGetAttachmentVec> hkGetAttachmentVec;
     static inline Hook<tGetAttachmentMatrix> hkGetAttachmentMatrix;
     static inline Hook<tTauBeamView> hkTauBeamView;
@@ -235,6 +237,7 @@ public:
     static Vector* __fastcall dServerGrabHoldOrigin(void* ecx, void* edx, Vector* out);
     static void __fastcall dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang);
     static void __fastcall dGetShootAngles(void* ecx, void* edx, QAngle* out);
+    static void __fastcall dEmitSound(void* ecx, void* edx, const char* name, float soundtime, float* duration);
     static void __fastcall dClientGetShootAngles(void* ecx, void* edx, QAngle* out);
     static int __fastcall dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles);
     static int __fastcall dGetAttachmentMatrix(void* ecx, void* edx, int number, float* matrix);

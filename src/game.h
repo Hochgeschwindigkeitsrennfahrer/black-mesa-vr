@@ -95,6 +95,7 @@ public:
     // reads a value that is not 0 or 1. Returns -1 when unavailable.
     int ReadPlayerFlagByte(int& offset);
     int ReadWeaponClip(C_BaseEntity* weapon);
+    void SetWeaponClip(C_BaseEntity* weapon, int clip);
     bool WeaponHasNoAmmo(C_BaseEntity* weapon);
     const char* GetActiveWeaponModelName();
     const char* GetEntityModelName(C_BaseEntity* entity);

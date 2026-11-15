@@ -2217,7 +2217,7 @@ namespace
 
         static const std::array<BooleanActionDef, 31>& BooleanDefs();
         static const std::array<BooleanActionDef, 4>& ExtraBooleanDefs();
-        static const std::array<FloatDigitalActionDef, 4>& FloatDigitalDefs();
+        static const std::array<FloatDigitalActionDef, 5>& FloatDigitalDefs();
         static const std::array<AnalogActionDef, 2>& AnalogDefs();
 
         bool Path(const char* text, XrPath& out, Logger& log);
@@ -4616,14 +4616,15 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         return defs;
     }
 
-    const std::array<OpenXrInputBridge::FloatDigitalActionDef, 4>& OpenXrInputBridge::FloatDigitalDefs()
+    const std::array<OpenXrInputBridge::FloatDigitalActionDef, 5>& OpenXrInputBridge::FloatDigitalDefs()
     {
-        static const std::array<FloatDigitalActionDef, 4> defs =
+        static const std::array<FloatDigitalActionDef, 5> defs =
         {{
             { L4D2VROpenXrActionId::PrimaryAttack, "primary_attack", "Primary Attack", 0.45f },
             { L4D2VROpenXrActionId::Use, "use", "Use", 0.45f },
             { L4D2VROpenXrActionId::Reload, "reload", "Reload", 0.45f },
             { L4D2VROpenXrActionId::Flashlight, "flashlight_value", "Flashlight Grip", 0.55f },
+            { L4D2VROpenXrActionId::InventoryGripLeft, "inventory_grip_left_value", "Left Grip", 0.55f },
         }};
         return defs;
     }
@@ -4933,7 +4934,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         const char* gripValueName)
     {
         const std::string rightGripValue = std::string("/user/hand/right/input/") + gripValueName;
+        const std::string leftGripValue = std::string("/user/hand/left/input/") + gripValueName;
         AddBinding(b, m_FloatDigitalActions[Index(L4D2VROpenXrActionId::Flashlight)], rightGripValue.c_str());
+        AddBinding(b, m_FloatDigitalActions[Index(L4D2VROpenXrActionId::InventoryGripLeft)], leftGripValue.c_str());
     }
 
     void OpenXrInputBridge::AddTouchFaceButtonBindings(std::vector<XrActionSuggestedBinding>& b)

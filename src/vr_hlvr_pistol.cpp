@@ -5,13 +5,15 @@
 #include "in_buttons.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 
 namespace
 {
     constexpr int kMagCapacity = 17;          // weapon_glock clip
     constexpr float kInsertDistance = 4.f;    // HL2VR PISTOL_CHAMBER_TO_MAGAZINE_LOAD_DISTANCE
-    constexpr float kSlideGrabRadius = 6.f;
+    constexpr float kSlideGrabRadius = 2.5f;
+    constexpr float kSupportRadius = 3.5f;
     constexpr float kMagGrabRadius = 8.f;
     constexpr float kShoulderRadius = 14.f;
     constexpr float kSlideTravel = 1.15f;     // inches, model +Y (back from the muzzle)
@@ -27,6 +29,8 @@ namespace
     const Vector kGripUp(0.f, -0.034899496f, 0.99939084f);
     const Vector kGunReloadLocal(0.f, 1.5515f, -3.6176f);
     const Vector kSlideGrabLocal(0.f, 1.0f, 1.5f);
+    // Left side of the frame, forward of the grip. Not the slide, not the mag.
+    const Vector kSupportLocal(1.6f, -0.6f, 0.3f);
     const Vector kClipEjectLocal(0.f, 0.969f, -1.82f);
 
     // vr_pistol_clip.mdl. Grip attachment is identity rotation.
@@ -57,12 +61,20 @@ namespace
         bool gripWas = false;
         bool reloadWas = false;
         bool attackWas = false;
+        bool wantShot = false;
+        bool twoHand = false;
+        bool queuedShot = false;
+        DWORD attackHoldUntil = 0;
+        DWORD nextAttackPulse = 0;
+        float fireKick = 0.f;
         int lastClip = -1;
         bool waitingReload = false;
         bool reloadPulsed = false;
         DWORD reloadWaitUntil = 0;
         Vector worldMagOrigin{};
         QAngle worldMagAngles{};
+        Vector worldMagVel{};
+        float worldMagFloor = 0.f;
         DWORD worldMagUntil = 0;
         DWORD lastTick = 0;
         bool logged = false;
@@ -184,6 +196,12 @@ namespace
         g_pistol.gripWas = false;
         g_pistol.reloadWas = false;
         g_pistol.attackWas = false;
+        g_pistol.wantShot = false;
+        g_pistol.twoHand = false;
+        g_pistol.queuedShot = false;
+        g_pistol.attackHoldUntil = 0;
+        g_pistol.nextAttackPulse = 0;
+        g_pistol.fireKick = 0.f;
         g_pistol.lastClip = -1;
         g_pistol.waitingReload = false;
         g_pistol.reloadPulsed = false;
@@ -293,6 +311,8 @@ namespace
     {
         if (g_pistol.slideGrabbed)
             return;
+        if (!g_pistol.slideGrabbed && g_pistol.fireKick > 0.f)
+            g_pistol.fireKick = (std::max)(0.f, g_pistol.fireKick - std::clamp(dt, 0.f, 0.05f) * 6.f);
         const float target = (g_pistol.slide == SlideLocked) ? 1.f : 0.f;
         const float step = std::clamp(dt, 0.f, 0.05f) * 10.f;
         if (g_pistol.slidePull < target)
@@ -337,15 +357,21 @@ namespace
         }
     }
 
-    void ConsumeOneFromServerDrop()
+    void ConsumeOneFromServerDrop(int clipAfter)
     {
         if (g_pistol.mag == MagLoaded && g_pistol.magAmmo > 0)
             --g_pistol.magAmmo;
         else
+            g_pistol.chamber = 0;
+        // Stay open only when the gun is actually empty. A shot with rounds
+        // left used to lock the slide at the back of the travel.
+        if (clipAfter <= 0)
         {
             g_pistol.chamber = 0;
             g_pistol.slide = SlideLocked;
         }
+        else if (!g_pistol.slideGrabbed)
+            g_pistol.slide = SlideClosed;
     }
 }
 
@@ -665,9 +691,14 @@ namespace
     void SlideLocal(float out[3][4])
     {
         std::memcpy(out, kPistolBind[6], sizeof(float) * 12);
-        const float pull = g_pistol.slidePull < 0.f ? 0.f : (g_pistol.slidePull > 1.f ? 1.f : g_pistol.slidePull);
+        float pull = g_pistol.slidePull < 0.f ? 0.f : (g_pistol.slidePull > 1.f ? 1.f : g_pistol.slidePull);
+        // @fire racks the slide. The authored travel is the same axis as a pull.
+        if (!g_pistol.slideGrabbed && g_pistol.fireKick > pull)
+            pull = g_pistol.fireKick;
         out[0][3] = kSlideClosedX + (kSlideOpenX - kSlideClosedX) * pull;
     }
+
+    std::atomic<int> g_shotPending{ 0 };
 }
 
 void VR::AnchorHlvrPistolGun(const float visibleBone0[3][4], const QAngle& aim, float outGun[3][4]) const
@@ -715,6 +746,29 @@ int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* 
             return 0;
         std::memcpy(g_gunMatrix, modelToWorld, sizeof(g_gunMatrix));
         g_gunMatrixValid = true;
+        // Muzzle attachment on bone 0, bone-local (0, -8.37, 2.63), after @idle.
+        const float lx = 0.f, ly = -8.37f, lz = 2.63f;
+        const float* b0 = &kPistolBind[0][0][0];
+        const float mx = b0[0] * lx + b0[1] * ly + b0[2] * lz + b0[3];
+        const float my = b0[4] * lx + b0[5] * ly + b0[6] * lz + b0[7];
+        const float mz = b0[8] * lx + b0[9] * ly + b0[10] * lz + b0[11];
+        const float* g = &g_gunMatrix[0][0];
+        NoteHlvrDrawnMuzzle(Vector(
+            g[0] * mx + g[1] * my + g[2] * mz + g[3],
+            g[4] * mx + g[5] * my + g[6] * mz + g[7],
+            g[8] * mx + g[9] * my + g[10] * mz + g[11]),
+            Vector(g[0], g[4], g[8]));
+        // Attachment "hud" on bone 0. Ammo sits on the gun, not the wrist.
+        const float hudLocal[3][4] = {
+            {-0.f, -1.f, 0.f, 1.f},
+            {1.f, -0.f, 0.f, -1.06f},
+            {0.f, 0.f, 1.f, 2.18f},
+        };
+        float hudModel[3][4];
+        float hudWorld[3][4];
+        MulModel(kPistolBind[0], hudLocal, hudModel);
+        MulModel(g_gunMatrix, hudModel, hudWorld);
+        NoteHlvrWeaponHud(hudWorld);
     }
     const float (*basisSrc)[4] = modelToWorld;
     if (!gun && g_gunMatrixValid && (slide || hand || (clip && g_pistol.mag == MagLoaded)))
@@ -730,9 +784,9 @@ int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* 
     {
         const int n = maxBones < 43 ? maxBones : 43;
         float away[3][4] = {
-            {0.f, 0.f, 0.f, 1.0e6f},
-            {0.f, 0.f, 0.f, 1.0e6f},
-            {0.f, 0.f, 0.f, 1.0e6f},
+            {1.f, 0.f, 0.f, 1.0e6f},
+            {0.f, 1.f, 0.f, 1.0e6f},
+            {0.f, 0.f, 1.f, 1.0e6f},
         };
         for (int i = 0; i < n; ++i)
             std::memcpy(boneRows + i * 12, away, sizeof(away));
@@ -743,6 +797,14 @@ int VR::WriteHlvrPistolSkin(const float modelToWorld[3][4], void* model, float* 
             float world[3][4];
             MulModel(basis, bone.m, world);
             std::memcpy(boneRows + bone.playerBone * 12, world, sizeof(world));
+        }
+        // Off hand is the same mesh. A second DrawEx of it flickered, and
+        // skipping it hid the hand once the gloves were covered.
+        NoteHlvrHandCover(true);
+        if (!(g_pistol.slideGrabbed && ApplyHlvrSlidePullHand(g_pistol.slidePull, basis, slideM, boneRows, n)))
+        {
+            if (!(g_pistol.twoHand && ApplyHlvrPistolSupportHand(g_pistol.gun, basis, boneRows, n)))
+                BlendHlvrControllerHand(false, boneRows, n);
         }
         return n;
     }
@@ -801,6 +863,13 @@ void VR::DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& g
         inf.angles = angles;
         inf.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(world);
         inf.instance = -1;
+        static Vector s_light[4];
+        static int s_lightSlot = 0;
+        Vector& lit = s_light[s_lightSlot++ & 3];
+        lit.x = world[0][3];
+        lit.y = world[1][3];
+        lit.z = world[2][3];
+        inf.pLightingOrigin = &lit;
         const int drawn = CallDrawModelExSeh(modelRender, &inf);
         static int s_partLog;
         if (s_partLog < 6)
@@ -817,7 +886,6 @@ void VR::DrawHlvrPistolAttachments(void* modelRender, const ModelRenderInfo_t& g
     drawPart(g_pistol.slideModel, "models/weapons/vr_pistol_slide.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
     if (g_pistol.handModel)
         drawPart(g_pistol.handModel, "models/weapons/vr_hlvr_hands.mdl", gunWorld, gunInfo.origin, gunInfo.angles);
-    DrawHlvrFreeHands(modelRender, true, false);
 
     if (g_pistol.mag == MagLoaded)
     {
@@ -989,6 +1057,7 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
             dt = 0.016f;
     }
     g_pistol.lastTick = now;
+    EnsureHlvrSlidePullPoses();
 
     C_BaseEntity* weapon = m_Game ? m_Game->GetActiveWeaponEntity() : nullptr;
     const int clip = m_Game ? m_Game->ReadWeaponClip(weapon) : -1;
@@ -1010,6 +1079,7 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
         }
     }
 
+    bool clipDropped = false;
     if (g_pistol.waitingReload)
     {
         if (clip > 0)
@@ -1047,17 +1117,35 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
     {
         if (clip < g_pistol.lastClip)
         {
+            clipDropped = true;
             int lost = g_pistol.lastClip - clip;
             if (lost > 30)
                 lost = 30;
             while (lost-- > 0)
-                ConsumeOneFromServerDrop();
+                ConsumeOneFromServerDrop(clip);
         }
         else if (clip > g_pistol.lastClip && g_pistol.mag == MagLoaded)
         {
             SeedFromClip(clip);
         }
         g_pistol.lastClip = clip;
+    }
+
+    if (g_pistol.mag == MagWorld)
+    {
+        g_pistol.worldMagVel.z -= 600.f * dt;
+        g_pistol.worldMagOrigin = g_pistol.worldMagOrigin + g_pistol.worldMagVel * dt;
+        if (g_pistol.worldMagOrigin.z < g_pistol.worldMagFloor)
+        {
+            g_pistol.worldMagOrigin.z = g_pistol.worldMagFloor;
+            g_pistol.worldMagVel = Vector(0.f, 0.f, 0.f);
+        }
+    }
+    if (g_pistol.slide == SlideLocked && clip > 0 && !g_pistol.slideGrabbed)
+    {
+        g_pistol.slide = SlideClosed;
+        if (g_pistol.chamber <= 0)
+            g_pistol.chamber = 1;
     }
 
     if (g_pistol.mag == MagWorld && g_pistol.worldMagUntil != 0 && now >= g_pistol.worldMagUntil)
@@ -1090,21 +1178,25 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
         const Vector slidePoint = TransformPoint(gunMatrix, kSlideGrabLocal);
         const Vector reloadPoint = TransformPoint(gunMatrix, kGunReloadLocal);
         const bool nearSlide = (off - slidePoint).LengthSqr() <= kSlideGrabRadius * kSlideGrabRadius;
+        const Vector supportPoint = TransformPoint(gunMatrix, kSupportLocal);
+        const bool nearSupport = (off - supportPoint).LengthSqr() <= kSupportRadius * kSupportRadius;
         const bool nearDrop = g_pistol.mag == MagWorld
             && (off - g_pistol.worldMagOrigin).LengthSqr() <= kMagGrabRadius * kMagGrabRadius;
 
         Vector shoulder = m_SetupOrigin;
         if (m_HmdRight.LengthSqr() > 0.01f)
         {
-            const float side = leftHanded ? 8.f : -8.f;
-            shoulder += m_HmdRight * side;
-            shoulder += m_HmdUp * -6.f;
+            const float side = leftHanded ? 10.f : -10.f;
+            shoulder = shoulder - m_HmdForward * 4.f + m_HmdRight * side + m_HmdUp * -8.f;
         }
-        const bool nearShoulder = (off - shoulder).LengthSqr() <= kShoulderRadius * kShoulderRadius;
+        const bool nearShoulder = (off - shoulder).LengthSqr() <= 16.f * 16.f;
+        const bool nearWell = (off - reloadPoint).LengthSqr() <= 8.f * 8.f;
+        const bool grabSlide = nearSlide && !g_pistol.twoHand
+            && (!nearSupport || (off - slidePoint).LengthSqr() <= (off - supportPoint).LengthSqr());
 
-        if (g_pistol.mag != MagInHand && (nearSlide || g_pistol.slideGrabbed))
+        if (g_pistol.mag != MagInHand && (grabSlide || g_pistol.slideGrabbed))
         {
-            if (grip && (nearSlide || g_pistol.slideGrabbed))
+            if (grip && (grabSlide || g_pistol.slideGrabbed))
             {
                 usedGrip = true;
                 if (!g_pistol.slideGrabbed)
@@ -1140,7 +1232,17 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
             g_pistol.slideGrabbed = false;
         }
 
-        if (!g_pistol.slideGrabbed && g_pistol.mag == MagInHand)
+        if (g_pistol.slideGrabbed || !grip)
+            g_pistol.twoHand = false;
+        else if (nearSupport || (g_pistol.twoHand && (off - supportPoint).LengthSqr() <= 6.f * 6.f))
+        {
+            usedGrip = true;
+            g_pistol.twoHand = true;
+        }
+        else
+            g_pistol.twoHand = false;
+
+        if (!g_pistol.slideGrabbed && !g_pistol.twoHand && g_pistol.mag == MagInHand)
         {
             usedGrip = grip;
             VMatrix handM{};
@@ -1188,8 +1290,7 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
             g_pistol.mag = MagInHand;
             g_pistol.worldMagUntil = 0;
         }
-        else if (!g_pistol.slideGrabbed && gripEdge && g_pistol.mag == MagNone && nearShoulder
-            && (reserve > 0 || clip <= 0))
+        else if (!g_pistol.slideGrabbed && gripEdge && g_pistol.mag == MagNone && nearShoulder)
         {
             usedGrip = true;
             g_pistol.mag = MagInHand;
@@ -1200,12 +1301,13 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
             if (m_Game)
                 m_Game->PlayUiSound("weapons/pistol/pistol_clip_insert.wav");
         }
-
-        if (reloadEdge && g_pistol.mag == MagLoaded && !g_pistol.slideGrabbed)
+        else if (!g_pistol.slideGrabbed && !g_pistol.twoHand && gripEdge && g_pistol.mag == MagLoaded && nearWell)
         {
             g_pistol.mag = MagWorld;
             g_pistol.worldMagOrigin = TransformPoint(gunMatrix, kClipEjectLocal);
             g_pistol.worldMagAngles = gunAngles;
+            g_pistol.worldMagVel = Vector(0.f, 0.f, -30.f);
+            g_pistol.worldMagFloor = m_SetupOrigin.z - 64.f;
             g_pistol.worldMagUntil = now + kDroppedMagMs;
             if (m_Game)
                 m_Game->PlayUiSound("weapons/pistol/pistol_clip_release.wav");
@@ -1217,6 +1319,7 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
     else if (!grip)
     {
         g_pistol.slideGrabbed = false;
+        g_pistol.twoHand = false;
     }
 
     LerpSlide(dt);
@@ -1229,9 +1332,30 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
         && g_pistol.slide == SlideClosed
         && g_pistol.chamber > 0
         && g_pistol.mag != MagInHand;
-    if (!canFire)
-        buttons &= ~IN_ATTACK;
     const bool attack = PressedDigitalAction(m_ActionPrimaryAttack);
+    if (clipDropped && clip <= 0 && !g_pistol.slideGrabbed)
+        g_pistol.slide = SlideLocked;
+    else if (clip > g_pistol.lastClip && clip > 0 && !g_pistol.slideGrabbed)
+    {
+        g_pistol.slide = SlideClosed;
+        g_pistol.slidePull = 0.f;
+        if (g_pistol.chamber <= 0)
+            g_pistol.chamber = 1;
+    }
+    if (clipDropped && !g_pistol.slideGrabbed && clip > 0)
+        g_pistol.fireKick = 0.55f;
+    // CreateMove takes the queued click for exactly one usercmd. Holding the
+    // trigger across several presents used to either double-fire or miss.
+    if (attack && !g_pistol.attackWas)
+        g_pistol.wantShot = true;
+    if (!attack)
+        g_pistol.wantShot = false;
+    if (g_pistol.wantShot && canFire && g_shotPending.load(std::memory_order_acquire) == 0)
+    {
+        g_shotPending.store(1, std::memory_order_release);
+        g_pistol.wantShot = false;
+    }
+    buttons &= ~IN_ATTACK;
     if (attack && !g_pistol.attackWas && g_pistol.chamber <= 0 && g_pistol.mag != MagInHand)
     {
         g_pistol.slide = SlideLocked;
@@ -1240,8 +1364,10 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
     }
     g_pistol.attackWas = attack;
 
-    buttons &= ~IN_RELOAD;
-    if (g_pistol.waitingReload && !g_pistol.reloadPulsed)
+    // A still runs the engine reload. Swallow it only while a mag is in the hand.
+    if (g_pistol.mag == MagInHand)
+        buttons &= ~IN_RELOAD;
+    else if (g_pistol.waitingReload && !g_pistol.reloadPulsed)
     {
         buttons |= IN_RELOAD;
         g_pistol.reloadPulsed = true;
@@ -1253,4 +1379,20 @@ void VR::UpdateHlvrPistol(uint32_t& buttons)
         else
             buttons &= ~IN_USE;
     }
+}
+
+bool VR::TakeHlvrPistolShot()
+{
+    if (!GlockHeld(this))
+    {
+        g_shotPending.store(0, std::memory_order_release);
+        return false;
+    }
+    int one = 1;
+    return g_shotPending.compare_exchange_strong(one, 0, std::memory_order_acq_rel);
+}
+
+void VR::InvalidateHlvrPistolAnchor()
+{
+    g_gunMatrixValid = false;
 }

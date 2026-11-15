@@ -649,8 +649,6 @@ bool BmVrGloves::DrawForEye(
     float zFar,
     bool overlayNoDepth)
 {
-    if (g_Game && g_Game->m_VR && g_Game->m_VR->HlvrHandsReplaceGloves())
-        return false;
     if (!device || !m_Impl || !m_Impl->EnsureAssets())
         return false;
 
@@ -701,6 +699,8 @@ bool BmVrGloves::DrawForEye(
             ? g_Game->m_VR->WantsRightGloveVisible()
             : bmvr::g_VrHandsRightEnabled;
         if (rightHand && !showRight)
+            continue;
+        if (g_Game && g_Game->m_VR && g_Game->m_VR->HlvrHandCoversGlove(rightHand))
             continue;
         if (!valid[i])
             continue;

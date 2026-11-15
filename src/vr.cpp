@@ -186,6 +186,448 @@ namespace
         delta.y = ny;
     }
 
+    // One-euro filter (Casiez et al.) on weapon controller poses. State is
+    // headset-local, so the whole body can walk and stick-turn without the
+    // gun dragging, while a few millimetres of tremor still gets averaged.
+    // A handful of float ops per hand per pose update; no GPU work.
+    struct Vq
+    {
+        float x, y, z, w;
+    };
+
+    struct CtrlSmoothPose
+    {
+        Vector pos{};
+        Vector fwd{};
+        Vector right{};
+        Vector up{};
+        QAngle ang{};
+    };
+
+    Vq VqNorm(Vq q)
+    {
+        const float n = sqrtf(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+        if (!(n > 1e-8f))
+            return Vq{0.f, 0.f, 0.f, 1.f};
+        const float inv = 1.f / n;
+        return Vq{q.x * inv, q.y * inv, q.z * inv, q.w * inv};
+    }
+
+    Vq VqMul(Vq a, Vq b)
+    {
+        return Vq{
+            a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+            a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+            a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+        };
+    }
+
+    Vq VqConj(Vq q)
+    {
+        return Vq{-q.x, -q.y, -q.z, q.w};
+    }
+
+    float VqDot(Vq a, Vq b)
+    {
+        return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    }
+
+    Vector VqRotate(Vq q, const Vector& v)
+    {
+        const Vq p{v.x, v.y, v.z, 0.f};
+        const Vq r = VqMul(VqMul(q, p), VqConj(q));
+        return Vector(r.x, r.y, r.z);
+    }
+
+    float VqAngle(Vq a, Vq b)
+    {
+        float d = fabsf(VqDot(VqNorm(a), VqNorm(b)));
+        if (d > 1.f)
+            d = 1.f;
+        return 2.f * acosf(d);
+    }
+
+    Vq VqSlerp(Vq a, Vq b, float t)
+    {
+        if (t < 0.f)
+            t = 0.f;
+        if (t > 1.f)
+            t = 1.f;
+        a = VqNorm(a);
+        b = VqNorm(b);
+        float d = VqDot(a, b);
+        if (d < 0.f)
+        {
+            b.x = -b.x;
+            b.y = -b.y;
+            b.z = -b.z;
+            b.w = -b.w;
+            d = -d;
+        }
+        if (d > 0.9995f)
+            return VqNorm(Vq{
+                a.x + t * (b.x - a.x),
+                a.y + t * (b.y - a.y),
+                a.z + t * (b.z - a.z),
+                a.w + t * (b.w - a.w)
+            });
+        const float theta = acosf(d);
+        const float s = sinf(theta);
+        if (!(fabsf(s) > 1e-6f))
+            return a;
+        const float w1 = sinf((1.f - t) * theta) / s;
+        const float w2 = sinf(t * theta) / s;
+        return VqNorm(Vq{a.x * w1 + b.x * w2, a.y * w1 + b.y * w2, a.z * w1 + b.z * w2, a.w * w1 + b.w * w2});
+    }
+
+    // Source (forward, right, up) has det -1. Columns (forward, -right, up)
+    // are a proper rotation, which a quaternion can represent.
+    bool ControllerFrame(const Vector& fwd, const Vector& right, const Vector& up,
+        Vector& oF, Vector& oR, Vector& oU)
+    {
+        oF = fwd;
+        if (VectorNormalize(oF) < 0.5f)
+            return false;
+        oU = up - oF * oF.Dot(up);
+        if (VectorNormalize(oU) < 0.5f)
+        {
+            oU = Vector(0.f, 0.f, 1.f) - oF * oF.z;
+            if (VectorNormalize(oU) < 0.5f)
+                oU = Vector(0.f, 1.f, 0.f);
+            VectorNormalize(oU);
+        }
+        CrossProduct(oF, oU, oR);
+        if (VectorNormalize(oR) < 0.5f)
+            return false;
+        if (oR.Dot(right) < 0.f)
+        {
+            oR = oR * -1.f;
+            oU = oU * -1.f;
+        }
+        return std::isfinite(oF.x) && std::isfinite(oR.y) && std::isfinite(oU.z);
+    }
+
+    bool VqFromController(const Vector& fwd, const Vector& right, const Vector& up, Vq& out)
+    {
+        Vector f, r, u;
+        if (!ControllerFrame(fwd, right, up, f, r, u))
+            return false;
+        const Vector s = r * -1.f;
+        const float m00 = f.x, m01 = s.x, m02 = u.x;
+        const float m10 = f.y, m11 = s.y, m12 = u.y;
+        const float m20 = f.z, m21 = s.z, m22 = u.z;
+        const float tr = m00 + m11 + m22;
+        Vq q{};
+        if (tr > 0.f)
+        {
+            const float ss = sqrtf(tr + 1.f) * 2.f;
+            q.w = 0.25f * ss;
+            q.x = (m21 - m12) / ss;
+            q.y = (m02 - m20) / ss;
+            q.z = (m10 - m01) / ss;
+        }
+        else if (m00 > m11 && m00 > m22)
+        {
+            const float ss = sqrtf(1.f + m00 - m11 - m22) * 2.f;
+            q.w = (m21 - m12) / ss;
+            q.x = 0.25f * ss;
+            q.y = (m01 + m10) / ss;
+            q.z = (m02 + m20) / ss;
+        }
+        else if (m11 > m22)
+        {
+            const float ss = sqrtf(1.f + m11 - m00 - m22) * 2.f;
+            q.w = (m02 - m20) / ss;
+            q.x = (m01 + m10) / ss;
+            q.y = 0.25f * ss;
+            q.z = (m12 + m21) / ss;
+        }
+        else
+        {
+            const float ss = sqrtf(1.f + m22 - m00 - m11) * 2.f;
+            q.w = (m10 - m01) / ss;
+            q.x = (m02 + m20) / ss;
+            q.y = (m12 + m21) / ss;
+            q.z = 0.25f * ss;
+        }
+        out = VqNorm(q);
+        return std::isfinite(out.w);
+    }
+
+    bool VqToController(Vq q, Vector& fwd, Vector& right, Vector& up)
+    {
+        q = VqNorm(q);
+        const float x = q.x, y = q.y, z = q.z, w = q.w;
+        const float xx = x * x, yy = y * y, zz = z * z;
+        const float xy = x * y, xz = x * z, yz = y * z;
+        const float wx = w * x, wy = w * y, wz = w * z;
+        fwd = Vector(1.f - 2.f * (yy + zz), 2.f * (xy + wz), 2.f * (xz - wy));
+        const Vector side(2.f * (xy - wz), 1.f - 2.f * (xx + zz), 2.f * (yz + wx));
+        up = Vector(2.f * (xz + wy), 2.f * (yz - wx), 1.f - 2.f * (xx + yy));
+        right = side * -1.f;
+        return std::isfinite(fwd.x) && std::isfinite(right.y) && std::isfinite(up.z);
+    }
+
+    void CtrlSmoothWriteAngles(CtrlSmoothPose& p)
+    {
+        if (p.fwd.LengthSqr() < 1e-8f)
+            return;
+        QAngle::VectorAngles(p.fwd, p.up, p.ang);
+        p.ang.y = WrapYaw(p.ang.y);
+    }
+
+    float OneEuroAlpha(float cutoffHz, float dt)
+    {
+        if (cutoffHz < 0.05f)
+            cutoffHz = 0.05f;
+        if (dt < 1e-4f)
+            dt = 1e-4f;
+        const float tau = 1.f / (6.2831853f * cutoffHz);
+        return 1.f / (1.f + tau / dt);
+    }
+
+    struct CtrlSmoothSlot
+    {
+        bool init = false;
+        int kind = -1;
+        double t = 0.0;
+        float x[3]{};
+        float dx[3]{};
+        float prev[3]{};
+        Vq q{0.f, 0.f, 0.f, 1.f};
+        float dOmega = 0.f;
+        Vq prevQ{0.f, 0.f, 0.f, 1.f};
+    };
+
+    CtrlSmoothSlot& ControllerSmoothSlot(int slot)
+    {
+        static CtrlSmoothSlot slots[2];
+        if (slot < 0)
+            slot = 0;
+        if (slot > 1)
+            slot = 1;
+        return slots[slot];
+    }
+
+    void ResetControllerSmoothSlot(int slot)
+    {
+        ControllerSmoothSlot(slot) = CtrlSmoothSlot{};
+    }
+
+    void ResetControllerSmooth()
+    {
+        ResetControllerSmoothSlot(0);
+        ResetControllerSmoothSlot(1);
+    }
+
+    double ControllerSmoothNowSec()
+    {
+        static LARGE_INTEGER freq{};
+        if (freq.QuadPart == 0)
+            QueryPerformanceFrequency(&freq);
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        if (freq.QuadPart == 0)
+            return 0.0;
+        return static_cast<double>(now.QuadPart) / static_cast<double>(freq.QuadPart);
+    }
+
+    // 0 = leave the raw pose, 1 = filter primed on this raw pose, 2 = pose written.
+    int SmoothControllerPose(CtrlSmoothPose& pose, int slot, int kind,
+        const Vector& hmdPos, const Vector& hmdFwd, const Vector& hmdRight, const Vector& hmdUp,
+        float stickYawDeg, float sourcePerMeter, double nowSec)
+    {
+        Vector oF, oR, oU;
+        if (!(sourcePerMeter > 1.f) || !ControllerFrame(hmdFwd, hmdRight, hmdUp, oF, oR, oU))
+        {
+            ResetControllerSmoothSlot(slot);
+            return 0;
+        }
+        Vector f = pose.fwd;
+        Vector r = pose.right;
+        Vector u = pose.up;
+        PivotYaw(f, -stickYawDeg);
+        PivotYaw(r, -stickYawDeg);
+        PivotYaw(u, -stickYawDeg);
+        Vq qCtrl{};
+        if (!VqFromController(f, r, u, qCtrl))
+        {
+            ResetControllerSmoothSlot(slot);
+            return 0;
+        }
+        Vq qHead{};
+        if (!VqFromController(oF, oR, oU, qHead))
+        {
+            ResetControllerSmoothSlot(slot);
+            return 0;
+        }
+        // Filter in the room, not on the headset. A head-relative offset
+        // lags when you look around, so the gun and hands bob with the HMD.
+        // Main did not run this filter.
+        oF = Vector(0.f, 1.f, 0.f);
+        oR = Vector(1.f, 0.f, 0.f);
+        oU = Vector(0.f, 0.f, 1.f);
+        qHead = Vq{ 0.f, 0.f, 0.f, 1.f };
+        const float rawM[3] = {
+            pose.pos.Dot(oR) / sourcePerMeter,
+            pose.pos.Dot(oF) / sourcePerMeter,
+            pose.pos.Dot(oU) / sourcePerMeter
+        };
+        if (!std::isfinite(rawM[0]) || !std::isfinite(rawM[1]) || !std::isfinite(rawM[2]))
+        {
+            ResetControllerSmoothSlot(slot);
+            return 0;
+        }
+        const Vq rawQ = VqMul(VqConj(qHead), qCtrl);
+        CtrlSmoothSlot& st = ControllerSmoothSlot(slot);
+        auto emit = [&]() {
+            pose.pos = oR * (st.x[0] * sourcePerMeter)
+                + oF * (st.x[1] * sourcePerMeter)
+                + oU * (st.x[2] * sourcePerMeter);
+            Vector ef, er, eu;
+            if (!VqToController(VqMul(qHead, st.q), ef, er, eu))
+                return false;
+            PivotYaw(ef, stickYawDeg);
+            PivotYaw(er, stickYawDeg);
+            PivotYaw(eu, stickYawDeg);
+            pose.fwd = ef;
+            pose.right = er;
+            pose.up = eu;
+            CtrlSmoothWriteAngles(pose);
+            return std::isfinite(pose.pos.x) && std::isfinite(pose.fwd.x) && std::isfinite(pose.ang.y);
+        };
+        auto prime = [&]() {
+            st.init = true;
+            st.kind = kind;
+            st.t = nowSec;
+            for (int i = 0; i < 3; ++i)
+            {
+                st.x[i] = rawM[i];
+                st.prev[i] = rawM[i];
+                st.dx[i] = 0.f;
+            }
+            st.q = rawQ;
+            st.prevQ = rawQ;
+            st.dOmega = 0.f;
+        };
+        // Aim and grip origins are centimetres apart. Switching which one
+        // the filter follows must snap, or the gun slides between them.
+        if (!st.init || st.kind != kind)
+        {
+            prime();
+            return 1;
+        }
+        float dt = static_cast<float>(nowSec - st.t);
+        if (!(dt > 0.f))
+        {
+            for (int i = 0; i < 3; ++i)
+                st.prev[i] = rawM[i];
+            st.prevQ = rawQ;
+            return emit() ? 2 : 0;
+        }
+        if (dt > 0.25f)
+        {
+            prime();
+            return 1;
+        }
+        const float jump = sqrtf(
+            (rawM[0] - st.prev[0]) * (rawM[0] - st.prev[0])
+            + (rawM[1] - st.prev[1]) * (rawM[1] - st.prev[1])
+            + (rawM[2] - st.prev[2]) * (rawM[2] - st.prev[2]));
+        if (jump > 0.45f)
+        {
+            prime();
+            return 1;
+        }
+        st.t = nowSec;
+        if (dt < 0.0005f)
+        {
+            for (int i = 0; i < 3; ++i)
+                st.prev[i] = rawM[i];
+            st.prevQ = rawQ;
+            return emit() ? 2 : 0;
+        }
+
+        // Rest cutoff sits under a tremor (about 4–12 Hz). Beta opens the
+        // filter once the hand is actually moving, so a swing is not lagged.
+        constexpr float kMinCutPos = 0.75f;
+        constexpr float kBetaPos = 5.5f;
+        constexpr float kMinCutAng = 0.9f;
+        constexpr float kBetaAng = 1.8f;
+        constexpr float kDCut = 1.0f;
+        constexpr float kPosLagM = 0.06f;
+        constexpr float kAngLagRad = 8.f * (3.14159265f / 180.f);
+        const float aD = OneEuroAlpha(kDCut, dt);
+        float speed2 = 0.f;
+        for (int i = 0; i < 3; ++i)
+        {
+            const float d = (rawM[i] - st.prev[i]) / dt;
+            st.dx[i] += aD * (d - st.dx[i]);
+            speed2 += st.dx[i] * st.dx[i];
+            st.prev[i] = rawM[i];
+        }
+        const float speed = sqrtf(speed2);
+        float cutPos = kMinCutPos + kBetaPos * speed;
+        if (cutPos > 60.f)
+            cutPos = 60.f;
+        const float aP = OneEuroAlpha(cutPos, dt);
+        for (int i = 0; i < 3; ++i)
+            st.x[i] += aP * (rawM[i] - st.x[i]);
+        float err2 = 0.f;
+        for (int i = 0; i < 3; ++i)
+        {
+            const float e = rawM[i] - st.x[i];
+            err2 += e * e;
+        }
+        const float err = sqrtf(err2);
+        if (err > kPosLagM && err > 1e-6f)
+        {
+            const float keep = kPosLagM / err;
+            for (int i = 0; i < 3; ++i)
+                st.x[i] = rawM[i] - (rawM[i] - st.x[i]) * keep;
+        }
+
+        float omega = VqAngle(st.prevQ, rawQ) / dt;
+        if (!std::isfinite(omega))
+            omega = 0.f;
+        if (omega > 40.f)
+            omega = 40.f;
+        st.dOmega += aD * (omega - st.dOmega);
+        float cutAng = kMinCutAng + kBetaAng * st.dOmega;
+        if (cutAng > 60.f)
+            cutAng = 60.f;
+        const float aA = OneEuroAlpha(cutAng, dt);
+        st.q = VqSlerp(st.q, rawQ, aA);
+        const float angErr = VqAngle(st.q, rawQ);
+        if (angErr > kAngLagRad && angErr > 1e-5f)
+            st.q = VqSlerp(st.q, rawQ, (angErr - kAngLagRad) / angErr);
+        st.prevQ = rawQ;
+        return emit() ? 2 : 0;
+    }
+
+    bool AttachControllerToSmoothed(CtrlSmoothPose& dst,
+        const CtrlSmoothPose& dstRaw, const CtrlSmoothPose& srcRaw, const CtrlSmoothPose& srcSmooth)
+    {
+        Vq qSrc{}, qDst{}, qSm{};
+        if (!VqFromController(srcRaw.fwd, srcRaw.right, srcRaw.up, qSrc)
+            || !VqFromController(dstRaw.fwd, dstRaw.right, dstRaw.up, qDst)
+            || !VqFromController(srcSmooth.fwd, srcSmooth.right, srcSmooth.up, qSm))
+            return false;
+        const Vq qLocal = VqMul(VqConj(qSrc), qDst);
+        const Vector offset = dstRaw.pos - srcRaw.pos;
+        const Vector worldOff = VqRotate(qSm, VqRotate(VqConj(qSrc), offset));
+        dst.pos = srcSmooth.pos + worldOff;
+        Vector f, r, u;
+        if (!VqToController(VqMul(qSm, qLocal), f, r, u))
+            return false;
+        dst.fwd = f;
+        dst.right = r;
+        dst.up = u;
+        CtrlSmoothWriteAngles(dst);
+        return std::isfinite(dst.pos.x) && std::isfinite(dst.fwd.x) && std::isfinite(dst.ang.y);
+    }
+
     // OpenXR Y-up yaw only. Drops headset pitch/roll so a tilted head cannot
     // latch a crooked 2D GameUI panel.
     void LevelOpenXrPoseToYaw(L4D2VROpenXrPoseDesc& pose)
@@ -1553,6 +1995,14 @@ public:
     {
         if (m_havePose)
             m_pose = *pose;
+        if (kind == Kind::Composite && vr && vr->m_StereoFramePoseActive)
+        {
+            m_haveHudView = true;
+            m_hudAng = vr->m_StereoFrameAngles;
+            m_hudHmd = vr->m_StereoFrameHmdPosAbs;
+            m_hudBody = vr->m_HasStereoBodyOrigin ? vr->m_StereoBodyOrigin : vr->m_SetupOrigin;
+            m_hudYaw = vr->m_RotationOffsetY.load(std::memory_order_acquire);
+        }
     }
 
     int AddRef() override
@@ -1573,7 +2023,13 @@ public:
         if (!m_vr)
             return;
         if (m_kind == Kind::Composite)
+        {
+            if (m_haveHudView)
+                m_vr->SetCompositeHudView(true, m_hudAng, m_hudHmd, m_hudBody, m_hudYaw);
             m_vr->McCompositeEyesToRing(m_band, m_havePose ? &m_pose : nullptr);
+            if (m_haveHudView)
+                m_vr->SetCompositeHudView(false, QAngle(), Vector(), Vector(), 0.f);
+        }
         else
             m_vr->McBindPlaybackEye(m_stereoEye, m_flushGpu);
     }
@@ -1585,7 +2041,12 @@ private:
     uint32_t m_band;
     bool m_flushGpu;
     bool m_havePose = false;
+    bool m_haveHudView = false;
     L4D2VROpenXrPoseDesc m_pose{};
+    QAngle m_hudAng{};
+    Vector m_hudHmd{};
+    Vector m_hudBody{};
+    float m_hudYaw = 0.f;
     std::atomic<int> m_refs{ 0 };
 };
 
@@ -2182,6 +2643,7 @@ void VR::BindOpenXrActionHandles()
     m_ActionSecondaryAttack = handle(L4D2VROpenXrActionId::SecondaryAttack);
     m_ActionReload = handle(L4D2VROpenXrActionId::Reload);
     m_ActionUse = handle(L4D2VROpenXrActionId::Use);
+    m_ActionInventoryGripLeft = handle(L4D2VROpenXrActionId::InventoryGripLeft);
     m_ActionWalk = handle(L4D2VROpenXrActionId::Walk);
     m_ActionTurn = handle(L4D2VROpenXrActionId::Turn);
     m_ActionNextItem = handle(L4D2VROpenXrActionId::NextItem);
@@ -3663,7 +4125,12 @@ void VR::ProcessInput()
 
     RefreshActiveWeaponModel();
     if (!paused && !MenuGameplayBlocked() && !m_WeaponMenuOpen && !m_EmptyHands)
+    {
         UpdateCrowbarMelee();
+        UpdateHlvrTwoHand();
+    }
+    else
+        m_HlvrTwoHand = false;
     m_WearingHevSuit = m_Game->LocalPlayerHasSuit();
     m_HasHevSuit = !bmvr::g_HideHandsWithoutSuit || m_WearingHevSuit;
     const bool scopedWeapon = ViewmodelIsScoped();
@@ -3771,6 +4238,20 @@ void VR::ProcessInput()
     }
     if (!paused && !MenuGameplayBlocked() && !WeaponMenuOpen())
         UpdateHlvrPistol(buttons);
+    // HL2VR shotgun: after a shot, the trigger dry-fires until the pump
+    // has been racked back and forward.
+    if (ViewmodelIsShotgun() && m_ShotgunNeedsPump)
+    {
+        const bool attack = (buttons & (IN_ATTACK | IN_ATTACK2)) != 0;
+        if (attack && !m_ShotgunDryWas && m_Game)
+            m_Game->PlayUiSound("weapons/shotgun/empty.wav");
+        m_ShotgunDryWas = attack;
+        buttons &= ~(IN_ATTACK | IN_ATTACK2);
+    }
+    else
+        m_ShotgunDryWas = false;
+    if (!paused && !MenuGameplayBlocked() && !WeaponMenuOpen())
+        UpdateHlvrSmg(buttons);
     m_HeldButtons.store(buttons, std::memory_order_release);
 
     if ((buttons & IN_ATTACK) && !m_FirstAttackLogged)
@@ -4381,9 +4862,42 @@ QAngle VR::GetAimAngles() const
     // The one place the firing direction is defined. Both cmd->viewangles and
     // the shot origin projection read this, so they cannot drift apart.
     QAngle aim = GetRightControllerAbsAngle();
-    // Trim the shot direction only. The viewmodel keeps its tuned pose, so a
-    // grip that consistently lands low is corrected without rotating models.
-    aim.x -= bmvr::g_AimPitchOffset;
+    bool twoHand = false;
+    Vector barrel{};
+    // Shotgun and MP5 (and any two-handed hold) must shoot along the drawn
+    // barrel. The hand-to-hand line and the stock viewmodel muzzle do not
+    // match that mesh, so pellets and the flash sat above the gun or on the
+    // old viewmodel.
+    if ((ViewmodelIsShotgun() || ViewmodelIsMp5() || m_HlvrTwoHand) && TryGetHlvrBarrelDir(barrel))
+    {
+        QAngle pointed{};
+        QAngle::VectorAngles(barrel, pointed);
+        aim = pointed;
+        twoHand = true;
+    }
+    else if (m_HlvrTwoHand && m_LeftControllerTrackingValid && m_ControllerPoseValid)
+    {
+        Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+        if (body.LengthSqr() > 1.f)
+        {
+            const Vector right = GetRightControllerAbsPos(body);
+            const Vector left = GetLeftControllerAbsPos(body);
+            Vector dir = left - right;
+            if (VectorNormalize(dir) > 0.01f)
+            {
+                Vector up;
+                QAngle::AngleVectors(aim, nullptr, nullptr, &up);
+                QAngle pointed{};
+                QAngle::VectorAngles(dir, up, pointed);
+                aim = pointed;
+                twoHand = true;
+            }
+        }
+    }
+    // Trim the one-hand shot direction only. Two-hand aim is the line between
+    // the controllers, which is also how the model is seated.
+    if (!twoHand)
+        aim.x -= bmvr::g_AimPitchOffset;
     if (aim.x > 180.f) aim.x -= 360.f;
     if (aim.x < -180.f) aim.x += 360.f;
     if (aim.x > 89.f) aim.x = 89.f;
@@ -4489,10 +5003,111 @@ bool VR::ScaleViewmodelRenderableAttachment(void* renderable, Vector& origin) co
     return true;
 }
 
+void VR::NoteHlvrDrawnMuzzle(const Vector& world, const Vector& barrelDir)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    m_HlvrDrawnMuzzle = world;
+    m_HlvrDrawnMuzzleValid = world.LengthSqr() > 1.f;
+    m_HlvrDrawnBarrel = barrelDir;
+    m_HlvrDrawnBarrelValid = barrelDir.LengthSqr() > 0.25f;
+    m_HlvrDrawnMuzzleMs = GetTickCount();
+}
+
+void VR::NoteHlvrCrowbarTop(const Vector& world)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    m_HlvrCrowbarTop = world;
+    m_HlvrCrowbarTopValid = world.LengthSqr() > 1.f;
+    m_HlvrCrowbarTopMs = GetTickCount();
+}
+
+bool VR::TryGetHlvrBarrelDir(Vector& dir) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    if (!m_HlvrDrawnBarrelValid || GetTickCount() - m_HlvrDrawnMuzzleMs >= 250)
+        return false;
+    dir = m_HlvrDrawnBarrel;
+    return VectorNormalize(dir) > 0.01f;
+}
+
+bool VR::CopyDrawnMuzzle(Vector& origin, Vector& dir) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    if (!m_HlvrDrawnMuzzleValid || !m_HlvrDrawnBarrelValid)
+        return false;
+    if (GetTickCount() - m_HlvrDrawnMuzzleMs >= 250)
+        return false;
+    origin = m_HlvrDrawnMuzzle;
+    dir = m_HlvrDrawnBarrel;
+    return origin.LengthSqr() > 1.f && VectorNormalize(dir) > 0.01f;
+}
+
+namespace
+{
+    void* g_VmMuzzleRenderable = nullptr;
+    int g_VmMuzzleIndex = 0;
+}
+
+void VR::NoteViewmodelMuzzle(void* renderable)
+{
+    if (!renderable || (renderable == g_VmMuzzleRenderable && g_VmMuzzleIndex > 0))
+        return;
+    void** vt = nullptr;
+    __try { vt = *reinterpret_cast<void***>(renderable); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+    if (!vt)
+        return;
+    using LookupFn = int(__thiscall*)(void*, const char*);
+    auto lookup = reinterpret_cast<LookupFn>(vt[Offsets::kIClientRenderable_LookupAttachment / 4]);
+    if (!lookup)
+        return;
+    int idx = 0;
+    __try { idx = lookup(renderable, "muzzle"); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { idx = 0; }
+    if (idx > 0)
+    {
+        g_VmMuzzleRenderable = renderable;
+        g_VmMuzzleIndex = idx;
+    }
+}
+
+bool VR::ReplaceViewmodelMuzzleAttachment(void* renderable, int number, Vector* origin, QAngle* angles, float* matrix3x4)
+{
+    if (!renderable || number <= 0 || renderable != g_VmMuzzleRenderable || number != g_VmMuzzleIndex)
+        return false;
+    Vector muzzle{}, dir{};
+    if (!CopyDrawnMuzzle(muzzle, dir))
+        return false;
+
+    QAngle ang{};
+    QAngle::VectorAngles(dir, ang);
+    Vector fwd, right, up;
+    QAngle::AngleVectors(ang, &fwd, &right, &up);
+    if (origin)
+        *origin = muzzle;
+    if (angles)
+        *angles = ang;
+    if (matrix3x4)
+    {
+        matrix3x4[0] = fwd.x;  matrix3x4[1] = -right.x; matrix3x4[2] = up.x;  matrix3x4[3] = muzzle.x;
+        matrix3x4[4] = fwd.y;  matrix3x4[5] = -right.y; matrix3x4[6] = up.y;  matrix3x4[7] = muzzle.y;
+        matrix3x4[8] = fwd.z;  matrix3x4[9] = -right.z; matrix3x4[10] = up.z; matrix3x4[11] = muzzle.z;
+    }
+    return true;
+}
+
 bool VR::TryGetVrMuzzleWorld(Vector& origin) const
 {
     if (!m_IsVREnabled || !m_ControllerPoseValid || !m_Game)
         return false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        if (m_HlvrDrawnMuzzleValid && GetTickCount() - m_HlvrDrawnMuzzleMs < 250)
+        {
+            origin = m_HlvrDrawnMuzzle;
+            return true;
+        }
+    }
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     if (body.LengthSqr() <= 1.f)
         body = m_SetupOrigin;
@@ -4525,6 +5140,17 @@ bool VR::TryGetVrShootOrigin(Vector& origin) const
     Vector muzzle{};
     if (!TryGetVrMuzzleWorld(muzzle))
         return false;
+
+    // The drawn HL2VR muzzle is already on the barrel. Sliding it onto the
+    // controller ray puts the shot beside the model.
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        if (m_HlvrDrawnMuzzleValid && GetTickCount() - m_HlvrDrawnMuzzleMs < 250)
+        {
+            origin = m_HlvrDrawnMuzzle;
+            return true;
+        }
+    }
 
     // Bullets fly along cmd->viewangles, which is the controller aim, but they
     // start at the muzzle. The muzzle sits off that axis by the per-weapon
@@ -5648,8 +6274,6 @@ bool VR::TryGetMeleeAim(Vector& origin, QAngle& angles) const
     angles = m_MeleeBladeAngles;
     if (angles.x > 180.f) angles.x -= 360.f;
     if (angles.x < -180.f) angles.x += 360.f;
-    if (angles.x > 89.f) angles.x = 89.f;
-    if (angles.x < -89.f) angles.x = -89.f;
     angles.z = 0.f;
     return true;
 }
@@ -6056,6 +6680,79 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
         stampVel(weaponLeft);
         stampVel(weaponRight);
     }
+    // Velocity above stays on the raw pose so crowbar swings still see the
+    // real speed. Position and aim are what the gun, gloves, and shots use.
+    const bool wantControllerSmooth = true
+        && m_GameplayEligible
+        && !m_EmptyHands
+        && !m_WeaponMenuOpen
+        && !IsMenuUp()
+        && hmdPose.bPoseIsValid;
+    if (!wantControllerSmooth)
+        ResetControllerSmooth();
+    else
+    {
+        const float yaw = m_RotationOffsetY.load(std::memory_order_acquire);
+        const float scale = (m_VRScale > 1.f) ? m_VRScale : 39.37f;
+        const Vector hmdPos = HmdMatrixToSourcePos(hmdPose.mDeviceToAbsoluteTracking, scale);
+        const QAngle hmdAng = HmdMatrixToSourceAnglesWithRoll(hmdPose.mDeviceToAbsoluteTracking);
+        Vector hmdF, hmdR, hmdU;
+        QAngle::AngleVectors(hmdAng, &hmdF, &hmdR, &hmdU);
+        const double nowSec = ControllerSmoothNowSec();
+        auto pull = [](const Sample& s) {
+            CtrlSmoothPose p;
+            p.pos = s.pos;
+            p.fwd = s.fwd;
+            p.right = s.right;
+            p.up = s.up;
+            p.ang = s.ang;
+            return p;
+        };
+        auto push = [](Sample& s, const CtrlSmoothPose& p) {
+            s.pos = p.pos;
+            s.fwd = p.fwd;
+            s.right = p.right;
+            s.up = p.up;
+            s.ang = p.ang;
+        };
+        auto smoothHand = [&](Sample& weapon, Sample& phys, int slot) {
+            if (!weapon.valid && !phys.valid)
+            {
+                ResetControllerSmoothSlot(slot);
+                return;
+            }
+            if (weapon.valid)
+            {
+                const CtrlSmoothPose rawW = pull(weapon);
+                CtrlSmoothPose sm = rawW;
+                if (SmoothControllerPose(sm, slot, 1, hmdPos, hmdF, hmdR, hmdU, yaw, scale, nowSec) == 2)
+                {
+                    push(weapon, sm);
+                    if (phys.valid)
+                    {
+                        const CtrlSmoothPose rawP = pull(phys);
+                        CtrlSmoothPose outP = rawP;
+                        if (AttachControllerToSmoothed(outP, rawP, rawW, sm))
+                            push(phys, outP);
+                    }
+                }
+            }
+            else
+            {
+                CtrlSmoothPose sm = pull(phys);
+                if (SmoothControllerPose(sm, slot, 0, hmdPos, hmdF, hmdR, hmdU, yaw, scale, nowSec) == 2)
+                    push(phys, sm);
+            }
+        };
+        smoothHand(weaponLeft, physLeft, 0);
+        smoothHand(weaponRight, physRight, 1);
+        static int s_smoothLog;
+        if (s_smoothLog < 1)
+        {
+            Game::logMsg("Controller smooth on while a weapon is held (ControllerSmooth in VR/config.txt)");
+            ++s_smoothLog;
+        }
+    }
     m_ControllerFamily = family;
     const Sample& aim = (AimControllerRole() == vr::TrackedControllerRole_LeftHand) ? weaponLeft : weaponRight;
     if (!aim.valid)
@@ -6288,15 +6985,48 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     if (!leftOk && !rightOk)
         return false;
 
+    Vector fwd, right, up;
+    Vector eyeOrig{};
+    if (m_CompositeHudValid)
+    {
+        // Same camera as the eye that already drew the gun. A live head
+        // pose here puts the plate on a different pixel every step.
+        body = m_CompositeHudBody;
+        QAngle ang = m_CompositeHudAng;
+        ang.y += m_CompositeHudYaw;
+        ang.y -= 360.f * floorf((ang.y + 180.f) / 360.f);
+        QAngle::AngleVectors(ang, &fwd, &right, &up);
+        Vector center = body;
+        if (m_HmdOriginLatched
+            && (m_OpenXrHelperBridgeActive || m_HmdPosAbsZero.z > 24.f))
+        {
+            Vector delta = m_CompositeHudHmd - m_HmdPosAbsZero;
+            PivotYaw(delta, m_CompositeHudYaw);
+            center += delta;
+        }
+        center.z += bmvr::g_HeightOffset;
+        eyeOrig = center + (fwd * (-(m_EyeZ * m_VRScale)));
+        const float ipd = (m_Ipd * m_IpdScale * m_VRScale) * 0.5f;
+        if (stereoEye == 1)
+            eyeOrig = eyeOrig - (right * ipd);
+        else if (stereoEye == 2)
+            eyeOrig = eyeOrig + (right * ipd);
+    }
+    else
+    {
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+        }
+        GetViewBasis(&fwd, &right, &up);
+        eyeOrig = (stereoEye == 1)
+            ? GetViewOriginLeft(body)
+            : (stereoEye == 2) ? GetViewOriginRight(body) : GetViewOrigin(body);
+    }
+
     auto toWorld = [&](const Vector& tracking) {
         return ControllerTrackingToWorld(body, tracking);
     };
-
-    Vector fwd, right, up;
-    GetViewBasis(&fwd, &right, &up);
-    const Vector eyeOrig = (stereoEye == 1)
-        ? GetViewOriginLeft(body)
-        : (stereoEye == 2) ? GetViewOriginRight(body) : GetViewOrigin(body);
 
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
@@ -6943,6 +7673,35 @@ namespace
         HudMakePanel(origin, xaxis, left, face, kAmmoHudSize, out);
     }
 
+    void BuildAttachmentHudPanel(const float m[3][4], float size, const Vector& eye, HudPanel& out, bool faceCamera = true)
+    {
+        out.valid = false;
+        if (!m)
+            return;
+        Vector origin(m[0][3], m[1][3], m[2][3]);
+        Vector face(m[0][0], m[1][0], m[2][0]);
+        Vector panelUp(m[0][2], m[1][2], m[2][2]);
+        if (VectorNormalize(face) < 0.01f)
+            return;
+        if (VectorNormalize(panelUp) < 0.01f)
+            panelUp = Vector(0.f, 0.f, 1.f);
+        // Turning the panel toward the eye every frame made the ammo
+        // digits jump while walking. The hand and weapon panels are
+        // already aimed at the mesh.
+        if (faceCamera && face.Dot(origin - eye) > 0.f)
+            face = face * -1.f;
+        Vector width = CrossProduct(panelUp, face);
+        if (VectorNormalize(width) < 0.01f)
+        {
+            width = CrossProduct(Vector(0.f, 0.f, 1.f), face);
+            VectorNormalize(width);
+        }
+        Vector height = CrossProduct(face, width);
+        VectorNormalize(height);
+        const Vector lowerLeft = origin - width * (size * 0.5f) - height * (size * 0.5f);
+        HudMakePanel(lowerLeft, width, height, face, size, out);
+    }
+
     int HudGlyphIndex(char c)
     {
         if (c >= '0' && c <= '9')
@@ -7167,10 +7926,27 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         if (offOk)
         {
             HudPanel handPanel{};
-            BuildHandHudPanel(
-                rightDominant ? leftOrigin : rightOrigin,
-                rightDominant ? leftAng : rightAng,
-                !rightDominant, handPanel);
+            // Follow the glove that was just skinned, including a two-hand
+            // grip. The controller wrist stays put while that hand moves
+            // onto the gun.
+            float handMat[3][4]{};
+            bool haveHandHud = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+                const int hudSide = rightDominant ? 0 : 1;
+                if (m_HandHudValid[hudSide])
+                {
+                    std::memcpy(handMat, m_HandHudMat[hudSide], sizeof(handMat));
+                    haveHandHud = true;
+                }
+            }
+            if (haveHandHud)
+                BuildAttachmentHudPanel(handMat, kHandHudSize, eyeOrig, handPanel, false);
+            else
+                BuildHandHudPanel(
+                    rightDominant ? leftOrigin : rightOrigin,
+                    rightDominant ? leftAng : rightAng,
+                    !rightDominant, handPanel);
             if (handPanel.valid && !HudIsBackfacing(handPanel, eyeOrig))
             {
                 const float pad = handPanel.width * 0.08f;
@@ -7196,10 +7972,23 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     if (hasAmmoHud && gunOk)
     {
         HudPanel weaponPanel{};
-        BuildAmmoHudPanel(
-            rightDominant ? rightOrigin : leftOrigin,
-            rightDominant ? rightAng : leftAng,
-            rightDominant, weaponPanel);
+        float weaponMat[3][4]{};
+        bool haveWeaponHud = false;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            if (m_WeaponHudValid)
+            {
+                std::memcpy(weaponMat, m_WeaponHudMat, sizeof(weaponMat));
+                haveWeaponHud = true;
+            }
+        }
+        if (haveWeaponHud)
+            BuildAttachmentHudPanel(weaponMat, kAmmoHudSize, eyeOrig, weaponPanel, false);
+        else
+            BuildAmmoHudPanel(
+                rightDominant ? rightOrigin : leftOrigin,
+                rightDominant ? rightAng : leftAng,
+                rightDominant, weaponPanel);
         if (weaponPanel.valid && !HudIsBackfacing(weaponPanel, eyeOrig))
         {
             std::string weaponModel;
@@ -7330,6 +8119,8 @@ void VR::NoteViewmodelModel(const char* modelName)
         if (m_VmClass.mp5) flags |= kVmFlagMp5;
         m_VmClassFlags.store(flags, std::memory_order_relaxed);
         Game::logMsg("Viewmodel model %s", modelName);
+        InvalidateHlvrHeldPose();
+        InvalidateHlvrPistolAnchor();
     }
 }
 
@@ -8327,6 +9118,17 @@ void VR::EndStereoFramePose()
     m_StereoFramePoseActive = false;
 }
 
+void VR::SetCompositeHudView(bool valid, const QAngle& ang, const Vector& hmd, const Vector& body, float yawOffset)
+{
+    m_CompositeHudValid = valid;
+    if (!valid)
+        return;
+    m_CompositeHudAng = ang;
+    m_CompositeHudHmd = hmd;
+    m_CompositeHudBody = body;
+    m_CompositeHudYaw = yawOffset;
+}
+
 void VR::LogOpenXrPublishRate()
 {
     const uint32_t now = GetTickCount();
@@ -8578,23 +9380,30 @@ bool VR::QueueMcMatFunctor(CFunctor* functor, const char* failTag)
 {
     if (!functor)
         return false;
+    static int s_McQueueMisses = 0;
     ICallQueue* q = ProbeCallQueue();
     if (q && SehQueueFunctorInternal(q, functor))
+    {
+        s_McQueueMisses = 0;
         return true;
+    }
 
-    // Quest Horizon Link: slot 146 is not a working ICallQueue
-    // (QueueFunctorInternal throws, then GetCallQueue returns null).
-    // McPipelineEnabled skips Present publish, so dropping the functor
-    // froze the HMD on the last 2D menu frame. Disable the MC publish
-    // path; hooks fall back to the single-thread 1x-eye blit.
-    m_McCallQueueDead = true;
+    // One missing queue used to set m_McCallQueueDead for the rest of the
+    // session. McPipelineEnabled then stayed false and every frame stretched
+    // the 16:9 window into the eyes (shear from the first miss after load).
+    // Slot 185 is valid again on the next frame. Only give up if it stays gone.
+    ++s_McQueueMisses;
+    if (s_McQueueMisses >= 30)
+        m_McCallQueueDead = true;
     static int s_dead;
     if (s_dead < 8)
     {
-        Game::logMsg("MC %s: call queue %s slot=%d — single-thread stereo publish",
+        Game::logMsg("MC %s: call queue %s slot=%d misses=%d — %s",
             failTag ? failTag : "functor",
             q ? "failed" : "missing",
-            m_Hl2vrCallQueueSlot);
+            m_Hl2vrCallQueueSlot,
+            s_McQueueMisses,
+            m_McCallQueueDead ? "single-thread stereo publish" : "keep eye path");
         ++s_dead;
     }
     functor->Release();
