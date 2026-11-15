@@ -1,0 +1,7 @@
+"VertexLitGeneric"
+{
+	"$basetexture" "models/weapons/v_glock/v_glock"
+	"$model" "1"
+	"$halflambert" "1"
+	"$SHADERNAME" "model_standard"
+}

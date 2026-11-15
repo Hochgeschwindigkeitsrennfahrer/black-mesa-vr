@@ -83,38 +83,32 @@ function Install-One([string]$DestDir) {
   Write-Host ("Installed {0} ({1} bytes)" -f $dest, $got)
 }
 
-# HL2VR physical crowbar (models + materials). Not vendored (~33MB of VTFs).
-function Install-Hl2vrCrowbar {
-  $hlvr = "C:\Program Files (x86)\Steam\steamapps\common\Half-Life 2 VR\hlvr"
-  $modelSrc = Join-Path $hlvr "models\weapons"
-  $matSrc = Join-Path $hlvr "materials\models\weapons\vr_crowbar"
-  $mdl = Join-Path $modelSrc "vr_crowbar.mdl"
-  if (-not (Test-Path -LiteralPath $mdl)) {
-    Write-Host "HL2VR vr_crowbar.mdl not found at $mdl - physical crowbar mesh skipped (swing logic still in the DLL)"
+# HL2VR physical weapon and hand assets used by vr_hlvr_weapons.cpp and
+# vr_hlvr_pistol.cpp. The extracted, install-ready tree lives in
+# assets\hl2vr\content (models / materials / sound). Source: Half-Life 2 VR
+# by wormslayer. See assets\hl2vr\README.md.
+function Install-HlvrContent {
+  $content = Join-Path $Root "assets\hl2vr\content"
+  if (-not (Test-Path -LiteralPath $content)) {
+    Write-Host "assets\hl2vr\content missing - HL2VR weapons/hands keep the stock viewmodels"
     return
   }
   $bms = Join-Path $GameRoot "bms"
-  $modelDst = Join-Path $bms "models\weapons"
-  $matDst = Join-Path $bms "materials\models\weapons\vr_crowbar"
-  New-Item -ItemType Directory -Force -Path $modelDst | Out-Null
-  Copy-Item -Force (Join-Path $modelSrc "vr_crowbar.*") $modelDst
-  New-Item -ItemType Directory -Force -Path $matDst | Out-Null
-  Get-ChildItem -LiteralPath $matSrc -File | Copy-Item -Force -Destination $matDst
-  $legacySrc = Join-Path $matSrc "legacy"
-  if (Test-Path -LiteralPath $legacySrc) {
-    $legacyDst = Join-Path $matDst "legacy"
-    New-Item -ItemType Directory -Force -Path $legacyDst | Out-Null
-    Get-ChildItem -LiteralPath $legacySrc -File | Copy-Item -Force -Destination $legacyDst
+  foreach ($sub in @("models", "materials", "sound")) {
+    $srcRoot = Join-Path $content $sub
+    if (-not (Test-Path -LiteralPath $srcRoot)) { continue }
+    Get-ChildItem -LiteralPath $srcRoot -Recurse -File | ForEach-Object {
+      $rel = $_.FullName.Substring($srcRoot.Length).TrimStart('\')
+      $dst = Join-Path (Join-Path $bms $sub) $rel
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+      Copy-Item -LiteralPath $_.FullName -Destination $dst -Force
+    }
   }
-  $copiedMdl = Join-Path $modelDst "vr_crowbar.mdl"
-  if (-not (Test-Path -LiteralPath $copiedMdl)) {
-    throw "Failed to copy vr_crowbar.mdl to $modelDst"
-  }
-  $mdlBytes = (Get-Item -LiteralPath $copiedMdl).Length
-  Write-Host "Installed HL2VR vr_crowbar into $copiedMdl ($mdlBytes bytes)"
+  $models = @(Get-ChildItem -LiteralPath (Join-Path $content "models\weapons") -Filter "vr_*.mdl" -File)
+  Write-Host ("Installed HL2VR weapon/hand content into {0} ({1} models)" -f $bms, $models.Count)
 }
 
-Install-Hl2vrCrowbar
+Install-HlvrContent
 
 # 1) Launcher DXVK folder (AddDllDirectory / optional full-path LoadLibraryW)
 Install-One $DxvkDir
@@ -237,6 +231,7 @@ if (-not (Test-Path $CfgDst)) {
   if ($cfgText -notmatch '(?m)^VrCrosshair=') { $cfgText += "`r`nVrCrosshair=false`r`n" }
   if ($cfgText -notmatch '(?m)^ScopeZoomFovScale=') { $cfgText += "`r`nScopeZoomFovScale=0.28`r`n" }
   if ($cfgText -notmatch '(?m)^ScopeZoomSmoothSec=') { $cfgText += "`r`nScopeZoomSmoothSec=0.16`r`n" }
+  if ($cfgText -notmatch '(?m)^ControllerSmooth=') { $cfgText += "`r`nControllerSmooth=true`r`n" }
   if ($cfgText -notmatch '(?m)^DesktopLeftoverRender=') { $cfgText += "`r`nDesktopLeftoverRender=false`r`n" }
   if ($cfgText -notmatch '(?m)^ForceOpenVis=') { $cfgText += "`r`nForceOpenVis=false`r`n" }
   if ($cfgText -notmatch '(?m)^HiddenAreaMesh=') { $cfgText += "`r`nHiddenAreaMesh=false`r`n" }
@@ -308,60 +303,4 @@ Write-Host "That is a verified load-path issue: default/native D3D9 never loads 
 Write-Host "Log: $GameRoot\bmvr_log.txt  (also next to whichever d3d9.dll actually loaded)"
 Write-Host "Close the game before the next install."
 
-# HL2VR pistol meshes for the glock replacement (vr_pistol, slide, clip).
-function Install-Hl2vrPistol {
-  $calibrated = "C:\Users\amien\Documents\cursor\black-mesa-vr\assets\vr_glock"
-  $hlvr = "C:\Program Files (x86)\Steam\steamapps\common\Half-Life 2 VR\hlvr"
-  if (Test-Path -LiteralPath (Join-Path $calibrated "models\weapons\vr_pistol.mdl")) {
-    $hlvr = $calibrated
-  }
-  $modelSrc = Join-Path $hlvr "models\weapons"
-  $gun = Join-Path $modelSrc "vr_pistol.mdl"
-  if (-not (Test-Path -LiteralPath $gun)) {
-    Write-Host "HL2VR vr_pistol.mdl not found at $gun - glock keeps the stock viewmodel"
-    return
-  }
-  $bms = Join-Path $GameRoot "bms"
-  $modelDst = Join-Path $bms "models\weapons"
-  New-Item -ItemType Directory -Force -Path $modelDst | Out-Null
-  foreach ($stem in @("vr_pistol", "vr_pistol_slide", "vr_pistol_clip")) {
-    Copy-Item -Force (Join-Path $modelSrc "$stem.*") $modelDst
-  }
-  $handSrc = Join-Path $hlvr "models\player.mdl"
-  if (Test-Path -LiteralPath $handSrc) {
-    foreach ($ext in @(".mdl", ".vvd", ".dx90.vtx", ".dx80.vtx", ".sw.vtx")) {
-      Copy-Item -Force (Join-Path $hlvr "models\player$ext") (Join-Path $modelDst "vr_glock_hands$ext")
-    }
-  }
-  $glockMat = Join-Path $hlvr "materials\models\weapons\v_glock"
-  if (Test-Path -LiteralPath $glockMat) {
-    $glockDst = Join-Path $bms "materials\models\weapons\v_glock"
-    New-Item -ItemType Directory -Force -Path $glockDst | Out-Null
-    Get-ChildItem -LiteralPath $glockMat -File | Copy-Item -Force -Destination $glockDst
-  }
-  $handMat = Join-Path $hlvr "materials\models\player"
-  if (Test-Path -LiteralPath $handMat) {
-    $handMatDst = Join-Path $bms "materials\models\player"
-    New-Item -ItemType Directory -Force -Path $handMatDst | Out-Null
-    Get-ChildItem -LiteralPath $handMat -File | Copy-Item -Force -Destination $handMatDst
-  }
-  $matSrc = Join-Path $hlvr "materials\models\weapons\vr_pistol"
-  $matDst = Join-Path $bms "materials\models\weapons\vr_pistol"
-  if (Test-Path -LiteralPath $matSrc) {
-    New-Item -ItemType Directory -Force -Path $matDst | Out-Null
-    Get-ChildItem -LiteralPath $matSrc -File | Copy-Item -Force -Destination $matDst
-  }
-  $sndSrc = Join-Path $hlvr "sound\weapons\pistol"
-  $sndDst = Join-Path $bms "sound\weapons\pistol"
-  if (Test-Path -LiteralPath $sndSrc) {
-    New-Item -ItemType Directory -Force -Path $sndDst | Out-Null
-    foreach ($wav in @(
-        "pistol_clip_insert.wav", "pistol_clip_release.wav", "pistol_reload_finished.wav",
-        "Pistol_SlidePulled_DAv01.wav", "Pistol_SlideReleased_DAv01.wav", "Pistol_Slide_DAv01r01.wav")) {
-      $from = Join-Path $sndSrc $wav
-      if (Test-Path -LiteralPath $from) { Copy-Item -Force $from $sndDst }
-    }
-  }
-  Write-Host "Installed HL2VR pistol models into $modelDst"
-}
-Install-Hl2vrPistol
+

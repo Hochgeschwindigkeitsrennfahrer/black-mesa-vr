@@ -32,6 +32,23 @@ https://github.com/keyou91/l4d2vr
 * Blue Shift HUD theme (weapon wheel and wrist HUD)
 * Multicore rendering
 
+## Building from source
+
+The `hlvr-pistol` branch ships the HL2VR pistol, crowbar, shotgun, MP5, grenade
+and hand assets under `assets/hl2vr/content`. They are part of the repository,
+so a fresh clone does not need a separate asset download or a Half-Life 2 VR
+install.
+
+```powershell
+scripts\build.ps1
+scripts\install.ps1        # copies d3d9.dll + VR\ + HL2VR assets into Black Mesa
+scripts\pack_release.ps1   # optional: drop-in zip with the same asset tree
+```
+
+`install.ps1` merges the asset tree into `Black Mesa\bms\` (`models`,
+`materials`, `sound`). See `assets/hl2vr/README.md` for the exact model and
+material list and for the HL2VR credit.
+
 ## Known Issues
 
 The VR experience is fully playable, but several features are still a work in progress:

@@ -81,6 +81,25 @@ if (Test-Path $BmvrCfgSrc) {
   Copy-Item -Force $BmvrCfgSrc (Join-Path $CfgGame "bmvr.cfg")
 }
 
+# HL2VR weapon/hand assets used by vr_hlvr_weapons.cpp and vr_hlvr_pistol.cpp.
+$HlvrContent = Join-Path $Root "assets\hl2vr\content"
+if (Test-Path -LiteralPath $HlvrContent) {
+  $BmsStage = Join-Path $Stage "bms"
+  foreach ($sub in @("models", "materials", "sound")) {
+    $srcRoot = Join-Path $HlvrContent $sub
+    if (-not (Test-Path -LiteralPath $srcRoot)) { continue }
+    Get-ChildItem -LiteralPath $srcRoot -Recurse -File | ForEach-Object {
+      $rel = $_.FullName.Substring($srcRoot.Length).TrimStart('\')
+      $dst = Join-Path (Join-Path $BmsStage $sub) $rel
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+      Copy-Item -LiteralPath $_.FullName -Destination $dst -Force
+    }
+  }
+  Write-Host "Packed HL2VR weapon/hand content into $BmsStage"
+} else {
+  Write-Host "assets\hl2vr\content missing - release zip has no HL2VR weapon/hand models"
+}
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($Stage, $Zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
 

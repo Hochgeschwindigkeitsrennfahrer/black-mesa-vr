@@ -1,0 +1,7 @@
+"VertexLitGeneric"
+{
+	"$basetexture" "models/weapons/vr_shotgun/v_shotgun_01"
+	"$model" "1"
+	"$halflambert" "1"
+	"$SHADERNAME" "model_standard"
+}

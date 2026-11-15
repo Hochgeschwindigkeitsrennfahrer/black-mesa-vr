@@ -1,0 +1,7 @@
+"VertexLitGeneric"
+{
+	"$basetexture" "models/weapons/vr_grenade/v_grenade"
+	"$model" "1"
+	"$halflambert" "1"
+	"$SHADERNAME" "model_standard"
+}

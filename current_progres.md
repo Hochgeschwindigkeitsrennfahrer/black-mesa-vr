@@ -2,6 +2,25 @@
 
 Read this file at the start of every session. Do not rediscover items below.
 
+## hlvr-pistol branch (2026-09-24 →)
+
+HL2VR viewmodels replace the stock ones: `vr_pistol` + slide + magazine,
+`vr_crowbar`, `vr_shotgun` + foregrip, `vr_smg` (MP5) + clip/foregrip/charging
+handle, `vr_grenade`, and `vr_hlvr_hands` (HL2VR `player.mdl` renamed) for the
+grip and support hands. The branch also carries two-handed hold, manual
+shotgun pump, MP5 magazine removal/reload and the left-grip inventory action.
+
+Assets are now in the repository at `assets/hl2vr/content/` (install-ready
+`bms/` tree) and documented in `assets/hl2vr/README.md`. `scripts/install.ps1`
+and `scripts/pack_release.ps1` copy that tree; do not depend on a local
+`Half-Life 2 VR` install or an absolute path outside the repo.
+
+Status: **compiled** (`d3d9.dll` + `OpenXRHelper64.exe`), **not HMD-verified**
+on this branch. The asset copy is byte-for-byte the HL2VR/calibrated set used
+on the branch, except the crowbar material was completed with HL2VR's
+`vr_crowbar_d/nrm/exp` textures because the extracted pack's
+`materials/models/weapons/vr_crowbar/crowbar_d.vmt` pointed at those names.
+
 ## Working (user-verified; do not rewrite)
 
 - Fused 3D stereo, uncoupled 6DoF, save-load (nested `LockSubmissionQueue` deadlock fixed).

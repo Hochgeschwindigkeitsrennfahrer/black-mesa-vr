@@ -1,0 +1,7 @@
+"VertexLitGeneric"
+{
+	"$basetexture" "models/player/v_hand"
+	"$model" "1"
+	"$halflambert" "1"
+	"$SHADERNAME" "model_standard"
+}
