@@ -631,7 +631,7 @@ public:
     // view, quads built in camera space. Single caller at 0x32BDD6.
     static constexpr uint32_t kClientPcfCameraFacingRva = 0x330530; // beta 26627981 (26234270: 0x32C5E0)
     static constexpr uint32_t kClientParticleMgrSimulateRva = 0x197090; // beta 26627981 (26234270: 0x1948A0)
-    static constexpr uint32_t kEngineWorldStaticMeshesRva = 0x8E62A4; // beta 26627981 (26234270: 0x8E6224)
+    static constexpr uint32_t kEngineWorldStaticMeshesRva = 0x8E82A4; // beta 26672462 (26627981: 0x8E62A4)
     // CLensflare's world-to-pixel helper (cdecl: world, size[2], out).  Reads the
     // view and projection matrices from the render context; diagnostic hook only.
     static constexpr uint32_t kLensflareWorldToScreenRva = 0x2260C0; // beta 26627981 (26234270: 0x223960)
