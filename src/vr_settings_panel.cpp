@@ -180,7 +180,7 @@ namespace
             { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
             { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
             { "HAND HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Reset hand HUD values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
+            { "Reset hands + HUD to default", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
             { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
             // The original release's look: flat gloves, HUD on the back of the hand.
             { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
@@ -1156,9 +1156,15 @@ void VR::UpdateSettingsPanel()
             bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
             break;
         }
-        // The hand HUD placement back at its defaults; on or off stays as it is.
+        // Hands + hand HUD placement back at their defaults (classic pose off, thumb-up roll,
+        // gun grip, HUD spot); HUD and hit flash on/off stay as they are.
         if (r.fmt && std::strcmp(r.fmt, "handhud_default") == 0)
         {
+            bmvr::g_VrHandsClassicPose = false;
+            bmvr::g_VrHandsRollDeg = 90.f;
+            bmvr::g_VrHandsGunGripRight = 1.2f;
+            bmvr::g_VrHandsGunGripUp = 0.f;
+            bmvr::g_VrHandsGunGripForward = 0.f;
             bmvr::g_HandHudSize = 2.5f;
             bmvr::g_HandHudUp = 2.2f;
             bmvr::g_HandHudForward = -0.55f;
