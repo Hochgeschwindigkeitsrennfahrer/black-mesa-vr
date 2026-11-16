@@ -1454,8 +1454,10 @@ namespace
             return;
         FoveationGazeState& g = g_FovGaze;
         int eye = 0;
+        // Full rate while the VR settings panel or the game's menus are up: the panel floats in
+        // the scene and its text was the one place the coarse rings showed (2026-11-16 headset).
         if (vr && bmvr::g_Foveated > 0.f && vr->StereoWorldPassActive() && !vr->HudPaintActive()
-            && !vr->m_CaptureReentry)
+            && !vr->m_CaptureReentry && !vr->SettingsPanelOpen() && !vr->m_GameUiVisible)
             eye = GpuTimerEye(vr);
         if (eye && eye != g.lastEye)
         {
@@ -6428,7 +6430,25 @@ void VR::UpdateScriptedCamera(const Vector& engineAngles)
     if (m_Game && m_Game->ReadLocalPlayerViewEntitySet(viewEntitySet) && !viewEntitySet)
     {
         if (m_ScriptedCamActive)
+        {
+            // Keep the heading the camera ended on: the normal view is turn offset + head yaw, which
+            // still pointed where the player faced before the scene, so after the Xen arrival
+            // stand-up (bm_c3a2i -> Xen) the view swung back to the wall instead of the cave exit
+            // (2026-11-16 headset). Turn so the current view yaw equals the camera view's yaw.
+            Vector camAngles, camRight;
+            if (bmvr::g_FollowScriptedCamera && m_ScriptedCamDiffersNow && m_HmdPoseValid
+                && ScriptedCameraView(camAngles, camRight))
+            {
+                const float viewYaw = GetViewAngle().y;
+                const float before = m_RotationOffsetY.load(std::memory_order_acquire);
+                float offset = before + WrapYaw(camAngles.y - viewYaw);
+                offset -= 360.f * floorf(offset / 360.f);
+                m_RotationOffsetY.store(offset, std::memory_order_release);
+                Game::logMsg("Scripted camera end: turn kept on the camera heading %.1f (view %.1f), turn offset %.1f -> %.1f",
+                    camAngles.y, viewYaw, before, offset);
+            }
             Game::logMsg("Scripted camera off: view entity cleared");
+        }
         m_ScriptedCamActive = false;
         m_ScriptedCamDiffersNow = false;
         m_ScriptedCamFrames = 0;
@@ -6988,6 +7008,19 @@ void VR::ProcessInput()
         const DWORD nowTick = GetTickCount();
         if ((flashOk && flash.bState) || squareFlash)
         {
+            // Diagnostic (2026-11-16 headset: a press near a usable door sometimes did nothing):
+            // a fresh press that does not queue the impulse says why.
+            if (!s_flashLatched && (paused || m_GameUiVisible || rightShoulder || (nowTick - s_flashImpulseMs) <= 300))
+            {
+                static int s_flashBlockLog;
+                if (s_flashBlockLog < 40)
+                {
+                    Game::logMsg("Flashlight press from=%s not queued: paused=%d gameUi=%d shoulder=%d sinceLast=%lums",
+                        squareFlash ? "left square" : "right grip", paused ? 1 : 0, m_GameUiVisible ? 1 : 0,
+                        rightShoulder ? 1 : 0, static_cast<unsigned long>(nowTick - s_flashImpulseMs));
+                    ++s_flashBlockLog;
+                }
+            }
             s_flashReleasePolls = 0;
             // A grip squeezed for a shoulder/hip grab is still held when
             // the hand comes forward: that press must not toggle the light.
@@ -13871,9 +13904,10 @@ bool VR::UpdateShoulderGestures(bool paused)
             && lateral > latLo && lateral < latHi;
     };
     const bool hipsOn = bmvr::g_HipGestures && m_PhysicalRightTrackingValid && !m_TwoHandActive;
-    // Pistol zone 8 cm further back and 8 cm lower than the first try
-    // (2026-11-14: it took the pistol 5-10 cm too far forward and too high).
-    const bool hipRightIn = hipsOn && inHip(m_PhysicalRightPosAbs, 1.f, -0.33f, 0.12f, -1.03f, -0.53f, 0.10f, 0.45f);
+    // Pistol zone 18 cm further back and 8 cm lower than the first try
+    // (2026-11-14: it took the pistol 5-10 cm too far forward and too high;
+    // 2026-11-16 headset: still 10 cm too far forward).
+    const bool hipRightIn = hipsOn && inHip(m_PhysicalRightPosAbs, 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f);
     const bool hipLeftIn = hipsOn && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f);
     if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
         grabWeapon("pistol", { "glock" });

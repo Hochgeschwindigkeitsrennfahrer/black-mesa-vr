@@ -8983,6 +8983,20 @@ void __fastcall Hooks::dImpulseCommands(void* ecx, void* edx)
     // Intercepting impulse 100 here cleared it and called EF_DIMLIGHT
     // virtuals that suit/gamerules may no-op — vanilla never saw the impulse.
     // Pass through; do not add flashlight cvars.
+    // Diagnostic: the server saw the flashlight impulse (pairs with "CreateMove applied impulse 100";
+    // a press that queued and applied but never shows here was lost between client and server).
+    int impulse = 0;
+    BMVR_TRY { impulse = *reinterpret_cast<const int*>(reinterpret_cast<const char*>(ecx) + Offsets::kCBasePlayer_m_nImpulse); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { impulse = 0; }
+    if (impulse == 100)
+    {
+        static int s_srvLog;
+        if (s_srvLog < 200)
+        {
+            Game::logMsg("Server ImpulseCommands impulse 100 (flashlight toggle)");
+            ++s_srvLog;
+        }
+    }
     if (hkImpulseCommands.fOriginal)
         hkImpulseCommands.fOriginal(ecx);
 }
