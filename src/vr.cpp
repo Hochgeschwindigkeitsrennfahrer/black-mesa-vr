@@ -9312,7 +9312,13 @@ namespace
     // mirrored second view over the stereo scene (c2a3c ambush drag). Black
     // Mesa draws them without DrawScreenSpaceRectangle, so the DSSR skip
     // missed them (audit, 2026-11-02).
-    const char* const kVrSkippedScreenEffects[] = { "__ep1introeffect", "__stuneffect", "__ep2stuneffect" };
+    //
+    // [3] Black Mesa's global Xen fog (Xog) pass: its scrolling noise is looked up by view direction only, so
+    // in stereo it sits at infinite depth and moves with the player ("under the floor", 2026-11-14), and it
+    // shows inside rooms where flat has none (Xen research silos). User (2026-11-16): hidden is far better.
+    constexpr int kScreenFxCount = 4;
+    const char* const kVrSkippedScreenEffects[kScreenFxCount] = { "__ep1introeffect", "__stuneffect", "__ep2stuneffect",
+        "__gbxog0" };
 
     // Code-made materials are not in FindMaterial's lookup; walk the list.
     int SehFindScreenEffectMaterials(void* matsys, IMaterial** out)
@@ -9335,7 +9341,7 @@ namespace
                 const char* name = m ? m->GetName() : nullptr;
                 if (!name || name[0] != '_' || name[1] != '_')
                     continue;
-                for (int i = 0; i < 3; ++i)
+                for (int i = 0; i < kScreenFxCount; ++i)
                 {
                     if (!out[i] && std::strcmp(name, kVrSkippedScreenEffects[i]) == 0)
                     {
@@ -9390,46 +9396,54 @@ void VR::UpdateScreenEffectNoDraw()
     if (m_ScreenFxMap != m_CurrentMapName)
     {
         m_ScreenFxMap = m_CurrentMapName;
-        for (IMaterial*& m : m_ScreenFxMaterials)
-            m = nullptr;
+        for (int i = 0; i < kScreenFxCount; ++i)
+        {
+            m_ScreenFxMaterials[i] = nullptr;
+            m_ScreenFxNoDraw[i] = false;
+        }
         m_ScreenFxMaterialCount = -1;
-        m_ScreenFxNoDraw = false;
     }
-    if (!m_ScreenFxMaterials[0] || !m_ScreenFxMaterials[1] || !m_ScreenFxMaterials[2])
+    bool missing = false;
+    for (IMaterial* m : m_ScreenFxMaterials)
+        missing |= !m;
+    if (missing)
     {
         const int count = SehNumMaterials(matsys);
         if (count != m_ScreenFxMaterialCount)
         {
             m_ScreenFxMaterialCount = count;
-            IMaterial* before[3] = { m_ScreenFxMaterials[0], m_ScreenFxMaterials[1], m_ScreenFxMaterials[2] };
+            IMaterial* before[kScreenFxCount];
+            for (int i = 0; i < kScreenFxCount; ++i)
+                before[i] = m_ScreenFxMaterials[i];
             LARGE_INTEGER f{}, t0{}, t1{};
             QueryPerformanceFrequency(&f);
             QueryPerformanceCounter(&t0);
             SehFindScreenEffectMaterials(matsys, m_ScreenFxMaterials);
             QueryPerformanceCounter(&t1);
             const double ms = f.QuadPart ? 1000.0 * (t1.QuadPart - t0.QuadPart) / f.QuadPart : 0.0;
-            for (int i = 0; i < 3; ++i)
+            for (int i = 0; i < kScreenFxCount; ++i)
             {
                 if (m_ScreenFxMaterials[i] && !before[i])
                 {
                     Game::logMsg("Screen effect %s found (%d materials, scan %.2f ms)",
                         kVrSkippedScreenEffects[i], count, ms);
-                    if (m_ScreenFxNoDraw)
-                        SehSetNoDraw(m_ScreenFxMaterials[i], true);
+                    m_ScreenFxNoDraw[i] = false;   // applied below
                 }
             }
         }
     }
-    const bool want = bmvr::g_VrSkipScreenEffects && m_IsVREnabled;
-    if (want == m_ScreenFxNoDraw)
-        return;
-    m_ScreenFxNoDraw = want;
-    for (IMaterial* m : m_ScreenFxMaterials)
+    for (int i = 0; i < kScreenFxCount; ++i)
     {
-        if (m)
-            SehSetNoDraw(m, want);
+        IMaterial* m = m_ScreenFxMaterials[i];
+        if (!m)
+            continue;
+        const bool want = m_IsVREnabled && (i == 3 ? bmvr::g_XenGlobalFogOff : bmvr::g_VrSkipScreenEffects);
+        if (want == m_ScreenFxNoDraw[i])
+            continue;
+        m_ScreenFxNoDraw[i] = want;
+        SehSetNoDraw(m, want);
+        Game::logMsg("%s %s in VR", i == 3 ? "Xen global fog (__gbxog0)" : kVrSkippedScreenEffects[i], want ? "off" : "on");
     }
-    Game::logMsg("Screen effects (stun / intro blur) %s in VR", want ? "off" : "on");
 }
 
 namespace

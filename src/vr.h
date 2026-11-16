@@ -775,8 +775,8 @@ public:
     bool m_AppliedVrPerfCvars = false;
     std::string m_CurrentMapName;
     std::string m_ScreenFxMap;
-    IMaterial* m_ScreenFxMaterials[3] = {};
-    bool m_ScreenFxNoDraw = false;
+    IMaterial* m_ScreenFxMaterials[4] = {};   // [3] = Xen global fog __gbxog0 (XenGlobalFogOff)
+    bool m_ScreenFxNoDraw[4] = {};
     int m_ScreenFxMaterialCount = -1;
     struct EnvmapTintEntry
     {

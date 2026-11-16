@@ -523,6 +523,9 @@ namespace bmvr
     // "keep above the water" clip, so the G-buffer has the world under the surface for the
     // engine's water intersection view (false = stock: black/fog-green lower part of the view).
     extern bool g_WaterLineClipFix;
+    // Black Mesa's global Xen fog pass (__gbxog0) is not drawn in VR: view-direction noise at infinite stereo
+    // depth, also inside rooms where flat shows none. Local fog volumes stay.
+    extern bool g_XenGlobalFogOff;
     extern bool g_FlareEyeAxis;
     // Lens flare layers are turned so their streaks stay level with the world
     // horizon at the light, not with the eye's image (which rolls with the head).

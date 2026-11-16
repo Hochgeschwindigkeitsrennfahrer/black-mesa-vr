@@ -166,6 +166,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_SkyWaterPerEye, nullptr },
             { "bmvr_eye_underwater_world", "VR: the G-buffer also gets the world under the water surface, as at nr_lights_quality 3 (0 = stock at 2 and below: clear patches in the water)",
               Kind::Bool, 0.f, 1.f, &g_EyeUnderwaterWorld, nullptr },
+            { "bmvr_xen_fog_off", "VR: Black Mesa's global Xen ground fog is not drawn (it sits at infinite depth in stereo and shows where flat has none); fog volumes stay",
+              Kind::Bool, 0.f, 1.f, &g_XenGlobalFogOff, nullptr },
             { "bmvr_waterline_clip_fix", "VR: eye at the water line: the eye view is not clipped at the water surface, so the part of the view under the water is lit (0 = stock: black lower part)",
               Kind::Bool, 0.f, 1.f, &g_WaterLineClipFix, nullptr },
             { "bmvr_light_cull_eye", "VR: deferred lights are culled from each eye's view, not the main view that follows the aim",
