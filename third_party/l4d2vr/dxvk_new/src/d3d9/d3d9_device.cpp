@@ -1610,6 +1610,11 @@ namespace dxvk {
     if (unlikely(pPresentationParameters == nullptr))
       return D3DERR_INVALIDCALL;
 
+    {
+      D3D9DeviceLock lock = LockDevice();
+      BmvrPayCopyDebt("Reset");
+    }
+
     D3DPRESENT_PARAMETERS local = *pPresentationParameters;
     BmvrStripSwapchainMsaa(&local);
     BmvrKeepDesktopWindowed(&local);
@@ -2218,6 +2223,7 @@ namespace dxvk {
     const POINT*             pDestPoint) {
     BMVR_PROF("d3d9 UpdateSurface");
     D3D9DeviceLock lock = LockDevice();
+    BmvrPayCopyDebt("UpdateSurface");
 
     D3D9Surface* src = static_cast<D3D9Surface*>(pSourceSurface);
     D3D9Surface* dst = static_cast<D3D9Surface*>(pDestinationSurface);
@@ -2297,6 +2303,7 @@ namespace dxvk {
           IDirect3DBaseTexture9* pDestinationTexture) {
     BMVR_PROF("d3d9 UpdateTexture");
     D3D9DeviceLock lock = LockDevice();
+    BmvrPayCopyDebt("UpdateTexture");
 
     if (!pDestinationTexture || !pSourceTexture)
       return D3DERR_INVALIDCALL;
@@ -2392,6 +2399,7 @@ namespace dxvk {
           IDirect3DSurface9* pDestSurface) {
     BMVR_PROF("d3d9 GetRenderTargetData");
     D3D9DeviceLock lock = LockDevice();
+    BmvrPayCopyDebt("GetRenderTargetData");
 
     if (unlikely(IsDeviceLost())) {
       return D3DERR_DEVICELOST;
@@ -2502,6 +2510,14 @@ namespace dxvk {
 
     if (dstImage == nullptr || srcImage == nullptr)
         return D3DERR_INVALIDCALL;
+
+    if (unlikely(m_bmvrDebtEye != nullptr)
+     && (BmvrCopyDebtTouches(srcTextureInfo) || BmvrCopyDebtTouches(dstTextureInfo)))
+      BmvrPayCopyDebt("StretchRect");
+
+    if (unlikely(bmvr::g_PostSwapArmThread != 0)
+     && BmvrTrySwapCopy(src, dst, pSourceRect, pDestRect))
+      return D3D_OK;
 
     // Eye MSAA: every copy out of a multisampled eye (refraction / FullFrame
     // copies, OpenXR ring, desktop mirror) used to resolve all 4 samples again,
@@ -2777,6 +2793,7 @@ namespace dxvk {
     const RECT*              pRect,
           D3DCOLOR           Color) {
     D3D9DeviceLock lock = LockDevice();
+    BmvrPayCopyDebt("ColorFill");
 
     D3D9Surface* dst = static_cast<D3D9Surface*>(pSurface);
 
@@ -3196,6 +3213,9 @@ namespace dxvk {
       return D3D_OK;
 
     D3D9DeviceLock lock = LockDevice();
+
+    if (unlikely(m_bmvrDebtEye != nullptr))
+      BmvrCopyDebtCheckClear(Flags);
 
     // D3DCLEAR_ZBUFFER and D3DCLEAR_STENCIL are invalid flags
     // if there is no currently bound DS (which can be the autoDS)
@@ -7044,6 +7064,11 @@ namespace dxvk {
     if (unlikely(pPresentationParameters == nullptr))
       return D3DERR_INVALIDCALL;
 
+    {
+      D3D9DeviceLock lock = LockDevice();
+      BmvrPayCopyDebt("Reset");
+    }
+
     D3DPRESENT_PARAMETERS local = *pPresentationParameters;
     BmvrStripSwapchainMsaa(&local);
     BmvrKeepDesktopWindowed(&local);
@@ -7611,6 +7636,9 @@ namespace dxvk {
             DWORD                   Flags) {
     BMVR_PROF("d3d9 LockImage");
     D3D9DeviceLock lock = LockDevice();
+
+    if (unlikely(BmvrCopyDebtTouches(pResource)))
+      BmvrPayCopyDebt("lock");
 
     UINT Subresource = pResource->CalcSubresource(Face, MipLevel);
 
@@ -10294,6 +10322,8 @@ namespace dxvk {
   void D3D9DeviceEx::BmvrResolveMsaaForSample(D3D9CommonTexture* tex, bool force) {
     if (!tex || (!force && !tex->MsaaNeedsResolve()))
       return;
+    if (unlikely(BmvrCopyDebtTouches(tex)))
+      BmvrPayCopyDebt("MSAA resolve");
     const Rc<DxvkImage>& srcRef = tex->GetImage();
     if (srcRef == nullptr || srcRef->info().sampleCount == VK_SAMPLE_COUNT_1_BIT) {
       tex->MarkMsaaResolved();
@@ -10448,6 +10478,9 @@ namespace dxvk {
 
 
   void D3D9DeviceEx::PrepareDraw(D3DPRIMITIVETYPE PrimitiveType, bool UploadVBOs, bool UploadIBO) {
+    if (unlikely(m_bmvrDebtEye != nullptr))
+      BmvrCopyDebtCheckDraw();
+
     if (unlikely(m_state.depthStencil != nullptr
         && (m_state.renderStates[D3DRS_ZENABLE] || m_state.renderStates[D3DRS_STENCILENABLE])
         && m_state.depthStencil->GetCommonTexture()->BmvrDepthPending()))
@@ -12114,6 +12147,8 @@ namespace dxvk {
         continue;
       if (tex->BmvrRetired() == retire && (retire || !tex->IsDepthStencil()))
         continue;
+      if (BmvrCopyDebtTouches(tex))
+        BmvrPayCopyDebt("eye MSAA retire/unretire");
       if (retire) {
         // Colour: resolve now. Depth (sample 0): only when a later draw tests
         // or writes depth (see PrepareDraw); otherwise never.
@@ -12138,6 +12173,279 @@ namespace dxvk {
       m_dirty.set(D3D9DeviceDirtyFlag::Framebuffer);
       // RT0's active sample count changed: alpha to coverage may switch.
       UpdateAlphaToCoverangeAndAlphaTest();
+    }
+  }
+}
+
+// BMVR PostCopySwap (see d3d9_device.h). The engine's post chain copies the
+// eye into _rt_FullFrameFB twice per eye (start of post, after
+// engine_post_nxtgen), and each copy is followed by a full-screen opaque draw
+// on the eye. Swapping the storage moves the content without a copy; the eye's
+// old content is only needed if something reads the eye (or writes the FB)
+// before that draw, and then the original copy runs at that point.
+namespace {
+  struct BmvrCopySwapStats {
+    uint32_t swaps = 0, overwritten = 0, paid = 0, refused = 0;
+    const char* lastPay = "";
+    const char* lastRefuse = "";
+    const char* lastKeep = "";
+    uint64_t t0 = 0;
+  } g_bmvrSwapStats;
+  int g_bmvrSwapLog = 0;
+}
+
+namespace dxvk {
+  static bool BmvrSameImageInfo(const Rc<DxvkImage>& a, const Rc<DxvkImage>& b) {
+    const DxvkImageCreateInfo& x = a->info();
+    const DxvkImageCreateInfo& y = b->info();
+    if (x.type != y.type || x.format != y.format || x.flags != y.flags || x.sampleCount != y.sampleCount
+     || x.extent.width != y.extent.width || x.extent.height != y.extent.height || x.extent.depth != y.extent.depth
+     || x.numLayers != y.numLayers || x.mipLevels != y.mipLevels || x.usage != y.usage
+     || x.stages != y.stages || x.access != y.access || x.tiling != y.tiling || x.layout != y.layout
+     || x.shared || y.shared || x.transient != y.transient
+     || x.sharing.mode != DxvkSharedHandleMode::None || y.sharing.mode != DxvkSharedHandleMode::None
+     || x.viewFormatCount != y.viewFormatCount || a->memFlags() != b->memFlags())
+      return false;
+    for (uint32_t i = 0; i < x.viewFormatCount; i++)
+      if (x.viewFormats[i] != y.viewFormats[i])
+        return false;
+    return x.mipLevels == 1u && x.numLayers == 1u && x.sampleCount == VK_SAMPLE_COUNT_1_BIT;
+  }
+
+  void D3D9DeviceEx::BmvrCopyDebtStatsTick() {
+    BmvrCopySwapStats& s = g_bmvrSwapStats;
+    const uint64_t now = GetTickCount64();
+    if (!s.t0)
+      s.t0 = now;
+    // A mode change (panel / cvar A/B) flushes the stats and logs the next decisions again.
+    static int s_mode = -1;
+    const int mode = (bmvr::g_PostCopySwap ? 1 : 0) + 2 * int(bmvr::g_PostCopySwapAlpha + 0.5f);
+    const bool modeChanged = s_mode >= 0 && mode != s_mode;
+    s_mode = mode;
+    if (modeChanged) {
+      g_bmvrSwapLog = 0;
+      bmvr::Log("PostCopySwap: mode now on=%d alpha=%d", mode & 1, mode >> 1);
+    }
+    if (now - s.t0 < 10000 && !modeChanged)
+      return;
+    if (s.swaps || s.refused)
+      bmvr::Log("PostCopySwap (10 s): swaps %u, overwritten (no copy) %u, paid back (copy) %u [last: %s], refused %u [last: %s], kept debt at a draw [last: %s]",
+        s.swaps, s.overwritten, s.paid, s.lastPay, s.refused, s.lastRefuse, s.lastKeep);
+    s = BmvrCopySwapStats{};
+    s.t0 = now;
+  }
+
+  bool D3D9DeviceEx::BmvrTrySwapCopy(D3D9Surface* src, D3D9Surface* dst, const RECT* srcRect, const RECT* dstRect) {
+    if (!bmvr::g_PostCopySwap || bmvr::g_PostSwapArmThread != GetCurrentThreadId())
+      return false;
+    bmvr::g_PostSwapArmThread = 0;   // one copy per arm
+    auto refuse = [&](const char* why) {
+      ++g_bmvrSwapStats.refused;
+      g_bmvrSwapStats.lastRefuse = why;
+      if (g_bmvrSwapLog < 24) {
+        bmvr::Log("PostCopySwap: copy not swapped (%s)", why);
+        ++g_bmvrSwapLog;
+      }
+      BmvrCopyDebtStatsTick();
+      return false;
+    };
+    D3D9CommonTexture* s = src->GetCommonTexture();
+    D3D9CommonTexture* d = dst->GetCommonTexture();
+    if (!s || !d || s == d || s->IsNull() || d->IsNull())
+      return refuse("textures");
+    if (src->GetSubresource() != 0 || dst->GetSubresource() != 0)
+      return refuse("subresource");
+    if (s->IsDepthStencil() || d->IsDepthStencil())
+      return refuse("depth");
+    if (s->Desc()->MultiSample != D3DMULTISAMPLE_NONE && !s->BmvrRetired())
+      return refuse("source multisampled, not retired");
+    if (d->Desc()->MultiSample != D3DMULTISAMPLE_NONE)
+      return refuse("dest multisampled");
+    if (s->Desc()->Format != d->Desc()->Format)
+      return refuse("format");
+    if (s->IsAutomaticMip() || d->IsAutomaticMip() || s->Desc()->Discard || d->Desc()->Discard)
+      return refuse("mips/discard");
+    Rc<DxvkImage> si = s->BmvrActiveImage();
+    Rc<DxvkImage> di = d->GetImage();
+    if (si == nullptr || di == nullptr || si == di)
+      return refuse("images");
+    if (!BmvrSameImageInfo(si, di)) {
+      if (g_bmvrSwapLog < 24) {
+        const DxvkImageCreateInfo& x = si->info();
+        const DxvkImageCreateInfo& y = di->info();
+        bmvr::Log("PostCopySwap: info eye/FB: fmt %d/%d flags 0x%x/0x%x samples %d/%d %ux%u/%ux%u layers %u/%u mips %u/%u usage 0x%x/0x%x stages 0x%x/0x%x access 0x%x/0x%x tiling %d/%d layout %d/%d shared %d/%d views %u/%u mem 0x%x/0x%x",
+          int(x.format), int(y.format), x.flags, y.flags, int(x.sampleCount), int(y.sampleCount),
+          x.extent.width, x.extent.height, y.extent.width, y.extent.height, x.numLayers, y.numLayers,
+          x.mipLevels, y.mipLevels, x.usage, y.usage, x.stages, y.stages, x.access, y.access,
+          int(x.tiling), int(y.tiling), int(x.layout), int(y.layout), int(x.shared), int(y.shared),
+          x.viewFormatCount, y.viewFormatCount, si->memFlags(), di->memFlags());
+      }
+      return refuse("image create info differs");
+    }
+    const VkExtent3D e = si->info().extent;
+    auto full = [&](const RECT* r) {
+      return !r || (r->left == 0 && r->top == 0 && r->right == LONG(e.width) && r->bottom == LONG(e.height));
+    };
+    if (!full(srcRect) || !full(dstRect))
+      return refuse("not a full copy");
+
+    if (m_bmvrDebtEye != nullptr)
+      BmvrPayCopyDebt("new swap");
+
+    const int alphaTest = int(bmvr::g_PostCopySwapAlpha + 0.5f);
+    Rc<DxvkImageView> clearView;
+    if (alphaTest >= 2) {
+      DxvkImageViewKey key;
+      key.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      key.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+      key.format = si->info().format;
+      key.aspects = VK_IMAGE_ASPECT_COLOR_BIT;
+      key.mipIndex = 0;
+      key.mipCount = 1;
+      key.layerIndex = 0;
+      key.layerCount = 1;
+      clearView = si->createView(key);
+    }
+    EmitCs([cA = si, cB = di, cView = clearView, cAlpha = alphaTest == 3 ? 1.0f : 0.0f] (DxvkContext* ctx) {
+      ctx->bmvrSwapImageStorage(cA, cB);
+      if (cView != nullptr) {
+        // Test: the eye's owed content becomes a solid colour, so any later
+        // use of the eye's old alpha shows in the image.
+        VkClearValue v = { };
+        v.color.float32[3] = cAlpha;
+        ctx->clearImageView(cView, VkOffset3D { 0, 0, 0 }, cA->info().extent, VK_IMAGE_ASPECT_COLOR_BIT, v);
+      }
+    });
+    m_bmvrDebtEye = src;
+    m_bmvrDebtFb = dst;
+    m_bmvrDebtEyeImage = si;
+    m_bmvrDebtFbImage = di;
+    s->SetNeedsReadback(0, true);
+    d->SetNeedsReadback(0, true);
+    ++g_bmvrSwapStats.swaps;
+    if (g_bmvrSwapLog < 24) {
+      bmvr::Log("PostCopySwap: swapped %ux%u fmt %d (eye %s)", e.width, e.height, int(si->info().format),
+        s->BmvrRetired() ? "1x resolve" : "1x");
+      ++g_bmvrSwapLog;
+    }
+    BmvrCopyDebtStatsTick();
+    return true;
+  }
+
+  void D3D9DeviceEx::BmvrPayCopyDebt(const char* reason) {
+    if (m_bmvrDebtEye == nullptr)
+      return;
+    D3D9CommonTexture* eye = m_bmvrDebtEye->GetCommonTexture();
+    if (eye->BmvrActiveImage() != m_bmvrDebtEyeImage && g_bmvrSwapLog < 24) {
+      bmvr::Log("PostCopySwap: eye image changed before the pay-back (%s)", reason);
+      ++g_bmvrSwapLog;
+    }
+    const VkExtent3D e = m_bmvrDebtEyeImage->info().extent;
+    const VkImageSubresourceLayers layers = { VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u };
+    EmitCs([
+      cDst = m_bmvrDebtEyeImage,
+      cSrc = m_bmvrDebtFbImage,
+      cLayers = layers,
+      cExtent = e
+    ] (DxvkContext* ctx) {
+      ctx->copyImage(cDst, cLayers, VkOffset3D { 0, 0, 0 },
+        cSrc, cLayers, VkOffset3D { 0, 0, 0 }, cExtent);
+    });
+    eye->SetNeedsReadback(0, true);
+    m_bmvrDebtEye = nullptr;
+    m_bmvrDebtFb = nullptr;
+    m_bmvrDebtEyeImage = nullptr;
+    m_bmvrDebtFbImage = nullptr;
+    ++g_bmvrSwapStats.paid;
+    g_bmvrSwapStats.lastPay = reason;
+    if (g_bmvrSwapLog < 24) {
+      bmvr::Log("PostCopySwap: paid back with a copy (%s)", reason);
+      ++g_bmvrSwapLog;
+    }
+    BmvrCopyDebtStatsTick();
+  }
+
+  // The armed draw must write every pixel of RT0 without reading it.
+  bool D3D9DeviceEx::BmvrFullOverwriteState(const char** why) {
+    const auto& rs = m_state.renderStates;
+    D3D9Surface* rt0 = m_state.renderTargets[0].ptr();
+    if (!rt0) { *why = "no RT0"; return false; }
+    if (rs[D3DRS_ALPHABLENDENABLE]) { *why = "blend on"; return false; }
+    if (rs[D3DRS_ALPHATESTENABLE]) { *why = "alpha test"; return false; }
+    // Source passes keep alpha writes off: RGB-only is a full overwrite when
+    // the eye's alpha is not needed (PostCopySwapAlpha test, see bmvr_flags.h).
+    const DWORD needMask = bmvr::g_PostCopySwapAlpha >= 0.5f ? 0x7u : 0xFu;
+    if ((rs[ColorWriteIndex(0)] & needMask) != needMask) {
+      *why = (rs[ColorWriteIndex(0)] & 0xFu) == 0x7u ? "colour write mask RGB only" : "colour write mask";
+      return false;
+    }
+    if (m_state.depthStencil != nullptr && rs[D3DRS_ZENABLE] && rs[D3DRS_ZFUNC] != D3DCMP_ALWAYS) { *why = "depth test"; return false; }
+    if (m_state.depthStencil != nullptr && rs[D3DRS_STENCILENABLE]) { *why = "stencil test"; return false; }
+    if (rs[D3DRS_CLIPPLANEENABLE]) { *why = "clip planes"; return false; }
+    const VkExtent2D ext = rt0->GetSurfaceExtent();
+    const D3DVIEWPORT9& vp = m_state.viewport;
+    if (vp.X != 0 || vp.Y != 0 || vp.Width < ext.width || vp.Height < ext.height) { *why = "viewport"; return false; }
+    if (rs[D3DRS_SCISSORTESTENABLE]) {
+      const RECT& sc = m_state.scissorRect;
+      if (sc.left > 0 || sc.top > 0 || sc.right < LONG(ext.width) || sc.bottom < LONG(ext.height)) { *why = "scissor"; return false; }
+    }
+    const D3D9CommonShader* ps = GetCommonShader(m_state.pixelShader);
+    if (ps && ps->BmvrUsesKill()) { *why = "pixel shader discards"; return false; }
+    return true;
+  }
+
+  void D3D9DeviceEx::BmvrCopyDebtCheckDraw() {
+    D3D9CommonTexture* eye = m_bmvrDebtEye->GetCommonTexture();
+    D3D9CommonTexture* fb = m_bmvrDebtFb->GetCommonTexture();
+    const auto& psMasks = PSShaderMasks();
+    int eyeSlot = -1;
+    for (uint32_t i = 0; i < m_state.renderTargets.size(); i++) {
+      D3D9CommonTexture* tex = GetCommonTexture(m_state.renderTargets[i].ptr());
+      if (!tex)
+        continue;
+      if (tex == fb)
+        return BmvrPayCopyDebt("FB is a render target");
+      const bool writes = (psMasks.rtMask & (1u << i)) && m_state.renderStates[ColorWriteIndex(i)] != 0;
+      if (tex == eye && writes && eyeSlot < 0)
+        eyeSlot = int(i);
+    }
+    for (uint32_t i = 0; i < m_state.textures->size(); i++) {
+      if (m_state.textures[i] != nullptr && GetCommonTexture(m_state.textures[i]) == eye)
+        return BmvrPayCopyDebt("eye sampled");
+    }
+    if (eyeSlot < 0) {
+      // Draws that do not write the eye's colour (luminance queries) keep the debt.
+      g_bmvrSwapStats.lastKeep = "draw without eye colour writes";
+      return;
+    }
+    const bool armed = bmvr::g_FullOverwriteArmThread == GetCurrentThreadId();
+    const char* why = armed ? "" : "eye drawn (not a marked full-screen pass)";
+    if (armed && eyeSlot == 0 && BmvrFullOverwriteState(&why)) {
+      bmvr::g_FullOverwriteArmThread = 0;
+      m_bmvrDebtEye = nullptr;
+      m_bmvrDebtFb = nullptr;
+      m_bmvrDebtEyeImage = nullptr;
+      m_bmvrDebtFbImage = nullptr;
+      ++g_bmvrSwapStats.overwritten;
+      if (g_bmvrSwapLog < 24) {
+        bmvr::Log("PostCopySwap: eye fully overwritten, no copy needed");
+        ++g_bmvrSwapLog;
+      }
+      BmvrCopyDebtStatsTick();
+      return;
+    }
+    if (armed && eyeSlot != 0)
+      why = "eye drawn as RT1-3";
+    BmvrPayCopyDebt(why);
+  }
+
+  void D3D9DeviceEx::BmvrCopyDebtCheckClear(DWORD Flags) {
+    if (!(Flags & D3DCLEAR_TARGET))
+      return;
+    for (uint32_t i = 0; i < m_state.renderTargets.size(); i++) {
+      D3D9CommonTexture* tex = GetCommonTexture(m_state.renderTargets[i].ptr());
+      if (BmvrCopyDebtTouches(tex))
+        return BmvrPayCopyDebt("clear");
     }
   }
 }

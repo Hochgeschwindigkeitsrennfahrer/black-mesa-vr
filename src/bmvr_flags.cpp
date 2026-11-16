@@ -84,6 +84,10 @@ namespace bmvr
     bool g_MulticoreMode = true;
     uint32_t g_Msaa = 0; // eye MSAA 0/2/4 (private eye targets only; FXAA stays on next to it)
     bool g_MsaaPostSwitch = true;
+    bool g_PostCopySwap = true;
+    float g_PostCopySwapAlpha = 1.f;
+    volatile unsigned long g_PostSwapArmThread = 0;
+    volatile unsigned long g_FullOverwriteArmThread = 0;
     bool g_MsaaParticles1x = true;   // no-op while Msaa is 0
     float g_MsaaF = 0.f;
     bool g_AlphaToCoverage = true;   // no-op while Msaa is 0
@@ -765,6 +769,8 @@ namespace bmvr
                 g_MsaaParticles1x = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MsaaPostSwitch") == 0)
                 g_MsaaPostSwitch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "PostCopySwap") == 0)
+                g_PostCopySwap = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PerfLog") == 0)
                 g_PerfLog = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ReflectionRtScale") == 0)

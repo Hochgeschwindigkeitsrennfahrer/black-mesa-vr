@@ -967,6 +967,18 @@ namespace dxvk {
       const DxvkImageUsageInfo&       usageInfo);
 
     /**
+     * \brief BMVR: swaps the backing storage of two images
+     *
+     * Same steps as \c invalidateImage for each image, but each one
+     * gets the other's storage, so a full same-size copy a -> b can be
+     * replaced by a swap (b then holds a's content). The images must
+     * have identical create info (checked by the caller).
+     */
+    void bmvrSwapImageStorage(
+      const Rc<DxvkImage>&            a,
+      const Rc<DxvkImage>&            b);
+
+    /**
      * \brief Ensures that an image supports the given usage
      *
      * No-op if the image already supports the requested properties.

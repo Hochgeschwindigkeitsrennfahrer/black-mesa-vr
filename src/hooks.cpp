@@ -8331,9 +8331,17 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             ++s_eyePostLog;
         }
     }
+    // PostCopySwap: a quad over the whole eye may drop the eye's pending
+    // copy (DXVK checks that the draw's state really writes every pixel).
+    const bool armOverwrite = bmvr::g_PostCopySwap && eyeW >= 640
+        && destX <= 0 && destY <= 0 && destX + width >= eyeW && destY + height >= eyeH;
+    if (armOverwrite)
+        bmvr::g_FullOverwriteArmThread = GetCurrentThreadId();
     if (hkDrawScreenSpaceRectangle.fOriginal)
         hkDrawScreenSpaceRectangle.fOriginal(ecx, material, destX, destY, width, height,
             srcX0, srcY0, srcX1, srcY1, srcWidth, srcHeight, clientRenderable, xDice, yDice);
+    if (armOverwrite)
+        bmvr::g_FullOverwriteArmThread = 0;
     if (vpPinned && hkViewport.fOriginal)
         hkViewport.fOriginal(ecx, vpX, vpY, vpW, vpH);
 }
@@ -8567,8 +8575,20 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
                 m_VR->m_RefractEyeDone = nullptr;
         }
     }
+    // PostCopySwap: the post chain's full eye -> _rt_FullFrameFB copies swap
+    // the images' storage in DXVK instead of copying (see d3d9_device.h).
+    bool armSwap = false;
+    if (bmvr::g_PostCopySwap && srcEye && m_VR && m_VR->m_IsVREnabled)
+    {
+        const char* dn = SafeTextureName(texture);
+        armSwap = dn && _stricmp(dn, "_rt_FullFrameFB") == 0;
+    }
+    if (armSwap)
+        bmvr::g_PostSwapArmThread = GetCurrentThreadId();
     if (hkCopyRenderTargetToTextureEx.fOriginal)
         hkCopyRenderTargetToTextureEx.fOriginal(ecx, texture, renderTargetId, srcRect, dstRect);
+    if (armSwap)
+        bmvr::g_PostSwapArmThread = 0;
     if (bmvr::g_PerfLog)
     {
         // Engine eye copies per second, logged when > 1500/s (refraction storms).

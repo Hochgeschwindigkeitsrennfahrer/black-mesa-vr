@@ -113,6 +113,8 @@ namespace dxvk {
           DWORD    dwFlags) {
     D3D9DeviceLock lock = m_parent->LockDevice();
 
+    m_parent->BmvrPayCopyDebt("present");
+
     m_parent->SetMostRecentlyUsedSwapchain(this);
 
     if (unlikely(m_parent->IsDeviceLost()))

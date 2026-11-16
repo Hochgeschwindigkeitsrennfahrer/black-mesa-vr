@@ -1106,6 +1106,27 @@ namespace dxvk {
     void BmvrResolveMsaaForSample(D3D9CommonTexture* tex, bool force = false);
     void BmvrResolvePendingDepth();
 
+    // BMVR PostCopySwap: a full eye -> _rt_FullFrameFB copy armed by the mod
+    // (bmvr::g_PostSwapArmThread) swaps the two images' storage instead. The
+    // eye then "owes" its old content (now in the FB). The debt is dropped
+    // when a full-screen opaque draw armed by the mod overwrites the eye
+    // (bmvr::g_FullOverwriteArmThread, state checked here), and paid with the
+    // original copy before anything else could read the eye or write the FB.
+    bool BmvrTrySwapCopy(D3D9Surface* src, D3D9Surface* dst, const RECT* srcRect, const RECT* dstRect);
+    void BmvrPayCopyDebt(const char* reason);
+    bool BmvrCopyDebtTouches(const D3D9CommonTexture* tex) const {
+      return m_bmvrDebtEye != nullptr && tex != nullptr
+        && (tex == m_bmvrDebtEye->GetCommonTexture() || tex == m_bmvrDebtFb->GetCommonTexture());
+    }
+    void BmvrCopyDebtCheckDraw();
+    void BmvrCopyDebtCheckClear(DWORD Flags);
+    bool BmvrFullOverwriteState(const char** why);
+    void BmvrCopyDebtStatsTick();
+    Com<D3D9Surface, false> m_bmvrDebtEye;
+    Com<D3D9Surface, false> m_bmvrDebtFb;
+    Rc<DxvkImage> m_bmvrDebtEyeImage;   // the eye's active (1x) image at swap time
+    Rc<DxvkImage> m_bmvrDebtFbImage;
+
     void EnsureSamplerLimit();
 
     template <DxsoProgramType ShaderStage>

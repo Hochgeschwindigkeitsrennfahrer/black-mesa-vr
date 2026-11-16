@@ -48,6 +48,8 @@ namespace dxvk {
     }
 
     const DxsoShaderMetaInfo& GetMeta() const { return m_meta; }
+    // BMVR: the shader can discard pixels (texkill).
+    bool BmvrUsesKill() const { return m_bmvrUsesKill; }
     const DxsoDefinedConstants& GetConstants() const { return m_constants; }
 
     D3D9ShaderMasks GetShaderMask() const { return D3D9ShaderMasks{ m_usedSamplers, m_usedRTs }; }
@@ -76,6 +78,7 @@ namespace dxvk {
     DxsoProgramInfo       m_info;
     DxsoShaderMetaInfo    m_meta;
     DxsoDefinedConstants  m_constants;
+    bool                  m_bmvrUsesKill = false;
     int32_t               m_maxDefinedFloatConst = -1;
     int32_t               m_maxDefinedIntConst = -1;
     int32_t               m_maxDefinedBoolConst = -1;

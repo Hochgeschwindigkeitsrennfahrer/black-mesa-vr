@@ -207,6 +207,18 @@ namespace bmvr
     extern float g_MsaaF;           // VR panel copy of g_Msaa (0/2/4); applied live by recreating the eyes
     extern bool g_MsaaParticles1x; // MsaaParticles1x (default true, needs Msaa): particles drawn last, on the 1x resolve (the gun too in frames with particles)
     extern bool g_MsaaPostSwitch;   // MsaaPostSwitch (default true): post chain on the 1x resolve
+    // PostCopySwap (default true, panel DEBUG > GPU SAVINGS): the post chain's
+    // eye -> _rt_FullFrameFB copies swap image storage in DXVK instead of copying
+    // (same image; the copy still runs if anything reads the eye before the
+    // next full-screen pass). The arm values are the thread id of the hook
+    // that may swap / overwrite, 0 = not armed.
+    extern bool g_PostCopySwap;
+    // PostCopySwapAlpha (cvar bmvr_post_copy_swap_alpha, default 1): 0 = an RGBA write is
+    // needed to drop the debt, 1 = RGB-only writes count (eye alpha mid-post is
+    // not needed), 2/3 = as 1 and the owed eye is cleared to alpha 0/1 (test).
+    extern float g_PostCopySwapAlpha;
+    extern volatile unsigned long g_PostSwapArmThread;
+    extern volatile unsigned long g_FullOverwriteArmThread;
     extern bool g_MsaaAllowed;
     uint32_t NormalizeMsaa(int samples);
     extern bool g_Haptics;

@@ -1608,6 +1608,51 @@ namespace dxvk {
   }
 
 
+  void DxvkContext::bmvrSwapImageStorage(
+    const Rc<DxvkImage>&            a,
+    const Rc<DxvkImage>&            b) {
+    // Bring both images to their default layout first (as invalidateImage
+    // does for one), so each storage is in the layout the other expects.
+    for (const Rc<DxvkImage>* p : { &a, &b }) {
+      const Rc<DxvkImage>& image = *p;
+      VkImageUsageFlags usage = image->info().usage;
+
+      if (usage & (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT))
+        m_descriptorState.dirtyViews(image->getShaderStages());
+
+      if (usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
+        bool found = false;
+
+        for (uint32_t i = 0; i < m_state.om.framebufferInfo.numAttachments() && !found; i++)
+          found = m_state.om.framebufferInfo.getAttachment(i).view->image() == image;
+
+        if (found) {
+          m_flags.set(DxvkContextFlag::GpDirtyRenderTargets);
+
+          spillRenderPass(true);
+
+          prepareImage(image, image->getAvailableSubresources());
+        }
+      }
+
+      if (resourceHasAccess(*image, image->getAvailableSubresources(), DxvkAccess::Write, DxvkAccessOp::None)) {
+        spillRenderPass(true);
+
+        flushBarriers();
+      }
+    }
+
+    Rc<DxvkResourceAllocation> storageA = a->storage();
+    Rc<DxvkResourceAllocation> storageB = b->storage();
+
+    m_cmd->track(a->assignStorage(std::move(storageB)));
+    m_cmd->track(b->assignStorage(std::move(storageA)));
+
+    a->resetTracking();
+    b->resetTracking();
+  }
+
+
   bool DxvkContext::ensureImageCompatibility(
     const Rc<DxvkImage>&            image,
     const DxvkImageUsageInfo&       usageInfo) {
