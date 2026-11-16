@@ -12731,14 +12731,31 @@ void VR::UpdateDamageFlash(int stereoEye)
         || health < 0 || health > 1000)
     {
         m_DmgLastHealth = m_DmgLastArmor = -1;
+        m_DmgSettleUntilMs = -1.0;   // armed: set on the first gameplay sample
         return;
     }
+    // Just (back) in gameplay: the first values after a load or a menu are stale for a few frames (after loading
+    // bm_c4a1a: "armor 90 -> 0" flashed at full strength), and "new game" from the pause menu runs a moment of
+    // gameplay while the old map shuts down (red fade right before the new map, user 2026-11-16). Let the
+    // baseline settle for 1 s before a drop counts as damage.
+    if (m_DmgSettleUntilMs < 0.0)
+        m_DmgSettleUntilMs = now + 1000.0;
     if (armor < 0 || armor > 1000)
         armor = 0;
     if (m_DmgLastHealth >= 0)
     {
         const int lost = std::max(0, m_DmgLastHealth - health) + std::max(0, m_DmgLastArmor - armor);
-        if (lost > 0)
+        if (lost > 0 && now < m_DmgSettleUntilMs)
+        {
+            static int s_settleLog;
+            if (s_settleLog < 8)
+            {
+                Game::logMsg("Damage flash suppressed (settling after load/menu): health %d -> %d, armor %d -> %d",
+                    m_DmgLastHealth, health, m_DmgLastArmor, armor);
+                ++s_settleLog;
+            }
+        }
+        else if (lost > 0)
         {
             const float t = static_cast<float>((now - m_DmgFlashStartMs) / kFadeMs);
             const float current = m_DmgFlashLevel * std::max(0.f, 1.f - t);

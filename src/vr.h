@@ -1469,6 +1469,7 @@ private:
     int m_DmgLastArmor = -1;
     float m_DmgFlashLevel = 0.f;
     double m_DmgFlashStartMs = 0.0;
+    double m_DmgSettleUntilMs = 0.0;   // drops before this only move the baseline (just back in gameplay)
     void RefreshActiveWeaponModel();
     void ToggleEmptyHands();
     void Recenter(const char* why);
