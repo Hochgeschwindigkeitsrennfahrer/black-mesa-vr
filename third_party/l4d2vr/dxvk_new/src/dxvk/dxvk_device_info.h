@@ -79,6 +79,7 @@ namespace dxvk {
     VkBool32                                                  khrExternalSemaphoreWin32;
     VkBool32                                                  extLoadStoreOpNone;
     VkPhysicalDeviceMaintenance5FeaturesKHR                   khrMaintenance5;
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR            khrFragmentShadingRate;
     VkPhysicalDeviceMaintenance7FeaturesKHR                   khrMaintenance7;
     VkPhysicalDevicePresentIdFeaturesKHR                      khrPresentId;
     VkPhysicalDevicePresentWaitFeaturesKHR                    khrPresentWait;

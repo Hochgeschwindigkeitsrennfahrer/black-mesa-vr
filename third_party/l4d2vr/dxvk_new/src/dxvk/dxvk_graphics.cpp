@@ -806,6 +806,10 @@ namespace dxvk {
         dyStates[dyInfo.dynamicStateCount++] = VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_ENABLE_EXT;
         dyStates[dyInfo.dynamicStateCount++] = VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT;
       }
+
+      // BMVR VRS test aid (BMVR_VRS); feature only enabled when set
+      if (device->features().khrFragmentShadingRate.pipelineFragmentShadingRate)
+        dyStates[dyInfo.dynamicStateCount++] = VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR;
     }
 
     if (dyInfo.dynamicStateCount)

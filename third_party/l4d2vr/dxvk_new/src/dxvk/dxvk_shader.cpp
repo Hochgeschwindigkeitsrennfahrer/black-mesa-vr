@@ -1499,6 +1499,10 @@ namespace dxvk {
     if (m_device->features().extExtendedDynamicState3.extendedDynamicState3DepthClipEnable)
       dynamicStates.push_back(VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT);
 
+    // BMVR VRS test aid: must match the fragment shader library
+    if (m_device->features().khrFragmentShadingRate.pipelineFragmentShadingRate)
+      dynamicStates.push_back(VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR);
+
     VkPipelineDynamicStateCreateInfo dyInfo = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     dyInfo.dynamicStateCount  = dynamicStates.size();
     dyInfo.pDynamicStates     = dynamicStates.data();
@@ -1603,6 +1607,10 @@ namespace dxvk {
       dynamicStates.push_back(VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_ENABLE_EXT);
       dynamicStates.push_back(VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT);
     }
+
+    // BMVR VRS test aid: must match the pre-rasterization library
+    if (m_device->features().khrFragmentShadingRate.pipelineFragmentShadingRate)
+      dynamicStates.push_back(VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR);
 
     VkPipelineDynamicStateCreateInfo dyInfo = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     dyInfo.dynamicStateCount  = dynamicStates.size();

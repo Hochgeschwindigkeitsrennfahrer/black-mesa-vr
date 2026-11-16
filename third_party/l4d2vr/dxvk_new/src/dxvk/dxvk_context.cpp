@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "dxvk_device.h"
+#include "dxvk_bmvr_vrs.h"
 #include "dxvk_context.h"
 #include "framepacer/dxvk_framepacer.h"
 
@@ -6452,6 +6453,22 @@ namespace dxvk {
       m_cmd->cmdBindPipeline(DxvkCmdBuffer::ExecBuffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineInfo.handle);
       m_lastBoundGraphicsPipeline = pipelineInfo.handle;
+    }
+
+    // BMVR VRS test aid (BMVR_VRS, foveated Phase 1): fixed rate for the
+    // whole target. startRenderPass dirties the pipeline, so this also
+    // runs after every render target change.
+    if (unlikely(m_device->features().khrFragmentShadingRate.pipelineFragmentShadingRate)) {
+      const BmvrVrsMode& vrs = bmvrVrsMode();
+      uint32_t rate = vrs.rate;
+
+      if (vrs.eyeOnly) {
+        DxvkFramebufferSize fbSize = m_state.om.framebufferInfo.size();
+        if (fbSize.width < 2400u || fbSize.height < 2400u)
+          rate = 1u;
+      }
+
+      m_cmd->cmdSetFragmentShadingRate(rate);
     }
 
     // Independent pipeline layout affects all resource updates
