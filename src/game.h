@@ -14,6 +14,7 @@ class IEngineClient;
 class IEngineVGui;
 class IMaterialSystem;
 class IModelInfo;
+class IBaseFileSystemBm;
 class IModelRender;
 class IInput;
 class ISurface;
@@ -41,6 +42,7 @@ public:
     ISurface* m_VguiSurface = nullptr;
     void* m_EngineSound = nullptr;
     void* m_Cvar = nullptr;
+    IBaseFileSystemBm* m_BaseFileSystem = nullptr;
 
     uintptr_t m_BaseEngine = 0;
     uintptr_t m_BaseClient = 0;
@@ -107,6 +109,11 @@ public:
     bool GetEntityAbsOrigin(C_BaseEntity* entity, Vector& out);
     // Client model precache index of a model path, -1 if the map does not use it.
     int ModelPrecacheIndex(const char* name);
+    // Entity lump (BSP lump 0) of maps/<map>.bsp through the engine filesystem
+    // (VPKs included). Returns its size, or a negative code: -1 no filesystem,
+    // -2 open failed, -3 not a BSP, -4 bad lump, -5 short read, -6 compressed.
+    // Reads up to ~1 MB, so call it once per map load, not per frame.
+    int ReadMapEntityLump(const char* map, std::string& out);
     // Entity indexes whose model index is one of modelIndexes (no strings
     // compared; a full entity-list pass, so call it sparingly).
     int CollectEntitiesWithModelIndex(const int* modelIndexes, int modelCount, int* out, int maxOut);

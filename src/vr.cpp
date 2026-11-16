@@ -3258,6 +3258,7 @@ void VR::OnLevelInit(const char* newmap)
     m_GmanEntityCount = 0;
     m_GmanGestureActive.store(false, std::memory_order_relaxed);
     Game::logMsg("LevelInit map=%s eligible=%d", m_CurrentMapName.c_str(), m_GameplayEligible ? 1 : 0);
+    ScanMapForGman();
     m_PhysicalCrowbarModel = nullptr;
     m_PhysicalCrowbarLoadTries = 0;
     m_CrowbarLastMotionCheckMs = 0;
@@ -13900,6 +13901,34 @@ namespace
     };
 }
 
+// Once per map load: does the entity lump list a G-Man? He is not always a
+// placed entity: in bm_c3a2g he is an npc_template_maker template spawned by
+// a trigger, and his model is only precached then. Maps that list him keep
+// retrying the precache lookup once a second (the cost of a map that has him
+// from the start); maps that do not, stop at once.
+void VR::ScanMapForGman()
+{
+    m_GmanMapListed = -1;
+    if (!bmvr::g_VrGmanGesture || !m_Game || !m_GameplayEligible || m_CurrentMapName.empty())
+        return;
+    std::string lump;
+    const int rc = m_Game->ReadMapEntityLump(m_CurrentMapName.c_str(), lump);
+    if (rc < 0)
+    {
+        Game::logMsg("G-Man gesture: entity lump of %s not read (code %d), precache check only",
+            m_CurrentMapName.c_str(), rc);
+        return;
+    }
+    for (char& c : lump)
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+    const bool listed = lump.find("npc_gman") != std::string::npos
+        || lump.find("models/gman") != std::string::npos;
+    m_GmanMapListed = listed ? 1 : 0;
+    Game::logMsg("G-Man gesture: entity lump of %s (%d bytes) %s",
+        m_CurrentMapName.c_str(), rc, listed ? "lists a G-Man" : "has no G-Man");
+}
+
 void VR::UpdateGmanGesture()
 {
     auto setActive = [&](bool on) {
@@ -13921,11 +13950,17 @@ void VR::UpdateGmanGesture()
     }
     const DWORD now = GetTickCount();
 
-    // Map start: is a G-Man model precached at all? The precache table can
-    // still be filling during the first frames, so ask up to 10 times, once
-    // a second; after that maps without him cost nothing.
+    // Is a G-Man model precached? Maps whose entity lump lists him ask once
+    // a second until he spawns (ScanMapForGman); maps that do not list him
+    // are skipped. Lump not read: the precache table can still be filling
+    // during the first frames, so ask up to 10 times, once a second.
     if (m_GmanMapState == 0)
     {
+        if (m_GmanMapListed == 0)
+        {
+            m_GmanMapState = 2;
+            return;
+        }
         if (m_GmanMapCheckMs != 0 && now - m_GmanMapCheckMs < 1000)
             return;
         m_GmanMapCheckMs = now;
@@ -13935,10 +13970,10 @@ void VR::UpdateGmanGesture()
         if (m_GmanModelIndex[0] > 0 || m_GmanModelIndex[1] > 0)
         {
             m_GmanMapState = 1;
-            Game::logMsg("G-Man gesture: map %s uses the G-Man (model index %d/%d)",
-                m_CurrentMapName.c_str(), m_GmanModelIndex[0], m_GmanModelIndex[1]);
+            Game::logMsg("G-Man gesture: map %s uses the G-Man (model index %d/%d, check %d)",
+                m_CurrentMapName.c_str(), m_GmanModelIndex[0], m_GmanModelIndex[1], m_GmanMapChecks);
         }
-        else if (m_GmanMapChecks >= 10)
+        else if (m_GmanMapListed != 1 && m_GmanMapChecks >= 10)
         {
             m_GmanMapState = 2;
         }

@@ -1712,9 +1712,13 @@ private:
     // On his maps the entity list is rescanned at most once a second and
     // only the cached entities are checked per frame.
     void UpdateGmanGesture();
+    void ScanMapForGman();
     int m_GmanModelIndex[2] = { -1, -1 };
     int m_GmanMapState = 0;            // 0 unknown, 1 has a G-Man, 2 none
     int m_GmanMapChecks = 0;
+    // From the map's entity lump at LevelInit: 1 lists an npc_gman (placed or
+    // a template spawned later), 0 does not, -1 not read (old 10-try check).
+    int m_GmanMapListed = -1;
     DWORD m_GmanMapCheckMs = 0;
     DWORD m_GmanScanMs = 0;
     int m_GmanEntities[4] = {};

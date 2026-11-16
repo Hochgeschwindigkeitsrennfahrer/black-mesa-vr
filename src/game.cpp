@@ -117,6 +117,8 @@ Game::Game()
     m_VguiSurface = nullptr;
     m_EngineSound = GetInterfaceAny("engine.dll", { "IEngineSoundClient003", "IEngineSoundClient002" });
     Game::logMsg("IEngineSound=%p", m_EngineSound);
+    m_BaseFileSystem = static_cast<IBaseFileSystemBm*>(GetInterfaceAny("filesystem_stdio.dll", { "VBaseFileSystem011" }));
+    Game::logMsg("IBaseFileSystem=%p", m_BaseFileSystem);
     // BM vstdlib only exports VEngineCvar004 (not 007). 007 FindVar slots
     // were what the 2026-08-18 probe called into until load hung.
     m_Cvar = GetInterfaceSafe("vstdlib.dll", "VEngineCvar004");
@@ -1068,6 +1070,85 @@ int Game::ModelPrecacheIndex(const char* name)
     {
         return -1;
     }
+}
+
+namespace
+{
+    // One engine filesystem call each, so the SEH frames hold no C++ objects.
+    void* SehFsOpen(IBaseFileSystemBm* fs, const char* path)
+    {
+        BMVR_TRY
+        {
+            return fs->Open(path, "rb", "GAME");
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+    }
+
+    int SehFsReadAt(IBaseFileSystemBm* fs, void* file, int pos, void* out, int size)
+    {
+        BMVR_TRY
+        {
+            fs->Seek(file, pos, 0);
+            return fs->Read(out, size, file);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    }
+
+    void SehFsClose(IBaseFileSystemBm* fs, void* file)
+    {
+        BMVR_TRY
+        {
+            fs->Close(file);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+}
+
+int Game::ReadMapEntityLump(const char* map, std::string& out)
+{
+    out.clear();
+    if (!m_BaseFileSystem || !map || !map[0])
+        return -1;
+    char path[160];
+    std::snprintf(path, sizeof(path), "maps/%s.bsp", map);
+    void* file = SehFsOpen(m_BaseFileSystem, path);
+    if (!file)
+        return -2;
+    // dheader_t: ident, version, then lump_t { fileofs, filelen, version, fourCC }[64].
+    int header[4] = {};
+    int rc = 0;
+    if (SehFsReadAt(m_BaseFileSystem, file, 0, header, sizeof(header)) != static_cast<int>(sizeof(header))
+        || std::memcmp(header, "VBSP", 4) != 0)
+        rc = -3;
+    const int ofs = header[2];
+    const int len = header[3];
+    if (rc == 0 && (ofs < static_cast<int>(sizeof(header)) || len <= 0 || len > (16 << 20)))
+        rc = -4;
+    if (rc == 0)
+    {
+        out.resize(static_cast<size_t>(len));
+        if (SehFsReadAt(m_BaseFileSystem, file, ofs, &out[0], len) != len)
+            rc = -5;
+        else if (out.compare(0, 4, "LZMA") == 0)
+            rc = -6;
+        else if (out.find('{') > 64)
+            rc = -4;
+    }
+    SehFsClose(m_BaseFileSystem, file);
+    if (rc != 0)
+    {
+        out.clear();
+        return rc;
+    }
+    return len;
 }
 
 namespace

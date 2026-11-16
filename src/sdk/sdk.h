@@ -289,6 +289,22 @@ public:
 	virtual char* GetModelName(void* model) const = 0;
 };
 
+// VBaseFileSystem011 from filesystem_stdio.dll: the IBaseFileSystem part of
+// CFileSystem_Stdio (object +4, 17-slot vtable). Slots 0-5 checked on build
+// 26672462 by their thiscall stack cleanup: Read/Write/Open/Seek 3 args,
+// Close/Tell 1, as in SDK 2013. Only these are declared; callers also check
+// what they read (Game::ReadMapEntityLump wants "VBSP" and a '{').
+class IBaseFileSystemBm
+{
+public:
+	virtual int Read(void* pOutput, int size, void* file) = 0;
+	virtual int Write(const void* pInput, int size, void* file) = 0;
+	virtual void* Open(const char* pFileName, const char* pOptions, const char* pathID) = 0;
+	virtual void Close(void* file) = 0;
+	virtual void Seek(void* file, int pos, int seekType) = 0;   // 0 = from the start
+	virtual unsigned int Tell(void* file) = 0;
+};
+
 struct model_t;
 
 struct ModelRenderInfo_t
