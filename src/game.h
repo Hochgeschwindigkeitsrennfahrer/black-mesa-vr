@@ -169,8 +169,11 @@ public:
     static void errorMsg(const char* msg);
     // A signature or byte check that no longer matches the game (usually a Black Mesa update), counted
     // once per name so VR can warn in the headset (ShowToast) instead of only in bmvr_log.txt.
-    static void noteMissingOffset(const char* what);
-    static int missingOffsetCount();
+    // debugOnly: the offset only feeds a debug feature (PerfLog stats, profiling, headless logs);
+    // players lose nothing, so it shows on the VR panel's Debug tab only, never in the toast.
+    static void noteMissingOffset(const char* what, bool debugOnly = false);
+    static int missingOffsetCount();        // gameplay offsets (the out-of-date toast)
+    static int missingDebugOffsetCount();   // debug-only offsets (Debug tab)
     static bool InstallVertexFormatWarningFilter() { return false; }
     static void UninstallVertexFormatWarningFilter() {}
 };

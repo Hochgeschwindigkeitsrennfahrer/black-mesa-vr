@@ -155,8 +155,9 @@ void bmvr::VerifyGameOffsets()
             if (why.empty())
                 continue;
             ++failed;
-            Game::logMsg("Offset check FAILED: %s (%s+0x%X): %s", c.name, c.module, c.value, why.c_str());
-            Game::noteMissingOffset((std::string("offset ") + c.name).c_str());
+            Game::logMsg("Offset check FAILED%s: %s (%s+0x%X): %s", c.debugOnly ? " (debug only)" : "",
+                c.name, c.module, c.value, why.c_str());
+            Game::noteMissingOffset((std::string("offset ") + c.name).c_str(), c.debugOnly);
         }
         bool same = false;
         const std::string have = Fingerprint(base, fp, same);

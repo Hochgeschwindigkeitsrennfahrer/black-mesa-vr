@@ -68,7 +68,8 @@ namespace
     bool IsEngineCmdKey(const char* key) { return key && std::strncmp(key, "cmd:", 4) == 0; }
     bool IsEngineKey(const char* key) { return IsEngineCvarKey(key) || IsEngineCmdKey(key); }
 
-    enum class RowKind { Tab, Section, Toggle, Number, Button, Close };
+    // Info: a read-only status line (label left, text from InfoText right); not clickable.
+    enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info };
 
     struct Row
     {
@@ -190,6 +191,9 @@ namespace
             { "Menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
             { "Pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
             { "DEBUG", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Offsets that no longer match the game: gameplay ones also raise the "VR MOD OUT
+            // OF DATE" toast, debug-only ones (PerfLog stats, profiling) only show here.
+            { "Missing hooks", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "missing_hooks" },
             // Capture/view tests are not saved (no key): always off after a restart.
             { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
@@ -374,7 +378,7 @@ namespace
             if (l.tab[i] != g_Tab || l.col[i] != c)
                 continue;
             if (py >= l.top[i] && py < l.top[i] + RowHeight(rows[i]))
-                return k == RowKind::Section ? -1 : i;
+                return (k == RowKind::Section || k == RowKind::Info) ? -1 : i;
         }
         return -1;
     }
@@ -589,6 +593,26 @@ namespace
     constexpr COLORREF kOn = RGB(60, 150, 80);
     constexpr COLORREF kOff = RGB(70, 74, 80);
 
+    // Text of an Info row and whether it is a warning (drawn amber).
+    std::string InfoText(const Row& r, bool& warn)
+    {
+        warn = false;
+        if (!r.fmt || std::strcmp(r.fmt, "missing_hooks") != 0)
+            return {};
+        const int game = Game::missingOffsetCount(), debug = Game::missingDebugOffsetCount();
+        warn = game > 0;
+        if (game == 0 && debug == 0)
+            return "none";
+        char buf[64]{};
+        if (game == 0)
+            _snprintf(buf, sizeof(buf) - 1, "%d debug only", debug);
+        else if (debug == 0)
+            _snprintf(buf, sizeof(buf) - 1, "%d gameplay", game);
+        else
+            _snprintf(buf, sizeof(buf) - 1, "%d gameplay, %d debug", game, debug);
+        return buf;
+    }
+
     void Paint(Canvas& c, int hoverRow, int hoverZone)
     {
         c.fill(0, 0, c.w, c.h, kBg);
@@ -638,6 +662,14 @@ namespace
             {
                 c.fill(mid - 180, y0 + 8, mid + 180, y1 - 8, hover ? kBtnHover : kBtn);
                 c.text(r.label, x, y0, x + cw, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
+                continue;
+            }
+            if (r.kind == RowKind::Info)
+            {
+                bool warn = false;
+                const std::string info = InfoText(r, warn);
+                c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
+                c.text(info.c_str(), x + kMinusX0, y0, x + cw - 40, y1, warn ? kAmber : kText, 30, true, DT_RIGHT);
                 continue;
             }
             c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
@@ -1024,6 +1056,7 @@ void VR::UpdateSettingsPanel()
     switch (r.kind)
     {
     case RowKind::Section:
+    case RowKind::Info:
         return;
     case RowKind::Tab:
     {

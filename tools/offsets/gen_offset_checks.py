@@ -68,6 +68,12 @@ MODULES = {
     'materialsystem': 'kCreateNamedRTExRva',
 }
 MODULE_OF = {n: m for m, names in MODULES.items() for n in names.split()}
+# Constants that only feed debug features (PerfLog stats and profiling, BMVR_*_STATS / flare
+# logs): a failed check goes to the VR panel's Debug tab instead of the "VR MOD OUT OF DATE"
+# toast, since players lose nothing. Anything a player sees or feels stays out of this list.
+DEBUG_ONLY = set('''kEngineWorldBatchRva kEngineWorldStaticMeshesRva kPixelVisGetFractionRva
+    kPixelVisQueryForViewRva kClientFrameStartRva kClientSetupBonesRva kClientBuildTransformationsRva
+    kClientParticleCollectionSimulateRva kClientParticleMgrSimulateRva kLensflareFractionRva'''.split())
 # Mid-function addresses (an instruction or a return address, not a function start).
 MID = re.compile(r'(Return|Insn|Cmp|Call)')
 
@@ -188,7 +194,10 @@ def main():
     pes = {m: PE(os.path.join(args.game, p)) for m, p in DLL.items()}
     text = open(os.path.join(REPO, 'src', 'offsets.h')).read()
     entries, unchecked, errors, warnings = [], [], [], []
-    for name, idx, val, comment in constants(text):
+    consts = constants(text)
+    errors += [f'{n}: in DEBUG_ONLY but not in offsets.h' for n in sorted(DEBUG_ONLY - {c[0] for c in consts})]
+    for name, idx, val, comment in consts:
+        dbg = ', true' if name in DEBUG_ONLY else ''
         ref = f'Offsets::{name}' + (f'[{idx}]' if idx is not None else '')
         label = name + (f'[{idx}]' if idx is not None else '')
         if val >= 0x10000:
@@ -206,7 +215,7 @@ def main():
                 if hits > 1:
                     warnings.append(f'{label}: {hits} identical copies in {mod} (bytes checked, location not unique)')
                 entries.append(f'    {{ "{mod}.dll", "{label}", OffsetCheckKind::Code, {ref}, {start}, 0, '
-                               f'"{hexpat(raw, mask)}", nullptr }},')
+                               f'"{hexpat(raw, mask)}", nullptr{dbg} }},')
             else:
                 d = data_check(pe, val)
                 if not d:
@@ -214,7 +223,7 @@ def main():
                     continue
                 start_rva, refoff, raw, mask = d
                 entries.append(f'    {{ "{mod}.dll", "{label}", OffsetCheckKind::Data, {ref}, {start_rva:#x}, {refoff}, '
-                               f'"{hexpat(raw, mask)}", nullptr }},')
+                               f'"{hexpat(raw, mask)}", nullptr{dbg} }},')
             continue
         fields = sorted(set(re.findall(r'\b(m_[A-Za-z0-9_]+)', comment)))
         done = False
@@ -229,7 +238,7 @@ def main():
                     continue
                 kind, site, _, _ = sites[0]
                 k = 'FieldPush' if kind == 'PUSH' else 'FieldRecv'
-                entries.append(f'    {{ "{mod}.dll", "{label}", OffsetCheckKind::{k}, {ref}, {site:#x}, 0, nullptr, "{f}" }},')
+                entries.append(f'    {{ "{mod}.dll", "{label}", OffsetCheckKind::{k}, {ref}, {site:#x}, 0, nullptr, "{f}"{dbg} }},')
                 done = True
                 break
             if done:

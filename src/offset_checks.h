@@ -23,6 +23,7 @@ struct OffsetCheck
     int32_t ref;
     const char* pattern;
     const char* field;
+    bool debugOnly = false;   // feeds a debug feature only: Debug tab, not the out-of-date toast
 };
 
 struct OffsetModuleFingerprint
@@ -36,6 +37,7 @@ namespace bmvr
 {
     // Checks every module from the table that is loaded and not checked yet (server.dll
     // only exists once a map is loading, so call again from LevelInit). Failures are
-    // logged by name and counted in Game::noteMissingOffset (the in-headset toast).
+    // logged by name and counted in Game::noteMissingOffset (the in-headset toast, or the
+    // Debug tab for debugOnly checks).
     void VerifyGameOffsets();
 }

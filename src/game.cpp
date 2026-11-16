@@ -2210,18 +2210,25 @@ namespace
 {
     std::mutex g_MissingOffsetsMutex;
     std::set<std::string> g_MissingOffsets;
+    std::set<std::string> g_MissingDebugOffsets;
 }
 
-void Game::noteMissingOffset(const char* what)
+void Game::noteMissingOffset(const char* what, bool debugOnly)
 {
     std::lock_guard<std::mutex> lock(g_MissingOffsetsMutex);
-    g_MissingOffsets.insert(what ? what : "?");
+    (debugOnly ? g_MissingDebugOffsets : g_MissingOffsets).insert(what ? what : "?");
 }
 
 int Game::missingOffsetCount()
 {
     std::lock_guard<std::mutex> lock(g_MissingOffsetsMutex);
     return static_cast<int>(g_MissingOffsets.size());
+}
+
+int Game::missingDebugOffsetCount()
+{
+    std::lock_guard<std::mutex> lock(g_MissingOffsetsMutex);
+    return static_cast<int>(g_MissingDebugOffsets.size());
 }
 
 void Game::errorMsg(const char* msg)

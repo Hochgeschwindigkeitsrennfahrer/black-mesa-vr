@@ -11143,13 +11143,15 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     // Offsets that no longer match the game (a Black Mesa update) only showed in bmvr_log.txt, so
     // players ran for a session with fixes silently off (2026-10-27). Warn in the headset once in a
     // map, and again if more go missing later (server.dll hooks resolve after the first map load).
+    // Only gameplay offsets count here: debug-only ones (PerfLog stats, profiling) cost players
+    // nothing and show on the VR panel's Debug tab ("Missing hooks") instead.
     const int missingOffsets = Game::missingOffsetCount();
     if (missingOffsets > m_MissingOffsetsWarned && m_Game && m_Game->m_EngineClient
         && m_Game->m_EngineClient->IsInGame())
     {
         m_MissingOffsetsWarned = missingOffsets;
         char detail[64];
-        sprintf_s(detail, "%d hook%s missing - Black Mesa updated?", missingOffsets,
+        sprintf_s(detail, "%d gameplay hook%s missing - Black Mesa updated?", missingOffsets,
             missingOffsets == 1 ? "" : "s");
         Game::logMsg("Out-of-date warning shown: %s", detail);
         ShowToast("VR MOD OUT OF DATE", 10000, detail);
