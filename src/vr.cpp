@@ -3022,7 +3022,7 @@ private:
 class McMatFunctor : public CFunctor
 {
 public:
-    enum class Kind { Bind, Composite, RetireMsaa };
+    enum class Kind { Bind, Composite, RetireMsaa, RefractReset };
 
     McMatFunctor(VR* vr, Kind kind, int stereoEye, uint32_t band, bool flushGpu)
         : McMatFunctor(vr, kind, stereoEye, band, flushGpu, nullptr)
@@ -3065,6 +3065,8 @@ public:
             m_vr->McCompositeEyesToRing(m_band, m_havePose ? &m_pose : nullptr, m_hands.valid ? &m_hands : nullptr);
         else if (m_kind == Kind::RetireMsaa)
             m_vr->RetireMsaaEyeIfBound();
+        else if (m_kind == Kind::RefractReset)
+            m_vr->m_RefractEyeDone = nullptr;
         else
             m_vr->McBindPlaybackEye(m_stereoEye, m_flushGpu);
     }
@@ -15952,6 +15954,25 @@ void VR::NoteTranslucentPassStart()
         return;
     }
     RetireMsaaEyeIfBound();
+}
+
+// RefractOncePerEye: the main view's translucent pass (world glass) is done.
+// Copies after it (env_screenoverlay refract, underwater warp) must see the
+// finished frame: the end-of-Lambda-Core overlay (bm_c3a2i) otherwise pasted
+// the first glass copy, taken before the orb particle and its lens flare, over
+// the whole eye. One more copy per eye at most.
+void VR::NoteWorldTranslucentsDone()
+{
+    if (McPipelineEnabled())
+    {
+        auto* functor = new (std::nothrow) McMatFunctor(this, McMatFunctor::Kind::RefractReset, 0, 0, false);
+        if (!functor)
+            return;
+        functor->AddRef();
+        QueueMcMatFunctor(functor, "RefractResetAfterTranslucents");
+        return;
+    }
+    m_RefractEyeDone = nullptr;
 }
 
 void VR::RetireMsaaEyeIfBound()

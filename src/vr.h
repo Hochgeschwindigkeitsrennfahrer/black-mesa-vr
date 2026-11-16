@@ -973,6 +973,8 @@ public:
     // follow (game thread); the eye being drawn switches to its 1x resolve at that point of the draw stream.
     void NoteTranslucentPassStart();
     void RetireMsaaEyeIfBound();
+    // RefractOncePerEye: main view translucents done (game thread); later refract copies run again.
+    void NoteWorldTranslucentsDone();
     void MsaaEyesTo1x(IDirect3DDevice9* device);
     // Eye surface the calling thread is drawing (multicore TLS or the stereo blit).
     IDirect3DSurface9* ThreadEyeSurface() const;

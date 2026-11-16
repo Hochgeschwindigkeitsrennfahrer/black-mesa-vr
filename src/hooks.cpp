@@ -1305,6 +1305,7 @@ namespace
     int g_TranslucentDepth = 0;
     bool g_TranslucentHold = false;
     bool g_TranslucentHoldTo1x = false;   // "MSAA skips particles": held particles go to the 1x resolve
+    bool g_TranslucentMainView = false;   // the outermost pass is VIEW_MAIN's
     std::vector<HeldParticle> g_HeldParticles;
 
     // Particle system renderable? By the MSVC RTTI class name behind the
@@ -1340,6 +1341,7 @@ namespace
         if (g_TranslucentDepth++ != 0)
             return;
         const bool mainView = Hooks::m_VR && g_ClientCurrentViewId && g_ClientCurrentViewId() == 0;
+        g_TranslucentMainView = mainView;
         g_TranslucentHoldTo1x = mainView && bmvr::g_MsaaParticles1x && Hooks::m_VR->UseVrMsaa();
         // ParticlesLast: same hold as a pure draw-order change (no 1x switch).
         g_TranslucentHold = g_TranslucentHoldTo1x || (mainView && bmvr::g_ParticlesLast);
@@ -1350,13 +1352,16 @@ namespace
         if (--g_TranslucentDepth != 0)
             return;
         g_TranslucentHold = false;
-        if (g_HeldParticles.empty())
-            return;
-        if (g_TranslucentHoldTo1x && Hooks::m_VR)
-            Hooks::m_VR->NoteTranslucentPassStart();
-        for (const HeldParticle& h : g_HeldParticles)
-            g_OrigDrawTranslucentRenderable(h.ent, h.twoPass, h.a3, h.a4, h.viewData);
-        g_HeldParticles.clear();
+        if (!g_HeldParticles.empty())
+        {
+            if (g_TranslucentHoldTo1x && Hooks::m_VR)
+                Hooks::m_VR->NoteTranslucentPassStart();
+            for (const HeldParticle& h : g_HeldParticles)
+                g_OrigDrawTranslucentRenderable(h.ent, h.twoPass, h.a3, h.a4, h.viewData);
+            g_HeldParticles.clear();
+        }
+        if (g_TranslucentMainView && bmvr::g_RefractOncePerEye && Hooks::m_VR && Hooks::m_VR->m_IsVREnabled)
+            Hooks::m_VR->NoteWorldTranslucentsDone();
     }
 }
 
@@ -8529,7 +8534,8 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
     // _rt_PowerOfTwoFB for every refractive object it draws (up to ~50 per eye
     // per frame behind the train windows). With this on, only the first copy of
     // each eye's frame runs; later glass refracts that copy (glass behind glass
-    // is then missing from the refraction). Any other writer resets it.
+    // is then missing from the refraction). Any other writer resets it, and so
+    // does the end of the main view's translucent pass (screen overlays).
     // Off while the player's eyes are under water: the underwater screen warp
     // copies after the gun is drawn, and skipping that copy hid the gun and
     // hand (2026-11-13). (The viewmodel pass is not visible on the drawing
