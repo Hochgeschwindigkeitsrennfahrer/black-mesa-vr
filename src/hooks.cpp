@@ -8072,7 +8072,14 @@ void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial
             ++s_gatedPost;
         }
     }
-    if (!bmvr::g_EyeBloom && StereoBloomMaterial(matName) && stereoEyePost && !eyeEnginePost)
+    // dev/bloomadd (drawn instead of engine_post when mat_colorcorrection is
+    // 0) adds _rt_SmallFB0, not BM's bloom result _rt_SmallFB3 (what
+    // engine_post_nxtgen reads). On the eyes SmallFB0 only holds BM's HUD glow
+    // at window scale, so it smears blurred HUD digits over both eyes; skip it
+    // also with EyeBloom on (regressed when b2fad11 made EyeBloom default,
+    // 2026-11-16).
+    const bool bloomAdd = matName && std::strstr(matName, "bloomadd") != nullptr;
+    if ((!bmvr::g_EyeBloom || bloomAdd) && StereoBloomMaterial(matName) && stereoEyePost && !eyeEnginePost)
     {
         static int s_skipBloom;
         if (s_skipBloom < 12)
