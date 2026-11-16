@@ -18,6 +18,8 @@
 
 #include <d3dcompiler.h>
 #include <algorithm>
+#include <array>
+#include <unordered_map>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -382,18 +384,56 @@ namespace
     // drawn, plus refract copies (StretchRect into a reflection-sized RT).
     // Read back a few Presents later without D3DGETDATA_FLUSH, so nothing
     // stalls. D3D thread only (the render thread under MulticoreMode).
-    enum GpuSpanKind { kSpanNone = -1, kSpanEye = 0, kSpanRefl = 1, kSpanCopy = 2, kSpanKinds = 3 };
+    // GpuPassDetail adds kSpanOther (every other RT0) and a label per span:
+    // "<RT0 description> | <material group or copy/MSAA step>". Detail spans
+    // share one timestamp per boundary (the end of one is the next's begin).
+    enum GpuSpanKind { kSpanNone = -1, kSpanEye = 0, kSpanRefl = 1, kSpanCopy = 2, kSpanOther = 3, kSpanKinds = 4 };
     struct GpuSpan
     {
         IDirect3DQuery9* begin;
         IDirect3DQuery9* end;
         int kind;
         int eye;
+        int label;          // GpuPassDetail label id, -1 = none
+        bool beginShared;   // begin is the previous span's end (do not recycle it)
     };
     constexpr int kGpuFrames = 6;
     constexpr size_t kGpuMaxSpans = 96;
+    constexpr size_t kGpuMaxDetailSpans = 8192;
+    struct GpuDetailSample
+    {
+        int label;
+        int eye;
+        double ms;
+    };
     struct GpuPassTimer
     {
+        // GpuPassDetail state.
+        int openLabel = -1;
+        bool openBeginShared = false;
+        IDirect3DDevice9* device = nullptr;
+        std::string curRt = "none";
+        std::string curMat = "-";
+        std::string curOverride;
+        std::vector<std::string> labelNames;
+        std::unordered_map<std::string, int> labelIds;
+        std::vector<std::array<double, 3>> labelMs;
+        std::vector<GpuDetailSample> detailScratch;
+        double detailSpans = 0.0;
+        int detailFrames = 0;
+        int detailDroppedFull = 0;
+        DWORD lastDetailLogMs = 0;
+        int detailReports = 0;
+        // CPU side of the "after Present" span: Present call -> return, and
+        // Present return -> first RT0 change of the next frame (QPC ms).
+        double presentCallMs = 0.0;
+        double presentReturnMs = 0.0;
+        bool waitFirstRt = false;
+        double cpuPresentSum = 0.0;
+        double cpuGapSum = 0.0;
+        int cpuGapN = 0;
+        int cpuPresentN = 0;
+        bool dumpNextFrame = false;   // log one resolved frame's spans in order
         std::vector<IDirect3DQuery9*> pool;
         std::vector<GpuSpan> frames[kGpuFrames];
         IDirect3DQuery9* frameEnd[kGpuFrames] = {};
@@ -417,7 +457,31 @@ namespace
 
     bool GpuTimerEnabled()
     {
-        return !g_GpuTimer.failed && (bmvr::g_GpuPassTiming || bmvr::g_PerfLog);
+        return !g_GpuTimer.failed && (bmvr::g_GpuPassTiming || bmvr::g_PerfLog || bmvr::g_GpuPassDetail);
+    }
+
+    bool GpuTimerDetail()
+    {
+        return bmvr::g_GpuPassDetail && !g_GpuTimer.failed;
+    }
+
+    int GpuTimerLabelId(const std::string& name)
+    {
+        GpuPassTimer& t = g_GpuTimer;
+        auto it = t.labelIds.find(name);
+        if (it != t.labelIds.end())
+            return it->second;
+        const int id = static_cast<int>(t.labelNames.size());
+        t.labelNames.push_back(name);
+        t.labelMs.push_back({ 0.0, 0.0, 0.0 });
+        t.labelIds.emplace(name, id);
+        return id;
+    }
+
+    int GpuTimerCurrentLabel()
+    {
+        GpuPassTimer& t = g_GpuTimer;
+        return GpuTimerLabelId(t.curRt + " | " + (t.curOverride.empty() ? t.curMat : t.curOverride));
     }
 
     bool GpuTimerThreadOk()
@@ -453,6 +517,27 @@ namespace
         q = nullptr;
     }
 
+    // The open span's begin, unless it is a shared boundary (owned by the
+    // previous span's end in the frame list).
+    void GpuTimerDropOpenBegin()
+    {
+        GpuPassTimer& t = g_GpuTimer;
+        if (t.openBeginShared)
+            t.openBegin = nullptr;
+        else
+            GpuTimerRecycle(t.openBegin);
+        t.openBeginShared = false;
+    }
+
+    void GpuTimerRecycleSpan(GpuSpan& sp)
+    {
+        if (sp.beginShared)
+            sp.begin = nullptr;
+        else
+            GpuTimerRecycle(sp.begin);
+        GpuTimerRecycle(sp.end);
+    }
+
     IDirect3DQuery9* GpuTimerStamp(IDirect3DDevice9* device)
     {
         IDirect3DQuery9* q = GpuTimerQuery(device);
@@ -462,29 +547,53 @@ namespace
     }
 
     // Close the open span and open one of `kind` (kSpanNone = just close).
-    void GpuTimerSwitch(IDirect3DDevice9* device, int kind, int eye)
+    // `label` is the GpuPassDetail label (-1 outside detail mode).
+    void GpuTimerSwitch(IDirect3DDevice9* device, int kind, int eye, int label = -1)
     {
         GpuPassTimer& t = g_GpuTimer;
-        if (kind == t.openKind && eye == t.openEye && (kind == kSpanNone || t.openBegin))
+        if (kind == kSpanNone)
+            label = -1;
+        if (kind == t.openKind && eye == t.openEye && label == t.openLabel && (kind == kSpanNone || t.openBegin))
             return;
+        IDirect3DQuery9* reuse = nullptr;
         if (t.openBegin)
         {
             IDirect3DQuery9* end = GpuTimerStamp(device);
             std::vector<GpuSpan>& spans = t.frames[t.write];
-            if (end && spans.size() < kGpuMaxSpans)
-                spans.push_back(GpuSpan{ t.openBegin, end, t.openKind, t.openEye });
+            const size_t cap = bmvr::g_GpuPassDetail ? kGpuMaxDetailSpans : kGpuMaxSpans;
+            if (end && spans.size() < cap)
+            {
+                spans.push_back(GpuSpan{ t.openBegin, end, t.openKind, t.openEye, t.openLabel, t.openBeginShared });
+                if (bmvr::g_GpuPassDetail)
+                    reuse = end;
+                t.openBegin = nullptr;
+                t.openBeginShared = false;
+            }
             else
             {
-                GpuTimerRecycle(t.openBegin);
+                GpuTimerDropOpenBegin();
                 GpuTimerRecycle(end);
                 ++t.dropped;
+                if (bmvr::g_GpuPassDetail)
+                    ++t.detailDroppedFull;
             }
-            t.openBegin = nullptr;
         }
         t.openKind = kind;
         t.openEye = eye;
+        t.openLabel = label;
         if (kind != kSpanNone)
-            t.openBegin = GpuTimerStamp(device);
+        {
+            if (reuse)
+            {
+                t.openBegin = reuse;
+                t.openBeginShared = true;
+            }
+            else
+            {
+                t.openBegin = GpuTimerStamp(device);
+                t.openBeginShared = false;
+            }
+        }
     }
 
     std::atomic<bool> g_EyeRtReset{ false };   // SkyWaterPerEye: drop the per-eye RT copies (map change)
@@ -1230,13 +1339,136 @@ namespace
         return kSpanNone;
     }
 
+    // GpuPassDetail: "<size label> WxH f<format> [eyeL|eyeR] mrtN [ds ms=N ret=R]".
+    std::string GpuTimerDescribeRt0(IDirect3DDevice9* device, VR* vr, IDirect3DSurface9* rt)
+    {
+        if (!rt)
+            return "none";
+        D3DSURFACE_DESC d{};
+        if (FAILED(rt->GetDesc(&d)))
+            return "?";
+        char buf[192];
+        const char* label = AuditSizeLabel(vr, d.Width, d.Height);
+        const char* eyeTag = "";
+        if (vr && rt == vr->m_D9LeftEyeSurface) eyeTag = " eyeL";
+        else if (vr && rt == vr->m_D9RightEyeSurface) eyeTag = " eyeR";
+        int mrt = 1;
+        for (DWORD i = 1; i < 4; ++i)
+        {
+            IDirect3DSurface9* o = nullptr;
+            if (SUCCEEDED(device->GetRenderTarget(i, &o)) && o)
+            {
+                ++mrt;
+                o->Release();
+            }
+        }
+        char ms[64] = {};
+        IDirect3DSurface9* ds = nullptr;
+        if (SUCCEEDED(device->GetDepthStencilSurface(&ds)) && ds)
+        {
+            bmvr::MsaaDepthStateText(ds, ms, sizeof(ms));
+            if (char* cut = std::strstr(ms, " pend="))
+                *cut = 0;
+            ds->Release();
+        }
+        std::snprintf(buf, sizeof(buf), "%s%s%ux%u f%u%s rtms%u mrt%d%s%s", label, label[0] ? " " : "", d.Width,
+            d.Height, static_cast<unsigned>(d.Format), eyeTag, static_cast<unsigned>(d.MultiSampleType), mrt,
+            ms[0] ? " ds" : "", ms);
+        return buf;
+    }
+
+    int GpuTimerDetailKind(int kind)
+    {
+        return kind == kSpanNone && GpuTimerDetail() ? kSpanOther : kind;
+    }
+
     // Called after RT0 changes (SetRenderTarget index 0).
     void GpuTimerOnRt0(IDirect3DDevice9* device, VR* vr, UINT w, UINT h)
     {
         if (!device || !GpuTimerEnabled() || !GpuTimerThreadOk())
             return;
-        GpuTimerSwitch(device, GpuTimerKindForRt0(vr, w, h), GpuTimerEye(vr));
+        int label = -1;
+        if (GpuTimerDetail())
+        {
+            if (g_GpuTimer.waitFirstRt)
+            {
+                g_GpuTimer.waitFirstRt = false;
+                g_GpuTimer.cpuGapSum += QpcNowMs() - g_GpuTimer.presentReturnMs;
+                ++g_GpuTimer.cpuGapN;
+            }
+            g_GpuTimer.device = device;
+            g_GpuTimer.curRt = GpuTimerDescribeRt0(device, vr, g_Rt0ActualPtr);
+            label = GpuTimerCurrentLabel();
+        }
+        GpuTimerSwitch(device, GpuTimerDetailKind(GpuTimerKindForRt0(vr, w, h)), GpuTimerEye(vr), label);
     }
+
+    // GpuPassDetail: reopen the current span with a new label (material
+    // group change, copy, MSAA switch), same kind and eye.
+    void GpuTimerRelabel(IDirect3DDevice9* device)
+    {
+        GpuPassTimer& t = g_GpuTimer;
+        if (!device || !GpuTimerDetail() || !GpuTimerThreadOk() || t.openKind == kSpanNone)
+            return;
+        GpuTimerSwitch(device, t.openKind, t.openEye, GpuTimerCurrentLabel());
+    }
+
+    // Material group: "__gbxog0" (global Xen fog), "__gbxog*" (fog volumes),
+    // other "__" names without trailing digits, else the directory part.
+    void GpuTimerMaterialGroup(const char* name, std::string& out)
+    {
+        out.clear();
+        if (!name || !name[0])
+        {
+            out = "-";
+            return;
+        }
+        if (std::strncmp(name, "__gbxog", 7) == 0)
+        {
+            out = name[7] == '0' ? "__gbxog0 (global Xen fog)" : "__gbxog* (fog volumes)";
+            return;
+        }
+        const char* slash = std::strrchr(name, '/');
+        const char* bslash = std::strrchr(name, '\\');
+        if (bslash && (!slash || bslash > slash))
+            slash = bslash;
+        // Post / engine materials are few and each is its own pass: full name.
+        const bool fullName = std::strncmp(name, "dev/", 4) == 0 || std::strncmp(name, "engine/", 7) == 0;
+        if (slash && name[0] != '_' && !fullName)
+        {
+            out.assign(name, static_cast<size_t>(slash - name + 1));
+            return;
+        }
+        size_t n = std::strlen(name);
+        while (n > 1 && std::isdigit(static_cast<unsigned char>(name[n - 1])))
+            --n;
+        out.assign(name, n);
+    }
+
+    // GpuPassDetail: named scope (copy, MSAA retire/begin) inside the open span.
+    struct GpuTimerScope
+    {
+        IDirect3DDevice9* device = nullptr;
+        bool on = false;
+        std::string saved;
+        GpuTimerScope(IDirect3DDevice9* dev, const char* what)
+        {
+            if (!dev || !GpuTimerDetail() || !GpuTimerThreadOk() || g_GpuTimer.openKind == kSpanNone)
+                return;
+            device = dev;
+            on = true;
+            saved = g_GpuTimer.curOverride;
+            g_GpuTimer.curOverride = what;
+            GpuTimerRelabel(device);
+        }
+        ~GpuTimerScope()
+        {
+            if (!on || g_GpuTimer.failed)
+                return;
+            g_GpuTimer.curOverride = saved;
+            GpuTimerRelabel(device);
+        }
+    };
 
     bool GpuTimerRead(IDirect3DQuery9* q, UINT64& out)
     {
@@ -1244,6 +1476,65 @@ namespace
     }
 
     // Called before Present: closes the frame and resolves the oldest one.
+    // GpuPassDetail report: ms per frame per eye (L, R, outside eyes = O),
+    // grouped by RT0, then the top labels (RT0 | material group / step).
+    void GpuTimerLogDetail(VR* vr)
+    {
+        GpuPassTimer& t = g_GpuTimer;
+        const double n = static_cast<double>(t.detailFrames);
+        double tot[3] = {};
+        std::map<std::string, std::array<double, 3>> byRt;
+        std::map<std::string, std::array<double, 3>> byMat;
+        for (size_t i = 0; i < t.labelNames.size(); ++i)
+        {
+            const std::string& name = t.labelNames[i];
+            const size_t bar = name.find(" | ");
+            std::array<double, 3>& r = byRt[bar == std::string::npos ? name : name.substr(0, bar)];
+            std::array<double, 3>& m = byMat[bar == std::string::npos ? std::string("-") : name.substr(bar + 3)];
+            for (int e = 0; e < 3; ++e)
+            {
+                r[e] += t.labelMs[i][e];
+                m[e] += t.labelMs[i][e];
+                tot[e] += t.labelMs[i][e];
+            }
+        }
+        Game::logMsg("GPU pass detail: %d frames, %.0f spans/frame, %d frames over the span cap | total L=%.2f R=%.2f O=%.2f ms/frame (eye %ux%u, MSAA %s) | CPU: Present call %.2f ms, Present return -> first RT0 %.2f ms",
+            t.detailFrames, t.detailSpans / n, t.detailDroppedFull, tot[1] / n, tot[2] / n, tot[0] / n,
+            vr ? vr->m_RenderWidth : 0, vr ? vr->m_RenderHeight : 0, vr && vr->UseVrMsaa() ? "on" : "off",
+            t.cpuPresentN ? t.cpuPresentSum / t.cpuPresentN : 0.0, t.cpuGapN ? t.cpuGapSum / t.cpuGapN : 0.0);
+        t.cpuPresentSum = t.cpuGapSum = 0.0;
+        t.cpuPresentN = t.cpuGapN = 0;
+        auto dump = [&](const char* tag, const std::map<std::string, std::array<double, 3>>& m, size_t maxLines) {
+            std::vector<std::pair<double, const std::string*>> order;
+            for (const auto& [k, v] : m)
+                order.emplace_back(v[0] + v[1] + v[2], &k);
+            std::sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+            size_t lines = 0;
+            for (const auto& [sum, k] : order)
+            {
+                if (lines >= maxLines || sum / n < 0.002)
+                    break;
+                const std::array<double, 3>& v = m.at(*k);
+                Game::logMsg("GPU pass %s: L %6.3f R %6.3f O %6.3f | %s", tag, v[1] / n, v[2] / n, v[0] / n, k->c_str());
+                ++lines;
+            }
+        };
+        dump("rt", byRt, 40);
+        dump("mat", byMat, 40);
+        std::map<std::string, std::array<double, 3>> byLabel;
+        for (size_t i = 0; i < t.labelNames.size(); ++i)
+            byLabel[t.labelNames[i]] = t.labelMs[i];
+        dump("label", byLabel, 400);
+        for (std::array<double, 3>& v : t.labelMs)
+            v = { 0.0, 0.0, 0.0 };
+        t.detailSpans = 0.0;
+        t.detailFrames = 0;
+        t.detailDroppedFull = 0;
+        t.lastDetailLogMs = GetTickCount();
+        if (++t.detailReports == 2)
+            t.dumpNextFrame = true;
+    }
+
     void GpuTimerOnPresent(IDirect3DDevice9* device, VR* vr)
     {
         if (!device || !GpuTimerEnabled())
@@ -1258,16 +1549,13 @@ namespace
                 Game::logMsg("GPU pass timing: following the presenting thread %lu (was %lu)",
                     static_cast<unsigned long>(tid), static_cast<unsigned long>(t.threadId));
             t.threadId = tid;
-            GpuTimerRecycle(t.openBegin);
-            t.openBegin = nullptr;
+            GpuTimerDropOpenBegin();
             t.openKind = kSpanNone;
+            t.openLabel = -1;
             for (int i = 0; i < kGpuFrames; ++i)
             {
                 for (GpuSpan& sp : t.frames[i])
-                {
-                    GpuTimerRecycle(sp.begin);
-                    GpuTimerRecycle(sp.end);
-                }
+                    GpuTimerRecycleSpan(sp);
                 t.frames[i].clear();
                 GpuTimerRecycle(t.frameEnd[i]);
             }
@@ -1275,7 +1563,15 @@ namespace
         }
         const int resumeKind = t.openKind;
         const int resumeEye = t.openEye;
+        const int resumeLabel = t.openLabel;
         GpuTimerSwitch(device, kSpanNone, 0);
+        if (GpuTimerDetail())
+        {
+            t.device = device;
+            // Material names: the Bind hooks stay on while detail timing runs
+            // (they are created lazily, so keep asking).
+            Hooks::SetMatBindHooks(true);
+        }
         if (!t.freqQuery)
         {
             if (SUCCEEDED(device->CreateQuery(D3DQUERYTYPE_TIMESTAMPFREQ, &t.freqQuery)) && t.freqQuery)
@@ -1296,15 +1592,21 @@ namespace
         IDirect3DQuery9*& oldEnd = t.frameEnd[t.write];
         bool ready = t.freq != 0;
         double frameSpan[kSpanKinds][3] = {};
+        t.detailScratch.clear();
+        const size_t spanCount = old.size();
         for (GpuSpan& sp : old)
         {
             UINT64 a = 0, b = 0;
             if (ready && GpuTimerRead(sp.begin, a) && GpuTimerRead(sp.end, b) && b >= a)
-                frameSpan[sp.kind][sp.eye] += static_cast<double>(b - a) * 1000.0 / static_cast<double>(t.freq);
+            {
+                const double ms = static_cast<double>(b - a) * 1000.0 / static_cast<double>(t.freq);
+                frameSpan[sp.kind][sp.eye] += ms;
+                if (sp.label >= 0)
+                    t.detailScratch.push_back(GpuDetailSample{ sp.label, sp.eye, ms });
+            }
             else
                 ready = false;
-            GpuTimerRecycle(sp.begin);
-            GpuTimerRecycle(sp.end);
+            GpuTimerRecycleSpan(sp);
         }
         old.clear();
         UINT64 endTs = 0;
@@ -1315,6 +1617,24 @@ namespace
             for (int k = 0; k < kSpanKinds; ++k)
                 for (int e = 0; e < 3; ++e)
                     t.sumMs[k][e] += frameSpan[k][e];
+            if (t.dumpNextFrame && !t.detailScratch.empty())
+            {
+                t.dumpNextFrame = false;
+                Game::logMsg("GPU pass frame: %zu spans in GPU order (eye, ms, label)", t.detailScratch.size());
+                double at = 0.0;
+                for (const GpuDetailSample& d : t.detailScratch)
+                {
+                    Game::logMsg("GPU pass frame: @%7.3f e%d %6.3f | %s", at, d.eye, d.ms, t.labelNames[d.label].c_str());
+                    at += d.ms;
+                }
+            }
+            if (!t.detailScratch.empty())
+            {
+                for (const GpuDetailSample& d : t.detailScratch)
+                    t.labelMs[d.label][d.eye] += d.ms;
+                t.detailSpans += static_cast<double>(spanCount);
+                ++t.detailFrames;
+            }
             if (t.lastFrameEndTs != 0 && endTs > t.lastFrameEndTs)
             {
                 t.frameMs += static_cast<double>(endTs - t.lastFrameEndTs) * 1000.0 / static_cast<double>(t.freq);
@@ -1351,9 +1671,21 @@ namespace
             t.dropped = 0;
             t.lastLogMs = now;
         }
+        if (t.lastDetailLogMs == 0)
+            t.lastDetailLogMs = now;
+        if (now - t.lastDetailLogMs >= 10000 && t.detailFrames > 0)
+            GpuTimerLogDetail(vr);
         // RT0 stays bound across Present; keep timing it in the next frame.
-        GpuTimerSwitch(device, resumeKind, resumeEye);
-        (void)vr;
+        // Detail: until the next RT0 change that span is labelled
+        // "after Present" (GPU idle waiting for the next frame + its first work).
+        if (GpuTimerDetail() && resumeKind != kSpanNone)
+        {
+            t.curOverride = "after Present";
+            GpuTimerSwitch(device, resumeKind, resumeEye, GpuTimerCurrentLabel());
+            t.curOverride.clear();
+        }
+        else
+            GpuTimerSwitch(device, resumeKind, resumeEye, resumeLabel);
     }
 
     void GpuTimerReleaseAll()
@@ -1364,13 +1696,19 @@ namespace
                 q->Release();
             q = nullptr;
         };
+        if (t.openBeginShared)
+            t.openBegin = nullptr;
         rel(t.openBegin);
+        t.openBeginShared = false;
         t.openKind = kSpanNone;
+        t.openLabel = -1;
         for (int f = 0; f < kGpuFrames; ++f)
         {
             for (GpuSpan& sp : t.frames[f])
             {
-                rel(sp.begin);
+                if (!sp.beginShared)
+                    rel(sp.begin);
+                sp.begin = nullptr;
                 rel(sp.end);
             }
             t.frames[f].clear();
@@ -1409,7 +1747,15 @@ namespace
         AuditOnPresent();
         if (!g_OrigPresent)
             return D3DERR_INVALIDCALL;
-        return g_OrigPresent(device, src, dst, hwnd, dirty);
+        if (!GpuTimerDetail())
+            return g_OrigPresent(device, src, dst, hwnd, dirty);
+        const double callMs = QpcNowMs();
+        const HRESULT hr = g_OrigPresent(device, src, dst, hwnd, dirty);
+        g_GpuTimer.presentReturnMs = QpcNowMs();
+        g_GpuTimer.cpuPresentSum += g_GpuTimer.presentReturnMs - callMs;
+        ++g_GpuTimer.cpuPresentN;
+        g_GpuTimer.waitFirstRt = true;
+        return hr;
     }
 
     HRESULT __stdcall HookedSetRenderTarget(IDirect3DDevice9* device, DWORD index, IDirect3DSurface9* rt)
@@ -2380,6 +2726,7 @@ namespace
         bool timed = false;
         int resumeKind = kSpanNone;
         int resumeEye = 0;
+        int resumeLabel = -1;
         if (device && pDest && vr && bmvr::g_RefractCopyRtW > 0 && GpuTimerEnabled()
             && vr->StereoWorldPassActive() && GpuTimerThreadOk())
         {
@@ -2389,14 +2736,33 @@ namespace
             {
                 resumeKind = g_GpuTimer.openKind;
                 resumeEye = g_GpuTimer.openEye;
-                GpuTimerSwitch(device, kSpanCopy, GpuTimerEye(vr));
+                resumeLabel = g_GpuTimer.openLabel;
+                GpuTimerSwitch(device, kSpanCopy, GpuTimerEye(vr), resumeLabel);
                 timed = true;
             }
         }
         AuditStretchRect(pSource, pSourceRect, pDest, pDestRect);
-        const HRESULT hr = HookedStretchRectInner(device, pSource, pSourceRect, pDest, pDestRect, filter);
+        HRESULT hr;
+        if (GpuTimerDetail() && pSource && pDest)
+        {
+            if (timed)
+                GpuTimerSwitch(device, kSpanCopy, GpuTimerEye(vr), resumeLabel);
+            D3DSURFACE_DESC sd{}, dd{};
+            pSource->GetDesc(&sd);
+            pDest->GetDesc(&dd);
+            char what[160];
+            std::snprintf(what, sizeof(what), "copy %s%s%ux%u f%u ms%u -> %s%s%ux%u f%u%s",
+                AuditSizeLabel(vr, sd.Width, sd.Height), AuditSizeLabel(vr, sd.Width, sd.Height)[0] ? " " : "",
+                sd.Width, sd.Height, static_cast<unsigned>(sd.Format), static_cast<unsigned>(sd.MultiSampleType),
+                AuditSizeLabel(vr, dd.Width, dd.Height), AuditSizeLabel(vr, dd.Width, dd.Height)[0] ? " " : "",
+                dd.Width, dd.Height, static_cast<unsigned>(dd.Format), timed ? " (refract)" : "");
+            GpuTimerScope scope(device, what);
+            hr = HookedStretchRectInner(device, pSource, pSourceRect, pDest, pDestRect, filter);
+        }
+        else
+            hr = HookedStretchRectInner(device, pSource, pSourceRect, pDest, pDestRect, filter);
         if (timed && !g_GpuTimer.failed)
-            GpuTimerSwitch(device, resumeKind, resumeEye);
+            GpuTimerSwitch(device, resumeKind, resumeEye, resumeLabel);
         return hr;
     }
 
@@ -11203,6 +11569,9 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     BMVR_PROF("vr DrawIndependentHandMarkers");
     if (!eyeSurf || !m_IsVREnabled || !IsGameplayEligible() || !m_HmdPoseValid || !g_D3DVR9)
         return false;
+    char gpuLabel[48];
+    std::snprintf(gpuLabel, sizeof(gpuLabel), "mod hands/HUD overlay e%d%s", stereoEye, drawOverlays ? " +overlays" : "");
+    GpuTimerScope gpuScope(g_GpuTimer.device, gpuLabel);
     if (IsMenuUp())
         return false;
     if (!(m_Fov > 10.f) || !m_HmdOriginLatched)
@@ -15245,7 +15614,11 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose, 
     EndStereoEyeBlit();
     g_McPlayEye = 0;
 
-    const bool copied = CopyEyesToOpenXrPublishSlot(left, right, pend);
+    bool copied = false;
+    {
+        GpuTimerScope gpuScope(g_GpuTimer.device, "mod eyes -> OpenXR publish copy");
+        copied = CopyEyesToOpenXrPublishSlot(left, right, pend);
+    }
     if (copied)
     {
         m_McEyeCopyDone = true;
@@ -15263,7 +15636,10 @@ void VR::McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose, 
     // blit. Offscreen dest — not the swapchain (that clobbered the eye
     // viewport / stalled Present).
     if (!Want2dMenuPanel() && !WantPauseWorldOverlay())
+    {
+        GpuTimerScope gpuScope(g_GpuTimer.device, "mod desktop mirror");
         MirrorStereoToDesktopWindow();
+    }
 }
 
 bool VR::QueueMcEyeBind(int stereoEye, bool flushGpu)
@@ -16011,7 +16387,10 @@ void VR::RetireMsaaEyeForPost()
     IDirect3DDevice9* device = nullptr;
     if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
         return;
-    bmvr::MsaaEyeRetire(device, color, depth);
+    {
+        GpuTimerScope scope(device, "msaa retire (colour resolve)");
+        bmvr::MsaaEyeRetire(device, color, depth);
+    }
     static int s_log;
     if (s_log < 4)
     {
@@ -16842,6 +17221,7 @@ void VR::DrawToastOnEyeSurface(IDirect3DSurface9* eyeSurf, int stereoEye)
     BMVR_PROF("vr DrawToastOnEyeSurface");
     if (!eyeSurf || !g_D3DVR9 || !ToastVisible())
         return;
+    GpuTimerScope gpuScope(g_GpuTimer.device, "mod toast");
     D3DSURFACE_DESC desc{};
     if (FAILED(eyeSurf->GetDesc(&desc)) || desc.Width < 64 || desc.Height < 64)
         return;
@@ -17786,7 +18166,10 @@ void VR::ClearStereoEyeSurfaces()
     m_RefractEyeDone = nullptr;   // RefractOncePerEye: new eye frame
     // Eye MSAA: back to the multisampled surfaces for this eye's scene.
     if (UseVrMsaa())
+    {
+        GpuTimerScope scope(device, "msaa begin");
         bmvr::MsaaEyeBegin(device, color, depth);
+    }
 
     DWORD flags = D3DCLEAR_TARGET;
     if (depth)
@@ -19121,6 +19504,18 @@ void BmvrAuditNoteMaterial(const char* name)
 {
     if (!name)
         name = "";
+    if (GpuTimerDetail() && g_GpuTimer.device && GpuTimerThreadOk()
+        && std::strncmp(name, t_AuditMaterial, sizeof(t_AuditMaterial) - 1) != 0)
+    {
+        static thread_local std::string s_group;
+        GpuTimerMaterialGroup(name, s_group);
+        if (s_group != g_GpuTimer.curMat)
+        {
+            g_GpuTimer.curMat = s_group;
+            if (g_GpuTimer.curOverride.empty())
+                GpuTimerRelabel(g_GpuTimer.device);
+        }
+    }
     std::strncpy(t_AuditMaterial, name, sizeof(t_AuditMaterial) - 1);
     t_AuditMaterial[sizeof(t_AuditMaterial) - 1] = 0;
 }

@@ -151,6 +151,7 @@ namespace bmvr
     int g_RefractCopyRtW = 0;
     int g_RefractCopyRtH = 0;
     bool g_GpuPassTiming = false;
+    bool g_GpuPassDetail = false;
     bool g_PerfLog = false;
     int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
@@ -754,6 +755,8 @@ namespace bmvr
                 g_RefractOncePerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassTiming") == 0)
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "GpuPassDetail") == 0)
+                g_GpuPassDetail = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LodBias") == 0)
                 g_LodBias = std::clamp(static_cast<float>(atof(val)), -1.f, 2.f);
             else if (std::strcmp(n, "AlphaToCoverage") == 0)
