@@ -12097,6 +12097,169 @@ namespace dxvk {
 }
 
 
+namespace dxvk {
+  // BMVR foveated rendering (fixed, around the lens centre). Shading rate
+  // image per eye: one R8_UINT texel per m_bmvrFovTexel pixels, rings by
+  // distance from the centre in units of half the eye height:
+  //   < r1 1x1, r1..r2 2x1 / 1x2 (coarse along the axis pointing away from
+  //   the centre), r2..r3 2x2, > r3 4x4 (clamped by the driver to its
+  //   largest supported rate, 2x2 on RDNA4).
+  // Ring layout adapted from HL2VR (OpenVRDirectMode.cpp, VRS map).
+  void D3D9DeviceEx::BmvrFoveationBuild(BmvrFovMap& map, int eyeIndex, uint32_t eyeW, uint32_t eyeH,
+      int32_t cx, int32_t cy, const float r[3], uint32_t level) {
+    const VkExtent2D texel = m_bmvrFovTexel;
+    const uint32_t tw = (eyeW + texel.width - 1u) / texel.width;
+    const uint32_t th = (eyeH + texel.height - 1u) / texel.height;
+
+    std::vector<uint8_t> data(size_t(tw) * th);
+    const float halfH = 0.5f * float(eyeH);
+    const float r1 = r[0] * halfH, r2 = r[1] * halfH, r3 = r[2] * halfH;
+    const float centreX = (float(cx) + 0.5f) * float(texel.width);
+    const float centreY = (float(cy) + 0.5f) * float(texel.height);
+    uint32_t counts[4] = { };
+
+    for (uint32_t y = 0; y < th; y++) {
+      for (uint32_t x = 0; x < tw; x++) {
+        const float dx = (float(x) + 0.5f) * float(texel.width) - centreX;
+        const float dy = (float(y) + 0.5f) * float(texel.height) - centreY;
+        const float d = std::sqrt(dx * dx + dy * dy);
+        // Rate texel value: (log2(width) << 2) | log2(height)
+        uint8_t v;
+        int ring;
+        if (d < r1)      { v = 0u; ring = 0; }
+        else if (d < r2) { v = std::abs(dx) >= std::abs(dy) ? 4u : 1u; ring = 1; }
+        else if (d < r3) { v = 5u; ring = 2; }
+        else             { v = 10u; ring = 3; }
+        data[size_t(y) * tw + x] = v;
+        counts[ring]++;
+      }
+    }
+
+    DxvkBufferCreateInfo bufInfo;
+    bufInfo.size   = data.size();
+    bufInfo.usage  = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufInfo.stages = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    bufInfo.access = VK_ACCESS_TRANSFER_READ_BIT;
+    bufInfo.debugName = "BMVR foveation staging";
+    Rc<DxvkBuffer> staging = m_dxvkDevice->createBuffer(bufInfo,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    std::memcpy(staging->mapPtr(0), data.data(), data.size());
+
+    DxvkImageCreateInfo imgInfo;
+    imgInfo.type        = VK_IMAGE_TYPE_2D;
+    imgInfo.format      = VK_FORMAT_R8_UINT;
+    imgInfo.sampleCount = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.extent      = { tw, th, 1u };
+    imgInfo.numLayers   = 1u;
+    imgInfo.mipLevels   = 1u;
+    imgInfo.usage       = VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                        | VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+    imgInfo.stages      = VK_PIPELINE_STAGE_TRANSFER_BIT
+                        | VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+    imgInfo.access      = VK_ACCESS_TRANSFER_WRITE_BIT
+                        | VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR;
+    imgInfo.tiling      = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.layout      = VK_IMAGE_LAYOUT_GENERAL;
+    imgInfo.debugName   = eyeIndex == 0 ? "BMVR foveation L" : "BMVR foveation R";
+    Rc<DxvkImage> image = m_dxvkDevice->createImage(imgInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    DxvkImageViewKey viewKey;
+    viewKey.viewType   = VK_IMAGE_VIEW_TYPE_2D;
+    viewKey.format     = VK_FORMAT_R8_UINT;
+    viewKey.usage      = VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+    viewKey.aspects    = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewKey.mipIndex   = 0u;
+    viewKey.mipCount   = 1u;
+    viewKey.layerIndex = 0u;
+    viewKey.layerCount = 1u;
+    Rc<DxvkImageView> view = image->createView(viewKey);
+
+    EmitCs([
+      cImage   = image,
+      cStaging = std::move(staging),
+      cExtent  = VkExtent3D { tw, th, 1u }
+    ] (DxvkContext* ctx) {
+      VkImageSubresourceLayers layers = { VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u };
+      ctx->copyBufferToImage(cImage, layers, VkOffset3D { 0, 0, 0 }, cExtent,
+        cStaging, 0, 0, 0, VK_FORMAT_R8_UINT);
+    });
+
+    map.view  = std::move(view);
+    map.w     = eyeW;
+    map.h     = eyeH;
+    map.cx    = cx;
+    map.cy    = cy;
+    map.r[0]  = r[0];
+    map.r[1]  = r[1];
+    map.r[2]  = r[2];
+    map.level = level;
+
+    const float n = float(tw * th) / 100.f;
+    bmvr::Log("Foveation map %c: eye %ux%u texel %ux%u -> %ux%u, centre px %.0f,%.0f, rings %.2f/%.2f/%.2f, "
+      "1x1 %.0f%% 2x1/1x2 %.0f%% 2x2 %.0f%% 4x4 %.0f%%",
+      eyeIndex == 0 ? 'L' : 'R', eyeW, eyeH, texel.width, texel.height, tw, th, centreX, centreY,
+      r[0], r[1], r[2], counts[0] / n, counts[1] / n, counts[2] / n, counts[3] / n);
+  }
+
+
+  void D3D9DeviceEx::BmvrFoveationSelect(int stereoEye, uint32_t eyeW, uint32_t eyeH, float centreU, float centreV) {
+    D3D9DeviceLock lock = LockDevice();
+
+    const auto& fsrFeatures = m_dxvkDevice->features().khrFragmentShadingRate;
+    Rc<DxvkImageView> want;
+
+    const uint32_t level = bmvr::g_Foveated > 0 ? uint32_t(bmvr::g_Foveated) : 0u;
+
+    if (fsrFeatures.attachmentFragmentShadingRate && level
+     && (stereoEye == 1 || stereoEye == 2) && eyeW >= 64u && eyeH >= 64u) {
+      if (!m_bmvrFovTexel.width) {
+        // Texel size: 16 px (HL2VR's choice), clamped to the device range
+        const auto& props = m_dxvkDevice->properties().khrFragmentShadingRate;
+        const VkExtent2D lo = props.minFragmentShadingRateAttachmentTexelSize;
+        const VkExtent2D hi = props.maxFragmentShadingRateAttachmentTexelSize;
+        m_bmvrFovTexel.width  = std::clamp(16u, std::max(lo.width, 1u),  std::max(hi.width, 1u));
+        m_bmvrFovTexel.height = std::clamp(16u, std::max(lo.height, 1u), std::max(hi.height, 1u));
+        bmvr::Log("Foveation: texel %ux%u (device %ux%u..%ux%u), max fragment %ux%u, MSAA with rates %d",
+          m_bmvrFovTexel.width, m_bmvrFovTexel.height, lo.width, lo.height, hi.width, hi.height,
+          props.maxFragmentSize.width, props.maxFragmentSize.height,
+          int(props.fragmentShadingRateWithCustomSampleLocations));
+      }
+
+      const float r[3] = {
+        std::clamp(bmvr::g_FoveatedInner, 0.05f, 2.0f),
+        std::clamp(std::max(bmvr::g_FoveatedMid, bmvr::g_FoveatedInner), 0.05f, 3.0f),
+        std::clamp(std::max(bmvr::g_FoveatedOuter, bmvr::g_FoveatedMid), 0.05f, 4.0f) };
+
+      const int32_t cx = int32_t(std::floor(std::clamp(centreU, 0.f, 1.f) * float(eyeW) / float(m_bmvrFovTexel.width)));
+      const int32_t cy = int32_t(std::floor(std::clamp(centreV, 0.f, 1.f) * float(eyeH) / float(m_bmvrFovTexel.height)));
+
+      BmvrFovMap& map = m_bmvrFovMap[stereoEye - 1];
+      if (map.view == nullptr || map.w != eyeW || map.h != eyeH || map.cx != cx || map.cy != cy
+       || map.r[0] != r[0] || map.r[1] != r[1] || map.r[2] != r[2] || map.level != level)
+        BmvrFoveationBuild(map, stereoEye - 1, eyeW, eyeH, cx, cy, r, level);
+
+      want = map.view;
+    }
+
+    if (m_bmvrFovBoundValid && want == m_bmvrFovBound)
+      return;
+
+    m_bmvrFovBound = want;
+    m_bmvrFovBoundValid = true;
+
+    if (!fsrFeatures.attachmentFragmentShadingRate)
+      return;
+
+    EmitCs([
+      cView  = std::move(want),
+      cTexel = m_bmvrFovTexel
+    ] (DxvkContext* ctx) {
+      ctx->bmvrSetShadingRateImage(cView, cTexel);
+    });
+  }
+}
+
+
 namespace bmvr {
   // Eye MSAA post switch (see D3D9CommonTexture::BmvrRetired). Retire: resolve
   // the eye colour (if written) and depth (sample 0) once, then the rest of the
@@ -12107,6 +12270,16 @@ namespace bmvr {
       return;
     auto* dev = static_cast<dxvk::D3D9DeviceEx*>(device);
     dev->BmvrSetMsaaEyeRetired(color, depth, retire);
+  }
+  void FoveationSelect(IDirect3DDevice9* device, int stereoEye, uint32_t eyeW, uint32_t eyeH, float centreU, float centreV) {
+    if (!device)
+      return;
+    static_cast<dxvk::D3D9DeviceEx*>(device)->BmvrFoveationSelect(stereoEye, eyeW, eyeH, centreU, centreV);
+  }
+  bool FoveationAvailable(IDirect3DDevice9* device) {
+    if (!device)
+      return false;
+    return static_cast<dxvk::D3D9DeviceEx*>(device)->GetDXVKDevice()->features().khrFragmentShadingRate.attachmentFragmentShadingRate;
   }
   void MsaaEyeRetire(IDirect3DDevice9* device, IDirect3DSurface9* color, IDirect3DSurface9* depth) {
     MsaaEyeSet(device, color, depth, true);

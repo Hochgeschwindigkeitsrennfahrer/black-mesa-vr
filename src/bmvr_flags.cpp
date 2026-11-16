@@ -156,6 +156,11 @@ namespace bmvr
     int g_RefractCopyRtH = 0;
     bool g_GpuPassTiming = false;
     bool g_GpuPassDetail = false;
+    float g_Foveated = 0.f;
+    bool g_FoveatedAtStart = false;
+    float g_FoveatedInner = 0.25f;
+    float g_FoveatedMid = 0.65f;
+    float g_FoveatedOuter = 0.8f;
     bool g_PerfLog = false;
     int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
@@ -761,6 +766,14 @@ namespace bmvr
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassDetail") == 0)
                 g_GpuPassDetail = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "Foveated") == 0)
+                g_Foveated = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
+            else if (std::strcmp(n, "FoveatedInner") == 0)
+                g_FoveatedInner = std::clamp(static_cast<float>(atof(val)), 0.05f, 2.f);
+            else if (std::strcmp(n, "FoveatedMid") == 0)
+                g_FoveatedMid = std::clamp(static_cast<float>(atof(val)), 0.05f, 3.f);
+            else if (std::strcmp(n, "FoveatedOuter") == 0)
+                g_FoveatedOuter = std::clamp(static_cast<float>(atof(val)), 0.05f, 4.f);
             else if (std::strcmp(n, "LodBias") == 0)
                 g_LodBias = std::clamp(static_cast<float>(atof(val)), -1.f, 2.f);
             else if (std::strcmp(n, "AlphaToCoverage") == 0)
@@ -1836,6 +1849,7 @@ namespace bmvr
         DetectCampaignSession();
         CapturePanelDefaults();   // before config.txt: the panel saves only values that differ
         ReadUserConfig(ExeDir() + L"\\VR\\config.txt");
+        g_FoveatedAtStart = g_Foveated > 0.f;
         ClearSkipsOnBuildChange();
         ReadSkipFile(SkipPath());
         ReadSkipFile(ModuleDir() + L"\\bmvr_skip.txt");

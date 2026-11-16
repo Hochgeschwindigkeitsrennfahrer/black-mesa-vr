@@ -1,3 +1,4 @@
+#include "../dxvk/dxvk_bmvr_vrs.h"
 #include "d3d9_interface.h"
 
 #include "d3d9_monitor.h"
@@ -390,6 +391,10 @@ namespace dxvk {
     const bool noHmd = IsNoHmdLaunchArgPresent();
     bmvr::InitFromDisk();
     bmvr::SetStage("create_device");
+    // Foveated rendering: the device needs the shading rate features
+    dxvk::bmvrFoveationRequestedRef() = bmvr::g_FoveatedAtStart;
+    if (bmvr::g_FoveatedAtStart)
+      bmvr::Log("Foveation requested at start (Foveated=%.0f)", bmvr::g_Foveated);
     if (pPresentationParameters && !pPresentationParameters->Windowed)
     {
       Logger::info("BMVR CreateDevice: keeping Windowed=TRUE (refusing exclusive fullscreen)");

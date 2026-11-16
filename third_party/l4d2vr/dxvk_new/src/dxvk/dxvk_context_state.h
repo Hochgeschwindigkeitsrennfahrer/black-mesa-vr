@@ -146,6 +146,12 @@ namespace dxvk {
     DxvkAttachmentMask  attachmentMask;
     VkOffset2D          renderAreaLo = { };
     VkOffset2D          renderAreaHi = { };
+    // BMVR foveation: rate image (R8_UINT, one texel per bmvrRateTexel
+    // pixels) attached to render passes whose size it covers exactly;
+    // bmvrRateBound = attached to the current render pass.
+    Rc<DxvkImageView>   bmvrRateView;
+    VkExtent2D          bmvrRateTexel = { };
+    bool                bmvrRateBound = false;
   };
 
 

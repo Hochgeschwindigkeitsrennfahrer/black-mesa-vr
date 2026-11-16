@@ -1382,6 +1382,31 @@ namespace
         return kind == kSpanNone && GpuTimerDetail() ? kSpanOther : kind;
     }
 
+    // Foveated rendering: after every RT0 change tell DXVK which eye's world
+    // pass this is (rate image on eye-sized targets) or none (HUD paint,
+    // captures, menus, everything outside the stereo world pass). DXVK only
+    // attaches the map to render passes of exactly the eye size.
+    void FoveationOnRt0(IDirect3DDevice9* device, VR* vr)
+    {
+        if (!bmvr::g_FoveatedAtStart || !device)
+            return;
+        int eye = 0;
+        float cu = 0.5f, cv = 0.5f;
+        if (vr && bmvr::g_Foveated > 0.f && vr->StereoWorldPassActive() && !vr->HudPaintActive()
+            && !vr->m_CaptureReentry)
+        {
+            eye = GpuTimerEye(vr);
+            float r[4];
+            if (eye && vr->EyeRenderRect(eye, r) && r[1] > r[0] && r[3] > r[2])
+            {
+                // Straight ahead (tangent 0,0) in the eye texture, v down.
+                cu = -r[0] / (r[1] - r[0]);
+                cv = r[3] / (r[3] - r[2]);
+            }
+        }
+        bmvr::FoveationSelect(device, eye, vr ? vr->m_RenderWidth : 0, vr ? vr->m_RenderHeight : 0, cu, cv);
+    }
+
     // Called after RT0 changes (SetRenderTarget index 0).
     void GpuTimerOnRt0(IDirect3DDevice9* device, VR* vr, UINT w, UINT h)
     {
@@ -1883,6 +1908,7 @@ namespace
             g_Rt0ActualPtr = rt;
             g_Rt0ActualKnown = true;
             GpuTimerOnRt0(device, vr, g_Rt0ActualW, g_Rt0ActualH);
+            FoveationOnRt0(device, vr);
         }
         if (SUCCEEDED(hr) && redirectedToEye && vr
             && vr->m_RenderWidth >= 640 && vr->m_RenderHeight >= 360)

@@ -1127,6 +1127,24 @@ namespace dxvk {
     Rc<DxvkImage> m_bmvrDebtEyeImage;   // the eye's active (1x) image at swap time
     Rc<DxvkImage> m_bmvrDebtFbImage;
 
+    // BMVR foveated rendering: one R8_UINT shading rate image per eye,
+    // built here from the eye size, the lens centre and the ring radii, and
+    // handed to the context for the eye's render passes (bmvr::FoveationSelect).
+    struct BmvrFovMap {
+      Rc<DxvkImageView> view;
+      uint32_t w = 0, h = 0;              // eye size in pixels
+      int32_t  cx = INT32_MIN, cy = 0;    // centre in texels (quantised)
+      float    r[3] = { };                // ring radii (fraction of half eye height)
+      uint32_t level = 0;
+    };
+    void BmvrFoveationSelect(int stereoEye, uint32_t eyeW, uint32_t eyeH, float centreU, float centreV);
+    BmvrFovMap        m_bmvrFovMap[2];
+    Rc<DxvkImageView> m_bmvrFovBound;     // last view emitted to the context
+    bool              m_bmvrFovBoundValid = false;
+    VkExtent2D        m_bmvrFovTexel = { };
+    void BmvrFoveationBuild(BmvrFovMap& map, int eyeIndex, uint32_t eyeW, uint32_t eyeH,
+      int32_t cx, int32_t cy, const float r[3], uint32_t level);
+
     void EnsureSamplerLimit();
 
     template <DxsoProgramType ShaderStage>

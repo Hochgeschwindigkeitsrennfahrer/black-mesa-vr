@@ -74,6 +74,7 @@ namespace dxvk {
     std::array<VkRenderingAttachmentInfo, MaxNumRenderTargets> color = { };
     VkRenderingAttachmentInfo depth = { };
     VkRenderingAttachmentInfo stencil = { };
+    VkRenderingFragmentShadingRateAttachmentInfoKHR shadingRate = { };   // BMVR foveation
     VkRenderingInfo rendering = { };
   };
 

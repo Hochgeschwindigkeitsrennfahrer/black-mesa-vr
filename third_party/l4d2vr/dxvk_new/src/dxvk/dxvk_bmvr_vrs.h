@@ -23,6 +23,30 @@ namespace dxvk {
     bool     eyeOnly = false;
   };
 
+  /**
+   * \brief BMVR foveated rendering wanted (config Foveated != 0 at start)
+   *
+   * Set by the d3d9 layer before the device is created; enables
+   * attachmentFragmentShadingRate (+ pipeline rate) on the device. The
+   * per-eye rate image itself is bound with
+   * DxvkContext::bmvrSetShadingRateImage.
+   */
+  inline bool& bmvrFoveationRequestedRef() {
+    static bool requested = false;
+    return requested;
+  }
+
+  inline bool bmvrFoveationRequested() {
+    return bmvrFoveationRequestedRef();
+  }
+
+  // Test switch (env BMVR_FOV_SECONDARY=1 keeps secondary command buffers
+  // for rate-image passes, the stock DXVK choice).
+  inline bool bmvrFoveationPrimary() {
+    static const bool primary = env::getEnvVar("BMVR_FOV_SECONDARY") != "1";
+    return primary;
+  }
+
   inline const BmvrVrsMode& bmvrVrsMode() {
     static const BmvrVrsMode mode = [] {
       BmvrVrsMode m;

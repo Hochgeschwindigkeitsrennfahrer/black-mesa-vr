@@ -361,6 +361,23 @@ namespace bmvr
     // RT0 and material group (Bind hook on) plus copies and eye MSAA
     // switches, per eye, logged every ~10 s as "GPU pass" lines.
     extern bool g_GpuPassDetail;
+    // Foveated rendering (VK_KHR_fragment_shading_rate rate image per eye,
+    // DXVK d3d9_device.cpp BmvrFoveationSelect). Foveated: 0 off, 1 fixed
+    // rings around each eye's lens centre. The GPU feature is only enabled
+    // when Foveated > 0 at game start (g_FoveatedAtStart); later the panel
+    // switches it live. Rings in units of half the eye height: inside Inner
+    // full rate, to Mid 2x1/1x2, to Outer 2x2, beyond 4x4 (driver clamps
+    // to its largest rate, 2x2 on RDNA4).
+    extern float g_Foveated;
+    extern bool g_FoveatedAtStart;
+    extern float g_FoveatedInner;
+    extern float g_FoveatedMid;
+    extern float g_FoveatedOuter;
+    // Called on the D3D thread after RT0 changes: stereoEye 1/2 = this eye's
+    // world pass (rate image on eye-sized targets), 0 = none. centreU/V =
+    // lens centre in the eye texture (0..1, v down).
+    void FoveationSelect(IDirect3DDevice9* device, int stereoEye, uint32_t eyeW, uint32_t eyeH, float centreU, float centreV);
+    bool FoveationAvailable(IDirect3DDevice9* device);
     // PerfLog (default false): playtest performance log. Turns on GpuPassTiming
     // and the engine world batch counters (per eye/view: surface groups, mesh
     // changes vs the engine's 127 limit, player position) and the glow

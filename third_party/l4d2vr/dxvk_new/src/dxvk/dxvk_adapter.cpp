@@ -447,9 +447,16 @@ namespace dxvk {
       m_deviceFeatures.khrSwapchainMaintenance1.swapchainMaintenance1 &&
       instance->extensions().khrSurfaceMaintenance1;
 
-    // BMVR: fixed shading rate test aid, only when BMVR_VRS is set
+    // BMVR: fragment shading rate only when wanted: the BMVR_VRS test aid
+    // (pipeline rate) or foveated rendering (pipeline rate + rate image,
+    // config Foveated). Otherwise pipelines stay exactly as before.
+    const bool bmvrFsrWanted = bmvrVrsMode().rate || bmvrFoveationRequested();
     enabledFeatures.khrFragmentShadingRate.pipelineFragmentShadingRate =
-      m_deviceFeatures.khrFragmentShadingRate.pipelineFragmentShadingRate && bmvrVrsMode().rate;
+      m_deviceFeatures.khrFragmentShadingRate.pipelineFragmentShadingRate && bmvrFsrWanted;
+    enabledFeatures.khrFragmentShadingRate.attachmentFragmentShadingRate =
+      m_deviceFeatures.khrFragmentShadingRate.attachmentFragmentShadingRate
+      && m_deviceFeatures.khrFragmentShadingRate.pipelineFragmentShadingRate
+      && bmvrFoveationRequested();
 
     // Enable maintenance features if supported
     enabledFeatures.khrMaintenance5.maintenance5 =
@@ -884,6 +891,11 @@ namespace dxvk {
     if (m_deviceExtensions.supports(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {
       m_deviceInfo.khrMaintenance5.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES_KHR;
       m_deviceInfo.khrMaintenance5.pNext = std::exchange(m_deviceInfo.core.pNext, &m_deviceInfo.khrMaintenance5);
+    }
+
+    if (m_deviceExtensions.supports(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME)) {
+      m_deviceInfo.khrFragmentShadingRate.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR;
+      m_deviceInfo.khrFragmentShadingRate.pNext = std::exchange(m_deviceInfo.core.pNext, &m_deviceInfo.khrFragmentShadingRate);
     }
 
     if (m_deviceExtensions.supports(VK_KHR_MAINTENANCE_7_EXTENSION_NAME)) {
@@ -1535,6 +1547,7 @@ namespace dxvk {
       "\n  extension supported                    : " << (features.extLoadStoreOpNone ? "1" : "0") <<
       "\n" << VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME <<
       "\n  pipelineFragmentShadingRate            : " << (features.khrFragmentShadingRate.pipelineFragmentShadingRate ? "1" : "0") <<
+      "\n  attachmentFragmentShadingRate          : " << (features.khrFragmentShadingRate.attachmentFragmentShadingRate ? "1" : "0") <<
       "\n" << VK_KHR_MAINTENANCE_5_EXTENSION_NAME <<
       "\n  maintenance5                           : " << (features.khrMaintenance5.maintenance5 ? "1" : "0") <<
       "\n" << VK_KHR_MAINTENANCE_7_EXTENSION_NAME <<

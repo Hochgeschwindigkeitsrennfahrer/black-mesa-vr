@@ -32,6 +32,7 @@ namespace dxvk {
     VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT       extVertexAttributeDivisor;
     VkPhysicalDeviceMaintenance5PropertiesKHR                 khrMaintenance5;
     VkPhysicalDeviceMaintenance7PropertiesKHR                 khrMaintenance7;
+    VkPhysicalDeviceFragmentShadingRatePropertiesKHR          khrFragmentShadingRate;
   };
 
 

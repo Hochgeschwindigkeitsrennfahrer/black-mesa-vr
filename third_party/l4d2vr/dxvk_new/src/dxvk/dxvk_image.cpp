@@ -489,7 +489,8 @@ namespace dxvk {
       VK_IMAGE_USAGE_SAMPLED_BIT |
       VK_IMAGE_USAGE_STORAGE_BIT |
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+      VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;   // BMVR foveation
 
     // Legalize view usage. We allow creating transfer-only view
     // objects so that some internal APIs can be more consistent.
