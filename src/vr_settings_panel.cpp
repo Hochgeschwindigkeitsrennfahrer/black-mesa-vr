@@ -204,9 +204,10 @@ namespace
             // Capture/view tests are not saved (no key): always off after a restart.
             { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
-            // GPU work removed without changing the image; off = the stock path, for A/B.
-            { "GPU SAVINGS (SAME IMAGE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // CPU/GPU work removed without changing the image; off = the stock path, for A/B.
+            { "SAVINGS (SAME IMAGE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Post copies: swap, no copy", RowKind::Toggle, "PostCopySwap", &bmvr::g_PostCopySwap, nullptr, 0, 0, 0, nullptr },
+            { "Light shadows: once per frame", RowKind::Toggle, "ShadowsOncePerFrame", &bmvr::g_ShadowsOncePerFrame, nullptr, 0, 0, 0, nullptr },
             { "CAPTURE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },

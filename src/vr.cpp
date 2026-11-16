@@ -11787,11 +11787,14 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         return false;
 
     // One upload per stereo pair. The right eye (2) must not upload again.
-    if (stereoEye != 2)
-        bmvr::PumpHudIconUploads(device);
+    {
+        BMVR_PROF("hands: icon uploads + glove warmup");
+        if (stereoEye != 2)
+            bmvr::PumpHudIconUploads(device);
 
-    if (bmvr::TryVrGloves() && bmvr::g_VrHandsGlovesEnabled)
-        g_VrGloves.WarmupGpu(device);
+        if (bmvr::TryVrGloves() && bmvr::g_VrHandsGlovesEnabled)
+            g_VrGloves.WarmupGpu(device);
+    }
 
     D3DSURFACE_DESC desc{};
     UINT w = 0, h = 0;
@@ -11849,15 +11852,18 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     // create + Capture + Apply + Release was two full state captures and an
     // allocation for every eye of every frame. Capture into the same block.
     IDirect3DStateBlock9* engineBlock = nullptr;
-    if (!m_HandEngineStateBlock)
     {
-        if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &m_HandEngineStateBlock)))
-            m_HandEngineStateBlock = nullptr;
-        else
+        BMVR_PROF("hands: state block capture");
+        if (!m_HandEngineStateBlock)
+        {
+            if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &m_HandEngineStateBlock)))
+                m_HandEngineStateBlock = nullptr;
+            else
+                engineBlock = m_HandEngineStateBlock;
+        }
+        else if (SUCCEEDED(m_HandEngineStateBlock->Capture()))
             engineBlock = m_HandEngineStateBlock;
     }
-    else if (SUCCEEDED(m_HandEngineStateBlock->Capture()))
-        engineBlock = m_HandEngineStateBlock;
     if (FAILED(device->SetRenderTarget(0, eyeSurf)))
     {
         if (oldRt)
@@ -12054,6 +12060,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     // first, then sets FVF again under the same crash-sticky flag.
     if (wantOverlay)
     {
+        BMVR_PROF("hands: overlay (menu/boxes)");
         static int s_overlayFlag;
         if (s_overlayFlag == 0)
         {
@@ -12348,6 +12355,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     bool drewGloves = false;
     if (drawGloves && bmvr::TryVrGloves() && bmvr::g_VrHandsGlovesEnabled && (m_HasHevSuit || g_VrGloves.HasBareHands()))
     {
+        BMVR_PROF("hands: gloves");
         if (gloveDepth)
         {
             device->SetDepthStencilSurface(gloveDepth);
@@ -12441,6 +12449,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     // IsBackfacing so the ammo plate is invisible from behind the gun.
     if (wantHandHud)
     {
+        BMVR_PROF("hands: hand HUD");
         restoreEngineDrawState();
         device->SetViewport(&eyeVp);
         static int s_hudFlag;
@@ -12462,6 +12471,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
 
     if (engineBlock)
     {
+        BMVR_PROF("hands: state block apply");
         engineBlock->Apply();
         engineBlock = nullptr;
         if (oldRt)

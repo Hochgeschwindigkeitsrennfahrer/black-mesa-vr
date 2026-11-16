@@ -1389,6 +1389,129 @@ static void __fastcall DrawTranslucentBHook(void* ecx, void* edx)
     TranslucentPassLeave();
 }
 
+// ShadowsOncePerFrame: the deferred lights' shadow atlas is view independent but the engine
+// renders it in every view, so once per eye. The first eye of a stereo pair renders as usual
+// and records each call; the second eye skips a call that matches one of them (same light,
+// type, atlas slot and flags = the same tile with the same content, still in the atlas since
+// nothing else writes it in between). Anything else (a light only the second eye queues, a
+// static light's first render whose flags change between the eyes) renders normally.
+using RenderLightShadowFn = void(__fastcall*)(void* ecx, void* edx, void* light, int isStatic, int arg3,
+    int copyStatic, int arg5, int arg6);
+static RenderLightShadowFn g_OrigRenderLightShadow = nullptr;
+namespace
+{
+    struct ShadowCallKey
+    {
+        void* light;
+        int type, slot;
+        uint32_t flags;  // the five bool/int args packed (low bytes)
+        int arg3;
+        uint32_t pose[6];  // light +0x20..+0x34 (the shadow view's origin and angles, raw bits)
+        bool operator==(const ShadowCallKey& o) const
+        {
+            return light == o.light && type == o.type && slot == o.slot && flags == o.flags && arg3 == o.arg3
+                && std::memcmp(pose, o.pose, sizeof(pose)) == 0;
+        }
+    };
+    struct ShadowOnceState
+    {
+        int pairSeq = -1;
+        int firstEye = 0;
+        int n = 0;
+        ShadowCallKey keys[64];
+        // stats (logged every 2000 second-eye calls)
+        int skipped = 0, rendered = 0;
+    };
+    ShadowOnceState g_ShadowOnce;
+}
+
+static void __fastcall RenderLightShadowHook(void* ecx, void* edx, void* light, int isStatic, int arg3,
+    int copyStatic, int arg5, int arg6)
+{
+    VR* vr = Hooks::m_VR;
+    const int eye = vr ? vr->m_StereoEye : 0;
+    if (!light || (eye != 1 && eye != 2) || !vr->m_IsVREnabled)
+    {
+        g_OrigRenderLightShadow(ecx, edx, light, isStatic, arg3, copyStatic, arg5, arg6);
+        return;
+    }
+    const auto* l = static_cast<const unsigned char*>(light);
+    ShadowCallKey key{ light, *reinterpret_cast<const int*>(l + 4), *reinterpret_cast<const int*>(l + 0x48),
+        (static_cast<uint32_t>(isStatic & 0xFF)) | (static_cast<uint32_t>(copyStatic & 0xFF) << 8)
+            | (static_cast<uint32_t>(arg5 & 0xFF) << 16) | (static_cast<uint32_t>(arg6 & 0xFF) << 24),
+        arg3, {} };
+    std::memcpy(key.pose, l + 0x20, sizeof(key.pose));
+    ShadowOnceState& st = g_ShadowOnce;
+    if (st.pairSeq != bmvr::g_StereoPairSeq)
+    {
+        st.pairSeq = bmvr::g_StereoPairSeq;
+        st.firstEye = eye;
+        st.n = 0;
+    }
+    if (eye == st.firstEye)
+    {
+        g_OrigRenderLightShadow(ecx, edx, light, isStatic, arg3, copyStatic, arg5, arg6);
+        if (st.n < static_cast<int>(sizeof(st.keys) / sizeof(st.keys[0])))
+            st.keys[st.n++] = key;
+        return;
+    }
+    bool match = bmvr::g_ShadowsOnceTestSkipAll;  // test: negative control (skips mismatches too)
+    if (!match && bmvr::g_ShadowsOncePerFrame)
+    {
+        for (int i = 0; i < st.n; ++i)
+        {
+            if (st.keys[i] == key)
+            {
+                match = true;
+                break;
+            }
+        }
+    }
+    if (match)
+        ++st.skipped;
+    else
+    {
+        ++st.rendered;
+        static int s_missLog;
+        if (s_missLog < 12 && bmvr::g_ShadowsOncePerFrame)
+        {
+            ++s_missLog;
+            const ShadowCallKey* same = nullptr;
+            for (int i = 0; i < st.n; ++i)
+                if (st.keys[i].light == light)
+                    same = &st.keys[i];
+            Game::logMsg("Shadows once: second eye renders light %p type %d slot %d flags %08X arg3 %d; first eye %s",
+                light, key.type, key.slot, key.flags, key.arg3,
+                !same ? "did not render it"
+                    : same->slot != key.slot ? "used another slot"
+                    : same->flags != key.flags || same->arg3 != key.arg3 ? "had other flags"
+                    : "had another pose");
+        }
+        g_OrigRenderLightShadow(ecx, edx, light, isStatic, arg3, copyStatic, arg5, arg6);
+    }
+    if (st.skipped + st.rendered >= 2000)
+    {
+        Game::logMsg("Shadows once per frame: second eye skipped %d, rendered %d light shadows (%s)",
+            st.skipped, st.rendered, bmvr::g_ShadowsOncePerFrame ? "on" : "off");
+        st.skipped = st.rendered = 0;
+    }
+}
+
+static void InstallRenderLightShadowHook(uintptr_t client)
+{
+    static const unsigned char kSig[] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x34, 0x02, 0x00, 0x00, 0xA1 };
+    auto* fn = reinterpret_cast<unsigned char*>(client + Offsets::kClientRenderLightShadowRva);
+    if (std::memcmp(fn, kSig, sizeof(kSig)) != 0)
+    {
+        Game::logMsg("light shadows once per frame: MISMATCH (not hooked; shadows render per eye)");
+        return;
+    }
+    const bool ok = MH_CreateHook(fn, reinterpret_cast<LPVOID>(&RenderLightShadowHook),
+                        reinterpret_cast<LPVOID*>(&g_OrigRenderLightShadow)) == MH_OK
+        && MH_EnableHook(fn) == MH_OK;
+    Game::logMsg("light shadows once per frame: hook %s", ok ? "on" : "FAILED");
+}
+
 static void InstallTranslucentPassHooks(uintptr_t client)
 {
     static const unsigned char kA[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x54, 0xA1 };
@@ -1540,6 +1663,7 @@ static void InstallPixelVisPerEye()
     InstallPixelVisStats(client);
     InstallParticleLevel(client);
     InstallTranslucentPassHooks(client);
+    InstallRenderLightShadowHook(client);
     InstallEngineWorldBatchStats();
     InstallBoneParticleProf(client);
     InstallFlareHooks(client);
@@ -6552,6 +6676,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             m_VR->m_StereoRenderViewActive = false;
             m_VR->m_StereoBodyOrigin = setup.origin;
             m_VR->m_HasStereoBodyOrigin = true;
+            ++bmvr::g_StereoPairSeq;
             m_VR->m_StereoEye = 1;
             callOriginal(leftEyeView, nClearFlags, whatToDraw);
             const bool leftOk = m_VR->BlitHmdViewFromBackbuffer(m_VR->m_D9LeftEyeSurface, true);
@@ -6689,6 +6814,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 ++s_rfLog;
             }
             const int eyeDraw = whatToDraw & ~kRenderViewDrawHud;
+            ++bmvr::g_StereoPairSeq;
             g_Cost.eye = 2;
             m_VR->m_StereoEye = 2;
             m_VR->QueueMcEyeBind(2, false);
@@ -6704,6 +6830,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         }
         else
         {
+        ++bmvr::g_StereoPairSeq;
         g_Cost.eye = 1;
         m_VR->m_StereoEye = 1;
         if (!mc)

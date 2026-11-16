@@ -619,6 +619,11 @@ public:
     // DrawTranslucentRenderable: cdecl (IClientRenderable* ent, bool twoPass, bool, bool, void* viewData),
     // called per sorted translucent renderable from A, B and their helper 0x1FF510; viewData = view object + 0x988.
     static constexpr uint32_t kClientDrawTranslucentRenderableRva = 0x1FED00;
+    // Deferred lights: render one shadowed light into the shadow atlas (_rt_gbShadowMapRT /
+    // StaticRT), thiscall (lightingMgr, light*, bool static, int, bool copyStatic, bool, bool), ret 0x18.
+    // Called per queued light from "CViewRender::RenderShadows" (VPROF name; 26234270: 0x181C60),
+    // once per view = once per eye. light+4 = type, +0x48 = atlas slot (beta 26672462; 26234270: 0x181190).
+    static constexpr uint32_t kClientRenderLightShadowRva = 0x183980;
     static constexpr uint32_t kClientParticleRenderStartRva = 0x196450; // beta 26627981 (26234270: 0x193C60)
     // Black Mesa's precipitation renderer (cdecl, no args; debug string "Rain render    : %du"; called from
     // 0x20444A): per precipitation entity GetMatrix(VIEW) -> local, LoadIdentity view, clip override, quads

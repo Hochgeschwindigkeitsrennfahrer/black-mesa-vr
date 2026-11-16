@@ -85,6 +85,9 @@ namespace bmvr
     uint32_t g_Msaa = 0; // eye MSAA 0/2/4 (private eye targets only; FXAA stays on next to it)
     bool g_MsaaPostSwitch = true;
     bool g_PostCopySwap = true;
+    bool g_ShadowsOncePerFrame = true;
+    int g_StereoPairSeq = 0;
+    bool g_ShadowsOnceTestSkipAll = false;
     float g_PostCopySwapAlpha = 1.f;
     volatile unsigned long g_PostSwapArmThread = 0;
     volatile unsigned long g_FullOverwriteArmThread = 0;
@@ -787,6 +790,8 @@ namespace bmvr
                 g_MsaaPostSwitch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PostCopySwap") == 0)
                 g_PostCopySwap = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ShadowsOncePerFrame") == 0)
+                g_ShadowsOncePerFrame = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PerfLog") == 0)
                 g_PerfLog = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ReflectionRtScale") == 0)

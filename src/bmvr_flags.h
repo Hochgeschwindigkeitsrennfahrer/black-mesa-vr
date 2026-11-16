@@ -213,6 +213,15 @@ namespace bmvr
     // next full-screen pass). The arm values are the thread id of the hook
     // that may swap / overwrite, 0 = not armed.
     extern bool g_PostCopySwap;
+    // ShadowsOncePerFrame (default true, panel DEBUG > SAVINGS): the deferred lights' shadow
+    // atlas tiles are rendered by the first eye only; the second eye skips a light whose
+    // render call (light, atlas slot, flags) matches one the first eye made in this stereo
+    // pair (same frame, same content). Saves engine CPU (shadow views) and GPU.
+    extern bool g_ShadowsOncePerFrame;
+    // Bumped once per stereo pair on the main thread (dRenderView), before the first eye.
+    extern int g_StereoPairSeq;
+    // bmvr_shadows_once_test (test, not saved): the second eye skips every light shadow, matched or not.
+    extern bool g_ShadowsOnceTestSkipAll;
     // PostCopySwapAlpha (cvar bmvr_post_copy_swap_alpha, default 1): 0 = an RGBA write is
     // needed to drop the debt, 1 = RGB-only writes count (eye alpha mid-post is
     // not needed), 2/3 = as 1 and the owed eye is cleared to alpha 0/1 (test).

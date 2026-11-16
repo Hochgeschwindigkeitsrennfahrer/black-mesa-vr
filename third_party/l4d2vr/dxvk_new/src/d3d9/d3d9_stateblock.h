@@ -274,11 +274,19 @@ namespace dxvk {
       }
 
       if (m_captures.flags.test(D3D9CapturedStateFlag::VsConstants)) {
-        for (uint32_t i = 0; i < m_captures.vsConsts.fConsts.dwordCount(); i++) {
-          for (uint32_t consts : bit::BitMask(m_captures.vsConsts.fConsts.dword(i))) {
-            uint32_t idx = i * 32 + consts;
+        if constexpr (std::is_same_v<Dst, D3D9DeviceEx>) {
+          // BMVR: apply only registers that differ from the device's current
+          // values, in runs. Same resulting state; avoids one device call per
+          // register and the full constant re-upload a set marks (a D3DSBT_ALL
+          // block applied per eye by the mod's hand overlay cost ~50 us).
+          BmvrApplyChangedF<true>(dst, m_captures.vsConsts.fConsts, src->vsConsts->fConsts, m_deviceState->vsConsts->fConsts);
+        } else {
+          for (uint32_t i = 0; i < m_captures.vsConsts.fConsts.dwordCount(); i++) {
+            for (uint32_t consts : bit::BitMask(m_captures.vsConsts.fConsts.dword(i))) {
+              uint32_t idx = i * 32 + consts;
 
-            dst->SetVertexShaderConstantF(idx, reinterpret_cast<const float*>(&src->vsConsts->fConsts[idx]), 1);
+              dst->SetVertexShaderConstantF(idx, reinterpret_cast<const float*>(&src->vsConsts->fConsts[idx]), 1);
+            }
           }
         }
 
@@ -297,11 +305,15 @@ namespace dxvk {
       }
 
       if (m_captures.flags.test(D3D9CapturedStateFlag::PsConstants)) {
-        for (uint32_t i = 0; i < m_captures.psConsts.fConsts.dwordCount(); i++) {
-          for (uint32_t consts : bit::BitMask(m_captures.psConsts.fConsts.dword(i))) {
-            uint32_t idx = i * 32 + consts;
+        if constexpr (std::is_same_v<Dst, D3D9DeviceEx>) {
+          BmvrApplyChangedF<false>(dst, m_captures.psConsts.fConsts, src->psConsts->fConsts, m_deviceState->psConsts->fConsts);
+        } else {
+          for (uint32_t i = 0; i < m_captures.psConsts.fConsts.dwordCount(); i++) {
+            for (uint32_t consts : bit::BitMask(m_captures.psConsts.fConsts.dword(i))) {
+              uint32_t idx = i * 32 + consts;
 
-            dst->SetPixelShaderConstantF(idx, reinterpret_cast<const float*>(&src->psConsts->fConsts[idx]), 1);
+              dst->SetPixelShaderConstantF(idx, reinterpret_cast<const float*>(&src->psConsts->fConsts[idx]), 1);
+            }
           }
         }
 
@@ -336,6 +348,39 @@ namespace dxvk {
           }
         }
       }
+    }
+
+    // BMVR: set the captured float constants that differ from the device's
+    // current ones, coalescing consecutive registers into one call.
+    template <bool Vs, typename Mask, typename Reg>
+    void BmvrApplyChangedF(D3D9DeviceEx* dst, Mask& mask, const Reg* src, const Reg* cur) {
+      uint32_t runStart = 0, runLen = 0;
+      auto flush = [&]() {
+        if (!runLen)
+          return;
+        if constexpr (Vs)
+          dst->SetVertexShaderConstantF(runStart, reinterpret_cast<const float*>(&src[runStart]), runLen);
+        else
+          dst->SetPixelShaderConstantF(runStart, reinterpret_cast<const float*>(&src[runStart]), runLen);
+        runLen = 0;
+      };
+      for (uint32_t i = 0; i < mask.dwordCount(); i++) {
+        for (uint32_t bitIdx : bit::BitMask(mask.dword(i))) {
+          const uint32_t idx = i * 32 + bitIdx;
+          if (std::memcmp(&src[idx], &cur[idx], sizeof(Reg)) == 0) {
+            flush();
+            continue;
+          }
+          if (runLen && runStart + runLen == idx)
+            runLen++;
+          else {
+            flush();
+            runStart = idx;
+            runLen = 1;
+          }
+        }
+      }
+      flush();
     }
 
     template <D3D9StateFunction Func, bool IgnoreStreamOffset>
