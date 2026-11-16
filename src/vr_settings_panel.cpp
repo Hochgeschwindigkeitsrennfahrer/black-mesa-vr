@@ -206,6 +206,9 @@ namespace
             // Glow fades and other effects run on game time: with the game
             // paused a change only shows after the panel closes.
             { "Panel pauses the game", RowKind::Toggle, "VrSettingsPause", &bmvr::g_VrSettingsPause, nullptr, 0, 0, 0, nullptr },
+            // Skips Black Mesa's Xen fog (Xog) draws by material: 1 = the global fog
+            // (__gbxog0), 2 = the local fog volumes, 3 = both. Draw hooks run while on.
+            { "Hide Xen fog (1 glob, 2 vol, 3 both)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugHideXog, 1.f, 0.f, 3.f, "%.0f" },
             { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },

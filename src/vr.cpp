@@ -1088,10 +1088,27 @@ namespace
             g_AuditVtbl ? "on" : "missing");
     }
 
+    // Draw + material hooks also run (outside audits) while the debug row
+    // "Hide Xen fog" is on: the skip needs each draw's material name.
+    void DebugSkipHooksUpdate()
+    {
+        static int s_on = -1;
+        const bool want = bmvr::g_DebugHideXog >= 0.5f;
+        if (static_cast<int>(want) == s_on)
+            return;
+        s_on = want ? 1 : 0;
+        AuditSetDrawHooks(want);
+        Hooks::SetMatBindHooks(want);
+        Game::logMsg("Hide Xen fog: %d (draw hooks %s)", static_cast<int>(bmvr::g_DebugHideXog + 0.5f), want ? "on" : "off");
+    }
+
     void AuditOnPresent()
     {
         if (g_AuditFramesLeft.load(std::memory_order_acquire) <= 0)
+        {
+            DebugSkipHooksUpdate();
             return;
+        }
         std::lock_guard<std::recursive_mutex> lock(g_AuditMutex);
         AuditFlushGroup();
         if (AuditLogging() && g_AuditLines < kAuditMaxLines)
@@ -1116,7 +1133,7 @@ namespace
                     AuditSizeLabel(vr, t.w, t.h), t.writerEye, t.writerHud ? "/hud" : "", t.writeFrame, t.writeSeq);
             // BMVR_TEST_SKIP_MAT keeps the hooks on after the audit (debug).
             char skip[4] = {};
-            if (!GetEnvironmentVariableA("BMVR_TEST_SKIP_MAT", skip, sizeof(skip)))
+            if (!GetEnvironmentVariableA("BMVR_TEST_SKIP_MAT", skip, sizeof(skip)) && bmvr::g_DebugHideXog < 0.5f)
             {
                 AuditSetDrawHooks(false);
                 Hooks::SetMatBindHooks(false);
@@ -1134,7 +1151,16 @@ namespace
             s_skip[0] = 0;
             GetEnvironmentVariableA("BMVR_TEST_SKIP_MAT", s_skip, sizeof(s_skip));
         }
-        if (!s_skip[0] || !t_AuditMaterial[0])
+        if (!t_AuditMaterial[0])
+            return false;
+        const int hideXog = static_cast<int>(bmvr::g_DebugHideXog + 0.5f);
+        if (hideXog && std::strncmp(t_AuditMaterial, "__gbxog", 7) == 0)
+        {
+            const bool global = t_AuditMaterial[7] == '0';
+            if ((hideXog & (global ? 1 : 2)) != 0)
+                return true;
+        }
+        if (!s_skip[0])
             return false;
         const char* p = s_skip;
         while (*p)
@@ -1177,6 +1203,8 @@ namespace
         const void* data, UINT stride)
     {
         AuditDraw(device, count);
+        if (AuditSkipDraw())
+            return S_OK;
         return g_OrigDrawPrimitiveUP(device, type, count, data, stride);
     }
 
@@ -1184,6 +1212,8 @@ namespace
         UINT numVerts, UINT count, const void* indices, D3DFORMAT fmt, const void* verts, UINT stride)
     {
         AuditDraw(device, count);
+        if (AuditSkipDraw())
+            return S_OK;
         return g_OrigDrawIndexedPrimitiveUP(device, type, minIndex, numVerts, count, indices, fmt, verts, stride);
     }
 
