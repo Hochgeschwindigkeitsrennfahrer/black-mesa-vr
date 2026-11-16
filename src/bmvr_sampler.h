@@ -10,4 +10,6 @@ namespace bmvr::sampler
     bool CpuSampleStart(double seconds);
     // Frame budget log line (call once per presented frame on the render thread).
     void BudgetTick();
+    // Time the render thread spent polling for the GPU (counts as CPU time; the budget line subtracts it).
+    void NoteRenderPaceWait(double ms);
 }

@@ -5183,6 +5183,7 @@ void VR::WaitOldestOpenXrPending()
         SwitchToThread();
     }
     const double waited = QpcNowMs() - t0;
+    bmvr::sampler::NoteRenderPaceWait(waited);
     ++m_OpenXrPaceWaits;
     m_OpenXrPaceWaitMs += waited;
     if (waited > m_OpenXrPaceWaitMaxMs)

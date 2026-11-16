@@ -616,6 +616,16 @@ namespace bmvr::sampler
         }
     }
 
+    namespace
+    {
+        double g_PaceWaitMs = 0.0;  // render thread only
+    }
+
+    void NoteRenderPaceWait(double ms)
+    {
+        g_PaceWaitMs += ms;
+    }
+
     void BudgetTick()
     {
         static ULONGLONG s_startMs = 0;
@@ -639,12 +649,14 @@ namespace bmvr::sampler
             const double rr = (r - s_render) / 10000.0 / f;
             const double pp = (p - s_proc) / 10000.0 / f;
             const bool same = mainTid == renderTid;
-            Game::logMsg("Frame budget (%.0f s): %d frames, %.2f ms/frame (%.0f fps); CPU ms/frame: render thread %.2f (%.0f %%), main thread %.2f%s, other threads %.2f",
-                (now - s_startMs) / 1000.0, s_frames, wall, 1000.0 / wall, rr, 100.0 * rr / wall,
+            const double pace = g_PaceWaitMs / f;
+            Game::logMsg("Frame budget (%.0f s): %d frames, %.2f ms/frame (%.0f fps); CPU ms/frame: render thread %.2f, of it polling for the GPU %.2f -> work %.2f (%.0f %% of the frame), main thread %.2f%s, other threads %.2f",
+                (now - s_startMs) / 1000.0, s_frames, wall, 1000.0 / wall, rr, pace, rr - pace, 100.0 * (rr - pace) / wall,
                 same ? 0.0 : mm, same ? " (same thread)" : "", pp - rr - (same ? 0.0 : mm));
         }
         s_startMs = now;
         s_frames = 0;
+        g_PaceWaitMs = 0.0;
         s_main = m;
         s_render = r;
         s_proc = p;
