@@ -717,6 +717,32 @@ bool L4D2VR_ReadOpenXrInputState(L4D2VROpenXrInputStateDesc& inputState, uint32_
     return false;
 }
 
+bool L4D2VR_ReadOpenXrEyeGaze(L4D2VROpenXrEyeGazeDesc& gaze)
+{
+    std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+    const L4D2VROpenXrBridgeState* state = g_OpenXrBridgeState;
+    if (!state)
+        return false;
+
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        const uint32_t gen0 = state->inputStateGeneration;
+        if (gen0 == 0 || (gen0 & 1u))
+            continue;
+
+        L4D2VR_SeqlockAcquire();
+        L4D2VROpenXrEyeGazeDesc snapshot = state->inputState.eyeGaze;
+        L4D2VR_SeqlockAcquire();
+        if (state->inputStateGeneration == gen0)
+        {
+            gaze = snapshot;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void L4D2VR_PublishOpenXrGameRenderPose(const L4D2VROpenXrPoseDesc& pose)
 {
     if (!pose.valid)

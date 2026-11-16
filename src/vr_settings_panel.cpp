@@ -167,9 +167,10 @@ namespace
             { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
             { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Frame cap (0 off, 1 +10, 2 x2)", RowKind::Number, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "%.0f" },
-            // Coarser shading towards the edge of each lens (fixed, not eye-
-            // tracked). The GPU feature turns on at game start when this is 1.
-            { "Foveated (0 off, 1 fixed; restart)", RowKind::Number, "Foveated", nullptr, &bmvr::g_Foveated, 1.f, 0.f, 1.f, "%.0f" },
+            // Coarser shading away from the centre: 1 = around each lens centre,
+            // 2 = where you look (eye tracking; lens centre while there is no
+            // gaze). The GPU feature turns on at game start when this is 1 or 2.
+            { "Foveated (0 off, 1 fixed, 2 eye; restart)", RowKind::Number, "Foveated", nullptr, &bmvr::g_Foveated, 1.f, 0.f, 2.f, "%.0f" },
             { "Foveated: sharp radius", RowKind::Number, "FoveatedInner", nullptr, &bmvr::g_FoveatedInner, 0.05f, 0.1f, 1.f, "%.2f" },
             { "Foveated: half-rate radius", RowKind::Number, "FoveatedMid", nullptr, &bmvr::g_FoveatedMid, 0.05f, 0.2f, 1.5f, "%.2f" },
             { "REFLECTIONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },

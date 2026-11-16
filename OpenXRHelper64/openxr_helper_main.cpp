@@ -2299,8 +2299,9 @@ namespace
     public:
         bool InitializeInstance(XrDispatch& xr, XrInstance instance, Logger& log);
         bool InitializeSession(XrSession session, XrSpace appSpace, bool handTrackingEnabled, Logger& log);
-        // XR_EXT_eye_gaze_interaction (PS VR2 via PSVR2Toolkit). Diagnostic
-        // only so far: logs the gaze once a second, nothing consumes it.
+        // XR_EXT_eye_gaze_interaction (PS VR2 via PSVR2Toolkit). Published in
+        // the input state (eyeGaze) for eye-tracked foveated rendering; also
+        // logged once a second.
         void SetEyeGazeEnabled(bool enabled) { m_EyeGazeEnabled = enabled; }
         void Shutdown();
         void UpdateFrame(XrTime displayTime, BridgeWriter& bridge, Logger& log);
@@ -2404,7 +2405,7 @@ namespace
         XrAction m_EyeGazeAction = XR_NULL_HANDLE;
         XrSpace m_EyeGazeSpace = XR_NULL_HANDLE;
         XrSpace m_ViewSpace = XR_NULL_HANDLE;
-        void LogEyeGaze(XrTime displayTime, Logger& log);
+        void ReadEyeGaze(XrTime displayTime, bool focused, L4D2VROpenXrEyeGazeDesc& gaze, Logger& log);
         std::array<XrPath, L4D2VR_OPENXR_HAND_COUNT> m_HandPaths{};
         std::array<XrSpace, L4D2VR_OPENXR_HAND_COUNT> m_HandSpaces{};
         std::array<XrSpace, L4D2VR_OPENXR_HAND_COUNT> m_AimSpaces{};
@@ -5387,8 +5388,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         }
     }
 
-    void OpenXrInputBridge::LogEyeGaze(XrTime displayTime, Logger& log)
+    void OpenXrInputBridge::ReadEyeGaze(XrTime displayTime, bool focused, L4D2VROpenXrEyeGazeDesc& gaze, Logger& log)
     {
+        gaze = {};
+        gaze.publishTickMs = GetTickCount64();
+        gaze.focused = focused ? 1u : 0u;
         if (m_EyeGazeSpace == XR_NULL_HANDLE || m_ViewSpace == XR_NULL_HANDLE)
             return;
         static ULONGLONG s_lastMs;
@@ -5407,16 +5411,22 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             && (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) != 0;
         if (tracked)
             ++s_tracked;
-        const ULONGLONG now = GetTickCount64();
-        if (now - s_lastMs < 1000)
-            return;
-        s_lastMs = now;
-        // Gaze forward is -Z of the gaze pose; as yaw/pitch relative to the
-        // head view (right/up positive).
+        // Gaze forward is -Z of the gaze pose (view space: x right, y up).
         const XrQuaternionf& q = location.pose.orientation;
         const float fx = -(2.f * (q.x * q.z + q.w * q.y));
         const float fy = -(2.f * (q.y * q.z - q.w * q.x));
         const float fz = -(1.f - 2.f * (q.x * q.x + q.y * q.y));
+        gaze.valid = (XR_SUCCEEDED(stateResult) && poseState.isActive) ? 1u : 0u;
+        gaze.tracked = tracked ? 1u : 0u;
+        gaze.sampleTime = static_cast<int64_t>(sampleTime.time);
+        gaze.dir[0] = fx;
+        gaze.dir[1] = fy;
+        gaze.dir[2] = fz;
+        const ULONGLONG now = GetTickCount64();
+        if (now - s_lastMs < 1000)
+            return;
+        s_lastMs = now;
+        // Log as yaw/pitch relative to the head view (right/up positive).
         const float yaw = std::atan2(fx, -fz) * 57.29578f;
         const float pitch = std::atan2(fy, std::sqrt(fx * fx + fz * fz)) * 57.29578f;
         log.Print("gaze: active=%u tracked=%u/%u frames flags=0x%llx yaw=%+.1f pitch=%+.1f sampleTime=%lld state=%s loc=%s",
@@ -5464,7 +5474,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         SynthesizeControllerFingerCurls(state);
         LocateControllerPoses(displayTime, state, log);
         LocateHandTracking(displayTime, state);
-        LogEyeGaze(displayTime, log);
+        ReadEyeGaze(displayTime, syncResult == XR_SUCCESS, state.eyeGaze, log);
         state.reserved0 = CurrentControllerFamily();
         static uint32_t s_loggedFamily = ~0u;
         if (state.reserved0 != s_loggedFamily)

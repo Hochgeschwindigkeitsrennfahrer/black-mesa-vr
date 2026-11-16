@@ -1136,6 +1136,7 @@ namespace dxvk {
       int32_t  cx = INT32_MIN, cy = 0;    // centre in texels (quantised)
       float    r[3] = { };                // ring radii (fraction of half eye height)
       uint32_t level = 0;
+      uint32_t uploads = 0;               // re-uploads into the same image
     };
     void BmvrFoveationSelect(int stereoEye, uint32_t eyeW, uint32_t eyeH, float centreU, float centreV);
     BmvrFovMap        m_bmvrFovMap[2];

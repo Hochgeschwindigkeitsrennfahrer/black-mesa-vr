@@ -1386,25 +1386,102 @@ namespace
     // pass this is (rate image on eye-sized targets) or none (HUD paint,
     // captures, menus, everything outside the stereo world pass). DXVK only
     // attaches the map to render passes of exactly the eye size.
+    // Foveated 2 = eye-tracked: the ring centre follows the gaze from the
+    // OpenXR helper (XR_EXT_eye_gaze_interaction), read once per eye pass.
+    // The centre only moves when the gaze moved more than FoveatedGazeStep
+    // (tangent units, ~1 deg) so the maps are not re-uploaded every frame.
+    // No usable gaze (not tracked, session not focused, sample older than
+    // 150 ms) keeps the last centre for 300 ms (blinks), then falls back to
+    // the lens centre.
+    struct FoveationGazeState
+    {
+        int lastEye = -1;
+        float cu[2] = { 0.5f, 0.5f }, cv[2] = { 0.5f, 0.5f };
+        bool haveGaze = false;
+        float tx = 0.f, ty = 0.f;      // gaze tangents in use (x right, y up)
+        uint64_t lastGoodMs = 0;
+        uint32_t passes = 0, gazePasses = 0, moves = 0, fallbacks = 0;
+        uint64_t statMs = 0;
+    };
+    FoveationGazeState g_FovGaze;
+
+    void FoveationUpdateGaze(FoveationGazeState& g)
+    {
+        L4D2VROpenXrEyeGazeDesc gaze{};
+        const uint64_t now = GetTickCount64();
+        const bool read = L4D2VR_ReadOpenXrEyeGaze(gaze);
+        const float fwd = -gaze.dir[2];
+        const bool ok = read && gaze.valid && gaze.tracked && gaze.focused
+            && now - gaze.publishTickMs <= 150 && fwd > 0.3f;
+        if (ok)
+        {
+            const float tx = gaze.dir[0] / fwd, ty = gaze.dir[1] / fwd;
+            const float step = bmvr::g_FoveatedGazeStep;
+            if (!g.haveGaze || (tx - g.tx) * (tx - g.tx) + (ty - g.ty) * (ty - g.ty) > step * step)
+            {
+                g.tx = tx;
+                g.ty = ty;
+                ++g.moves;
+            }
+            g.haveGaze = true;
+            g.lastGoodMs = now;
+        }
+        else if (g.haveGaze && now - g.lastGoodMs > 300)
+        {
+            g.haveGaze = false;
+            ++g.fallbacks;
+        }
+        ++g.passes;
+        if (g.haveGaze)
+            ++g.gazePasses;
+        if (now - g.statMs >= 10000)
+        {
+            if (g.statMs)
+                Game::logMsg("Foveation gaze: %u/%u eye passes on gaze, %u centre moves, %u fallbacks (last 10 s); "
+                    "now %s tan %+.3f %+.3f (read=%d valid=%u tracked=%u focused=%u age=%llums)",
+                    g.gazePasses, g.passes, g.moves, g.fallbacks, g.haveGaze ? "gaze" : "lens centre", g.tx, g.ty,
+                    read ? 1 : 0, gaze.valid, gaze.tracked, gaze.focused,
+                    static_cast<unsigned long long>(read ? now - gaze.publishTickMs : 0));
+            g.statMs = now;
+            g.passes = g.gazePasses = g.moves = g.fallbacks = 0;
+        }
+    }
+
     void FoveationOnRt0(IDirect3DDevice9* device, VR* vr)
     {
         if (!bmvr::g_FoveatedAtStart || !device)
             return;
+        FoveationGazeState& g = g_FovGaze;
         int eye = 0;
-        float cu = 0.5f, cv = 0.5f;
         if (vr && bmvr::g_Foveated > 0.f && vr->StereoWorldPassActive() && !vr->HudPaintActive()
             && !vr->m_CaptureReentry)
-        {
             eye = GpuTimerEye(vr);
-            float r[4];
-            if (eye && vr->EyeRenderRect(eye, r) && r[1] > r[0] && r[3] > r[2])
+        if (eye && eye != g.lastEye)
+        {
+            // New eye pass: centre = straight ahead (lens) or the gaze, in this
+            // eye's texture (0..1, v down) from its tangent rectangle.
+            float cu = 0.5f, cv = 0.5f, tx = 0.f, ty = 0.f;
+            if (bmvr::g_Foveated >= 1.5f)
             {
-                // Straight ahead (tangent 0,0) in the eye texture, v down.
-                cu = -r[0] / (r[1] - r[0]);
-                cv = r[3] / (r[3] - r[2]);
+                FoveationUpdateGaze(g);
+                if (g.haveGaze)
+                {
+                    tx = g.tx;
+                    ty = g.ty;
+                }
             }
+            float r[4];
+            if (vr->EyeRenderRect(eye, r) && r[1] > r[0] && r[3] > r[2])
+            {
+                cu = (tx - r[0]) / (r[1] - r[0]);
+                cv = (r[3] - ty) / (r[3] - r[2]);
+            }
+            g.cu[eye - 1] = std::clamp(cu, 0.f, 1.f);
+            g.cv[eye - 1] = std::clamp(cv, 0.f, 1.f);
         }
-        bmvr::FoveationSelect(device, eye, vr ? vr->m_RenderWidth : 0, vr ? vr->m_RenderHeight : 0, cu, cv);
+        g.lastEye = eye;
+        bmvr::FoveationSelect(device, eye, vr ? vr->m_RenderWidth : 0, vr ? vr->m_RenderHeight : 0,
+            eye ? g.cu[eye - 1] : 0.5f, eye ? g.cv[eye - 1] : 0.5f);
     }
 
     // Called after RT0 changes (SetRenderTarget index 0).

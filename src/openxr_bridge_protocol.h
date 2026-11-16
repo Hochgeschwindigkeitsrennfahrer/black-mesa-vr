@@ -26,11 +26,13 @@ inline void L4D2VR_SeqlockAcquire()
 }
 
 constexpr uint32_t L4D2VR_OPENXR_BRIDGE_MAGIC = 0x5258344Cu; // L4XR
-constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 16;
+constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 17;
 // 13: XR_KHR_visibility_mask hidden triangle list (NDC xy per eye).
 // 14: helperConsumingFrameId / helperConsumedFrameId (helper -> game blit
 //     progress; the game reuses a publish slot only once the helper's blit
 //     out of it has finished on the GPU).
+// 17: L4D2VROpenXrInputStateDesc.eyeGaze (XR_EXT_eye_gaze_interaction ray in
+//     head view space, for eye-tracked foveated rendering).
 // L4D2VROpenXrRuntimeViewConfigDesc.reserved0: 0 = recommended size only
 // (CreateDevice), 1 = xrLocateViews FOV (InitOpenXR stereo fusion).
 constexpr uint32_t L4D2VR_OPENXR_RUNTIME_VIEW_SIZE_ONLY = 0;
@@ -364,6 +366,21 @@ struct L4D2VROpenXrHandTrackingDesc
     L4D2VROpenXrHandJointDesc joints[L4D2VR_OPENXR_HAND_JOINT_COUNT] = {};
 };
 
+// Combined eye gaze (XR_EXT_eye_gaze_interaction), located in the VIEW
+// space at the frame's predicted display time. dir = gaze forward, unit
+// vector, x right, y up, -z forward (OpenXR view axes).
+struct L4D2VROpenXrEyeGazeDesc
+{
+    uint32_t valid = 0;          // extension active, action bound
+    uint32_t tracked = 0;        // this sample's orientation is tracked
+    uint32_t focused = 0;        // xrSyncActions returned XR_SUCCESS
+    uint32_t reserved0 = 0;
+    uint64_t publishTickMs = 0;  // GetTickCount64() when the helper wrote it
+    int64_t sampleTime = 0;      // XrEyeGazeSampleTimeEXT (0 = unknown)
+    float dir[3] = { 0.0f, 0.0f, -1.0f };
+    float reserved1 = 0.0f;
+};
+
 struct L4D2VROpenXrInputStateDesc
 {
     uint32_t valid = 0;
@@ -375,6 +392,7 @@ struct L4D2VROpenXrInputStateDesc
     L4D2VROpenXrDigitalActionDesc digitalActions[L4D2VR_OPENXR_ACTION_COUNT] = {};
     L4D2VROpenXrAnalogActionDesc analogActions[L4D2VR_OPENXR_ACTION_COUNT] = {};
     L4D2VROpenXrHandTrackingDesc handTracking[L4D2VR_OPENXR_HAND_COUNT] = {};
+    L4D2VROpenXrEyeGazeDesc eyeGaze = {};
 };
 
 struct L4D2VROpenXrHapticRequestDesc

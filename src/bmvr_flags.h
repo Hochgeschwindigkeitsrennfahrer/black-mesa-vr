@@ -363,7 +363,9 @@ namespace bmvr
     extern bool g_GpuPassDetail;
     // Foveated rendering (VK_KHR_fragment_shading_rate rate image per eye,
     // DXVK d3d9_device.cpp BmvrFoveationSelect). Foveated: 0 off, 1 fixed
-    // rings around each eye's lens centre. The GPU feature is only enabled
+    // rings around each eye's lens centre, 2 eye-tracked (centre follows the
+    // OpenXR eye gaze; lens centre while there is none). FoveatedGazeStep:
+    // gaze change (tangent units) before the centre moves. The GPU feature is only enabled
     // when Foveated > 0 at game start (g_FoveatedAtStart); later the panel
     // switches it live. Rings in units of half the eye height: inside Inner
     // full rate, to Mid 2x1/1x2, to Outer 2x2, beyond 4x4 (driver clamps
@@ -373,6 +375,7 @@ namespace bmvr
     extern float g_FoveatedInner;
     extern float g_FoveatedMid;
     extern float g_FoveatedOuter;
+    extern float g_FoveatedGazeStep;
     // Called on the D3D thread after RT0 changes: stereoEye 1/2 = this eye's
     // world pass (rate image on eye-sized targets), 0 = none. centreU/V =
     // lens centre in the eye texture (0..1, v down).

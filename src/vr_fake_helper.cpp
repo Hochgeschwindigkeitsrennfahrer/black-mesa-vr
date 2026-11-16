@@ -37,6 +37,9 @@
 //                                pose at 90/s barely moves, then the next ones catch up)
 //   msaa <0|2|4>                 eye MSAA, like the VR panel row (live eye recreate)
 //   perflog <0|1>                PerfLog, like the VR panel Debug row (live)
+//   gaze <yaw> <pitch> [tracked] eye gaze relative to the head view, degrees, right/up
+//                                positive (XR_EXT_eye_gaze_interaction); tracked 0 = gaze
+//                                lost (blink). Without the line: no eye tracking.
 // <VR dir>\cmd.txt: console commands, one per line, appended by the test; each new
 // line is run once (ClientCmd_Unrestricted on the engine thread).
 
@@ -96,6 +99,9 @@ namespace
         int poseLagEvery = 0;
         float poseLagMs = 0.f;
         RawPose raw[kRawCount];
+        bool gazeSet = false;
+        float gazeYaw = 0.f, gazePitch = 0.f;
+        int gazeTracked = 1;
     };
 
     std::mutex g_CmdMutex;
@@ -192,6 +198,8 @@ namespace
         fresh.throwArc = 0.f;
         fresh.poseLagEvery = 0;
         fresh.poseLagMs = 0.f;
+        fresh.gazeSet = false;
+        fresh.gazeTracked = 1;
         for (RawPose& r : fresh.raw)
             r = RawPose{};
         std::string line;
@@ -274,6 +282,14 @@ namespace
             }
             else if (key == "poselag")
                 ss >> fresh.poseLagEvery >> fresh.poseLagMs;
+            else if (key == "gaze")
+            {
+                fresh.gazeSet = true;
+                ss >> fresh.gazeYaw >> fresh.gazePitch;
+                int tr = 1;
+                if (ss >> tr)
+                    fresh.gazeTracked = tr;
+            }
             else if (key == "buttons")
             {
                 std::string b;
@@ -533,6 +549,17 @@ namespace
             in.analogActions[(int)L4D2VROpenXrActionId::Walk].y = script.moveY;
             in.analogActions[(int)L4D2VROpenXrActionId::Turn].x = script.turnX;
             in.analogActions[(int)L4D2VROpenXrActionId::Turn].y = script.turnY;
+            in.eyeGaze.publishTickMs = GetTickCount64();
+            in.eyeGaze.focused = 1;
+            if (script.gazeSet)
+            {
+                const float gy = script.gazeYaw * kPi / 180, gp = script.gazePitch * kPi / 180;
+                in.eyeGaze.valid = 1;
+                in.eyeGaze.tracked = script.gazeTracked != 0 ? 1u : 0u;
+                in.eyeGaze.dir[0] = sinf(gy) * cosf(gp);
+                in.eyeGaze.dir[1] = sinf(gp);
+                in.eyeGaze.dir[2] = -cosf(gy) * cosf(gp);
+            }
             ++state->inputStateGeneration;
             std::atomic_thread_fence(std::memory_order_release);
             state->inputState = in;

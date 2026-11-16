@@ -12111,26 +12111,31 @@ namespace dxvk {
     const uint32_t tw = (eyeW + texel.width - 1u) / texel.width;
     const uint32_t th = (eyeH + texel.height - 1u) / texel.height;
 
+    // Rebuilt when the eye-tracked centre moves (a few times a second), on
+    // the D3D thread: squared distances, no per-texel sqrt.
     std::vector<uint8_t> data(size_t(tw) * th);
     const float halfH = 0.5f * float(eyeH);
     const float r1 = r[0] * halfH, r2 = r[1] * halfH, r3 = r[2] * halfH;
+    const float r1s = r1 * r1, r2s = r2 * r2, r3s = r3 * r3;
     const float centreX = (float(cx) + 0.5f) * float(texel.width);
     const float centreY = (float(cy) + 0.5f) * float(texel.height);
     uint32_t counts[4] = { };
 
     for (uint32_t y = 0; y < th; y++) {
+      const float dy = (float(y) + 0.5f) * float(texel.height) - centreY;
+      const float dy2 = dy * dy;
+      uint8_t* row = &data[size_t(y) * tw];
       for (uint32_t x = 0; x < tw; x++) {
         const float dx = (float(x) + 0.5f) * float(texel.width) - centreX;
-        const float dy = (float(y) + 0.5f) * float(texel.height) - centreY;
-        const float d = std::sqrt(dx * dx + dy * dy);
+        const float d2 = dx * dx + dy2;
         // Rate texel value: (log2(width) << 2) | log2(height)
         uint8_t v;
         int ring;
-        if (d < r1)      { v = 0u; ring = 0; }
-        else if (d < r2) { v = std::abs(dx) >= std::abs(dy) ? 4u : 1u; ring = 1; }
-        else if (d < r3) { v = 5u; ring = 2; }
-        else             { v = 10u; ring = 3; }
-        data[size_t(y) * tw + x] = v;
+        if (d2 < r1s)      { v = 0u; ring = 0; }
+        else if (d2 < r2s) { v = dx * dx >= dy2 ? 4u : 1u; ring = 1; }
+        else if (d2 < r3s) { v = 5u; ring = 2; }
+        else               { v = 10u; ring = 3; }
+        row[x] = v;
         counts[ring]++;
       }
     }
@@ -12144,6 +12149,40 @@ namespace dxvk {
     Rc<DxvkBuffer> staging = m_dxvkDevice->createBuffer(bufInfo,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     std::memcpy(staging->mapPtr(0), data.data(), data.size());
+
+    // Same size: upload into the existing image. The copy is ordered after
+    // the GPU's earlier reads of it by DXVK's barriers (the image's stages
+    // include the shading rate stage), so passes already recorded keep the
+    // old map and later ones get the new one.
+    const bool reuse = map.view != nullptr
+      && map.view->image()->info().extent.width == tw
+      && map.view->image()->info().extent.height == th;
+
+    if (reuse) {
+      EmitCs([
+        cImage   = map.view->image(),
+        cStaging = std::move(staging),
+        cExtent  = VkExtent3D { tw, th, 1u }
+      ] (DxvkContext* ctx) {
+        VkImageSubresourceLayers layers = { VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u };
+        ctx->copyBufferToImage(cImage, layers, VkOffset3D { 0, 0, 0 }, cExtent,
+          cStaging, 0, 0, 0, VK_FORMAT_R8_UINT);
+      });
+
+      map.cx = cx;
+      map.cy = cy;
+      map.r[0] = r[0];
+      map.r[1] = r[1];
+      map.r[2] = r[2];
+      map.level = level;
+      map.uploads++;
+
+      // Log the first few moves, then only a count (eye-tracked: many)
+      if (map.uploads <= 3u || (map.uploads % 500u) == 0u)
+        bmvr::Log("Foveation map %c re-upload #%u: centre px %.0f,%.0f",
+          eyeIndex == 0 ? 'L' : 'R', map.uploads, centreX, centreY);
+      return;
+    }
 
     DxvkImageCreateInfo imgInfo;
     imgInfo.type        = VK_IMAGE_TYPE_2D;
