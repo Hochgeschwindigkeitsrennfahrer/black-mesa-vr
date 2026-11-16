@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <mutex>
@@ -592,15 +593,22 @@ namespace
     constexpr COLORREF kBtnHover = RGB(255, 176, 0);
     constexpr COLORREF kOn = RGB(60, 150, 80);
     constexpr COLORREF kOff = RGB(70, 74, 80);
+    constexpr COLORREF kAlert = RGB(210, 40, 30);
 
-    // Text of an Info row and whether it is a warning (drawn amber).
-    std::string InfoText(const Row& r, bool& warn)
+    // Missing-hook alert: 0 none, 1 debug-only hooks missing (amber), 2 gameplay hooks missing (red).
+    // Shown as a filled bar on the Debug tab's "Missing hooks" row and a badge on the DEBUG tab
+    // button, so it is seen without opening the tab.
+    int MissingHooksLevel()
     {
-        warn = false;
+        return Game::missingOffsetCount() > 0 ? 2 : Game::missingDebugOffsetCount() > 0 ? 1 : 0;
+    }
+
+    // Text of an Info row.
+    std::string InfoText(const Row& r)
+    {
         if (!r.fmt || std::strcmp(r.fmt, "missing_hooks") != 0)
             return {};
         const int game = Game::missingOffsetCount(), debug = Game::missingDebugOffsetCount();
-        warn = game > 0;
         if (game == 0 && debug == 0)
             return "none";
         char buf[64]{};
@@ -634,8 +642,22 @@ namespace
             {
                 const bool active = (tabIndex++ == g_Tab);
                 const int y0 = l.top[i], y1 = y0 + kTabPx;
+                // Missing hooks: the DEBUG tab button is filled red (gameplay) or amber (debug only)
+                // with "!" on both sides, so it shows from any tab; selected, a red/amber frame.
+                const int alert = std::strcmp(r.label, "DEBUG") == 0 ? MissingHooksLevel() : 0;
+                const COLORREF alertFill = alert == 2 ? kAlert : kAmber;
+                if (alert && !active)
+                {
+                    c.fill(l.x0[i], y0 + 4, l.x1[i], y1, alertFill);
+                    c.text("!   DEBUG   !", l.x0[i], y0 + 4, l.x1[i], y1, alert == 2 ? RGB(255, 255, 255) : RGB(0, 0, 0),
+                        34, true, DT_CENTER);
+                    continue;
+                }
+                if (alert)
+                    c.fill(l.x0[i] - 6, y0 - 2, l.x1[i] + 6, y1 + 6, alert == 2 ? kAlert : RGB(255, 255, 255));
                 c.fill(l.x0[i], y0 + 4, l.x1[i], y1, active ? kAmber : hover ? kRowHover : kBtn);
-                c.text(r.label, l.x0[i], y0 + 4, l.x1[i], y1, active ? RGB(0, 0, 0) : kText, 32, true, DT_CENTER);
+                c.text(alert ? "!   DEBUG   !" : r.label, l.x0[i], y0 + 4, l.x1[i], y1, active ? RGB(0, 0, 0) : kText,
+                    32, true, DT_CENTER);
                 continue;
             }
             if (!RowVisible(i))
@@ -666,10 +688,20 @@ namespace
             }
             if (r.kind == RowKind::Info)
             {
-                bool warn = false;
-                const std::string info = InfoText(r, warn);
-                c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
-                c.text(info.c_str(), x + kMinusX0, y0, x + cw - 40, y1, warn ? kAmber : kText, 30, true, DT_RIGHT);
+                const std::string info = InfoText(r);
+                const int level = MissingHooksLevel();
+                if (level == 0)
+                {
+                    c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kDim, 34, false, DT_LEFT);
+                    c.text(info.c_str(), x + kMinusX0, y0, x + cw - 40, y1, kOn, 30, true, DT_RIGHT);
+                    continue;
+                }
+                // Something is missing: a filled bar across the column, red for gameplay hooks.
+                const COLORREF bar = level == 2 ? kAlert : kAmber;
+                const COLORREF ink = level == 2 ? RGB(255, 255, 255) : RGB(0, 0, 0);
+                c.fill(x + 16, y0 + 4, x + cw - 16, y1 - 4, bar);
+                c.text(level == 2 ? "! MISSING HOOKS" : "! Missing hooks", x + 40, y0, x + kMinusX0 - 10, y1, ink, 34, true, DT_LEFT);
+                c.text(info.c_str(), x + kMinusX0 - 60, y0, x + cw - 40, y1, ink, 30, true, DT_RIGHT);
                 continue;
             }
             c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
@@ -852,6 +884,15 @@ IDirect3DTexture9* VR::SettingsGearTexture(IDirect3DDevice9* device)
 
 void VR::OpenSettingsPanel()
 {
+    // Test only: BMVR_TEST_PANEL_TAB=<n> opens the panel on tab n (headless screenshots).
+    static bool s_testTab = false;
+    if (!s_testTab)
+    {
+        s_testTab = true;
+        char v[8] = {};
+        if (GetEnvironmentVariableA("BMVR_TEST_PANEL_TAB", v, sizeof(v)))
+            g_Tab = std::atoi(v);
+    }
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     Vector fwd, right, up;
     GetViewBasis(&fwd, &right, &up);
@@ -1197,6 +1238,14 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     // exchange before Paint: a click on the game thread while this paints
     // sets the flag again, so it is drawn next frame. (A plain bool cleared
     // after Upload lost such clicks: pills needed 2-3 pulls, 2026-11-11.)
+    // Hooks resolved at a map load can go missing while the panel is open: repaint for the alert.
+    static int s_paintedHookCounts = -1;
+    const int hookCounts = Game::missingOffsetCount() * 1000 + Game::missingDebugOffsetCount();
+    if (hookCounts != s_paintedHookCounts)
+    {
+        s_paintedHookCounts = hookCounts;
+        m_SettingsDirty = true;
+    }
     if (m_SettingsDirty.exchange(false) || !g_Gfx.gpu)
     {
         Canvas c(kTexW, TexH());

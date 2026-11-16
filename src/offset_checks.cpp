@@ -4,6 +4,7 @@
 #include "bmvr_seh.h"
 
 #include <Windows.h>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -134,6 +135,24 @@ namespace
 
 void bmvr::VerifyGameOffsets()
 {
+    // Test only: BMVR_TEST_MISSING_HOOKS=<gameplay>,<debug> adds that many fake missing offsets, to
+    // check the out-of-date toast and the Debug tab alert headless.
+    static bool s_testInjected = false;
+    if (!s_testInjected)
+    {
+        s_testInjected = true;
+        char v[32] = {};
+        int game = 0, debug = 0;
+        if (GetEnvironmentVariableA("BMVR_TEST_MISSING_HOOKS", v, sizeof(v))
+            && sscanf_s(v, "%d,%d", &game, &debug) >= 1)
+        {
+            Game::logMsg("BMVR_TEST_MISSING_HOOKS: %d gameplay, %d debug (fake)", game, debug);
+            for (int i = 0; i < game; ++i)
+                Game::noteMissingOffset(("test gameplay " + std::to_string(i)).c_str());
+            for (int i = 0; i < debug; ++i)
+                Game::noteMissingOffset(("test debug " + std::to_string(i)).c_str(), true);
+        }
+    }
     const size_t nModules = sizeof(kOffsetFingerprints) / sizeof(kOffsetFingerprints[0]);
     for (size_t m = 0; m < nModules; ++m)
     {
