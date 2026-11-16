@@ -206,6 +206,8 @@ namespace bmvr
               Kind::Float, 0.f, 500.f, nullptr, &g_GlowHideMs },
             { "bmvr_loading_card", "VR: LOADING card on the eyes during in-game loads (0 = old frozen world; test switch)",
               Kind::Bool, 0.f, 1.f, &g_LoadingCard, nullptr },
+            { "bmvr_particles_last", "VR test: particles drawn after the rest of the translucent pass also without MSAA (splash over water)",
+              Kind::Bool, 0.f, 1.f, &g_ParticlesLast, nullptr },
             { "bmvr_title_level", "VR test: intro logo / chapter titles level in the room at the head's yaw (0 = head-locked)",
               Kind::Bool, 0.f, 1.f, &g_TitleLevel, nullptr },
             { "bmvr_glow_proxy_scale", "VR test: glow occlusion test area this many times wider (1 = stock): finer visibility steps, less flicker",

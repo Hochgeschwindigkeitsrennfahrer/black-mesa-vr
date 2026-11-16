@@ -1304,6 +1304,7 @@ namespace
     // Game thread only.
     int g_TranslucentDepth = 0;
     bool g_TranslucentHold = false;
+    bool g_TranslucentHoldTo1x = false;   // "MSAA skips particles": held particles go to the 1x resolve
     std::vector<HeldParticle> g_HeldParticles;
 
     // Particle system renderable? By the MSVC RTTI class name behind the
@@ -1338,8 +1339,10 @@ namespace
     {
         if (g_TranslucentDepth++ != 0)
             return;
-        g_TranslucentHold = bmvr::g_MsaaParticles1x && Hooks::m_VR && Hooks::m_VR->UseVrMsaa()
-            && g_ClientCurrentViewId && g_ClientCurrentViewId() == 0;
+        const bool mainView = Hooks::m_VR && g_ClientCurrentViewId && g_ClientCurrentViewId() == 0;
+        g_TranslucentHoldTo1x = mainView && bmvr::g_MsaaParticles1x && Hooks::m_VR->UseVrMsaa();
+        // ParticlesLast: same hold as a pure draw-order change (no 1x switch).
+        g_TranslucentHold = g_TranslucentHoldTo1x || (mainView && bmvr::g_ParticlesLast);
     }
 
     void TranslucentPassLeave()
@@ -1349,7 +1352,7 @@ namespace
         g_TranslucentHold = false;
         if (g_HeldParticles.empty())
             return;
-        if (Hooks::m_VR)
+        if (g_TranslucentHoldTo1x && Hooks::m_VR)
             Hooks::m_VR->NoteTranslucentPassStart();
         for (const HeldParticle& h : g_HeldParticles)
             g_OrigDrawTranslucentRenderable(h.ent, h.twoPass, h.a3, h.a4, h.viewData);

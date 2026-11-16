@@ -550,6 +550,13 @@ namespace bmvr
     // left there (like the pause menu) instead of head-locked (turning,
     // pitching and rolling with the headset).
     extern bool g_TitleLevel;
+    // ParticlesLast (default false, panel DEBUG > TESTS): hold the main view's
+    // particles to the end of the translucent pass also when "MSAA skips
+    // particles" does not (MSAA 0 or that row off), as a pure draw-order change
+    // without the 1x switch. The engine's distance sort can put a big water
+    // model after a waterfall splash; the water then paints its refraction
+    // texture (no particles in it) over the splash (capture 213054 vs 213110).
+    extern bool g_ParticlesLast;
     // bmvr_glow_trace <seconds> / panel DEBUG "Record glow trace": start a glow
     // trace of that length (bmvr_glowtrace.h); reset to 0 once it starts.
     extern float g_GlowTraceSeconds;
