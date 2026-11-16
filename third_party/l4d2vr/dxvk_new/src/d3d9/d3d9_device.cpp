@@ -12264,10 +12264,12 @@ namespace dxvk {
           int(props.fragmentShadingRateWithCustomSampleLocations));
       }
 
+      // Radii are tuned on the PS VR2; the scale keeps them the same angle on other headsets.
+      const float ringScale = std::clamp(bmvr::g_FoveatedRingScale, 0.25f, 4.0f);
       const float r[3] = {
-        std::clamp(bmvr::g_FoveatedInner, 0.05f, 2.0f),
-        std::clamp(std::max(bmvr::g_FoveatedMid, bmvr::g_FoveatedInner), 0.05f, 3.0f),
-        std::clamp(std::max(bmvr::g_FoveatedOuter, bmvr::g_FoveatedMid), 0.05f, 4.0f) };
+        std::clamp(bmvr::g_FoveatedInner, 0.05f, 2.0f) * ringScale,
+        std::clamp(std::max(bmvr::g_FoveatedMid, bmvr::g_FoveatedInner), 0.05f, 3.0f) * ringScale,
+        std::clamp(std::max(bmvr::g_FoveatedOuter, bmvr::g_FoveatedMid), 0.05f, 4.0f) * ringScale };
 
       const int32_t cx = int32_t(std::floor(std::clamp(centreU, 0.f, 1.f) * float(eyeW) / float(m_bmvrFovTexel.width)));
       const int32_t cy = int32_t(std::floor(std::clamp(centreV, 0.f, 1.f) * float(eyeH) / float(m_bmvrFovTexel.height)));

@@ -1399,6 +1399,7 @@ namespace
         int lastEye = -1;
         float cu[2] = { 0.5f, 0.5f }, cv[2] = { 0.5f, 0.5f };
         bool haveGaze = false;
+        bool everGaze = false;         // eye tracking delivered a gaze at least once this launch
         float tx = 0.f, ty = 0.f;      // gaze tangents in use (x right, y up)
         uint64_t lastGoodMs = 0;
         uint32_t passes = 0, gazePasses = 0, moves = 0, fallbacks = 0;
@@ -1425,6 +1426,7 @@ namespace
                 ++g.moves;
             }
             g.haveGaze = true;
+            g.everGaze = true;
             g.lastGoodMs = now;
         }
         else if (g.haveGaze && now - g.lastGoodMs > 300)
@@ -1448,10 +1450,15 @@ namespace
         }
     }
 
+    std::atomic<int> g_FovGpu{ -1 };   // variable-rate shading on this GPU: -1 not known yet, 0 no, 1 yes
+    std::string FoveationStatusNow();
+
     void FoveationOnRt0(IDirect3DDevice9* device, VR* vr)
     {
         if (!bmvr::g_FoveatedAtStart || !device)
             return;
+        if (g_FovGpu.load(std::memory_order_relaxed) < 0)
+            g_FovGpu.store(bmvr::FoveationAvailable(device) ? 1 : 0, std::memory_order_relaxed);
         FoveationGazeState& g = g_FovGaze;
         int eye = 0;
         // Full rate while the VR settings panel or the game's menus are up: the panel floats in
@@ -1459,6 +1466,17 @@ namespace
         if (vr && bmvr::g_Foveated > 0.f && vr->StereoWorldPassActive() && !vr->HudPaintActive()
             && !vr->m_CaptureReentry && !vr->SettingsPanelOpen() && !vr->m_GameUiVisible)
             eye = GpuTimerEye(vr);
+        if (eye == 1 && eye != g.lastEye)
+        {
+            // Status changes (eye tracking found / paused / lost) go to the log once each.
+            static std::string s_lastStatus;
+            std::string status = FoveationStatusNow();
+            if (status != s_lastStatus)
+            {
+                Game::logMsg("Foveation status: %s", status.c_str());
+                s_lastStatus = std::move(status);
+            }
+        }
         if (eye && eye != g.lastEye)
         {
             // New eye pass: centre = straight ahead (lens) or the gaze, in this
@@ -1478,6 +1496,16 @@ namespace
             {
                 cu = (tx - r[0]) / (r[1] - r[0]);
                 cv = (r[3] - ty) / (r[3] - r[2]);
+                // Ring radii are tuned as fractions of half the eye height on the PS VR2 (vertical span
+                // 1.003 up + 1.142 down = 2.1451 tangent). Same angle elsewhere: scale by PS VR2 / this span.
+                constexpr float kPsvr2TanSpan = 2.1451f;
+                const float scale = kPsvr2TanSpan / (r[3] - r[2]);
+                if (std::fabs(scale - bmvr::g_FoveatedRingScale) > 0.002f)
+                {
+                    bmvr::g_FoveatedRingScale = scale;
+                    Game::logMsg("Foveation rings: eye vertical span %.4f tan -> ring scale %.3f (PS VR2 = 1)",
+                        r[3] - r[2], scale);
+                }
             }
             g.cu[eye - 1] = std::clamp(cu, 0.f, 1.f);
             g.cv[eye - 1] = std::clamp(cv, 0.f, 1.f);
@@ -1485,6 +1513,24 @@ namespace
         g.lastEye = eye;
         bmvr::FoveationSelect(device, eye, vr ? vr->m_RenderWidth : 0, vr ? vr->m_RenderHeight : 0,
             eye ? g.cu[eye - 1] : 0.5f, eye ? g.cv[eye - 1] : 0.5f);
+    }
+
+    std::string FoveationStatusNow()
+    {
+        if (bmvr::g_Foveated < 0.5f)
+            return "off";
+        if (!bmvr::g_FoveatedAtStart)
+            return "restart the game to turn on";
+        const int gpu = g_FovGpu.load(std::memory_order_relaxed);
+        if (gpu == 0)
+            return "off (GPU has no variable-rate shading)";
+        if (gpu < 0)
+            return "starting";
+        if (bmvr::g_Foveated < 1.5f)
+            return "fixed (lens centre)";
+        if (g_FovGaze.haveGaze)
+            return "eye-tracked";
+        return g_FovGaze.everGaze ? "fixed (eye tracking paused)" : "fixed (no eye tracking)";
     }
 
     // Called after RT0 changes (SetRenderTarget index 0).
@@ -19709,3 +19755,7 @@ void BmvrAuditNoteMaterial(const char* name)
     t_AuditMaterial[sizeof(t_AuditMaterial) - 1] = 0;
 }
 
+std::string bmvr::FoveationStatusText()
+{
+    return FoveationStatusNow();
+}

@@ -161,11 +161,12 @@ namespace bmvr
     int g_RefractCopyRtH = 0;
     bool g_GpuPassTiming = false;
     bool g_GpuPassDetail = false;
-    float g_Foveated = 0.f;
+    float g_Foveated = 2.f;   // eye-tracked; lens centre (= fixed) without eye tracking
     bool g_FoveatedAtStart = false;
     float g_FoveatedInner = 0.25f;
     float g_FoveatedMid = 0.65f;
     float g_FoveatedOuter = 0.8f;
+    float g_FoveatedRingScale = 1.f;
     float g_FoveatedGazeStep = 0.02f;
     bool g_PerfLog = false;
     int g_ReflectionRtH = 0;

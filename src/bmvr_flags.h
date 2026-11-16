@@ -382,14 +382,19 @@ namespace bmvr
     // OpenXR eye gaze; lens centre while there is none). FoveatedGazeStep:
     // gaze change (tangent units) before the centre moves. The GPU feature is only enabled
     // when Foveated > 0 at game start (g_FoveatedAtStart); later the panel
-    // switches it live. Rings in units of half the eye height: inside Inner
-    // full rate, to Mid 2x1/1x2, to Outer 2x2, beyond 4x4 (driver clamps
-    // to its largest rate, 2x2 on RDNA4).
+    // switches it live. Rings in units of half the eye height on the PS VR2:
+    // inside Inner full rate, to Mid 2x1/1x2, to Outer 2x2, beyond 4x4 (driver
+    // clamps to its largest rate, 2x2 on RDNA4). g_FoveatedRingScale (set per
+    // eye pass) keeps them the same angle on other headsets: PS VR2 vertical
+    // eye span (tangent) / this headset's.
     extern float g_Foveated;
     extern bool g_FoveatedAtStart;
     extern float g_FoveatedInner;
     extern float g_FoveatedMid;
     extern float g_FoveatedOuter;
+    extern float g_FoveatedRingScale;
+    // Panel/log status: "off", "eye-tracked", "fixed (no eye tracking)", ...
+    std::string FoveationStatusText();
     extern float g_FoveatedGazeStep;
     // Called on the D3D thread after RT0 changes: stereoEye 1/2 = this eye's
     // world pass (rate image on eye-sized targets), 0 = none. centreU/V =

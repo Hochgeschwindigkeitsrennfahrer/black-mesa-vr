@@ -224,7 +224,7 @@ namespace bmvr
               Kind::Float, 0.f, 2.f, nullptr, &g_Foveated },
             { "bmvr_foveated_gaze_step", "VR: eye-tracked foveation moves its centre only after the gaze moved this far (tangent units, 0.02 = ~1 deg)",
               Kind::Float, 0.f, 0.2f, nullptr, &g_FoveatedGazeStep },
-            { "bmvr_foveated_inner", "VR: foveated full-rate radius (fraction of half the eye height)",
+            { "bmvr_foveated_inner", "VR: foveated full-rate radius (fraction of half the eye height on the PS VR2; same angle on other headsets)",
               Kind::Float, 0.05f, 2.f, nullptr, &g_FoveatedInner },
             { "bmvr_foveated_mid", "VR: foveated half-rate (2x1/1x2) ring outer radius",
               Kind::Float, 0.05f, 3.f, nullptr, &g_FoveatedMid },

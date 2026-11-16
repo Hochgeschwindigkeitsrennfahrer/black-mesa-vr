@@ -173,6 +173,7 @@ namespace
             // 2 = where you look (eye tracking; lens centre while there is no
             // gaze). The GPU feature turns on at game start when this is 1 or 2.
             { "Foveated (0 off, 1 fixed, 2 eye; restart)", RowKind::Number, "Foveated", nullptr, &bmvr::g_Foveated, 1.f, 0.f, 2.f, "%.0f" },
+            { "Foveation now", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "foveation" },
             { "Foveated: sharp radius", RowKind::Number, "FoveatedInner", nullptr, &bmvr::g_FoveatedInner, 0.05f, 0.1f, 1.f, "%.2f" },
             { "Foveated: half-rate radius", RowKind::Number, "FoveatedMid", nullptr, &bmvr::g_FoveatedMid, 0.05f, 0.2f, 1.5f, "%.2f" },
             { "REFLECTIONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -632,6 +633,8 @@ namespace
     // Text of an Info row.
     std::string InfoText(const Row& r)
     {
+        if (r.fmt && std::strcmp(r.fmt, "foveation") == 0)
+            return bmvr::FoveationStatusText();
         if (!r.fmt || std::strcmp(r.fmt, "missing_hooks") != 0)
             return {};
         const int game = Game::missingOffsetCount(), debug = Game::missingDebugOffsetCount();
@@ -715,7 +718,7 @@ namespace
             if (r.kind == RowKind::Info)
             {
                 const std::string info = InfoText(r);
-                const int level = MissingHooksLevel();
+                const int level = (r.fmt && std::strcmp(r.fmt, "missing_hooks") == 0) ? MissingHooksLevel() : 0;
                 if (level == 0)
                 {
                     c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kDim, 34, false, DT_LEFT);
@@ -1270,6 +1273,14 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     if (hookCounts != s_paintedHookCounts)
     {
         s_paintedHookCounts = hookCounts;
+        m_SettingsDirty = true;
+    }
+    // The "Foveation now" row changes on its own (eye tracking found / paused).
+    static std::string s_paintedFovStatus;
+    std::string fovStatus = bmvr::FoveationStatusText();
+    if (fovStatus != s_paintedFovStatus)
+    {
+        s_paintedFovStatus = std::move(fovStatus);
         m_SettingsDirty = true;
     }
     if (m_SettingsDirty.exchange(false) || !g_Gfx.gpu)
