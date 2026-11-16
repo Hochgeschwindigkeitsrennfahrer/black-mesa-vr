@@ -238,6 +238,8 @@ namespace bmvr
               Kind::Float, 0.f, 20.f, nullptr, &g_PoseHoldMm },
             { "bmvr_hide_xog", "VR debug: skip Xen fog (Xog) draws: 1 = global fog, 2 = fog volumes, 3 = both",
               Kind::Float, 0.f, 3.f, nullptr, &g_DebugHideXog },
+            { "bmvr_flare_log", "VR debug: log lens flare screen positions + visibility per eye (each switch-on starts fresh line caps)",
+              Kind::Bool, 0.f, 1.f, &g_FlareLog, nullptr },
             { "bmvr_freeze_head", "VR debug: the game view keeps the current head pose (SteamVR still reprojects it to the real head); hands keep tracking",
               Kind::Bool, 0.f, 1.f, &g_FreezeHead, nullptr },
             { "bmvr_glow_trace", "VR debug: record every light glow's brightness + frame timing for N seconds into VR/glowtrace-*.csv",

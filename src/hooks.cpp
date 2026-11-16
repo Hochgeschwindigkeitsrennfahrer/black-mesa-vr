@@ -483,7 +483,22 @@ static FlareWorldToScreenFn g_OrigFlareWorldToScreen = nullptr;
 using FlareDrawQuadFn = void(__thiscall*)(void* flare, void* material, int x, int y, int w, int h, void* color, float angle);
 static FlareDrawQuadFn g_OrigFlareDrawQuad = nullptr;
 static void* const* g_FlareMaterials = nullptr;
-static bool g_FlareLogOn = false;
+// Flare log (bmvr::g_FlareLog): every switch-on is a new session, so each
+// logger starts with fresh line caps and forgets what it has seen.
+static unsigned g_FlareLogSession = 0;
+static bool FlareLogActive()
+{
+    static bool s_wasOn = false;
+    const bool on = bmvr::g_FlareLog;
+    if (on != s_wasOn)
+    {
+        s_wasOn = on;
+        if (on)
+            ++g_FlareLogSession;
+        Game::logMsg("flare log %s (session %u)", on ? "on" : "off", g_FlareLogSession);
+    }
+    return on;
+}
 static float g_FlareAxisShiftX = 0.f;
 static float g_FlareAxisShiftY = 0.f;
 static bool g_FlareElementOnLight = true;
@@ -498,6 +513,15 @@ static const float* g_ClientViewOrigin = nullptr;
 static void FlareLogPosition(const float* world, const float* size, const float* out, const float* view, const float* proj)
 {
     static int s_lines;
+    struct Seen { int sig; ULONGLONG nextMs; };
+    static std::unordered_map<uint64_t, Seen> s_seen;
+    static unsigned s_session;
+    if (s_session != g_FlareLogSession)
+    {
+        s_session = g_FlareLogSession;
+        s_lines = 0;
+        s_seen.clear();
+    }
     if (s_lines >= 20000)
         return;
     const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
@@ -506,8 +530,6 @@ static void FlareLogPosition(const float* world, const float* size, const float*
         + static_cast<int>(proj[5] * 100.f) * 7 + static_cast<int>(proj[6] * 100.f) + (onScreen ? 100000 : 0);
     const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int>(world[0]))) << 32)
         ^ (static_cast<uint32_t>(static_cast<int>(world[1])) << 2) ^ static_cast<uint32_t>(eye);
-    struct Seen { int sig; ULONGLONG nextMs; };
-    static std::unordered_map<uint64_t, Seen> s_seen;
     const ULONGLONG now = GetTickCount64();
     auto [it, fresh] = s_seen.try_emplace(key, Seen{ sig, 0 });
     if (!fresh && it->second.sig == sig && now < it->second.nextMs)
@@ -579,7 +601,7 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
     reinterpret_cast<GetMatrixFn>(vt[0x78 / 4])(ctx, 1, proj);
     reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
     reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
-    if (g_FlareLogOn)
+    if (FlareLogActive())
         FlareLogPosition(world, size, out, view, proj);
     // Where the view axis lands: NDC (-m02, -m12), screen y pointing down.
     if (bmvr::g_FlareEyeAxis && g_OrigFlareDrawQuad)
@@ -650,9 +672,15 @@ static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, i
     const int drawH = static_cast<int>(h * shrink);
     x += (w - drawW) / 2;
     y += (h - drawH) / 2;
-    if (g_FlareLogOn && Hooks::m_VR && Hooks::m_VR->m_StereoEye != 0)
+    if (bmvr::g_FlareLog && Hooks::m_VR && Hooks::m_VR->m_StereoEye != 0)
     {
         static int s_quads;
+        static unsigned s_session;
+        if (s_session != g_FlareLogSession)
+        {
+            s_session = g_FlareLogSession;
+            s_quads = 0;
+        }
         if (s_quads < 120)
         {
             ++s_quads;
@@ -704,13 +732,22 @@ static float __fastcall FlareFractionLog(void* ecx, void* edx, void* leaf, const
 {
     (void)edx;
     const float f = g_OrigFlareFraction(ecx, leaf, pos);
+    if (!FlareLogActive())
+        return f;
     static int s_lines;
+    struct Seen { int bucket; ULONGLONG nextMs; };
+    static std::unordered_map<uint64_t, Seen> s_seen;
+    static unsigned s_session;
+    if (s_session != g_FlareLogSession)
+    {
+        s_session = g_FlareLogSession;
+        s_lines = 0;
+        s_seen.clear();
+    }
     if (s_lines >= 30000)
         return f;
     const int eye = Hooks::m_VR ? Hooks::m_VR->m_StereoEye : 0;
     const int bucket = f <= 0.02f ? 0 : (f < 0.98f ? 1 : 2);
-    struct Seen { int bucket; ULONGLONG nextMs; };
-    static std::unordered_map<uint64_t, Seen> s_seen;
     const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ecx)) << 2) | static_cast<uint32_t>(eye);
     const ULONGLONG now = GetTickCount64();
     auto [it, fresh] = s_seen.try_emplace(key, Seen{ bucket, 0 });
@@ -784,11 +821,11 @@ static void InstallFlareHooks(uintptr_t client)
         Game::logMsg("Lens flare layers: element hook failed, all layers stay on");
     Game::logMsg("Lens flare eye axis hooks on (FlareEyeAxis=%d)", bmvr::g_FlareEyeAxis ? 1 : 0);
 
+    // The log itself is switched at runtime (panel DEBUG / bmvr_flare_log); the
+    // visibility hook only adds a flag check while it is off.
     char v[8] = {};
-    if (!GetEnvironmentVariableA("BMVR_FLARE_LOG", v, sizeof(v)) || v[0] != '1')
-        return;
-    g_FlareLogOn = true;
-    Game::logMsg("flare log on (BMVR_FLARE_LOG)");
+    if (GetEnvironmentVariableA("BMVR_FLARE_LOG", v, sizeof(v)) && v[0] == '1')
+        bmvr::g_FlareLog = true;
     static const unsigned char kFractionPrologue[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x83, 0xEC, 0x1C };
     auto* frac = reinterpret_cast<unsigned char*>(client + Offsets::kLensflareFractionRva);
     if (std::memcmp(frac, kFractionPrologue, sizeof(kFractionPrologue)) != 0)

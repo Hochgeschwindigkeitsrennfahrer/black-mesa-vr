@@ -142,6 +142,7 @@ namespace bmvr
     unsigned long g_DebugCaptureAt = 0;
     float g_DebugBlankEye = 0.f;
     float g_DebugHideXog = 0.f;
+    bool g_FlareLog = false;
     bool g_FreezeHead = false;
     float g_FrameCapMode = 2.f;
     bool g_VrHandThrow = true;

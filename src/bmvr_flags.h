@@ -325,6 +325,7 @@ namespace bmvr
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
     extern bool g_TwoHandGripToggle;     // support grip latches: squeeze on the gun = on, squeeze again = off
     extern unsigned long g_DebugCaptureAt;   // VR panel "Capture debug frame": GetTickCount when to capture (0 = none)
+    extern bool g_FlareLog;              // VR panel DEBUG "Flare position log" / bmvr_flare_log / env BMVR_FLARE_LOG=1: log lens flare positions + visibility; each switch-on starts fresh line caps (not saved)
     extern bool g_FreezeHead;            // VR panel debug row / bmvr_freeze_head: game view keeps the head pose of the moment it was switched on (not saved)
     extern float g_DebugHideXog;         // VR panel debug row: skip Xen fog draws, 1 = global (__gbxog0), 2 = volumes, 3 = both (not saved)
     extern float g_DebugBlankEye;        // VR panel debug row: 1 = blank the left eye, 2 = the right (not saved)
