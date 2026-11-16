@@ -12,4 +12,6 @@ namespace bmvr::sampler
     void BudgetTick();
     // Time the render thread spent polling for the GPU (counts as CPU time; the budget line subtracts it).
     void NoteRenderPaceWait(double ms);
+    // Wall time the main thread spent in the per-frame pose wait (OpenXR WaitFrame pacing).
+    void NoteMainPoseWait(double ms);
 }

@@ -619,6 +619,12 @@ namespace bmvr::sampler
     namespace
     {
         double g_PaceWaitMs = 0.0;  // render thread only
+        std::atomic<long long> g_PoseWaitUs{ 0 };  // main thread, read on the render thread
+    }
+
+    void NoteMainPoseWait(double ms)
+    {
+        g_PoseWaitUs.fetch_add(static_cast<long long>(ms * 1000.0), std::memory_order_relaxed);
     }
 
     void NoteRenderPaceWait(double ms)
@@ -650,13 +656,19 @@ namespace bmvr::sampler
             const double pp = (p - s_proc) / 10000.0 / f;
             const bool same = mainTid == renderTid;
             const double pace = g_PaceWaitMs / f;
-            Game::logMsg("Frame budget (%.0f s): %d frames, %.2f ms/frame (%.0f fps); CPU ms/frame: render thread %.2f, of it polling for the GPU %.2f -> work %.2f (%.0f %% of the frame), main thread %.2f%s, other threads %.2f",
-                (now - s_startMs) / 1000.0, s_frames, wall, 1000.0 / wall, rr, pace, rr - pace, 100.0 * (rr - pace) / wall,
-                same ? 0.0 : mm, same ? " (same thread)" : "", pp - rr - (same ? 0.0 : mm));
+            const double pose = g_PoseWaitUs.exchange(0, std::memory_order_relaxed) / 1000.0 / f;
+            // render: CPU = work + GPU polling; idle = blocked (waiting for the main thread's
+            // commands, Present, ...). main: idle = blocked (pose wait shown, the rest is mostly
+            // the material queue = waiting for the render thread).
+            Game::logMsg("Frame budget (%.0f s): %d frames, %.2f ms/frame (%.0f fps) | render thread: work %.2f (%.0f %%), polling GPU %.2f, idle %.2f | main thread: CPU %.2f, pose wait %.2f, other idle %.2f%s | other threads CPU %.2f",
+                (now - s_startMs) / 1000.0, s_frames, wall, 1000.0 / wall, rr - pace, 100.0 * (rr - pace) / wall, pace,
+                (std::max)(0.0, wall - rr), same ? 0.0 : mm, pose, same ? 0.0 : (std::max)(0.0, wall - mm - pose),
+                same ? " (same thread as render)" : "", pp - rr - (same ? 0.0 : mm));
         }
         s_startMs = now;
         s_frames = 0;
         g_PaceWaitMs = 0.0;
+        g_PoseWaitUs.store(0, std::memory_order_relaxed);
         s_main = m;
         s_render = r;
         s_proc = p;

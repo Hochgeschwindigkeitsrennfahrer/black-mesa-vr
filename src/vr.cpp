@@ -15385,6 +15385,12 @@ void VR::WaitPosesForStereoFrame(bool allowQueued)
     BMVR_PROF("vr WaitPosesForStereoFrame");
     if (m_PosesWaitedThisFrame)
         return;
+    // Frame budget line: wall time this frame's pose wait took (main thread).
+    struct PoseWaitTimer
+    {
+        double t0 = QpcNowMs();
+        ~PoseWaitTimer() { bmvr::sampler::NoteMainPoseWait(QpcNowMs() - t0); }
+    } poseWaitTimer;
     if (m_OpenXrHelperBridgeActive)
     {
         // In-game pause / HWND deactivated with GameUI: do not block 22ms
