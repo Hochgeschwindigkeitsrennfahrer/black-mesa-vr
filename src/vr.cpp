@@ -1,5 +1,6 @@
 #include "vr.h"
 #include "bmvr_prof.h"
+#include "bmvr_sampler.h"
 #include "game.h"
 #include "sdk.h"
 #include "offsets.h"
@@ -16600,6 +16601,7 @@ static IDirect3DTexture9* CachedPauseCopy(IDirect3DTexture9*& slot, IDirect3DDev
 
 void VR::ReleaseVRRenderTargetsForDeviceReset()
 {
+    bmvr::InvalidateClientSizeCache();
     ReleasePauseLayerCopies();
     GpuTimerReleaseAll();
     std::lock_guard<TextureStateMutex> lock(m_TextureMutex);
@@ -19404,6 +19406,7 @@ void VR::UpdateTracking()
 void VR::Update()
 {
     BMVR_PROF("vr Update");
+    bmvr::sampler::CpuNote(1);
     if (!m_Game)
         return;
 

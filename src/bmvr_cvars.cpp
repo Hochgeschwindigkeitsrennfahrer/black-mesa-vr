@@ -212,6 +212,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_ShadowsOncePerFrame, nullptr },
             { "bmvr_shadows_once_test", "VR test: second eye skips every light shadow render, matched or not (negative control for bmvr_shadows_once)",
               Kind::Bool, 0.f, 1.f, &g_ShadowsOnceTestSkipAll, nullptr },
+            { "bmvr_cpu_sample", "VR test: sample the main and render thread's CPU for this many seconds and log where it goes",
+              Kind::Float, 0.f, 120.f, nullptr, &g_CpuSampleSeconds },
             { "bmvr_post_copy_swap_alpha", "VR test: post copy swap also on RGB-only passes (1); 2/3 = and clear the owed eye to alpha 0/1 (shows any use of that alpha)",
               Kind::Float, 0.f, 3.f, nullptr, &g_PostCopySwapAlpha },
             { "bmvr_foveated", "VR: foveated rendering, coarser shading away from the centre (0 off, 1 fixed lens centre, 2 eye-tracked; needs Foveated 1/2 at game start)",

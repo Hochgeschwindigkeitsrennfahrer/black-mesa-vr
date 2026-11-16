@@ -13,6 +13,7 @@
 // lock holders and invented contention, and its stack chains were stale.)
 #include "bmvr_sampler.h"
 #include "bmvr_prof.h"
+#include "bmvr_seh.h"
 #include "game.h"
 #include "MinHook.h"
 #include <Windows.h>
@@ -374,5 +375,209 @@ namespace bmvr::sampler
                     ::bmvr::prof::SiteName(e.key.inner), chain);
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPU sampler (test aid, cvar bmvr_cpu_sample <seconds>; independent of
+// PerfLog): a background thread suspends the main and the render thread
+// about every 1 ms, records the instruction pointer and the return addresses
+// found in the top 512 bytes of the stack, resumes. Report: leaf module
+// share, and per module the top leaf RVAs and top inclusive return RVAs
+// (resolve d3d9.dll RVAs with a /Z7 build and llvm-symbolizer).
+// Suspending can inflate lock contention, so this answers "where is CPU
+// time spent", not "who waits on whom".
+// ---------------------------------------------------------------------------
+#include <map>
+#include <set>
+#include <tuple>
+#include <string>
+#include <thread>
+#include <timeapi.h>
+#pragma comment(lib, "winmm.lib")
+
+namespace bmvr::sampler
+{
+    namespace
+    {
+        std::atomic<DWORD> g_CpuTid[2]{};
+        std::atomic<bool> g_CpuRunning{ false };
+
+        struct CpuAgg
+        {
+            int samples = 0;
+            std::map<int, int> leafMod;                         // module (-1 unknown) -> samples
+            std::map<std::pair<int, uint32_t>, int> leaf;       // (module, rva & ~0xF) -> samples
+            std::map<std::pair<int, uint32_t>, int> incl;       // (module, return rva) -> samples (once per sample)
+            // leaf in a system module / unknown: (leaf rva & ~0xF, first 2 non-system return addresses) -> samples
+            std::map<std::tuple<int, uint32_t, int, uint32_t, int, uint32_t>, int> sysCallers;
+        };
+
+        // SEH helpers (no C++ objects in these frames).
+        size_t CopyStack(uintptr_t esp, uintptr_t* out)
+        {
+            size_t n = 0;
+            BMVR_TRY
+            {
+                const uintptr_t* sp = reinterpret_cast<const uintptr_t*>(esp);
+                for (; n < 128; ++n)
+                    out[n] = sp[n];
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return n;
+        }
+
+        bool SafeLooksLikeReturn(uintptr_t a, int m)
+        {
+            bool ret = false;
+            BMVR_TRY { ret = LooksLikeReturn(a, g_Mods[m]); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { ret = false; }
+            return ret;
+        }
+
+        void CpuSampleRun(double seconds)
+        {
+            LoadModules();
+            timeBeginPeriod(1);
+            CpuAgg agg[2];
+            const DWORD tid[2] = { g_CpuTid[0].load(), g_CpuTid[1].load() };
+            HANDLE th[2] = {};
+            // Render thread only: suspending the main thread while it holds the d3d9
+            // device lock made the render thread spin on it (an artifact).
+            for (int t = 1; t < 2; ++t)
+                if (tid[t])
+                    th[t] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, tid[t]);
+            const ULONGLONG end = GetTickCount64() + static_cast<ULONGLONG>(seconds * 1000.0);
+            uintptr_t stack[128];
+            while (GetTickCount64() < end)
+            {
+                for (int t = 0; t < 2; ++t)
+                {
+                    if (!th[t])
+                        continue;
+                    if (SuspendThread(th[t]) == static_cast<DWORD>(-1))
+                        continue;
+                    CONTEXT ctx{};
+                    ctx.ContextFlags = CONTEXT_CONTROL;
+                    const bool ok = GetThreadContext(th[t], &ctx) != 0;
+                    const size_t n = ok ? CopyStack(ctx.Esp, stack) : 0;
+                    ResumeThread(th[t]);
+                    if (!ok)
+                        continue;
+                    CpuAgg& a = agg[t];
+                    ++a.samples;
+                    const int m = FindModule(ctx.Eip);
+                    a.leafMod[m]++;
+                    a.leaf[{ m, m >= 0 ? static_cast<uint32_t>(ctx.Eip - g_Mods[m].base) & ~0xFu : 0u }]++;
+                    if (m >= 0)
+                        a.incl[{ m, static_cast<uint32_t>(ctx.Eip - g_Mods[m].base) }];  // leaf itself not inclusive
+                    if (m < 0 || g_Mods[m].system)
+                    {
+                        int cm[2] = { -1, -1 };
+                        uint32_t cr[2] = { 0, 0 };
+                        int got = 0;
+                        for (size_t i = 0; i < n && i < 48 && got < 2; ++i)
+                        {
+                            const int rm = FindModule(stack[i]);
+                            if (rm < 0 || g_Mods[rm].system || !SafeLooksLikeReturn(stack[i], rm))
+                                continue;
+                            cm[got] = rm;
+                            cr[got] = static_cast<uint32_t>(stack[i] - g_Mods[rm].base);
+                            ++got;
+                        }
+                        a.sysCallers[{ m, m >= 0 ? static_cast<uint32_t>(ctx.Eip - g_Mods[m].base) & ~0xFu : 0u, cm[0], cr[0], cm[1], cr[1] }]++;
+                    }
+                    std::set<std::pair<int, uint32_t>> seen;
+                    int found = 0;
+                    for (size_t i = 0; i < n && found < 24; ++i)
+                    {
+                        const int rm = FindModule(stack[i]);
+                        if (rm < 0)
+                            continue;
+                        if (!SafeLooksLikeReturn(stack[i], rm))
+                            continue;
+                        ++found;
+                        const std::pair<int, uint32_t> k{ rm, static_cast<uint32_t>(stack[i] - g_Mods[rm].base) };
+                        if (seen.insert(k).second)
+                            a.incl[k]++;
+                    }
+                }
+                Sleep(4);  // ~200 Hz: suspend/resume under Wine is costly; 1 kHz slowed frames ~35 %
+            }
+            timeEndPeriod(1);
+            for (int t = 0; t < 2; ++t)
+                if (th[t])
+                    CloseHandle(th[t]);
+            static const char* kName[2] = { "main", "render" };
+            for (int t = 0; t < 2; ++t)
+            {
+                const CpuAgg& a = agg[t];
+                if (!a.samples)
+                    continue;
+                std::vector<std::pair<int, int>> mods;
+                for (auto& kv : a.leafMod)
+                    mods.push_back({ kv.second, kv.first });
+                std::sort(mods.rbegin(), mods.rend());
+                std::string line;
+                for (auto& mv : mods)
+                {
+                    char one[64];
+                    _snprintf_s(one, sizeof(one), _TRUNCATE, " %s %.1f%%", mv.second >= 0 ? g_Mods[mv.second].name : "?",
+                        100.0 * mv.first / a.samples);
+                    line += one;
+                }
+                Game::logMsg("cpu sample %s (tid %lu): %d samples over %.1f s; leaf module:%s",
+                    kName[t], static_cast<unsigned long>(tid[t]), a.samples, seconds, line.c_str());
+                std::vector<std::pair<int, std::pair<int, uint32_t>>> rows;
+                for (auto& kv : a.leaf)
+                    rows.push_back({ kv.second, kv.first });
+                std::sort(rows.rbegin(), rows.rend());
+                for (size_t i = 0; i < rows.size() && i < 40; ++i)
+                    Game::logMsg("cpu sample %s leaf %5.2f%% %s+0x%X", kName[t], 100.0 * rows[i].first / a.samples,
+                        rows[i].second.first >= 0 ? g_Mods[rows[i].second.first].name : "?", rows[i].second.second);
+                {
+                    std::vector<std::pair<int, std::tuple<int, uint32_t, int, uint32_t, int, uint32_t>>> sc;
+                    for (auto& kv : a.sysCallers)
+                        sc.push_back({ kv.second, kv.first });
+                    std::sort(sc.rbegin(), sc.rend());
+                    for (size_t i = 0; i < sc.size() && i < 40; ++i)
+                    {
+                        const auto& k = sc[i].second;
+                        auto nm = [](int mm) { return mm >= 0 ? g_Mods[mm].name : "?"; };
+                        Game::logMsg("cpu sample %s syscaller %5.2f%% %s+0x%X <- %s+0x%X <- %s+0x%X", kName[t],
+                            100.0 * sc[i].first / a.samples, nm(std::get<0>(k)), std::get<1>(k), nm(std::get<2>(k)), std::get<3>(k),
+                            nm(std::get<4>(k)), std::get<5>(k));
+                    }
+                }
+                rows.clear();
+                for (auto& kv : a.incl)
+                    if (kv.second > 0)
+                        rows.push_back({ kv.second, kv.first });
+                std::sort(rows.rbegin(), rows.rend());
+                for (size_t i = 0; i < rows.size() && i < 80; ++i)
+                    Game::logMsg("cpu sample %s incl %5.2f%% %s+0x%X", kName[t], 100.0 * rows[i].first / a.samples,
+                        g_Mods[rows[i].second.first].name, rows[i].second.second);
+            }
+        }
+    }
+
+    void CpuNote(int which)
+    {
+        if (which == 0 || which == 1)
+            g_CpuTid[which].store(GetCurrentThreadId(), std::memory_order_relaxed);
+    }
+
+    bool CpuSampleStart(double seconds)
+    {
+        bool expected = false;
+        if (seconds <= 0 || !g_CpuRunning.compare_exchange_strong(expected, true))
+            return false;
+        std::thread([seconds]() {
+            CpuSampleRun(seconds);
+            g_CpuRunning.store(false);
+        }).detach();
+        return true;
     }
 }

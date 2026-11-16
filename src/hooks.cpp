@@ -13,6 +13,7 @@ extern "C" volatile int g_BmvrFlashlightMatrixFix = 1;
 #include "bmvr_flags.h"
 #include "bmvr_glowtrace.h"
 #include "bmvr_prof.h"
+#include "bmvr_sampler.h"
 #include <intrin.h>
 #include <map>
 #include <unordered_map>
@@ -6293,6 +6294,14 @@ ITexture* __fastcall Hooks::dGetRenderTarget(void* ecx, void* edx)
 void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int nClearFlags, int whatToDraw)
 {
     ApplyPerfLogLive();
+    bmvr::sampler::CpuNote(0);
+    bmvr::NoteClientSizeRefreshThread();
+    if (bmvr::g_CpuSampleSeconds > 0.f)
+    {
+        if (bmvr::sampler::CpuSampleStart(bmvr::g_CpuSampleSeconds))
+            Game::logMsg("cpu sample: started for %.1f s", bmvr::g_CpuSampleSeconds);
+        bmvr::g_CpuSampleSeconds = 0.f;
+    }
     (void)edx;
     struct ProfFrame
     {

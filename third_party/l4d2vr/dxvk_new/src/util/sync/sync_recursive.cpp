@@ -18,6 +18,18 @@ namespace dxvk::sync {
 
   bool RecursiveSpinlock::try_lock() {
     uint32_t threadId = dxvk::this_thread::get_id();
+
+    // BMVR: re-entry by the owner (nested d3d9 calls) without a locked
+    // read-modify-write, and no cmpxchg while another thread holds it. Only
+    // the owner thread ever stores its own id or touches m_counter.
+    const uint32_t owner = m_owner.load(std::memory_order_relaxed);
+    if (owner == threadId) {
+      m_counter += 1;
+      return true;
+    }
+    if (owner != 0)
+      return false;
+
     uint32_t expected = 0;
 
     bool status = m_owner.compare_exchange_weak(

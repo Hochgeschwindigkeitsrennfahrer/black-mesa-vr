@@ -88,6 +88,7 @@ namespace bmvr
     bool g_ShadowsOncePerFrame = true;
     int g_StereoPairSeq = 0;
     bool g_ShadowsOnceTestSkipAll = false;
+    float g_CpuSampleSeconds = 0.f;
     float g_PostCopySwapAlpha = 1.f;
     volatile unsigned long g_PostSwapArmThread = 0;
     volatile unsigned long g_FullOverwriteArmThread = 0;
@@ -2338,12 +2339,38 @@ namespace bmvr
         return hwnd;
     }
 
+    // Thread that refreshes the cached client size (the RenderView / main
+    // thread, set every frame). Other threads (the render thread calls this
+    // from per-constant d3d9 hooks thousands of times a frame) only read the
+    // cache: under Wine both QueryPerformanceCounter (a syscall in 32-bit
+    // processes) and GetClientRect (wineserver, 1.5-3 ms spikes) were on the
+    // render thread's hot path (~6 % of it, 2026-11-16 CPU sampler).
+    static std::atomic<DWORD> g_ClientSizeRefreshTid{ 0 };
+
+    void InvalidateClientSizeCache()
+    {
+        g_ClientSizeQpc.store(0, std::memory_order_release);
+    }
+
+    void NoteClientSizeRefreshThread()
+    {
+        g_ClientSizeRefreshTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    }
+
     bool QueryWindowClientSize(uint32_t& width, uint32_t& height)
     {
-        LARGE_INTEGER t{};
-        QueryPerformanceCounter(&t);
-        const int64_t last = g_ClientSizeQpc.load(std::memory_order_acquire);
-        if (last != 0 && (t.QuadPart - last) < 4 * QpcTicksPerMs())
+        const int64_t last = g_ClientSizeQpc.load(std::memory_order_acquire);  // GetTickCount64 ms of the last refresh
+        const DWORD refresher = g_ClientSizeRefreshTid.load(std::memory_order_relaxed);
+        const bool mayRefresh = refresher == 0 || refresher == GetCurrentThreadId();
+        int64_t now = 0;
+        bool fresh = last != 0;
+        if (fresh)
+        {
+            // Non-refreshing threads use the cache unless it is very old (main thread not calling, e.g. menus).
+            now = static_cast<int64_t>(GetTickCount64());
+            fresh = (now - last) < (mayRefresh ? 100 : 1000);
+        }
+        if (fresh)
         {
             const uint64_t packed = g_ClientSizePacked.load(std::memory_order_relaxed);
             if (packed == 0)
@@ -2352,6 +2379,8 @@ namespace bmvr
             height = static_cast<uint32_t>(packed & 0xffffffffu);
             return true;
         }
+        if (!now)
+            now = static_cast<int64_t>(GetTickCount64());
         uint64_t packed = 0;
         HWND hwnd = GameWindow();
         RECT rc{};
@@ -2363,7 +2392,7 @@ namespace bmvr
                 packed = (static_cast<uint64_t>(w) << 32) | h;
         }
         g_ClientSizePacked.store(packed, std::memory_order_relaxed);
-        g_ClientSizeQpc.store(t.QuadPart ? t.QuadPart : 1, std::memory_order_release);
+        g_ClientSizeQpc.store(now ? now : 1, std::memory_order_release);
         if (packed == 0)
             return false;
         width = static_cast<uint32_t>(packed >> 32);

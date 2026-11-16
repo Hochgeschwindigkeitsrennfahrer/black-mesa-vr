@@ -149,6 +149,9 @@ namespace bmvr
     HWND GameWindow();
     // Client size of GameWindow(), cached for a few ms. Thread-safe.
     bool QueryWindowClientSize(uint32_t& width, uint32_t& height);
+    // The thread that refreshes that cache (main/RenderView thread, every frame); others only read it.
+    void NoteClientSizeRefreshThread();
+    void InvalidateClientSizeCache();  // device Reset: the window size may have changed
     void InstallEarlyFramebufferHook();
     void SetGameplayWorldRts(bool gameplayMap);
 
@@ -222,6 +225,8 @@ namespace bmvr
     extern int g_StereoPairSeq;
     // bmvr_shadows_once_test (test, not saved): the second eye skips every light shadow, matched or not.
     extern bool g_ShadowsOnceTestSkipAll;
+    // bmvr_cpu_sample <s> (test, not saved): sample main + render thread CPU for s seconds, log the result.
+    extern float g_CpuSampleSeconds;
     // PostCopySwapAlpha (cvar bmvr_post_copy_swap_alpha, default 1): 0 = an RGBA write is
     // needed to drop the debt, 1 = RGB-only writes count (eye alpha mid-post is
     // not needed), 2/3 = as 1 and the owed eye is cleared to alpha 0/1 (test).

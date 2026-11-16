@@ -8,6 +8,10 @@
 #include <thread>
 #include <utility>
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 #include "util_error.h"
 
 #include "./com/com_include.h"
@@ -126,7 +130,13 @@ namespace dxvk {
     }
 
     inline thread::id get_id() {
+#if defined(_M_IX86) && defined(_MSC_VER)
+      // BMVR: TEB ClientId.UniqueThread (fs:[0x24]) = GetCurrentThreadId without
+      // the import call; this runs for every device lock (~50k per frame).
+      return thread::id(static_cast<uint32_t>(__readfsdword(0x24)));
+#else
       return thread::id(GetCurrentThreadId());
+#endif
     }
 
     bool isInModuleDetachment();
