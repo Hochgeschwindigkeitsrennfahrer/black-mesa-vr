@@ -375,6 +375,11 @@ namespace dxvk {
     bool BmvrStandInClear() const { return m_bmvrStandInClear; }
     void BmvrSetStandInClear(bool clear) { m_bmvrStandInClear = clear; }
     void BmvrSetRetired(bool retired) { m_bmvrRetired = retired; }
+    // Multisampled eye colour: its multisampled depth surface (set at eye
+    // begin). A draw on the eye with a 1x depth bound (Xog fog volume, which
+    // tests against the 1x G-buffer depth) is given this depth instead.
+    IDirect3DSurface9* BmvrEyeDepth() const { return m_bmvrEyeDepth; }
+    void BmvrSetEyeDepth(IDirect3DSurface9* depth) { m_bmvrEyeDepth = depth; }
     const Rc<DxvkImage>& BmvrActiveImage() {
       return m_bmvrRetired ? GetResolveImage() : m_image;
     }
@@ -518,6 +523,7 @@ namespace dxvk {
     bool                          m_bmvrRetired = false;
     bool                          m_bmvrDepthPending = false;
     bool                          m_bmvrStandInClear = false;
+    IDirect3DSurface9*            m_bmvrEyeDepth = nullptr;   // not owned; eye surfaces live as long as the eye
     Rc<DxvkBuffer>                m_buffer;
     MemoryFileRegion              m_data = { };
 

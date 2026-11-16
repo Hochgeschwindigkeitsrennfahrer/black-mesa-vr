@@ -9624,7 +9624,29 @@ namespace dxvk {
         attachments.depth.view = m_state.depthStencil->GetResolveDepthStencilView(true);
         ++g_bmvrMsaaStats.depthStandIns;
       }
-      if (unlikely(!bindDS && !msDepthFor1x && dsInfo.sampleCount != sampleCount)) {
+      // Eye MSAA, the other way round: a draw on the multisampled eye with a
+      // 1x depth bound. Black Mesa's Xog fog volume (`__gbxog1`, a full-screen
+      // quad at the far plane, ZFUNC LESSEQUAL) tests against the 1x G-buffer
+      // depth so it only fogs the sky. Without depth it fogged the whole view
+      // ("fog wall", only while no particle had retired the eye to 1x). The
+      // eye's own multisampled depth holds the same scene depth at that point.
+      bool msEyeDepthFor1xDs = false;
+      if (unlikely(!bindDS && !msDepthFor1x && dsInfo.sampleCount == VK_SAMPLE_COUNT_1_BIT
+          && sampleCount != VK_SAMPLE_COUNT_1_BIT && rt0 != nullptr && rt0->BmvrEyeDepth() != nullptr)) {
+        D3D9Surface* eyeDs = static_cast<D3D9Surface*>(rt0->BmvrEyeDepth());
+        D3D9CommonTexture* eyeTex = eyeDs->GetCommonTexture();
+        const DxvkImageCreateInfo& eyeInfo = eyeTex->BmvrActiveImage()->info();
+        if (eyeInfo.sampleCount == sampleCount
+            && eyeInfo.extent.width >= renderArea.width && eyeInfo.extent.height >= renderArea.height) {
+          attachments.depth.view = eyeDs->GetActiveDepthStencilView(true);
+          msEyeDepthFor1xDs = true;
+          static uint32_t s_eyeDs;
+          if (s_eyeDs++ < 4)
+            bmvr::Log("Eye MSAA: 1x depth on the multisampled eye -> eye depth (%ux%u) #%u",
+              dsInfo.extent.width, dsInfo.extent.height, s_eyeDs);
+        }
+      }
+      if (unlikely(!bindDS && !msDepthFor1x && !msEyeDepthFor1xDs && dsInfo.sampleCount != sampleCount)) {
         static uint32_t s_dsDrop;
         if (s_dsDrop++ < 24)
           bmvr::Log("Eye MSAA: depth dropped (samples ds=%u rt0=%u, ds %ux%u rt0 %ux%u) #%u",
@@ -12077,6 +12099,13 @@ namespace dxvk {
   void D3D9DeviceEx::BmvrSetMsaaEyeRetired(IDirect3DSurface9* color, IDirect3DSurface9* depth, bool retire) {
     D3D9DeviceLock lock = LockDevice();
     bool changed = false;
+    if (color && depth) {
+      D3D9CommonTexture* ctex = static_cast<D3D9Surface*>(color)->GetCommonTexture();
+      D3D9CommonTexture* dtex = static_cast<D3D9Surface*>(depth)->GetCommonTexture();
+      if (ctex && dtex && ctex->Desc()->MultiSample != D3DMULTISAMPLE_NONE
+          && dtex->Desc()->MultiSample == ctex->Desc()->MultiSample && dtex->IsDepthStencil())
+        ctex->BmvrSetEyeDepth(depth);
+    }
     for (IDirect3DSurface9* s : { color, depth }) {
       if (!s)
         continue;

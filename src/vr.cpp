@@ -1114,14 +1114,53 @@ namespace
             for (const auto& [key, t] : g_AuditTex)
                 Game::logMsg("audit tex %p %ux%u[%s] last e%d%s frame %u seq %u", key, t.w, t.h,
                     AuditSizeLabel(vr, t.w, t.h), t.writerEye, t.writerHud ? "/hud" : "", t.writeFrame, t.writeSeq);
-            AuditSetDrawHooks(false);
-            Hooks::SetMatBindHooks(false);
+            // BMVR_TEST_SKIP_MAT keeps the hooks on after the audit (debug).
+            char skip[4] = {};
+            if (!GetEnvironmentVariableA("BMVR_TEST_SKIP_MAT", skip, sizeof(skip)))
+            {
+                AuditSetDrawHooks(false);
+                Hooks::SetMatBindHooks(false);
+            }
         }
+    }
+
+    // Debug: BMVR_TEST_SKIP_MAT=<part>[|<part>...] drops the draws of matching
+    // materials once an audit has turned the hooks on (they then stay on).
+    bool AuditSkipDraw()
+    {
+        static char s_skip[64] = { 1 };
+        if (s_skip[0] == 1)
+        {
+            s_skip[0] = 0;
+            GetEnvironmentVariableA("BMVR_TEST_SKIP_MAT", s_skip, sizeof(s_skip));
+        }
+        if (!s_skip[0] || !t_AuditMaterial[0])
+            return false;
+        const char* p = s_skip;
+        while (*p)
+        {
+            const char* e = std::strchr(p, '|');
+            const size_t n = e ? static_cast<size_t>(e - p) : std::strlen(p);
+            char tok[64];
+            if (n && n < sizeof(tok))
+            {
+                std::memcpy(tok, p, n);
+                tok[n] = 0;
+                if (std::strstr(t_AuditMaterial, tok))
+                    return true;
+            }
+            if (!e)
+                break;
+            p = e + 1;
+        }
+        return false;
     }
 
     HRESULT __stdcall HookedDrawPrimitive(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, UINT start, UINT count)
     {
         AuditDraw(device, count);
+        if (AuditSkipDraw())
+            return S_OK;
         return g_OrigDrawPrimitive(device, type, start, count);
     }
 
@@ -1129,6 +1168,8 @@ namespace
         UINT minIndex, UINT numVerts, UINT startIndex, UINT count)
     {
         AuditDraw(device, count);
+        if (AuditSkipDraw())
+            return S_OK;
         return g_OrigDrawIndexedPrimitive(device, type, base, minIndex, numVerts, startIndex, count);
     }
 
