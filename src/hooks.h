@@ -64,6 +64,7 @@ typedef void(__thiscall* tViewport)(void* thisptr, int x, int y, int width, int 
 typedef void(__thiscall* tGetViewport)(void* thisptr, int& x, int& y, int& width, int& height);
 typedef void(__thiscall* tGetRenderTargetDimensions)(void* thisptr, int& width, int& height);
 typedef void(__thiscall* tDepthRange)(void* thisptr, float zNear, float zFar);
+typedef void(__thiscall* tSetHeightClipMode)(void* thisptr, int mode);
 typedef void(__thiscall* tMatBind)(void* thisptr, IMaterial* material, void* proxyData);
 typedef void(__thiscall* tDrawModelExecute)(void* thisptr, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
 typedef void*(__cdecl* tLightcacheFindNearest)(int x, int y, int z, int flags);
@@ -152,6 +153,8 @@ public:
     static inline Hook<tGetRenderTargetDimensions> hkGetRenderTargetDimensionsQueued;
     static inline Hook<tDepthRange> hkDepthRange;
     static inline Hook<tDepthRange> hkDepthRangeQueued;
+    static inline Hook<tSetHeightClipMode> hkSetHeightClipMode;
+    static inline Hook<tSetHeightClipMode> hkSetHeightClipModeQueued;
     static inline Hook<tMatBind> hkMatBind;
     static inline Hook<tMatBind> hkMatBindQueued;
     static inline Hook<tDrawModelExecute> hkDrawModelExecute;
@@ -236,6 +239,8 @@ public:
     static void __fastcall dGetViewport(void* ecx, void* edx, int& x, int& y, int& width, int& height);
     static void __fastcall dGetRenderTargetDimensions(void* ecx, void* edx, int& width, int& height);
     static void __fastcall dDepthRange(void* ecx, void* edx, float zNear, float zFar);
+    static void __fastcall dSetHeightClipMode(void* ecx, void* edx, int mode);
+    static void __fastcall dSetHeightClipModeQueued(void* ecx, void* edx, int mode);
     static void SetMatBindHooks(bool on);
     static void __fastcall dMatBind(void* ecx, void* edx, IMaterial* material, void* proxyData);
     static void __fastcall dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);

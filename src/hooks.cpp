@@ -5492,6 +5492,28 @@ namespace
                 }
             }
         }
+        void* clipFn = SehContextVtableSlot(ctx, Offsets::kIMatRenderContext_SetHeightClipMode);
+        if (clipFn
+            && !HookAlreadyHasTarget(Hooks::hkSetHeightClipMode, clipFn)
+            && !HookAlreadyHasTarget(Hooks::hkSetHeightClipModeQueued, clipFn))
+        {
+            static std::mutex s_clipMu;
+            std::lock_guard<std::mutex> lock(s_clipMu);
+            // One detour per hook, each calling its own trampoline: the queued context's
+            // SetHeightClipMode calls the base one directly with the queued `this`, so picking
+            // the original by `this`'s vtable recursed forever (hang at the first frame).
+            auto tryClip = [&](Hook<tSetHeightClipMode>& hk, tSetHeightClipMode detour, const char* tag) {
+                if (hk.pTarget)
+                    return false;
+                if (hk.createHook(clipFn, detour) != 0
+                    || hk.enableHook() != 0)
+                    return false;
+                Game::logMsg("Hook enabled: SetHeightClipMode %s fn=%p", tag, clipFn);
+                return true;
+            };
+            if (!tryClip(Hooks::hkSetHeightClipMode, reinterpret_cast<tSetHeightClipMode>(&Hooks::dSetHeightClipMode), "ctx"))
+                tryClip(Hooks::hkSetHeightClipModeQueued, reinterpret_cast<tSetHeightClipMode>(&Hooks::dSetHeightClipModeQueued), "ctx-queued");
+        }
         void* bindFn = SehContextVtableSlot(ctx, Offsets::kIMatRenderContext_Bind);
         if (bindFn
             && !HookAlreadyHasTarget(Hooks::hkMatBind, bindFn)
@@ -7649,6 +7671,46 @@ void __fastcall Hooks::dDepthRange(void* ecx, void* edx, float zNear, float zFar
         zFar = 1.f;
     }
     CallOriginalDepthRange(ecx, zNear, zFar);
+}
+
+// Eye at the water line. When the near plane crosses the water surface, the engine draws the eye view in two parts
+// (SDK CAboveWaterView, hardware clip planes): the main view clipped to "above the water" (PushView ->
+// SetHeightClipMode(RENDER_ABOVE_HEIGHT)), then CIntersectionView for the part under the surface, clipped to
+// "below". Black Mesa is deferred and the intersection view has no G-buffer pass of its own, so it shades with the
+// main view's light buffer, which the above-water clip left empty under the surface: the lower part of the view went
+// black / flat fog green, ending at a straight line (crouched or swimming in bm_c2a5a, 2026-11-16 capture 213843;
+// mat_clipz 0, which skips the clip, fixed it). Drop that clip for the eye view only: water reflection/refraction
+// views push their own RT (AuxSceneRtBound) and keep it, and the intersection view's "below" clip is untouched.
+// Both threads see the same RT pushes in the same order (thread-local depth), so the queued and the hardware
+// context decide alike.
+static int WaterLineClipMode(int mode)
+{
+    constexpr int kRenderAboveHeight = 1, kDisable = 0;
+    if (mode != kRenderAboveHeight || !bmvr::g_WaterLineClipFix || !Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled
+        || !Hooks::m_VR->StereoWorldPassActive() || AuxSceneRtBound())
+        return mode;
+    static int s_log;
+    if (s_log < 4 || bmvr::g_PassTraceFrames > 0)
+    {
+        Game::logMsg("Water line: eye %d view not clipped above the water (stock: under-water part unlit)",
+            Hooks::m_VR->m_StereoEye);
+        ++s_log;
+    }
+    return kDisable;
+}
+
+void __fastcall Hooks::dSetHeightClipMode(void* ecx, void* edx, int mode)
+{
+    (void)edx;
+    // MulticoreMode: the queued context decided on the main thread (and calls this one inline with
+    // the result); calls here on the render thread are its replay, so pass them through.
+    hkSetHeightClipMode.fOriginal(ecx, bmvr::g_MulticoreMode ? mode : WaterLineClipMode(mode));
+}
+
+void __fastcall Hooks::dSetHeightClipModeQueued(void* ecx, void* edx, int mode)
+{
+    (void)edx;
+    hkSetHeightClipModeQueued.fOriginal(ecx, WaterLineClipMode(mode));
 }
 
 void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld)

@@ -519,6 +519,10 @@ namespace bmvr
     extern bool g_McHandSnapshot;
     extern bool g_SkyWaterPerEye;
     extern bool g_EyeUnderwaterWorld;
+    // Eye at the water line (near plane crosses the surface): the eye view drops the engine's
+    // "keep above the water" clip, so the G-buffer has the world under the surface for the
+    // engine's water intersection view (false = stock: black/fog-green lower part of the view).
+    extern bool g_WaterLineClipFix;
     extern bool g_FlareEyeAxis;
     // Lens flare layers are turned so their streaks stay level with the world
     // horizon at the light, not with the eye's image (which rolls with the head).

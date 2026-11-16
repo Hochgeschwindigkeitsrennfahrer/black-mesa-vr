@@ -395,10 +395,10 @@ public:
     // mat_queue_mode 2 + GetLightForPoint/studio lighting can cycle +0x1D0
     // next pointers; the engine walk never hits 0x200 and freezes the game
     // thread (verified 2026-09-08, PID 25228, 12-node cycle).
-    Offset LightcacheFindNearest{ "engine.dll", 0x1D1F60,
+    Offset LightcacheFindNearest{ "engine.dll", 0x1D20A0, // 26713286 (26672462: 0x1D1F60)
         "55 8B EC 83 EC 1C 0F B7 0D ? ? ? ? 33 D2 53 56 BB 00 02 00 00" };
 
-    Offset VGui_Paint{ "engine.dll", 0x23B140,
+    Offset VGui_Paint{ "engine.dll", 0x23B280, // 26713286 (26672462: 0x23B140)
         "55 8B EC 83 EC 18 53 8B D9 8B 0D ? ? ? ? FF 15" };
 
     // CMatRenderContext slot 7. RT-stack count moved 0x4C -> 0x58 on the beta.
@@ -464,6 +464,10 @@ public:
     // GetRenderTargetDimensions (8) and BindLightmapPage (10).
     static constexpr int kIMatRenderContext_Bind = 0x24;
     static constexpr int kIMatRenderContext_GetViewport = 0x9C;
+    // SetHeightClipMode(MaterialHeightClipMode_t) / SetHeightClipZ(float): SDK slots 39/40 + IRefCounted = 41/42.
+    // client.dll CBaseWorldView::PushView calls [ctx+0xA8](waterZ) then [ctx+0xA4](mode) (beta 26672462: 0x1FDD2F,
+    // 0x1FDDF2, 0x2033D6, 0x2034E2).
+    static constexpr int kIMatRenderContext_SetHeightClipMode = 0xA4;
     static constexpr int kIMatRenderContext_PushRT6 = 0x23C;
     static constexpr int kIMatRenderContext_PopRT = 0x24C;
     // IMatRenderContext::GetCallQueue. HL2VR/Source 2013 absolute slot 146.
