@@ -544,6 +544,11 @@ namespace bmvr
     // LOADING card on in-game loads (bmvr_loading_card, default on). Test switch
     // for the 2026-11-11 stuck-head-pose-after-load report.
     extern bool g_LoadingCard;
+    // TitleLevel (default false, panel DEBUG > TESTS): intro logo / chapter
+    // titles placed level with the room at the head's yaw when they appear and
+    // left there (like the pause menu) instead of head-locked (turning,
+    // pitching and rolling with the headset).
+    extern bool g_TitleLevel;
     // bmvr_glow_trace <seconds> / panel DEBUG "Record glow trace": start a glow
     // trace of that length (bmvr_glowtrace.h); reset to 0 once it starts.
     extern float g_GlowTraceSeconds;

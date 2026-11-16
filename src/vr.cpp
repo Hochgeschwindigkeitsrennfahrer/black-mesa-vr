@@ -5500,7 +5500,9 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
     overlay.reserved0 = m_MenuOverlayEpoch;
     overlay.reserved1 = L4D2VR_OPENXR_OVERLAY_FLAG_BLEND_ALPHA;
     // Title texts stay in front of the eyes; the pause menu stays put in the room.
-    if (!WantPauseWorldOverlay() && WantTitleHudOverlay())
+    // TitleLevel: titles take the pause-menu path too (the helper places the
+    // layer level at the head's yaw once per epoch; UpdateTitleHud bumps it).
+    if (!WantPauseWorldOverlay() && WantTitleHudOverlay() && !bmvr::g_TitleLevel)
         overlay.reserved1 |= L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED;
     if (!FillOpenXrOverlayTextureFromShared(overlay, hud))
         return false;
@@ -9109,7 +9111,8 @@ void VR::UpdateTitleHud()
     }
     if (m_TitleHudActive != was)
     {
-        // New epoch: the helper locks the HUD layer at the current head pose.
+        // New epoch: with TitleLevel the helper places the HUD layer level at
+        // the head's yaw once per epoch (otherwise the layer is head-locked).
         if (m_TitleHudActive && ++m_MenuOverlayEpoch == 0)
             m_MenuOverlayEpoch = 1;
         Game::logMsg("Title HUD %s (credits=%d message=%d)", m_TitleHudActive ? "shown" : "hidden",

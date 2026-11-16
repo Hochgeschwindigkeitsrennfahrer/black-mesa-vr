@@ -215,6 +215,7 @@ namespace bmvr
     float g_GlowSmooth = 0.15f;
     float g_GlowHideMs = 20.f;
     bool g_LoadingCard = true;
+    bool g_TitleLevel = false;
     float g_GlowProxyScale = 1.5f;
     float g_PoseHoldDeg = 0.f;
     float g_PoseHoldMm = 0.f;
@@ -837,6 +838,8 @@ namespace bmvr
                 g_GlowHideMs = std::clamp(static_cast<float>(atof(val)), 0.f, 500.f);
             else if (std::strcmp(n, "GlowProxyScale") == 0)
                 g_GlowProxyScale = std::clamp(static_cast<float>(atof(val)), 1.f, 8.f);
+            else if (std::strcmp(n, "TitleLevel") == 0)
+                g_TitleLevel = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PoseHoldDeg") == 0)
                 g_PoseHoldDeg = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "PoseHoldMm") == 0)
