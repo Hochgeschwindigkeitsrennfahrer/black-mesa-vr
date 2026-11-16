@@ -182,6 +182,8 @@ namespace
             { "HAND HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Reset hand HUD values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
             { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
+            // The original release's look: flat gloves, HUD on the back of the hand.
+            { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
             { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
             { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
             { "Panel size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },

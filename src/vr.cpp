@@ -12718,7 +12718,8 @@ namespace
         up = HudRotate(up, fwd, kRoll);
         // Size/offsets/angles from the panel (Graphics -> HAND HUD) / bmvr_hand_hud_*.
         const float size = bmvr::g_HandHudSize;
-        const Vector center = ctrlPos + up * bmvr::g_HandHudUp + fwd * bmvr::g_HandHudForward
+        const float lift = bmvr::g_HandHudUp - (bmvr::g_VrHandsClassicPose ? bmvr::kHandHudClassicDrop : 0.f);
+        const Vector center = ctrlPos + up * lift + fwd * bmvr::g_HandHudForward
             + left * bmvr::g_HandHudSide;
         const Vector origin = center - fwd * (size * 0.5f) - left * (size * 0.5f);
         HudMakePanel(origin, fwd, left, up, size, out);
@@ -14123,6 +14124,9 @@ bool VR::WantsOffhandGloveWeaponGripCurl() const
 
 Vector VR::GunGripHandOffset(bool rightHand, const QAngle& gunAngles) const
 {
+    // Classic hands: the flat glove stays on the controller (glove and hand HUD).
+    if (bmvr::g_VrHandsClassicPose)
+        return Vector(0.f, 0.f, 0.f);
     Vector fwd, right, up;
     QAngle::AngleVectors(gunAngles, &fwd, &right, &up);
     return right * (rightHand ? -bmvr::g_VrHandsGunGripRight : bmvr::g_VrHandsGunGripRight)
