@@ -19407,6 +19407,7 @@ void VR::Update()
 {
     BMVR_PROF("vr Update");
     bmvr::sampler::CpuNote(1);
+    bmvr::sampler::BudgetTick();
     if (!m_Game)
         return;
 

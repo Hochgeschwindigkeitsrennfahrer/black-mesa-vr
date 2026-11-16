@@ -52,6 +52,8 @@ namespace
     // Panel copies of engine cvars (rows with a "cvar:" key).
     bool g_EngSvCheats = false;
     bool g_EngOcclusion = true;
+    bool g_EngOccTracker = true;
+    bool g_EngOccTrackerShadow = true;
     bool g_EngPixelVis = true;
     bool g_Eng3dSky = true;
     float g_EngRopeMinWidth = 0.3f;
@@ -204,6 +206,9 @@ namespace
             // Capture/view tests are not saved (no key): always off after a restart.
             { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
+            // Eye GPU ms every ~5 s (timestamp queries); with the always-on "Frame budget" CPU line it shows
+            // whether a scene is CPU- or GPU-limited.
+            { "GPU timing in log", RowKind::Toggle, "GpuPassTiming", &bmvr::g_GpuPassTiming, nullptr, 0, 0, 0, nullptr },
             // CPU/GPU work removed without changing the image; off = the stock path, for A/B.
             { "SAVINGS (SAME IMAGE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Post copies: swap, no copy", RowKind::Toggle, "PostCopySwap", &bmvr::g_PostCopySwap, nullptr, 0, 0, 0, nullptr },
@@ -232,6 +237,9 @@ namespace
             { "ENGINE (CONSOLE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "sv_cheats", RowKind::Toggle, "cvar:sv_cheats", &g_EngSvCheats, nullptr, 0, 0, 0, nullptr },
             { "r_occlusion", RowKind::Toggle, "cvar:r_occlusion", &g_EngOcclusion, nullptr, 0, 0, 0, nullptr },
+            // Black Mesa's GPU-query occlusion (engine/occlusionproxy draws + query readback, per eye).
+            { "r_occlusion_tracker_enabled", RowKind::Toggle, "cvar:r_occlusion_tracker_enabled", &g_EngOccTracker, nullptr, 0, 0, 0, nullptr },
+            { "r_occlusion_tracker_shadowdepthview_enabled", RowKind::Toggle, "cvar:r_occlusion_tracker_shadowdepthview_enabled", &g_EngOccTrackerShadow, nullptr, 0, 0, 0, nullptr },
             { "r_dopixelvisibility", RowKind::Toggle, "cvar:r_dopixelvisibility", &g_EngPixelVis, nullptr, 0, 0, 0, nullptr },
             { "r_3dsky", RowKind::Toggle, "cvar:r_3dsky", &g_Eng3dSky, nullptr, 0, 0, 0, nullptr },
             { "rope_smooth_minwidth", RowKind::Number, "cvar:rope_smooth_minwidth", nullptr, &g_EngRopeMinWidth, 0.1f, 0.f, 3.f, "%.1f" },
@@ -782,7 +790,7 @@ std::string bmvr::CaptureSettingsScenario(Game* game)
     }
     // The settings the harness guard checks plus other picture cvars.
     static const char* kEngine[] = { "cl_csm_enabled", "cl_csm_qualitymode", "cl_csm_memoryusage", "np_gr_quality",
-        "mat_motion_blur_enabled", "mat_fxaa_enabled", "r_occlusion", "mat_hdr_level", "nr_lights_quality",
+        "mat_motion_blur_enabled", "mat_fxaa_enabled", "r_occlusion", "r_occlusion_tracker_enabled", "mat_hdr_level", "nr_lights_quality",
         "nr_shadow_quality", "nr_shadow_res", "nr_shadow_filter_quality", "mat_specular", "mat_bloomscale",
         "r_waterforceexpensive", "r_waterforcereflectentities", "mat_antialias", "mat_picmip", "r_3dsky",
         "r_dopixelvisibility", "mat_queue_mode", "host_timescale", "fov_desired" };

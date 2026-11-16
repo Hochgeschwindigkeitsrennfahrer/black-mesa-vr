@@ -8,4 +8,6 @@ namespace bmvr::sampler
     // CPU sampler (cvar bmvr_cpu_sample): 0 = main thread (RenderView), 1 = render thread (Present).
     void CpuNote(int which);
     bool CpuSampleStart(double seconds);
+    // Frame budget log line (call once per presented frame on the render thread).
+    void BudgetTick();
 }

@@ -581,3 +581,74 @@ namespace bmvr::sampler
         return true;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Frame budget line (always on, every 10 s): frame interval and CPU ms per
+// frame of the main (RenderView) thread, the render (Present) thread and all
+// other threads together, from GetThreadTimes (no PerfLog, no hooks). With
+// GpuPassTiming on, the "GPU pass timing" lines give the GPU side.
+// ---------------------------------------------------------------------------
+namespace bmvr::sampler
+{
+    namespace
+    {
+        unsigned long long ThreadCpu100ns(DWORD tid)
+        {
+            HANDLE th = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
+            if (!th)
+                return 0;
+            FILETIME c, e, k, u;
+            unsigned long long t = 0;
+            if (GetThreadTimes(th, &c, &e, &k, &u))
+                t = ((static_cast<unsigned long long>(k.dwHighDateTime) << 32) | k.dwLowDateTime)
+                    + ((static_cast<unsigned long long>(u.dwHighDateTime) << 32) | u.dwLowDateTime);
+            CloseHandle(th);
+            return t;
+        }
+
+        unsigned long long ProcessCpu100ns()
+        {
+            FILETIME c, e, k, u;
+            if (!GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u))
+                return 0;
+            return ((static_cast<unsigned long long>(k.dwHighDateTime) << 32) | k.dwLowDateTime)
+                + ((static_cast<unsigned long long>(u.dwHighDateTime) << 32) | u.dwLowDateTime);
+        }
+    }
+
+    void BudgetTick()
+    {
+        static ULONGLONG s_startMs = 0;
+        static int s_frames = 0;
+        static unsigned long long s_main = 0, s_render = 0, s_proc = 0;
+        static DWORD s_mainTid = 0, s_renderTid = 0;
+        const ULONGLONG now = GetTickCount64();
+        ++s_frames;
+        if (s_startMs != 0 && now - s_startMs < 10000)
+            return;
+        const DWORD mainTid = g_CpuTid[0].load(std::memory_order_relaxed);
+        const DWORD renderTid = GetCurrentThreadId();
+        const unsigned long long m = mainTid ? ThreadCpu100ns(mainTid) : 0;
+        const unsigned long long r = ThreadCpu100ns(renderTid);
+        const unsigned long long p = ProcessCpu100ns();
+        if (s_startMs != 0 && s_frames > 1 && mainTid == s_mainTid && renderTid == s_renderTid)
+        {
+            const double f = static_cast<double>(s_frames);
+            const double wall = static_cast<double>(now - s_startMs) / f;
+            const double mm = (m - s_main) / 10000.0 / f;
+            const double rr = (r - s_render) / 10000.0 / f;
+            const double pp = (p - s_proc) / 10000.0 / f;
+            const bool same = mainTid == renderTid;
+            Game::logMsg("Frame budget (%.0f s): %d frames, %.2f ms/frame (%.0f fps); CPU ms/frame: render thread %.2f (%.0f %%), main thread %.2f%s, other threads %.2f",
+                (now - s_startMs) / 1000.0, s_frames, wall, 1000.0 / wall, rr, 100.0 * rr / wall,
+                same ? 0.0 : mm, same ? " (same thread)" : "", pp - rr - (same ? 0.0 : mm));
+        }
+        s_startMs = now;
+        s_frames = 0;
+        s_main = m;
+        s_render = r;
+        s_proc = p;
+        s_mainTid = mainTid;
+        s_renderTid = renderTid;
+    }
+}
