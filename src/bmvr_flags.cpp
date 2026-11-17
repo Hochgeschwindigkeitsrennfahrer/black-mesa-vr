@@ -291,9 +291,10 @@ namespace bmvr
     bool g_VrHandsBlackMesa = false;
     bool g_VrGunRightHand = false;
     bool g_VrMagReload = false;
-    float g_VrMagHandForward = 2.f;
-    float g_VrMagHandUp = -1.f;
-    float g_VrMagSeatDistance = 6.f;
+    float g_VrMagHandForward = -3.f;
+    float g_VrMagHandUp = 3.f;
+    float g_VrMagSeatDistance = 9.f;
+    float g_VrBoltGrabRadius = 7.f;
     float g_VrHandsBlackMesaScale = 0.8f;
     bool g_IsBlueShift = false;
     bool g_IsAzureSheep = false;

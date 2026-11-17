@@ -3286,6 +3286,24 @@ namespace
             ForceViewmodelIdlePose(viewmodel, hdr);
             return;
         }
+        // Manual magazines: the hands do the reload, so the stock reload clip
+        // (also the game's own refill after firing dry) is not shown.
+        if (label && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
+            && MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponNone)
+        {
+            char lb[64]{};
+            for (int i = 0; i < 63 && label[i]; ++i)
+                lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+            if (std::strstr(lb, "reload"))
+            {
+                static int s_log;
+                if (s_log++ < 20)
+                    Game::logMsg("Mag reload: stock clip '%s' not shown", label);
+                Hooks::m_VR->NoteViewmodelBeamHidden(false);
+                ForceViewmodelIdlePose(viewmodel, hdr);
+                return;
+            }
+        }
         // Lock-free class flag from the weapon model dCalcViewModelView just
         // classified; replaces a model-info lookup + four strstr per call (this
         // runs twice per CalcViewModelView) and an unlocked read of the
@@ -3759,45 +3777,135 @@ namespace
         return true;
     }
 
-    // Manual MP5 magazine (prototype): the gun's own magazine bone is hidden
-    // while ejected, or moved to the left hand (same orientation to the left
-    // controller as it has to the gun), and reports when it is near the well.
-    void ApplyMagReloadBones(VR* vr, unsigned char* hdr, float* bones, int nBones, const QAngle& gunAng)
+    // Manual magazines (VrMagReload, vr_mag_reload.h). Works on the copied
+    // bone matrices of the gun's own viewmodel: the magazine bone is hidden,
+    // dropped, or placed at the left hand (same orientation to the left
+    // controller as it has to the gun); the bolt/slide bone slides back along
+    // the gun while the left hand pulls it, or stays back when locked open.
+    void ApplyMagReloadBones(VR* vr, unsigned char* hdr, float* bones, int nBones,
+        const Vector& gunOrigin, const QAngle& gunAng, float vmScale)
     {
-        const int st = MagReload::g_State.load(std::memory_order_relaxed);
-        if (st == MagReload::kLoaded || st == MagReload::kDry || !vr)
+        const int weapon = MagReload::g_Weapon.load(std::memory_order_relaxed);
+        if (weapon == MagReload::kWeaponNone || !vr)
         {
             MagReload::g_NearWell.store(false);
+            MagReload::g_NearBolt.store(false);
             return;
         }
+        const MagReload::WeaponDef& def = MagReload::Def(weapon);
         static thread_local unsigned char* s_hdr = nullptr;
-        static thread_local int s_clip = -1;
+        static thread_local int s_mag = -1, s_bolt = -1;
         if (s_hdr != hdr)
         {
             s_hdr = hdr;
-            s_clip = FindStudioBoneIndex(hdr, "Clip_New");
-            Game::logMsg("Mag reload: magazine bone %d", s_clip);
+            s_mag = FindStudioBoneIndex(hdr, def.magBone);
+            s_bolt = FindStudioBoneIndex(hdr, def.boltBone);
+            Game::logMsg("Mag reload: %s magazine bone %d, bolt bone %d", def.name, s_mag, s_bolt);
         }
-        if (s_clip < 0 || s_clip >= nBones)
-            return;
-        float* m = bones + s_clip * 12;
-        const Vector well(m[3], m[7], m[11]);
-        if (st == MagReload::kEmpty)
-        {
-            for (int r = 0; r < 3; ++r)
-                m[r * 4 + 0] = m[r * 4 + 1] = m[r * 4 + 2] = 0.f;
-            MagReload::g_NearWell.store(false);
-            return;
-        }
+        Vector f, r, u;
+        QAngle::AngleVectors(gunAng, &f, &r, &u);
         Vector hand;
         QAngle handAng;
-        if (!vr->OffhandWorldPoseForDraw(hand, handAng))
+        const bool handOk = vr->OffhandWorldPoseForDraw(hand, handAng);
+        Vector hf, hr, hu;
+        QAngle::AngleVectors(handAng, &hf, &hr, &hu);
+        const Vector anchor = hand + hf * bmvr::g_VrMagHandForward + hu * bmvr::g_VrMagHandUp;
+        const DWORD now = GetTickCount();
+        auto local = [](const float* mm, const float* p) {
+            return Vector(mm[0] * p[0] + mm[1] * p[1] + mm[2] * p[2] + mm[3],
+                mm[4] * p[0] + mm[5] * p[1] + mm[6] * p[2] + mm[7],
+                mm[8] * p[0] + mm[9] * p[1] + mm[10] * p[2] + mm[11]);
+        };
+
+        // ---- bolt / slide ----
+        if (s_bolt >= 0 && s_bolt < nBones)
+        {
+            float* b = bones + s_bolt * 12;
+            const Vector boltPos = local(b, def.boltCenter);
+            const bool atBolt = handOk && (anchor - boltPos).Length() < bmvr::g_VrBoltGrabRadius * vmScale;
+            MagReload::g_NearBolt.store(atBolt);
+            static thread_local DWORD s_boltLogMs = 0;
+            if (handOk && MagReload::g_NeedRack.load() && GetTickCount() - s_boltLogMs > 1000)
+            {
+                s_boltLogMs = GetTickCount();
+                const Vector d = boltPos - anchor;
+                Game::logMsg("Mag reload: %s bolt %.1f units from the hand (bolt - hand: %.1f fwd %.1f right %.1f up in the hand frame) grab=%d pull=%.2f",
+                    def.name, d.Length(), d.Dot(hf), d.Dot(hr), d.Dot(hu),
+                    MagReload::g_BoltGrab.load() ? 1 : 0, MagReload::g_BoltPull.load());
+            }
+            static thread_local bool s_grabbing = false;
+            static thread_local float s_startAlong = 0.f;
+            float pull = 0.f;
+            const float travel = def.boltTravel * vmScale;
+            if (MagReload::g_BoltGrab.load() && handOk)
+            {
+                const float along = (anchor - gunOrigin).Dot(f);
+                if (!s_grabbing)
+                {
+                    s_grabbing = true;
+                    s_startAlong = along;
+                }
+                pull = std::clamp((s_startAlong - along) / (travel > 0.01f ? travel : 1.f), 0.f, 1.f);
+            }
+            else
+                s_grabbing = false;
+            MagReload::g_BoltPull.store(pull);
+            const float back = (std::max)(pull, MagReload::g_SlideLocked.load() ? 1.f : 0.f) * travel;
+            b[3] -= f.x * back;
+            b[7] -= f.y * back;
+            b[11] -= f.z * back;
+        }
+        else
+            MagReload::g_NearBolt.store(false);
+
+        // ---- magazine ----
+        if (s_mag < 0 || s_mag >= nBones)
             return;
-        // Source basis as columns: forward, left, up.
+        float* m = bones + s_mag * 12;
+        const Vector well = local(m, def.magCenter);
+        static thread_local float s_handMag[12]{};
+        static thread_local bool s_handMagValid = false;
+        static thread_local unsigned s_seenDrop = 0;
+        static thread_local float s_drop[12]{};
+        const unsigned dropTick = MagReload::g_DropTick.load();
+        if (dropTick != s_seenDrop)
+        {
+            s_seenDrop = dropTick;
+            if (MagReload::g_DropFrom.load() == 1 && s_handMagValid)
+                std::memcpy(s_drop, s_handMag, sizeof(s_drop));
+            else
+                std::memcpy(s_drop, m, sizeof(s_drop));
+        }
+        const int st = MagReload::g_State.load(std::memory_order_relaxed);
+        if (st == MagReload::kLoaded || st == MagReload::kDry)
+        {
+            MagReload::g_NearWell.store(false);
+            s_handMagValid = false;
+            return;
+        }
+        if (st == MagReload::kEmpty)
+        {
+            MagReload::g_NearWell.store(false);
+            s_handMagValid = false;
+            const float t = dropTick ? (now - dropTick) * 0.001f : 99.f;
+            if (t < 1.2f)
+            {
+                // Falls for ~0.5 s (gravity 386 in/s^2, at most 4 ft), then lies still.
+                std::memcpy(m, s_drop, sizeof(s_drop));
+                m[11] -= (std::min)(0.5f * 386.f * t * t, 48.f);
+                return;
+            }
+            for (int i = 0; i < 3; ++i)
+                m[i * 4 + 0] = m[i * 4 + 1] = m[i * 4 + 2] = 0.f;
+            return;
+        }
+        // In the hand.
+        if (!handOk)
+            return;
         auto basis = [](const QAngle& a, float out[3][3]) {
-            Vector f, r, u;
-            QAngle::AngleVectors(a, &f, &r, &u);
-            const Vector c[3] = { f, r * -1.f, u };
+            Vector fa, ra, ua;
+            QAngle::AngleVectors(a, &fa, &ra, &ua);
+            const Vector c[3] = { fa, ra * -1.f, ua };
             for (int i = 0; i < 3; ++i)
             {
                 out[0][i] = c[i].x;
@@ -3808,7 +3916,6 @@ namespace
         float L[3][3], G[3][3], D[3][3], R[3][3];
         basis(handAng, L);
         basis(gunAng, G);
-        // D = L * G^T
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
                 D[i][j] = L[i][0] * G[j][0] + L[i][1] * G[j][1] + L[i][2] * G[j][2];
@@ -3818,23 +3925,23 @@ namespace
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
                 m[i * 4 + j] = R[i][j];
-        // Magazine top in the palm: a little ahead of and above the controller origin.
-        Vector f, r, u;
-        QAngle::AngleVectors(handAng, &f, &r, &u);
-        const Vector at = hand + f * bmvr::g_VrMagHandForward + u * bmvr::g_VrMagHandUp;
-        m[3] = at.x;
-        m[7] = at.y;
-        m[11] = at.z;
-        const float dist = (at - well).Length();
-        MagReload::g_NearWell.store(dist < bmvr::g_VrMagSeatDistance);
+        // Magazine centre in the palm.
+        m[3] = m[7] = m[11] = 0.f;
+        const Vector c0 = local(m, def.magCenter);
+        m[3] = anchor.x - c0.x;
+        m[7] = anchor.y - c0.y;
+        m[11] = anchor.z - c0.z;
+        std::memcpy(s_handMag, m, sizeof(s_handMag));
+        s_handMagValid = true;
+        const float dist = (anchor - well).Length();
+        MagReload::g_NearWell.store(dist < bmvr::g_VrMagSeatDistance * vmScale);
         static thread_local DWORD s_logMs = 0;
-        const DWORD now = GetTickCount();
         if (now - s_logMs > 1000)
         {
             s_logMs = now;
-            const Vector d = well - at;
+            const Vector d = well - anchor;
             Game::logMsg("Mag reload: magazine %.1f units from the well (well - hand: %.1f fwd %.1f right %.1f up in the hand frame)",
-                dist, d.Dot(f), d.Dot(r), d.Dot(u));
+                dist, d.Dot(hf), d.Dot(hr), d.Dot(hu));
         }
     }
 
@@ -8395,8 +8502,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
                 if (gunRightHand)
                     CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
-                if (m_VR->ViewmodelIsMp5())
-                    ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, targetAng);
+                ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, targetAng,
+                    needScale ? scale : 1.f);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);

@@ -13581,6 +13581,7 @@ void VR::NoteViewmodelModel(const char* modelName)
         if (m_VmClass.rpg) flags |= kVmFlagRpg;
         if (m_VmClass.gluon) flags |= kVmFlagGluon;
         if (m_VmClass.mp5) flags |= kVmFlagMp5;
+        if (m_VmClass.glock) flags |= kVmFlagGlock;
         m_VmClassFlags.store(flags, std::memory_order_relaxed);
         Game::logMsg("Viewmodel model %s", modelName);
     }
@@ -13618,7 +13619,7 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
         out.ox = 12.5f; out.oy = 8.f; out.oz = -12.f; out.ax = -24.5f; out.ay = -6.5f; out.az = -6.f; out.numpadKey = "crowbar"; out.crowbar = true;
     }
     else if (has("glock") || has("pistol") || has("9mm") || has("beretta"))
-    { out.ox = 16.5f; out.oy = 4.f; out.oz = -7.f; out.ax = 0.f; out.numpadKey = "glock"; }
+    { out.ox = 16.5f; out.oy = 4.f; out.oz = -7.f; out.ax = 0.f; out.numpadKey = "glock"; out.glock = true; }
     else if (has("357") || has("python") || has("revolver"))
     { out.ox = 10.f; out.oy = 3.5f; out.oz = -5.5f; out.ax = 0.5f; out.numpadKey = "357"; }
     else if (has("mp5") || has("smg") || has("mp5k"))
@@ -13876,7 +13877,9 @@ void VR::ApplyTwoHandWeaponAim()
                     && along >= (alongMin - slop) && along <= (alongMax + slop));
     }
     else if ((bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
-        && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kInHand)
+        && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kInHand
+        && !MagReload::g_BoltGrab.load(std::memory_order_relaxed)
+        && !(MagReload::g_NeedRack.load(std::memory_order_relaxed) && MagReload::g_NearBolt.load(std::memory_order_relaxed)))
     {
         bool onPoint = pistol
             ? (distToGrip < enterR)
@@ -20067,9 +20070,34 @@ std::string bmvr::FoveationStatusText()
     return FoveationStatusNow();
 }
 
-// ---- Manual MP5 magazine (prototype) ----
+// ---- Manual magazines (VrMagReload): MP5 + glock ----
+std::atomic<int> MagReload::g_Weapon{ MagReload::kWeaponNone };
 std::atomic<int> MagReload::g_State{ MagReload::kLoaded };
+std::atomic<bool> MagReload::g_SlideLocked{ false };
+std::atomic<bool> MagReload::g_BoltGrab{ false };
+std::atomic<bool> MagReload::g_NeedRack{ false };
+std::atomic<unsigned> MagReload::g_DropTick{ 0 };
+std::atomic<int> MagReload::g_DropFrom{ 0 };
 std::atomic<bool> MagReload::g_NearWell{ false };
+std::atomic<bool> MagReload::g_NearBolt{ false };
+std::atomic<float> MagReload::g_BoltPull{ 0.f };
+
+const MagReload::WeaponDef& MagReload::Def(int weapon)
+{
+    // Sounds: Black Mesa has one wav per whole reload, so the handling sounds
+    // come from the Half-Life 2 sounds the game mounts itself (hl2/).
+    static const WeaponDef kDefs[kWeaponCount] = {
+        { "none", nullptr, nullptr, 0, 0.f, false, nullptr, nullptr, { 0, 0, 0 }, { 0, 0, 0 } },
+        // Centres measured from v_mp5 / v_glock (bind pose, 2026-11-17).
+        { "mp5", "Clip_New", "Bolt_New", 30, 4.0f, false,
+          "weapons/mp5/empty.wav", "weapons/smg1/switch_single.wav",
+          { 0.00f, -8.93f, -8.32f }, { 1.04f, -14.23f, 1.49f } },
+        { "glock", "bone_clip", "Bone01", 17, 1.8f, true,
+          "weapons/pistol/pistol_empty.wav", "weapons/glock/reload_roundchambered.wav",
+          { 3.90f, -0.12f, 0.04f }, { 2.56f, -0.09f, 0.04f } },
+    };
+    return kDefs[(weapon >= 0 && weapon < kWeaponCount) ? weapon : 0];
+}
 
 bool VR::OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const
 {
@@ -20095,52 +20123,110 @@ bool VR::OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const
     return true;
 }
 
+int VR::MagReloadWeaponNow() const
+{
+    if (!bmvr::g_VrMagReload || bmvr::g_LeftHanded || !m_HasHeldWeapon || m_EmptyHands || !m_GameplayEligible)
+        return MagReload::kWeaponNone;
+    if (ViewmodelIsMp5())
+        return MagReload::kWeaponMp5;
+    if (ViewmodelIsGlock())
+        return MagReload::kWeaponGlock;
+    return MagReload::kWeaponNone;
+}
+
 void VR::UpdateMagReload(uint32_t& buttons)
 {
     using namespace MagReload;
-    static bool s_reloadWas = false, s_gripWas = false;
+    // Per weapon, so a gun put away with its magazine out is still empty
+    // when it comes back. Reset on a new map / load.
+    struct WeaponState
+    {
+        int mag = kLoaded;
+        bool chambered = true;
+        int lastClip = -1;
+    };
+    static WeaponState s_w[kWeaponCount];
+    static bool s_reloadWas = false, s_gripWas = false, s_attackWas = false;
+    static bool s_boltFull = false;
     static DWORD s_pulseUntil = 0;
     static bool s_pulseReload = false;
+    static int s_lastWeapon = kWeaponNone;
+    static std::string s_level;
     const DWORD now = GetTickCount();
     const bool reload = (buttons & IN_RELOAD) != 0;
-    const bool on = bmvr::g_VrMagReload && !bmvr::g_LeftHanded && ViewmodelIsMp5()
-        && m_HasHeldWeapon && !m_EmptyHands && m_GameplayEligible;
-    if (!on)
+    const bool attack = (buttons & IN_ATTACK) != 0;
+    if (s_level != m_CurrentMapName)
     {
-        if (g_State.exchange(kLoaded) != kLoaded)
-            Game::logMsg("Mag reload: off or weapon changed -> loaded");
+        s_level = m_CurrentMapName;
+        for (auto& w : s_w)
+            w = WeaponState{};
+    }
+    const int weapon = MagReloadWeaponNow();
+    if (weapon != s_lastWeapon)
+    {
+        s_lastWeapon = weapon;
+        s_boltFull = false;
+        g_BoltGrab.store(false);
+        // A magazine in the hand is dropped by a weapon switch.
+        if (weapon != kWeaponNone && s_w[weapon].mag == kInHand)
+            s_w[weapon].mag = kEmpty;
+        Game::logMsg("Mag reload: weapon %s (mag %d, chambered %d)", Def(weapon).name,
+            weapon ? s_w[weapon].mag : 0, weapon ? (s_w[weapon].chambered ? 1 : 0) : 1);
+    }
+    g_Weapon.store(weapon);
+    if (weapon == kWeaponNone)
+    {
+        g_State.store(kLoaded);
+        g_SlideLocked.store(false);
+        g_NeedRack.store(false);
         s_reloadWas = reload;
         s_pulseReload = false;
         return;
     }
+    const WeaponDef& def = Def(weapon);
+    WeaponState& w = s_w[weapon];
     // The reload button only ejects; the game's reload runs when a magazine
     // is seated (it keeps the ammo count and the reserve the game's own).
     buttons &= ~IN_RELOAD;
-    int st = g_State.load();
-    static int s_lastClip = -1;
     const int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
+    auto sound = [&](const char* wav) {
+        if (wav && m_Game)
+            m_Game->PlayUiSound(wav);
+    };
     // Fired dry: the game reloads by itself once the trigger is let go
-    // (checked headless 2026-11-17). The magazine stays in and the trigger
-    // stays blocked until it is swapped; the game's refill is bookkeeping.
-    if (st == kLoaded && clip == 0 && s_lastClip > 0)
+    // (checked headless 2026-11-17). The magazine stays in, the chamber is
+    // empty and the trigger blocked until a swap; the game's refill is only
+    // bookkeeping.
+    if (w.mag == kLoaded && clip == 0 && w.lastClip > 0)
     {
-        st = kDry;
-        Game::logMsg("Mag reload: fired dry, swap the magazine");
+        w.mag = kDry;
+        w.chambered = false;
+        Game::logMsg("Mag reload: %s fired dry, swap the magazine", def.name);
     }
     const float grip = LeftSupportGripValue();
     const bool gripDown = grip > 0.6f;
     const bool gripEdge = gripDown && !s_gripWas;
     const bool released = grip < 0.35f;
-    if ((st == kLoaded || st == kDry) && reload && !s_reloadWas)
+    bool boltGrab = g_BoltGrab.load();
+
+    if ((w.mag == kLoaded || w.mag == kDry) && reload && !s_reloadWas)
     {
-        st = kEmpty;
-        if (m_Game)
-            m_Game->PlayUiSound("weapons/mp5/empty.wav");
+        w.mag = kEmpty;
+        g_DropFrom.store(0);
+        g_DropTick.store(now ? now : 1);
+        sound("weapons/ar2/ar2_reload_rotate.wav");
         PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.5f);
-        Game::logMsg("Mag reload: ejected (clip %d)",
-            m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1);
+        Game::logMsg("Mag reload: %s ejected (clip %d, chambered %d)", def.name, clip, w.chambered ? 1 : 0);
     }
-    else if (st == kEmpty && gripEdge && m_HmdPoseValid && m_LeftControllerTrackingValid)
+    // Bolt / slide: left grip at it, pull back, let go.
+    else if (!boltGrab && gripEdge && w.mag != kInHand && !w.chambered && g_NearBolt.load())
+    {
+        boltGrab = true;
+        s_boltFull = false;
+        PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 1500, 0.5f);
+        Game::logMsg("Mag reload: %s bolt grabbed", def.name);
+    }
+    else if (w.mag == kEmpty && gripEdge && m_HmdPoseValid && m_LeftControllerTrackingValid)
     {
         // Left hip: mirror of the right-hand pistol holster zone.
         const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
@@ -20158,9 +20244,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
             static int s_missLog;
             if (atHip)
             {
-                st = kInHand;
+                w.mag = kInHand;
                 PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
-                Game::logMsg("Mag reload: magazine taken from the hip");
+                Game::logMsg("Mag reload: %s magazine taken from the hip", def.name);
             }
             else if (s_missLog < 20)
             {
@@ -20170,34 +20256,58 @@ void VR::UpdateMagReload(uint32_t& buttons)
             }
         }
     }
-    else if (st == kInHand)
+    else if (w.mag == kInHand)
     {
         if (g_NearWell.load())
         {
-            st = kLoaded;
-            const int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
-            s_pulseReload = clip >= 0 && clip < 30;
+            w.mag = kLoaded;
+            s_pulseReload = clip >= 0 && clip < def.maxClip;
             s_pulseUntil = now + 200;
-            if (m_Game)
-                m_Game->PlayUiSound("weapons/mp5/empty.wav");
+            sound("weapons/ar2/ar2_reload_push.wav");
             PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
-            Game::logMsg("Mag reload: seated (clip %d, game reload %d)", clip, s_pulseReload ? 1 : 0);
+            Game::logMsg("Mag reload: %s seated (clip %d, game reload %d, chambered %d)",
+                def.name, clip, s_pulseReload ? 1 : 0, w.chambered ? 1 : 0);
         }
         else if (released)
         {
-            st = kEmpty;
-            Game::logMsg("Mag reload: magazine dropped");
+            w.mag = kEmpty;
+            g_DropFrom.store(1);
+            g_DropTick.store(now ? now : 1);
+            Game::logMsg("Mag reload: %s magazine dropped", def.name);
         }
     }
-    static bool s_attackWas = false;
-    const bool attack = (buttons & IN_ATTACK) != 0;
-    if (st != kLoaded)
+
+    if (boltGrab)
     {
-        if (attack && !s_attackWas && m_Game)
-            m_Game->PlayUiSound("weapons/mp5/empty.wav");
+        const float pull = g_BoltPull.load();
+        if (pull >= 0.85f && !s_boltFull)
+        {
+            s_boltFull = true;
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2000, 0.6f);
+        }
+        if (released)
+        {
+            boltGrab = false;
+            if (s_boltFull)
+            {
+                // A pull with a loaded magazine chambers a round; without one
+                // it only cycles the action (and closes a locked slide).
+                w.chambered = (w.mag == kLoaded) && clip > 0;
+                sound(def.boltSound);
+                Game::logMsg("Mag reload: %s bolt released, chambered %d", def.name, w.chambered ? 1 : 0);
+            }
+            s_boltFull = false;
+        }
+    }
+    g_BoltGrab.store(boltGrab);
+
+    const bool canFire = w.mag == kLoaded && w.chambered && !boltGrab;
+    if (!canFire)
+    {
+        if (attack && !s_attackWas)
+            sound(def.emptyClick);
         buttons &= ~IN_ATTACK;
     }
-    s_attackWas = attack;
     if (s_pulseReload)
     {
         if (now < s_pulseUntil)
@@ -20205,12 +20315,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
         else
             s_pulseReload = false;
     }
-    g_State.store(st);
+    // Open (locked back) slide: glock with an empty chamber.
+    g_SlideLocked.store(def.slideLocksBack && !w.chambered);
+    g_NeedRack.store(!w.chambered);
+    g_State.store(w.mag);
+    if (clip > w.lastClip && w.lastClip >= 0)
+        Game::logMsg("Mag reload: %s clip %d -> %d (mag %d)", def.name, w.lastClip, clip, w.mag);
+    w.lastClip = clip;
     s_reloadWas = reload;
     s_gripWas = gripDown;
-    // Clip changes while on: shows the game's reload landing, and any
-    // automatic reload the game does on its own (not after a seat).
-    if (clip > s_lastClip && s_lastClip >= 0)
-        Game::logMsg("Mag reload: clip %d -> %d (state %d)", s_lastClip, clip, st);
-    s_lastClip = clip;
+    s_attackWas = attack;
 }

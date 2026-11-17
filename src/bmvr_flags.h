@@ -719,6 +719,7 @@ namespace bmvr
     // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
     extern bool g_VrMagReload;
     extern float g_VrMagHandForward, g_VrMagHandUp, g_VrMagSeatDistance; // game units
+    extern float g_VrBoltGrabRadius; // game units (before the viewmodel scale)
     // True for this process when launched with -game bshift (or a bs_* map).
     // Calhoun never wears the HEV suit — use bare-hand GLBs the whole session.
     extern bool g_IsBlueShift;

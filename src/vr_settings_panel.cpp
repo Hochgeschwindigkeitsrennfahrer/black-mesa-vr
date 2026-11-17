@@ -144,7 +144,7 @@ namespace
             // Built from the installed game's own first-person arms; nothing shipped.
             { "Black Mesa hands", RowKind::Toggle, "VrHandsBlackMesa", &bmvr::g_VrHandsBlackMesa, nullptr, 0, 0, 0, nullptr },
             { "Black Mesa hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
-            { "Manual MP5 magazine (test)", RowKind::Toggle, "VrMagReload", &bmvr::g_VrMagReload, nullptr, 0, 0, 0, nullptr },
+            { "Manual magazines (MP5, glock)", RowKind::Toggle, "VrMagReload", &bmvr::g_VrMagReload, nullptr, 0, 0, 0, nullptr },
             { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
             { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
