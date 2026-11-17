@@ -176,6 +176,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_XenGlobalFogOff, nullptr },
             { "bmvr_waterline_clip_fix", "VR: eye at the water line: the eye view is not clipped at the water surface, so the part of the view under the water is lit (0 = stock: black lower part)",
               Kind::Bool, 0.f, 1.f, &g_WaterLineClipFix, nullptr },
+            { "bmvr_screenspace_model_fix", "VR: screen-space quads (underwater warp, post passes, lens flares) are drawn with an identity model matrix, whatever an earlier draw left (0 = stock: inherit it)",
+              Kind::Bool, 0.f, 1.f, &g_ScreenSpaceModelFix, nullptr },
             { "bmvr_light_cull_eye", "VR: deferred lights are culled from each eye's view, not the main view that follows the aim",
               Kind::Bool, 0.f, 1.f, &g_LightCullEyeView, nullptr },
             { "bmvr_flare_level", "VR: lens flare streaks stay level with the horizon when the head rolls (0 = stock: they roll with the head)",

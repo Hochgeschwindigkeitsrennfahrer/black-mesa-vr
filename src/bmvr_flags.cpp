@@ -214,6 +214,7 @@ namespace bmvr
     bool g_SkyWaterPerEye = true;
     bool g_EyeUnderwaterWorld = true;
     bool g_WaterLineClipFix = true;
+    bool g_ScreenSpaceModelFix = true;
     bool g_XenGlobalFogOff = true;
     bool g_FlareEyeAxis = true;
     bool g_FlareLevel = true;
@@ -907,6 +908,8 @@ namespace bmvr
                 g_XenGlobalFogOff = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "WaterLineClipFix") == 0)
                 g_WaterLineClipFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ScreenSpaceModelFix") == 0)
+                g_ScreenSpaceModelFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LightCullEyeView") == 0)
                 g_LightCullEyeView = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlareLevel") == 0)

@@ -483,6 +483,156 @@ static FlareWorldToScreenFn g_OrigFlareWorldToScreen = nullptr;
 using FlareDrawQuadFn = void(__thiscall*)(void* flare, void* material, int x, int y, int w, int h, void* color, float angle);
 static FlareDrawQuadFn g_OrigFlareDrawQuad = nullptr;
 static void* const* g_FlareMaterials = nullptr;
+
+// Screen-space quads (DrawScreenSpaceRectangle: underwater warp + post chain; the lens flare quad
+// draw) push identity view + projection and draw in clip space, but keep the current MODEL matrix
+// (materialsystem DSSR body and client flare quad, disassembled 2026-11-17: MatrixMode 0/1 only,
+// both end on MatrixMode(1) + PopMatrix). Flat Black Mesa happens to have an identity model there.
+// A leftover translation in it drew the underwater warp only in the top-right part of the eye and
+// the flares away from their light, for a whole launch (handover 2026-11-17). Every check logs a
+// non-identity model (on change); with ScreenSpaceModelFix the draw gets identity, and the mode is
+// left as the stock functions leave it (PROJECTION).
+namespace ScreenModel
+{
+    // IMatRenderContext slots (offsets.h notes): 0x04 Release, 0x08 BeginRender, 0x0C EndRender,
+    // 0x50 MatrixMode, 0x54 PushMatrix, 0x58 PopMatrix, 0x78 GetMatrix(mode, VMatrix*), 0x7C LoadIdentity.
+    constexpr int kModeProjection = 1;
+    constexpr int kModeModel = 10;   // MATERIAL_MODEL (client.dll pushes 0xA before MatrixMode)
+    using VoidFn = void(__thiscall*)(void*);
+    using IntFn = void(__thiscall*)(void*, int);
+    using GetMatrixFn = void(__thiscall*)(void*, int, float*);
+
+    inline void** Vt(void* ctx) { return *reinterpret_cast<void***>(ctx); }
+
+    inline void GetModel(void* ctx, float* m)
+    {
+        reinterpret_cast<GetMatrixFn>(Vt(ctx)[0x78 / 4])(ctx, kModeModel, m);
+    }
+
+    inline bool IsIdentity(const float* m)
+    {
+        for (int i = 0; i < 16; ++i)
+            if (std::fabs(m[i] - ((i % 5) == 0 ? 1.f : 0.f)) > 1e-4f)
+                return false;
+        return true;
+    }
+
+    struct SiteStats
+    {
+        const char* name;
+        unsigned draws = 0, bad = 0, logged = 0;
+        float last[16] = {};
+        ULONGLONG nextSummaryMs = 0;
+        unsigned summaryDraws = 0, summaryBad = 0;
+    };
+
+    // Checks the model matrix before a screen-space draw. Returns true when the draw should be
+    // wrapped (fix on). One site per calling thread (DSSR: drawing thread; flares: client thread).
+    inline bool Check(SiteStats& st, void* ctx, const char* mat)
+    {
+        if (!ctx || !Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled)
+            return false;
+        float m[16];
+        GetModel(ctx, m);
+        ++st.draws;
+        if (!IsIdentity(m))
+        {
+            ++st.bad;
+            if (st.logged < 200 && std::memcmp(m, st.last, sizeof(m)) != 0)
+            {
+                ++st.logged;
+                std::memcpy(st.last, m, sizeof(m));
+                Game::logMsg("Screen model: %s %s eye=%d tid=%lu model NOT identity: r0=(%.4g %.4g %.4g %.4g) r1=(%.4g %.4g %.4g %.4g) r2=(%.4g %.4g %.4g %.4g) r3=(%.4g %.4g %.4g %.4g) -> %s",
+                    st.name, mat ? mat : "?", Hooks::m_VR->m_StereoEye, GetCurrentThreadId(),
+                    m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15],
+                    bmvr::g_ScreenSpaceModelFix ? "identity for this draw" : "kept (fix off)");
+            }
+        }
+        // Summary every 10 s when something was drawn: a good launch logs "0 not identity".
+        const ULONGLONG now = GetTickCount64();
+        if (now >= st.nextSummaryMs)
+        {
+            if (st.draws != st.summaryDraws)
+                Game::logMsg("Screen model: %s %u draws, %u not identity (fix %s)", st.name, st.draws, st.bad,
+                    bmvr::g_ScreenSpaceModelFix ? "on" : "off");
+            st.summaryDraws = st.draws;
+            st.summaryBad = st.bad;
+            st.nextSummaryMs = now + 10000;
+        }
+        return bmvr::g_ScreenSpaceModelFix;
+    }
+
+    inline void Begin(void* ctx)
+    {
+        void** vt = Vt(ctx);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, kModeModel);
+        reinterpret_cast<VoidFn>(vt[0x54 / 4])(ctx);
+        reinterpret_cast<VoidFn>(vt[0x7C / 4])(ctx);
+    }
+
+    inline void End(void* ctx)
+    {
+        void** vt = Vt(ctx);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, kModeModel);
+        reinterpret_cast<VoidFn>(vt[0x58 / 4])(ctx);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, kModeProjection);
+    }
+
+    // Diagnostic around code that may leave the model matrix changed (held-particle replay,
+    // particle-level hooks): logs when the model differs after the call. Logs only.
+    struct Probe
+    {
+        void* ctx = nullptr;
+        float before[16] = {};
+        explicit Probe(void* c) : ctx(c)
+        {
+            if (ctx)
+                GetModel(ctx, before);
+        }
+        void After(const char* where)
+        {
+            if (!ctx)
+                return;
+            float after[16];
+            GetModel(ctx, after);
+            if (std::memcmp(before, after, sizeof(after)) == 0)
+                return;
+            static std::atomic<int> s_lines{ 0 };
+            if (s_lines.fetch_add(1) >= 200)
+                return;
+            Game::logMsg("Model matrix changed by %s eye=%d tid=%lu: before t=(%.4g %.4g %.4g)%s after r0=(%.4g %.4g %.4g %.4g) r1=(%.4g %.4g %.4g %.4g) r2=(%.4g %.4g %.4g %.4g)%s",
+                where, Hooks::m_VR ? Hooks::m_VR->m_StereoEye : -1, GetCurrentThreadId(),
+                before[3], before[7], before[11], IsIdentity(before) ? " (identity)" : "",
+                after[0], after[1], after[2], after[3], after[4], after[5], after[6], after[7],
+                after[8], after[9], after[10], after[11], IsIdentity(after) ? " (identity)" : "");
+        }
+    };
+
+    // The client's render context (AddRef'd + BeginRender), for code that has no context at hand.
+    struct ClientCtx
+    {
+        void* ctx = nullptr;
+        ClientCtx()
+        {
+            if (!g_FlareMaterials || !*g_FlareMaterials)
+                return;
+            void* materials = *g_FlareMaterials;
+            using GetContextFn = void*(__thiscall*)(void*);
+            ctx = (*reinterpret_cast<GetContextFn**>(materials))[0x19C / 4](materials);
+            if (ctx)
+                reinterpret_cast<VoidFn>(Vt(ctx)[0x08 / 4])(ctx);
+        }
+        ~ClientCtx()
+        {
+            if (!ctx)
+                return;
+            reinterpret_cast<VoidFn>(Vt(ctx)[0x0C / 4])(ctx);
+            reinterpret_cast<VoidFn>(Vt(ctx)[0x04 / 4])(ctx);
+        }
+        ClientCtx(const ClientCtx&) = delete;
+        ClientCtx& operator=(const ClientCtx&) = delete;
+    };
+}
 // Flare log (bmvr::g_FlareLog): every switch-on is a new session, so each
 // logger starts with fresh line caps and forgets what it has seen.
 static unsigned g_FlareLogSession = 0;
@@ -720,7 +870,15 @@ static void __fastcall FlareDrawQuadHook(void* ecx, void* edx, void* material, i
         y += static_cast<int>(std::lround(ay - by));
         angle += g_FlareRoll;
     }
+    // The quad draw uses the client's render context; identity model around it (ScreenModel above).
+    static ScreenModel::SiteStats s_flareModel{ "flare quad" };
+    ScreenModel::ClientCtx cc;
+    const bool wrap = ScreenModel::Check(s_flareModel, cc.ctx, "lensflare");
+    if (wrap)
+        ScreenModel::Begin(cc.ctx);
     g_OrigFlareDrawQuad(ecx, material, x, y, drawW, drawH, color, angle);
+    if (wrap)
+        ScreenModel::End(cc.ctx);
 }
 
 // Same switch: how visible the flare is for each eye. Below the draw threshold
@@ -1237,6 +1395,7 @@ namespace
             turned[r * 4 + 0] = c * proj[r * 4 + 0] + s * proj[r * 4 + 1];
             turned[r * 4 + 1] = -s * proj[r * 4 + 0] + c * proj[r * 4 + 1];
         }
+        ScreenModel::Probe probe(ctx);
         reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 1);
         reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, turned);
         reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
@@ -1246,6 +1405,7 @@ namespace
         reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, proj);
         reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
         reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, view);
+        probe.After("precipitation level hook");
         reinterpret_cast<VoidFn>(vt[0x0C / 4])(ctx);
         reinterpret_cast<VoidFn>(vt[0x04 / 4])(ctx);
         static int s_log;
@@ -1303,6 +1463,7 @@ namespace
             turned[r * 4 + 0] = c * proj[r * 4 + 0] + s * proj[r * 4 + 1];
             turned[r * 4 + 1] = -s * proj[r * 4 + 0] + c * proj[r * 4 + 1];
         }
+        ScreenModel::Probe probe(ctx);
         reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 1);
         reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, turned);
         reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
@@ -1312,6 +1473,7 @@ namespace
         reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, proj);
         reinterpret_cast<IntFn>(vt[0x50 / 4])(ctx, 0);
         reinterpret_cast<MatFn>(vt[0x60 / 4])(ctx, view);
+        probe.After("pcf level hook");
         static int s_log;
         if (s_log < 4)
         {
@@ -1394,8 +1556,12 @@ namespace
         {
             if (g_TranslucentHoldTo1x && Hooks::m_VR)
                 Hooks::m_VR->NoteTranslucentPassStart();
+            // Diagnostic: does the replay (after the engine's own loop) leave the model matrix changed?
+            ScreenModel::ClientCtx cc;
+            ScreenModel::Probe probe(cc.ctx);
             for (const HeldParticle& h : g_HeldParticles)
                 g_OrigDrawTranslucentRenderable(h.ent, h.twoPass, h.a3, h.a4, h.viewData);
+            probe.After("held-particle replay");
             g_HeldParticles.clear();
         }
         if (g_TranslucentMainView && bmvr::g_RefractOncePerEye && Hooks::m_VR && Hooks::m_VR->m_IsVREnabled)
@@ -8306,6 +8472,48 @@ void __fastcall Hooks::dPopRenderTargetAndViewport(void* ecx, void* edx)
 }
 
 void __fastcall Hooks::dDrawScreenSpaceRectangle(void* ecx, void* edx, IMaterial* material,
+    int destX, int destY, int width, int height,
+    float srcX0, float srcY0, float srcX1, float srcY1,
+    int srcWidth, int srcHeight, void* clientRenderable, int xDice, int yDice)
+{
+    // Identity model around every screen-space rectangle (ScreenModel, top of this file). ecx is
+    // the render context the rectangle is drawn on (immediate, or the replaying one with MulticoreMode).
+    static ScreenModel::SiteStats s_dssrModel{ "screen rect" };
+    const char* matName = SafeMaterialName(material);
+    // Test switch (harness): BMVR_TEST_SCREEN_MODEL_SHIFT=1 gives the underwater warp a leftover model
+    // translation of (+1, +1), as a broken launch would, to check what it looks like and that the fix
+    // repairs it.
+    static const bool s_testShift = [] {
+        char v[8] = {};
+        return GetEnvironmentVariableA("BMVR_TEST_SCREEN_MODEL_SHIFT", v, sizeof(v)) && v[0] == '1';
+    }();
+    const bool testShift = s_testShift && ecx && matName && std::strstr(matName, "water_warp");
+    if (testShift)
+    {
+        using MatFn = void(__thiscall*)(void*, const float*);
+        void** vt = ScreenModel::Vt(ecx);
+        const float shift[16] = { 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1 };
+        reinterpret_cast<ScreenModel::IntFn>(vt[0x50 / 4])(ecx, ScreenModel::kModeModel);
+        reinterpret_cast<ScreenModel::VoidFn>(vt[0x54 / 4])(ecx);
+        reinterpret_cast<MatFn>(vt[0x60 / 4])(ecx, shift);
+    }
+    const bool wrap = ScreenModel::Check(s_dssrModel, ecx, matName);
+    if (wrap)
+        ScreenModel::Begin(ecx);
+    dDrawScreenSpaceRectangleBody(ecx, edx, material, destX, destY, width, height,
+        srcX0, srcY0, srcX1, srcY1, srcWidth, srcHeight, clientRenderable, xDice, yDice);
+    if (wrap)
+        ScreenModel::End(ecx);
+    if (testShift)
+    {
+        void** vt = ScreenModel::Vt(ecx);
+        reinterpret_cast<ScreenModel::IntFn>(vt[0x50 / 4])(ecx, ScreenModel::kModeModel);
+        reinterpret_cast<ScreenModel::VoidFn>(vt[0x58 / 4])(ecx);
+        reinterpret_cast<ScreenModel::IntFn>(vt[0x50 / 4])(ecx, ScreenModel::kModeProjection);
+    }
+}
+
+void __fastcall Hooks::dDrawScreenSpaceRectangleBody(void* ecx, void* edx, IMaterial* material,
     int destX, int destY, int width, int height,
     float srcX0, float srcY0, float srcX1, float srcY1,
     int srcWidth, int srcHeight, void* clientRenderable, int xDice, int yDice)

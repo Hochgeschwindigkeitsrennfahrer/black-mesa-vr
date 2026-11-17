@@ -530,6 +530,10 @@ namespace bmvr
     // "keep above the water" clip, so the G-buffer has the world under the surface for the
     // engine's water intersection view (false = stock: black/fog-green lower part of the view).
     extern bool g_WaterLineClipFix;
+    // Screen-space quads (DrawScreenSpaceRectangle: underwater warp, post chain; lens flare layers) get an
+    // identity model matrix around the draw. Both set identity view + projection but inherit the model
+    // matrix; a leftover translation drew the warp / flares shifted for a whole launch (2026-11-17).
+    extern bool g_ScreenSpaceModelFix;
     // Black Mesa's global Xen fog pass (__gbxog0) is not drawn in VR: view-direction noise at infinite stereo
     // depth, also inside rooms where flat shows none. Local fog volumes stay.
     extern bool g_XenGlobalFogOff;

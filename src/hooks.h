@@ -251,6 +251,10 @@ public:
         int destX, int destY, int width, int height,
         float srcX0, float srcY0, float srcX1, float srcY1,
         int srcWidth, int srcHeight, void* clientRenderable, int xDice, int yDice);
+    static void __fastcall dDrawScreenSpaceRectangleBody(void* ecx, void* edx, IMaterial* material,
+        int destX, int destY, int width, int height,
+        float srcX0, float srcY0, float srcX1, float srcY1,
+        int srcWidth, int srcHeight, void* clientRenderable, int xDice, int yDice);
     static void __fastcall dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITexture* texture,
         int renderTargetId, SourceRect_t* srcRect, SourceRect_t* dstRect);
     static void __fastcall dVGui_Paint(void* ecx, void* edx, int mode);
