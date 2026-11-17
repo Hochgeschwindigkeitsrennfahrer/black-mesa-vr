@@ -144,6 +144,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_ThrowStroke, nullptr },
             { "bmvr_delta_seq_idle", "VR: tau/crossbow show idle instead of the sideways reference pose after a fast weapon-menu switch",
               Kind::Bool, 0.f, 1.f, &g_DeltaSeqIdle, nullptr },
+            { "bmvr_twohand_no_lower", "VR: with both hands on the gun, aiming at a friendly does not lower it (laser stays on)",
+              Kind::Bool, 0.f, 1.f, &g_TwoHandNoLower, nullptr },
             { "bmvr_twohand_lowered_follow", "VR: with both hands on the gun, the support hand follows the gun down when it is lowered at a friendly",
               Kind::Bool, 0.f, 1.f, &g_TwoHandLoweredFollow, nullptr },
             { "bmvr_scope_clip_idle", "VR: the crossbow stays in the hand while the scope opens/closes (no to-scope animation)",

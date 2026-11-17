@@ -3083,18 +3083,41 @@ namespace
         // frame. On the glock, MP5 and 357 the two transition clips carry
         // swapped activities, so the raise plays the lowering clip and idle
         // fades in from a lowered gun: keep the beam off a little longer.
+        // Both hands on the gun: the hands place the gun, so Black Mesa's
+        // lowered clip (aimed at a friendly) is not shown and the laser stays
+        // on (user 2026-11-17: the clip swung the gun ~33 deg across, away
+        // from both real hands; lowering is up to the player's own arms).
+        bool noLower = false;
         if (Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
         {
+            noLower = s_lc.lowered && bmvr::g_TwoHandNoLower && Hooks::m_VR->TwoHandGripActive();
+            const bool lowered = s_lc.lowered && !noLower;
             static ULONGLONG s_loweredUntil = 0;
             const ULONGLONG now = GetTickCount64();
-            if (s_lc.lowered)
+            if (lowered)
                 s_loweredUntil = now + 300;
-            Hooks::m_VR->NoteViewmodelBeamHidden(s_lc.beamHide || now < s_loweredUntil);
+            else if (noLower)
+                s_loweredUntil = 0;
+            const bool beamHide = noLower ? false : s_lc.beamHide;
+            Hooks::m_VR->NoteViewmodelBeamHidden(beamHide || now < s_loweredUntil);
             // Same 300 ms tail for the support glove: idle blends in from the
             // lowered pose, and the glove follows the wrist back up.
-            const int lowerState = (s_lc.lowered || now < s_loweredUntil) ? VR::kVmLowerLowered
-                : (!s_lc.beamHide && !s_lc.action ? VR::kVmLowerIdle : VR::kVmLowerOther);
+            const int lowerState = (lowered || now < s_loweredUntil) ? VR::kVmLowerLowered
+                : (!beamHide && !s_lc.action ? VR::kVmLowerIdle : VR::kVmLowerOther);
             Hooks::m_VR->NoteViewmodelLowerState(lowerState, hdr);
+            // The idle written below stays until the server changes the
+            // sequence again, so this fires once per lowering.
+            if (noLower)
+            {
+                static int s_log;
+                if (s_log++ < 20)
+                    Game::logMsg("Two-hand: lowered clip '%s' skipped, gun stays in the hands", label ? label : "?");
+            }
+        }
+        if (noLower)
+        {
+            ForceViewmodelIdlePose(viewmodel, hdr);
+            return;
         }
         // Lock-free class flag from the weapon model dCalcViewModelView just
         // classified; replaces a model-info lookup + four strstr per call (this
