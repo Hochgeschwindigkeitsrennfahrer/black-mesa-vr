@@ -954,6 +954,22 @@ public:
         int dir = 0;
     };
     bool PhysicalLadderStep(PhysicalLadderCmd& out);
+    // RenderView: height to add to the main view while climbing by hand
+    // (PhysicalLadderSmooth). LadderMove moves 0 or 200 u/s per tick, so
+    // the body moves in bursts; the view instead follows the climb hand
+    // every frame, at most a few units ahead of / behind the body.
+    float PhysicalLadderViewOffset(float renderZ);
+    struct LadderViewState
+    {
+        bool active = false;     // climbing by hand (set by PhysicalLadderStep)
+        bool rebase = false;     // new anchor: keep the view continuous
+        int hand = -1;
+        float anchorHandZ = 0.f; // tracking z of the climb hand at its grab
+        float visAnchorZ = 0.f;  // view z belonging to anchorHandZ
+        float offset = 0.f;      // last offset sent
+        float limit = 8.f;
+        ULONGLONG lastMs = 0;
+    } m_LadderView;
     // ProcessInput: grip state per hand (0 left, 1 right) for PhysicalLadderStep.
     void UpdateLadderGrips();
     std::atomic<bool> m_LadderGrip[2]{};

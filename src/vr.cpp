@@ -8155,6 +8155,13 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     static float s_mountYaw = 0.f;
     static ULONGLONG s_dropAt = 0;   // both hands let go: fall off at this time
 
+    // Smooth view (PhysicalLadderViewOffset): on only while a hand climbs.
+    struct ViewOff
+    {
+        LadderViewState& v;
+        bool climbing = false;
+        ~ViewOff() { if (!climbing) v.active = false; }
+    } viewOff{ m_LadderView };
     auto clearTouch = [&]() {
         m_LadderTouch[0].store(false, std::memory_order_release);
         m_LadderTouch[1].store(false, std::memory_order_release);
@@ -8349,8 +8356,14 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         s_anchorHandZ = hz;
         s_anchorOriginZ = origin.z;
         s_sent = 0.f;
+        m_LadderView.hand = s_climbHand;
+        m_LadderView.anchorHandZ = hz;
+        m_LadderView.rebase = true;
     }
     const float step = 200.f * m_Game->TickInterval();   // MAX_CLIMB_SPEED per tick
+    viewOff.climbing = true;
+    m_LadderView.active = true;
+    m_LadderView.limit = 2.5f * step * fabsf(k);
     const float want = (s_anchorHandZ - hz) / k;
     const float actual = (origin.z - s_anchorOriginZ) / k;
     // The ladder ends (or anything else) stopped the player: count from
@@ -8377,6 +8390,62 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         ++s_climbLog;
     }
     return true;
+}
+
+float VR::PhysicalLadderViewOffset(float renderZ)
+{
+    LadderViewState& v = m_LadderView;
+    const ULONGLONG now = GetTickCount64();
+    float dt = v.lastMs ? (now - v.lastMs) * 0.001f : 0.f;
+    v.lastMs = now;
+    if (dt > 0.1f)
+        dt = 0.1f;
+    float hz = 0.f;
+    bool valid = false;
+    if (v.active && bmvr::g_PhysicalLadderSmooth && v.hand >= 0)
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        if (v.hand == 0 && m_LeftControllerTrackingValid)
+        {
+            hz = m_LeftControllerPosAbs.z;
+            valid = true;
+        }
+        else if (v.hand == 1 && m_PhysicalRightTrackingValid)
+        {
+            hz = m_PhysicalRightPosAbs.z;
+            valid = true;
+        }
+    }
+    if (!valid)
+    {
+        // Not climbing: ease what is left back onto the body (~80 ms).
+        v.offset *= expf(-dt / 0.08f);
+        if (fabsf(v.offset) < 0.01f)
+            v.offset = 0.f;
+        return v.offset;
+    }
+    if (v.rebase)
+    {
+        // New climb hand / anchor: the view stays where it is.
+        v.visAnchorZ = renderZ + v.offset - (v.anchorHandZ - hz);
+        v.rebase = false;
+    }
+    // Where the view belongs so the climb hand stays where it took hold.
+    float off = v.visAnchorZ + (v.anchorHandZ - hz) - renderZ;
+    // The body is at most a couple of ticks behind; more = blocked (ladder
+    // end, ceiling): move the anchor instead of drifting off the body.
+    if (off > v.limit)
+    {
+        v.visAnchorZ -= off - v.limit;
+        off = v.limit;
+    }
+    else if (off < -v.limit)
+    {
+        v.visAnchorZ -= off + v.limit;
+        off = -v.limit;
+    }
+    v.offset = off;
+    return off;
 }
 
 QAngle VR::GetUseAimAnglesFromEye() const

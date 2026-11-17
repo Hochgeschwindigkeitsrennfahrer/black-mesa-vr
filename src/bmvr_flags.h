@@ -746,6 +746,9 @@ namespace bmvr
     // Physical ladders: grip a ladder with either hand and pull/push to
     // climb (the stick still climbs too). On by default.
     extern bool g_PhysicalLadders;
+    // Physical ladders: the view follows the climb hand every frame instead
+    // of LadderMove's per-tick bursts (render offset only). On by default.
+    extern bool g_PhysicalLadderSmooth;
     extern float g_VrRecoilScale;
     // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
     extern bool g_RpgRocketShown;

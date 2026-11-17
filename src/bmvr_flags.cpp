@@ -326,6 +326,7 @@ namespace bmvr
     bool g_VrMagReload = false;
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = true;
+    bool g_PhysicalLadderSmooth = true;
     float g_VrRecoilScale = 1.f;
     bool g_RpgRocketShown = true;
     float g_DebugVmSeq = -1.f;
@@ -1111,6 +1112,8 @@ namespace bmvr
                 g_RpgRocketShown = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PhysicalLadders") == 0)
                 g_PhysicalLadders = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "PhysicalLadderSmooth") == 0)
+                g_PhysicalLadderSmooth = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrRecoil") == 0)
                 g_VrRecoil = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrRecoilScale") == 0)

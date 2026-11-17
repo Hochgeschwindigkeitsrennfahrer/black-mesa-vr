@@ -7315,6 +7315,15 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         }
     }
 
+    // Hand climbing: the view follows the climb hand between LadderMove's
+    // per-tick bursts (VR::PhysicalLadderViewOffset). Before anything reads
+    // setup.origin, so eyes, hands and the body origin agree.
+    if (m_VR && m_VR->m_IsVREnabled && mainView && inGame && originOk)
+    {
+        const float off = m_VR->PhysicalLadderViewOffset(setup.origin.z);
+        if (off != 0.f)
+            setup.origin.z += off;
+    }
     if (m_VR && mainView)
         m_VR->m_SetupOrigin = setup.origin;
     {
@@ -8393,6 +8402,10 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
         return;
     if (m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible() && EngineInGame() && m_VR->m_HmdPoseValid)
     {
+        // Hand climbing lifts the view (PhysicalLadderViewOffset, last
+        // frame's value): the gun hand moves with it.
+        Vector ladderEye = eyePosition;
+        ladderEye.z += m_VR->m_LadderView.offset;
         // Uncoupled viewmodel: same world pose both eyes (sd805 / Portal 2).
         // Do not IPD the gun — that drew two weapons (2026-08-17).
         if (m_VR->m_ControllerPoseValid)
@@ -8408,7 +8421,7 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
             const bool mp5 = m_Game && m_VR->ViewmodelIsMp5();
             // L4D2VR: feed the aim-controller pose as CalcViewModelView eye so
             // lag/bob and $origin are in the same frame as the hard-lock.
-            const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(eyePosition);
+            const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(ladderEye);
             const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
             // Crowbar idle-force runs in SuppressViewmodelMovementAnims.
             // MP5 fire sequences must keep playing (never idle-force those).
@@ -8426,7 +8439,7 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
         }
         // Controller pose dropped: keep the gun on the last tracking pose.
         // Feeding HMD origin/angles here parented the weapon to nod.
-        const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(eyePosition);
+        const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(ladderEye);
         const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
         CallCalcViewModelViewOriginal(ecx, owner, targetOrigin, targetAng);
         const float origin3[3] = { targetOrigin.x, targetOrigin.y, targetOrigin.z };
