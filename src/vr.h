@@ -1223,6 +1223,11 @@ public:
     bool IntersectMenuPanelUv(float& u, float& v);
     // Paint complete: copy the HUD RT to the publish surface, then flag it.
     void NoteHudPainted();
+    // Pending painted HUD frame for the layer about to publish (kind 0 = pause
+    // menu, 1 = title texts). A paint of the other kind is dropped, and a
+    // switch of kind drops the last image (2026-11-17: the map-start pause
+    // screen's paint was published as the first frame of the credits layer).
+    bool TakeHudPaintFor(int kind);
     bool HudPaintedThisFrame() const { return m_HudPaintedThisFrame.load(std::memory_order_acquire); }
     void UpdateCrowbarMelee();
     // Hand throw: sampled every input frame; read by the server grenade hooks.
@@ -1489,6 +1494,8 @@ private:
     int m_DmgLastArmor = -1;
     float m_DmgFlashLevel = 0.f;
     double m_DmgFlashStartMs = 0.0;
+    bool m_DmgMapLoaded = false;        // LevelInit since the last gameplay sample: longer settle
+    double m_DmgLoadSettleUntilMs = 0.0; // after a map load; kept over the map-start pause
     double m_DmgSettleUntilMs = 0.0;   // drops before this only move the baseline (just back in gameplay)
     void RefreshActiveWeaponModel();
     void ToggleEmptyHands();
@@ -1680,6 +1687,8 @@ private:
     bool m_PauseHudRtSaved = false;
     bool m_PauseHudAlphaOverridden = false;
     bool m_HudOverlayHasImage = false;
+    std::atomic<int> m_HudPaintedKind{ 0 };
+    int m_HudPublishedKind = -1;
     bool m_OpenXrHudOverlayPublished = false;
     std::atomic<bool> m_HudPaintedThisFrame{ false };
     bool m_MenuTriggerWasDown = false;

@@ -290,6 +290,10 @@ constexpr uint32_t L4D2VR_OPENXR_OVERLAY_FLAG_BLEND_ALPHA = 1u << 0;
 // Placed in front of the head every frame (full head pose) instead of the
 // pose captured when the epoch started: chapter titles, intro logo, "Saved...".
 constexpr uint32_t L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED = 1u << 1;
+// Colour is premultiplied by alpha (title texts: Black Mesa's additive fonts
+// paint colour*a). Without it the HUD quad is submitted UNPREMULTIPLIED.
+// Older helpers ignore the bit (text then composites a little darker).
+constexpr uint32_t L4D2VR_OPENXR_OVERLAY_FLAG_PREMULTIPLIED = 1u << 2;
 // L4D2VROpenXrSharedTextureDesc.reserved0. UVs are a subrect of a shared
 // ring (or similar); do not treat 0..1 as one eye.
 constexpr uint32_t L4D2VR_OPENXR_SHARED_UV_EXPLICIT = 1u << 0;

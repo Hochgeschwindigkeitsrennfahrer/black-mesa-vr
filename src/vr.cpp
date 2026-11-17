@@ -3849,6 +3849,7 @@ void VR::OnLevelInit(const char* newmap)
     m_GmanEntityCount = 0;
     m_GmanGestureActive.store(false, std::memory_order_relaxed);
     Game::logMsg("LevelInit map=%s eligible=%d", m_CurrentMapName.c_str(), m_GameplayEligible ? 1 : 0);
+    m_DmgMapLoaded = true;
     ScanMapForGman();
     m_PhysicalCrowbarModel = nullptr;
     m_PhysicalCrowbarLoadTries = 0;
@@ -6096,6 +6097,9 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
     // layer level at the head's yaw once per epoch; UpdateTitleHud bumps it).
     if (!WantPauseWorldOverlay() && WantTitleHudOverlay() && !bmvr::g_TitleLevel)
         overlay.reserved1 |= L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED;
+    // Title texts are published premultiplied (TitlePremultipliedShader).
+    if (!WantPauseWorldOverlay() && WantTitleHudOverlay())
+        overlay.reserved1 |= L4D2VR_OPENXR_OVERLAY_FLAG_PREMULTIPLIED;
     if (!FillOpenXrOverlayTextureFromShared(overlay, hud))
         return false;
 
@@ -12912,14 +12916,23 @@ void VR::UpdateDamageFlash(int stereoEye)
     // bm_c4a1a: "armor 90 -> 0" flashed at full strength), and "new game" from the pause menu runs a moment of
     // gameplay while the old map shuts down (red fade right before the new map, user 2026-11-16). Let the
     // baseline settle for 1 s before a drop counts as damage.
+    // After a map load the HUD values stay the previous map's for over a second (2026-11-17: "new game" armor
+    // 92 -> 0 and a load health 100 -> 55 both flashed after the 1 s settle), so a load settles 4 s.
+    // The map start's own short pause re-arms the 1 s settle, so the load window is kept separately.
     if (m_DmgSettleUntilMs < 0.0)
         m_DmgSettleUntilMs = now + 1000.0;
+    if (m_DmgMapLoaded)
+    {
+        m_DmgLoadSettleUntilMs = now + 4000.0;
+        m_DmgMapLoaded = false;
+    }
     if (armor < 0 || armor > 1000)
         armor = 0;
     if (m_DmgLastHealth >= 0)
     {
         const int lost = std::max(0, m_DmgLastHealth - health) + std::max(0, m_DmgLastArmor - armor);
-        if (lost > 0 && now < m_DmgSettleUntilMs)
+        // Health up in the same sample = a reset (new game, load, respawn), never damage.
+        if (lost > 0 && (now < m_DmgSettleUntilMs || now < m_DmgLoadSettleUntilMs || health > m_DmgLastHealth))
         {
             static int s_settleLog;
             if (s_settleLog < 8)
@@ -17932,21 +17945,22 @@ static IDirect3DPixelShader9* PauseAlphaFromColourShader(IDirect3DDevice9* devic
 
 // Title layer (intro credits, chapter/location text): VGUI paints onto the
 // cleared (0,0,0,0) RT with SRCALPHA (normal fonts) or SRCALPHA/ONE (Black
-// Mesa's credit fonts are additive), so colour = c*a and alpha = a*a. The
-// helper composites the layer as UNPREMULTIPLIED alpha. The pause menu's
-// opaque boost made faint and fading credits opaque c*a: dark grey-brown
-// instead of orange (user, 2026-11-17). Here: alpha = sqrt(a*a), colour =
-// (c*a)/a = c, so the text keeps its colour and fades as it does flat.
-static IDirect3DPixelShader9* TitleStraightAlphaShader(IDirect3DDevice9* device)
+// Mesa's credit fonts are additive), so colour = c*a (premultiplied) and
+// alpha = a*a. The pause menu's opaque boost made faint and fading credits
+// opaque c*a: dark grey-brown instead of orange (user, 2026-11-17). Dividing
+// the colour back to straight alpha left near-white rims on letter edges
+// (edge alpha comes out lower than a*a), which the helper's and runtime's
+// filtering spread (white speckle, user). So the colour stays premultiplied
+// as VGUI wrote it, alpha = sqrt(a*a), and the layer is published with
+// L4D2VR_OPENXR_OVERLAY_FLAG_PREMULTIPLIED: world*(1-a) + c*a, as flat.
+static IDirect3DPixelShader9* TitlePremultipliedShader(IDirect3DDevice9* device)
 {
     static LayerShaderCache s_cache;
     static const char kSrc[] =
         "sampler2D s : register(s0);\n"
         "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
         "  float4 c = tex2D(s, uv);\n"
-        "  float a = max(sqrt(c.a), max(c.r, max(c.g, c.b)));\n"
-        "  float3 rgb = a > 0.004 ? saturate(c.rgb / a) : float3(0, 0, 0);\n"
-        "  return float4(rgb, a);\n"
+        "  return float4(c.rgb, sqrt(c.a));\n"
         "}\n";
     return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_alpha.hlsl");
 }
@@ -18147,12 +18161,12 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         prevDs->Release();
 }
 
-static void TitleLayerStraightAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf)
+static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9* surf)
 {
     D3DSURFACE_DESC desc{};
     if (!device || !surf || FAILED(surf->GetDesc(&desc)))
         return;
-    IDirect3DPixelShader9* ps = TitleStraightAlphaShader(device);
+    IDirect3DPixelShader9* ps = TitlePremultipliedShader(device);
     IDirect3DTexture9* copy = ps ? PauseLayerCopy(device, desc) : nullptr;
     IDirect3DSurface9* copySurf = nullptr;
     if (!copy || FAILED(copy->GetSurfaceLevel(0, &copySurf)) || !copySurf)
@@ -18213,7 +18227,7 @@ static void TitleLayerStraightAlpha(IDirect3DDevice9* device, IDirect3DSurface9*
         prevDs->Release();
     static int s_log;
     if (s_log++ < 2)
-        Game::logMsg("Title layer: straight alpha %ux%u", desc.Width, desc.Height);
+        Game::logMsg("Title layer: premultiplied %ux%u", desc.Width, desc.Height);
 }
 
 void VR::NoteHudPainted()
@@ -18231,7 +18245,28 @@ void VR::NoteHudPainted()
             device->Release();
         }
     }
+    m_HudPaintedKind.store(m_HudPaintTitle.load(std::memory_order_acquire) ? 1 : 0, std::memory_order_relaxed);
     m_HudPaintedThisFrame.store(true, std::memory_order_release);
+}
+
+bool VR::TakeHudPaintFor(int kind)
+{
+    if (m_HudPublishedKind != kind)
+        m_HudOverlayHasImage = false;
+    if (!m_HudPaintedThisFrame.load(std::memory_order_acquire))
+        return false;
+    m_HudPaintedThisFrame.store(false, std::memory_order_release);
+    const int painted = m_HudPaintedKind.load(std::memory_order_relaxed);
+    if (painted != kind)
+    {
+        static int s_log;
+        if (s_log++ < 8)
+            Game::logMsg("HUD layer: dropped a %s paint for the %s layer",
+                painted ? "title" : "pause-menu", kind ? "title" : "pause-menu");
+        return false;
+    }
+    m_HudPublishedKind = kind;
+    return true;
 }
 
 void VR::StampPauseOverlayCursor()
@@ -18247,7 +18282,7 @@ void VR::StampPauseOverlayCursor()
         PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
     const int alphaPasses = static_cast<int>(bmvr::g_PauseMenuAlphaPasses + 0.5f);
     if (title)
-        TitleLayerStraightAlpha(device, m_D9HUDSurface);
+        TitleLayerPremultiplied(device, m_D9HUDSurface);
     else if (alphaPasses > 0)
         FixPauseLayerAlpha(device, m_D9HUDSurface, alphaPasses > 6 ? 6 : alphaPasses);
     if (!title)
@@ -19155,7 +19190,7 @@ void VR::SubmitVRTextures()
             }
             if (WantPauseWorldOverlay() && m_HudOverlayReady && m_D9HUDSurface)
             {
-                if (HudPaintedThisFrame())
+                if (TakeHudPaintFor(0))
                 {
                     if (SUCCEEDED(SehTransferSurfaceNoWait(m_D9HUDPublishSurface)))
                     {
@@ -19219,7 +19254,7 @@ void VR::SubmitVRTextures()
             {
                 if (m_HudOverlayReady && m_D9HUDSurface)
                 {
-                    if (HudPaintedThisFrame())
+                    if (TakeHudPaintFor(WantPauseWorldOverlay() ? 0 : 1))
                     {
                         g_D3DVR9->TransferSurface(m_D9HUDPublishSurface, FALSE);
                         FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
@@ -19407,7 +19442,7 @@ void VR::SubmitVRTextures()
             }
             if (m_HudOverlayReady && m_D9HUDSurface)
             {
-                if (HudPaintedThisFrame())
+                if (TakeHudPaintFor(0))
                 {
                     g_D3DVR9->TransferSurface(m_D9HUDPublishSurface, FALSE);
                     FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
@@ -19555,11 +19590,10 @@ void VR::SubmitVRTextures()
     if (rightSubmit && SUCCEEDED(hrR))
         okR = SUCCEEDED(g_D3DVR9->TransferSurface(rightSubmit, waitGpu)) && FillSharedTexture(rightSubmit, m_VKRightEye);
     if (WantPauseWorldOverlay() && m_HudOverlayReady && m_D9HUDSurface
-        && m_HudPaintedThisFrame.load(std::memory_order_acquire))
+        && TakeHudPaintFor(0))
     {
         g_D3DVR9->TransferSurface(m_D9HUDPublishSurface, FALSE);
         FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
-        m_HudPaintedThisFrame.store(false, std::memory_order_release);
         m_HudOverlayHasImage = true;
     }
     g_D3DVR9->UnlockDevice();

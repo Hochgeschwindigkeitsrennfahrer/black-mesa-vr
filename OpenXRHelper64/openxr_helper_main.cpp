@@ -10174,7 +10174,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                                         overlayLayer.layerFlags =
                                             (overlayIndex == L4D2VR_OPENXR_OVERLAY_HUD)
                                                 ? (XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT
-                                                    | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT)
+                                                    | ((overlay.reserved1 & L4D2VR_OPENXR_OVERLAY_FLAG_PREMULTIPLIED) != 0
+                                                        ? 0 : XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT))
                                                 : 0;
                                         overlayLayer.space = m_AppSpace;
                                         overlayLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;

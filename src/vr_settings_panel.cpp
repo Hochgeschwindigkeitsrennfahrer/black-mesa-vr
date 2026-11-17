@@ -1003,10 +1003,17 @@ void VR::FlushPanelEngineCommands()
         std::lock_guard<std::mutex> lock(g_EngCmdLock);
         cmds.swap(g_EngCmds);
     }
+    // The panel pauses the game, so the client sees noclip's new move type
+    // only once the game runs again: until the read-back moves away from the
+    // value at the click, the row keeps what was clicked (user 2026-11-17:
+    // the row flipped back to off while noclip was on).
+    static int s_noclipClickMoveType = -2;
     for (const std::string& c : cmds)
     {
         const bool ok = m_Game->ClientCmd_Unrestricted(c.c_str());
         Game::logMsg("VR settings console '%s' ok=%d", c.c_str(), ok ? 1 : 0);
+        if (c == "noclip" && s_noclipClickMoveType == -2)
+            s_noclipClickMoveType = m_Game->LocalPlayerMoveType();
     }
     static DWORD s_lastRead;
     const DWORD now = GetTickCount();
@@ -1016,7 +1023,17 @@ void VR::FlushPanelEngineCommands()
     bool changed = false;
     // MOVETYPE_NOCLIP = 8.
     const int moveType = m_Game->LocalPlayerMoveType();
-    if (moveType >= 0 && g_DevNoclip != (moveType == 8))
+    static int s_lastMoveType = -2;
+    if (moveType != s_lastMoveType)
+    {
+        static int s_mtLog;
+        if (s_mtLog++ < 20)
+            Game::logMsg("VR settings: player move type %d (noclip row %d)", moveType, g_DevNoclip ? 1 : 0);
+        s_lastMoveType = moveType;
+    }
+    if (s_noclipClickMoveType != -2 && moveType != s_noclipClickMoveType)
+        s_noclipClickMoveType = -2;   // the server's answer arrived
+    if (s_noclipClickMoveType == -2 && moveType >= 0 && g_DevNoclip != (moveType == 8))
     {
         g_DevNoclip = moveType == 8;
         changed = true;
