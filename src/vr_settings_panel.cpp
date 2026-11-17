@@ -83,7 +83,7 @@ namespace
     // Bind: one controller button (fmt "L.face1", "R.face2.hold"); label and value
     // come from the detected controller and the button map; a click opens the
     // action picker. ColumnBreak: the rows after it go to the right column
-    // (BUTTONS tab: left / right controller). BindPreset: like Preset, for the
+    // (CONTROLS tab: left / right controller). BindPreset: like Preset, for the
     // button-map presets (vr_button_map.h).
     enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection, Preset,
         Bind, ColumnBreak, BindPreset };
@@ -107,7 +107,7 @@ namespace
     {
         // A Tab row starts a tab; its rows follow until the next Tab row.
         static std::vector<Row> rows = {
-            { "CONTROLS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "MOVEMENT", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "TURNING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Snap turning", RowKind::Toggle, "SnapTurning", &bmvr::g_SnapTurning, nullptr, 0, 0, 0, nullptr },
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
@@ -140,7 +140,7 @@ namespace
             // Glow fades and other effects run on game time: with the game
             // paused a change only shows after the panel closes.
             { "Panel pauses the game", RowKind::Toggle, "VrSettingsPause", &bmvr::g_VrSettingsPause, nullptr, 0, 0, 0, nullptr },
-            { "BUTTONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "CONTROLS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Left column = left controller, right column = right controller. Headings name
             // the detected controller; button names follow it (A/B, Cross/Circle).
             { "LAYOUT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -381,7 +381,7 @@ namespace
         return IsHeading(r.kind) ? kSectionPx : kRowPx;
     }
 
-    // Controller the BUTTONS tab shows (VR::SetPanelController from the input state).
+    // Controller the CONTROLS tab shows (VR::SetPanelController from the input state).
     uint32_t g_PanelFamily = 0;
     uint32_t g_PanelRaw[2] = {};
     char g_PanelSystem[64] = {};
