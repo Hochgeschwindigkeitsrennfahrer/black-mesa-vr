@@ -434,6 +434,13 @@ namespace bmvr
     // TurnBlocksJumpCrouch=true: after the right stick went sideways (turn),
     // no stick jump/crouch until it returns near the centre.
     extern bool g_TurnBlocksJumpCrouch;
+    // Button mapping: a button with a hold action mapped fires it after this
+    // long (ms); released earlier = its press action. One global value.
+    extern float g_ButtonHoldMs;
+    // Button mapping on (OpenXR helper with raw inputs). false = the helper's
+    // fixed bindings, as before mapping existed (fallback if a mapping bug
+    // blocks a button).
+    extern bool g_ButtonMapping;
     // SprintToggle=true: one sprint click (left stick click) keeps sprinting
     // until the left stick returns to centre or sprint is clicked again
     // (default false = hold the click).

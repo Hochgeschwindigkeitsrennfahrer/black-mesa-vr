@@ -2303,6 +2303,9 @@ namespace
         // the input state (eyeGaze) for eye-tracked foveated rendering; also
         // logged once a second.
         void SetEyeGazeEnabled(bool enabled) { m_EyeGazeEnabled = enabled; }
+        // XrSystemProperties.systemName, published with the input state so the
+        // DLL can name buttons (PS VR2 Sense reports the Touch profile).
+        void SetSystemName(const char* name) { std::snprintf(m_SystemName, sizeof(m_SystemName), "%s", name ? name : ""); }
         void Shutdown();
         void UpdateFrame(XrTime displayTime, BridgeWriter& bridge, Logger& log);
         uint32_t CurrentControllerFamily() const;
@@ -2356,6 +2359,10 @@ namespace
         bool CreateBooleanActions(Logger& log);
         bool CreateFloatDigitalActions(Logger& log);
         bool CreateAnalogActions(Logger& log);
+        bool CreateRawActions(Logger& log);
+        void AddRawBindings(std::vector<XrActionSuggestedBinding>& bindings, const char* profilePath);
+        void ReadRawHands(L4D2VROpenXrInputStateDesc& outState);
+        uint32_t RawPresentBits(uint32_t hand) const;
         void AddBinding(std::vector<XrActionSuggestedBinding>& bindings, XrAction action, const char* bindingPath);
         XrResult SuggestProfileOnce(XrPath profile, const std::vector<XrActionSuggestedBinding>& bindings);
         void SuggestProfile(Logger& log, const char* profilePath, const std::vector<XrActionSuggestedBinding>& bindings);
@@ -2401,6 +2408,18 @@ namespace
         XrAction m_HandPoseAction = XR_NULL_HANDLE;
         XrAction m_AimPoseAction = XR_NULL_HANDLE;
         XrAction m_HapticAction = XR_NULL_HANDLE;
+        // Physical inputs per hand (subaction paths left/right), read for the
+        // DLL's button mapping. Optional: a failure leaves rawHands invalid
+        // and the DLL keeps the legacy action layout.
+        XrAction m_RawTrigger = XR_NULL_HANDLE;
+        XrAction m_RawGrip = XR_NULL_HANDLE;
+        XrAction m_RawStick = XR_NULL_HANDLE;
+        XrAction m_RawFace1 = XR_NULL_HANDLE;
+        XrAction m_RawFace2 = XR_NULL_HANDLE;
+        XrAction m_RawStickClick = XR_NULL_HANDLE;
+        XrAction m_RawMenu = XR_NULL_HANDLE;
+        bool m_RawReady = false;
+        char m_SystemName[64] = {};
         bool m_EyeGazeEnabled = false;
         XrAction m_EyeGazeAction = XR_NULL_HANDLE;
         XrSpace m_EyeGazeSpace = XR_NULL_HANDLE;
@@ -4922,6 +4941,158 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         return true;
     }
 
+    bool OpenXrInputBridge::CreateRawActions(Logger& log)
+    {
+        return
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_FLOAT_INPUT, "raw_trigger", "Raw Trigger", m_RawTrigger, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_FLOAT_INPUT, "raw_grip", "Raw Grip", m_RawGrip, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_VECTOR2F_INPUT, "raw_stick", "Raw Stick", m_RawStick, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_face1", "Raw Lower Face Button", m_RawFace1, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_face2", "Raw Upper Face Button", m_RawFace2, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_stick_click", "Raw Stick Click", m_RawStickClick, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_menu", "Raw Menu Button", m_RawMenu, log);
+    }
+
+    namespace
+    {
+        // Physical layout per interaction profile, for the raw button actions.
+        struct RawProfileLayout
+        {
+            const char* profile;
+            const char* stick;      // component name under /input/
+            const char* grip;       // squeeze/value, squeeze/click or nullptr
+            const char* faceLeft1;  // lower face button, left hand
+            const char* faceLeft2;
+            const char* faceRight1;
+            const char* faceRight2;
+            const char* menuLeft;
+            const char* menuRight;
+        };
+
+        const RawProfileLayout kRawProfileLayouts[] =
+        {
+            { "/interaction_profiles/oculus/touch_controller", "thumbstick", "squeeze/value", "x", "y", "a", "b", "menu", nullptr },
+            { "/interaction_profiles/facebook/touch_controller_pro", "thumbstick", "squeeze/value", "x", "y", "a", "b", "menu", nullptr },
+            { "/interaction_profiles/meta/touch_controller_plus", "thumbstick", "squeeze/value", "x", "y", "a", "b", "menu", nullptr },
+            { "/interaction_profiles/bytedance/pico4_controller", "thumbstick", "squeeze/value", "x", "y", "a", "b", "menu", nullptr },
+            { "/interaction_profiles/hp/mixed_reality_controller", "thumbstick", "squeeze/value", "x", "y", "a", "b", "menu", "menu" },
+            { "/interaction_profiles/valve/index_controller", "thumbstick", "squeeze/value", "a", "b", "a", "b", "system", "system" },
+            { "/interaction_profiles/htc/vive_cosmos_controller", "joystick", "squeeze/click", "x", "y", "a", "b", "menu", nullptr },
+            { "/interaction_profiles/htc/vive_focus3_controller", "thumbstick", "squeeze/click", "x", "y", "a", "b", "menu", nullptr },
+            { "/interaction_profiles/microsoft/motion_controller", "thumbstick", "squeeze/click", nullptr, nullptr, nullptr, nullptr, "menu", "menu" },
+            { "/interaction_profiles/htc/vive_controller", "trackpad", "squeeze/click", nullptr, nullptr, nullptr, nullptr, "menu", "menu" },
+        };
+
+        const RawProfileLayout* FindRawProfileLayout(const char* profilePath)
+        {
+            if (!profilePath)
+                return nullptr;
+            for (const RawProfileLayout& l : kRawProfileLayouts)
+                if (std::strcmp(l.profile, profilePath) == 0)
+                    return &l;
+            return nullptr;
+        }
+    }
+
+    void OpenXrInputBridge::AddRawBindings(std::vector<XrActionSuggestedBinding>& b, const char* profilePath)
+    {
+        if (!m_RawReady)
+            return;
+        const RawProfileLayout* l = FindRawProfileLayout(profilePath);
+        if (!l)
+            return;
+        const char* hands[2] = { "/user/hand/left/input/", "/user/hand/right/input/" };
+        for (int h = 0; h < 2; ++h)
+        {
+            const std::string base = hands[h];
+            AddBinding(b, m_RawTrigger, (base + "trigger/value").c_str());
+            if (l->grip)
+                AddBinding(b, m_RawGrip, (base + l->grip).c_str());
+            AddBinding(b, m_RawStick, (base + l->stick).c_str());
+            AddBinding(b, m_RawStickClick, (base + l->stick + "/click").c_str());
+            const char* f1 = h == 0 ? l->faceLeft1 : l->faceRight1;
+            const char* f2 = h == 0 ? l->faceLeft2 : l->faceRight2;
+            const char* menu = h == 0 ? l->menuLeft : l->menuRight;
+            if (f1)
+                AddBinding(b, m_RawFace1, (base + f1 + "/click").c_str());
+            if (f2)
+                AddBinding(b, m_RawFace2, (base + f2 + "/click").c_str());
+            if (menu)
+                AddBinding(b, m_RawMenu, (base + menu + "/click").c_str());
+        }
+    }
+
+    uint32_t OpenXrInputBridge::RawPresentBits(uint32_t hand) const
+    {
+        const XrPath path = m_LastInteractionProfiles[hand];
+        if (path == XR_NULL_PATH || path == static_cast<XrPath>(~0ull))
+            return 0;
+        const RawProfileLayout* l = FindRawProfileLayout(PathToString(path).c_str());
+        if (!l)
+            return 0;
+        uint32_t bits = L4D2VR_RAW_BUTTON_STICK_CLICK_PRESENT;
+        if (l->grip)
+            bits |= L4D2VR_RAW_BUTTON_GRIP_PRESENT;
+        if (hand == L4D2VR_OPENXR_HAND_LEFT ? l->faceLeft1 != nullptr : l->faceRight1 != nullptr)
+            bits |= L4D2VR_RAW_BUTTON_FACE1_PRESENT;
+        if (hand == L4D2VR_OPENXR_HAND_LEFT ? l->faceLeft2 != nullptr : l->faceRight2 != nullptr)
+            bits |= L4D2VR_RAW_BUTTON_FACE2_PRESENT;
+        return bits;
+    }
+
+    void OpenXrInputBridge::ReadRawHands(L4D2VROpenXrInputStateDesc& outState)
+    {
+        std::snprintf(outState.systemName, sizeof(outState.systemName), "%s", m_SystemName);
+        if (!m_RawReady)
+            return;
+        for (uint32_t hand = 0; hand < L4D2VR_OPENXR_HAND_COUNT; ++hand)
+        {
+            L4D2VROpenXrRawHandDesc& raw = outState.rawHands[hand];
+            XrActionStateGetInfo getInfo{ XR_TYPE_ACTION_STATE_GET_INFO };
+            getInfo.subactionPath = m_HandPaths[hand];
+            bool any = false;
+            auto readFloat = [&](XrAction a, float& out)
+            {
+                getInfo.action = a;
+                XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT };
+                if (XR_SUCCEEDED(m_Xr->xrGetActionStateFloat(m_Session, &getInfo, &st)) && st.isActive)
+                {
+                    out = std::clamp(st.currentState, 0.0f, 1.0f);
+                    any = true;
+                }
+            };
+            auto readBool = [&](XrAction a, uint32_t bit)
+            {
+                getInfo.action = a;
+                XrActionStateBoolean st{ XR_TYPE_ACTION_STATE_BOOLEAN };
+                if (XR_SUCCEEDED(m_Xr->xrGetActionStateBoolean(m_Session, &getInfo, &st)) && st.isActive)
+                {
+                    any = true;
+                    if (st.currentState)
+                        raw.buttons |= bit;
+                }
+            };
+            readFloat(m_RawTrigger, raw.trigger);
+            readFloat(m_RawGrip, raw.grip);
+            {
+                getInfo.action = m_RawStick;
+                XrActionStateVector2f st{ XR_TYPE_ACTION_STATE_VECTOR2F };
+                if (XR_SUCCEEDED(m_Xr->xrGetActionStateVector2f(m_Session, &getInfo, &st)) && st.isActive)
+                {
+                    raw.stick[0] = st.currentState.x;
+                    raw.stick[1] = st.currentState.y;
+                    any = true;
+                }
+            }
+            readBool(m_RawFace1, L4D2VR_RAW_BUTTON_FACE1);
+            readBool(m_RawFace2, L4D2VR_RAW_BUTTON_FACE2);
+            readBool(m_RawStickClick, L4D2VR_RAW_BUTTON_STICK_CLICK);
+            readBool(m_RawMenu, L4D2VR_RAW_BUTTON_MENU);
+            raw.buttons |= RawPresentBits(hand);
+            raw.valid = any ? 1u : 0u;
+        }
+    }
+
     bool OpenXrInputBridge::InitializeInstance(XrDispatch& xr, XrInstance instance, Logger& log)
     {
         m_Xr = &xr;
@@ -4955,6 +5126,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         {
             return false;
         }
+        m_RawReady = CreateRawActions(log);
+        log.Print("Raw button actions %s", m_RawReady ? "ready" : "unavailable (legacy layout only)");
 
         SuggestBindings(log);
         if (m_EyeGazeEnabled)
@@ -5002,10 +5175,14 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         return m_Xr->xrSuggestInteractionProfileBindings(m_Instance, &suggested);
     }
 
-    void OpenXrInputBridge::SuggestProfile(Logger& log, const char* profilePath, const std::vector<XrActionSuggestedBinding>& bindings)
+    void OpenXrInputBridge::SuggestProfile(Logger& log, const char* profilePath, const std::vector<XrActionSuggestedBinding>& legacyBindings)
     {
-        if (bindings.empty())
+        if (legacyBindings.empty())
             return;
+        // Every suggest for a profile replaces the previous one, so the raw
+        // button bindings go into each call.
+        std::vector<XrActionSuggestedBinding> bindings = legacyBindings;
+        AddRawBindings(bindings, profilePath);
 
         XrPath profile = XR_NULL_PATH;
         if (!TryPath(profilePath, profile))
@@ -5352,6 +5529,14 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             DestroyAction(m_HandPoseAction);
             DestroyAction(m_AimPoseAction);
             DestroyAction(m_HapticAction);
+            DestroyAction(m_RawTrigger);
+            DestroyAction(m_RawGrip);
+            DestroyAction(m_RawStick);
+            DestroyAction(m_RawFace1);
+            DestroyAction(m_RawFace2);
+            DestroyAction(m_RawStickClick);
+            DestroyAction(m_RawMenu);
+            m_RawReady = false;
             for (XrAction& action : m_BooleanActions)
                 DestroyAction(action);
             for (XrAction& action : m_FloatDigitalActions)
@@ -5475,6 +5660,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         LocateControllerPoses(displayTime, state, log);
         LocateHandTracking(displayTime, state);
         ReadEyeGaze(displayTime, syncResult == XR_SUCCESS, state.eyeGaze, log);
+        ReadRawHands(state);
         state.reserved0 = CurrentControllerFamily();
         static uint32_t s_loggedFamily = ~0u;
         if (state.reserved0 != s_loggedFamily)
@@ -6279,6 +6465,20 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             result = m_Xr.xrGetSystem(m_Instance, &systemInfo, &m_SystemId);
             if (!Succeeded(m_Log, "xrGetSystem(HMD)", result) || m_SystemId == XR_NULL_SYSTEM_ID)
                 return false;
+            {
+                // System name for the DLL's button labels (optional).
+                PFN_xrGetSystemProperties getProps = nullptr;
+                if (XR_SUCCEEDED(m_Xr.xrGetInstanceProcAddr(m_Instance, "xrGetSystemProperties",
+                        reinterpret_cast<PFN_xrVoidFunction*>(&getProps))) && getProps)
+                {
+                    XrSystemProperties props{ XR_TYPE_SYSTEM_PROPERTIES };
+                    if (XR_SUCCEEDED(getProps(m_Instance, m_SystemId, &props)))
+                    {
+                        m_Log.Print("System: %s (vendor 0x%X)", props.systemName, props.vendorId);
+                        m_InputBridge.SetSystemName(props.systemName);
+                    }
+                }
+            }
 
             uint32_t viewCount = 0;
             result = m_Xr.xrEnumerateViewConfigurationViews(

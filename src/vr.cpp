@@ -6248,9 +6248,30 @@ bool VR::GetDigitalActionData(vr::VRActionHandle_t handle, vr::InputDigitalActio
         const uint32_t actionIndex = static_cast<uint32_t>(handle);
         if (actionIndex == 0 || actionIndex >= L4D2VR_OPENXR_ACTION_COUNT)
             return false;
+        if (m_ButtonMapActive && m_MappedOverride[actionIndex])
+        {
+            const L4D2VROpenXrDigitalActionDesc& mapped = m_MappedDigital[actionIndex];
+            out.bActive = true;
+            out.activeOrigin = vr::k_ulInvalidInputValueHandle;
+            out.bState = mapped.state != 0;
+            out.bChanged = mapped.changed != 0;
+            return true;
+        }
         const L4D2VROpenXrDigitalActionDesc& action = m_OpenXrLastInputState.digitalActions[actionIndex];
         if (!action.active)
             return false;
+        if (m_LegacyMask[actionIndex])
+        {
+            // Held across the switch from mapped buttons to the fixed menu
+            // layout: released until let go.
+            if (action.state)
+            {
+                out.bActive = true;
+                out.activeOrigin = vr::k_ulInvalidInputValueHandle;
+                return true;
+            }
+            m_LegacyMask[actionIndex] = false;
+        }
         out.bActive = true;
         out.activeOrigin = vr::k_ulInvalidInputValueHandle;
         out.bState = action.state != 0;
@@ -6657,6 +6678,98 @@ void VR::ApplyTurnStick(float stickX, float deltaMs)
     m_RotationOffsetY.store(offset, std::memory_order_release);
 }
 
+void VR::UpdateButtonMap()
+{
+    using bmvr::BindAction;
+    using Id = L4D2VROpenXrActionId;
+    // Mapped action -> the OpenXR action slot the input code already reads.
+    // QuickSave / QuickLoad / VrSettings / Recenter have no slot: handled here.
+    static const std::pair<BindAction, Id> kSlots[] =
+    {
+        { BindAction::Fire, Id::PrimaryAttack },
+        { BindAction::AltFire, Id::SecondaryAttack },
+        { BindAction::Reload, Id::Reload },
+        { BindAction::Jump, Id::Jump },
+        { BindAction::CrouchToggle, Id::CustomAction2 },
+        { BindAction::CrouchHold, Id::Crouch },
+        { BindAction::Use, Id::Use },
+        { BindAction::Sprint, Id::CustomAction1 },
+        { BindAction::Flashlight, Id::Flashlight },
+        { BindAction::WeaponMenu, Id::InventoryQuickSwitch },
+        { BindAction::NextWeapon, Id::NextItem },
+        { BindAction::PrevWeapon, Id::PrevItem },
+        { BindAction::Pause, Id::Pause },
+    };
+    // Fixed-layout slots that mapping replaces with nothing: ResetPosition
+    // (right stick click also counted as the weapon menu), Scoreboard (L4D2
+    // leftover on the Index left A).
+    static const Id kCleared[] = { Id::ResetPosition, Id::Scoreboard };
+
+    const L4D2VROpenXrInputStateDesc& in = m_OpenXrLastInputState;
+    const bool menuMode = !m_GameplayEligible || m_SettingsOpen || IsMenuUp()
+        || Want2dMenuPanel() || WantPauseWorldOverlay();
+    const bool usable = m_RuntimeBackend == VrRuntimeBackend::OpenXR && bmvr::g_ButtonMapping
+        && bmvr::ButtonMapper::RawAvailable(in);
+    if (!usable || menuMode)
+    {
+        if (m_ButtonMapActive)
+        {
+            // Fixed layout from here: slots still held read released until let go
+            // (the Y hold that opened the VR panel must not close it again).
+            for (uint32_t i = 1; i < L4D2VR_OPENXR_ACTION_COUNT; ++i)
+                m_LegacyMask[i] = in.digitalActions[i].active && in.digitalActions[i].state;
+            m_ButtonMapper.Suspend();
+            m_ButtonMapActive = false;
+        }
+        return;
+    }
+
+    bmvr::ButtonMapContext ctx;
+    ctx.gripInGestureZone[0] = m_GestureZoneLeft;
+    ctx.gripInGestureZone[1] = m_GestureZoneRight;
+    ctx.stickBlocked = m_WeaponMenuOpen;
+    m_ButtonMapper.Update(in, ctx, GetTickCount());
+
+    for (const auto& [action, id] : kSlots)
+    {
+        const uint32_t i = static_cast<uint32_t>(id);
+        L4D2VROpenXrDigitalActionDesc& d = m_MappedDigital[i];
+        const uint32_t held = m_ButtonMapper.Held(action) ? 1u : 0u;
+        d.active = 1;
+        d.changed = held != d.state ? 1u : 0u;
+        d.state = held;
+        m_MappedOverride[i] = true;
+    }
+    for (const Id id : kCleared)
+    {
+        const uint32_t i = static_cast<uint32_t>(id);
+        m_MappedDigital[i] = {};
+        m_MappedDigital[i].active = 1;
+        m_MappedOverride[i] = true;
+    }
+    std::memset(m_LegacyMask, 0, sizeof(m_LegacyMask));
+    m_ButtonMapActive = true;
+
+    const bool paused = m_Game && SehIsPaused(m_Game->m_EngineClient);
+    if (m_ButtonMapper.Pressed(BindAction::QuickSave) && !paused)
+    {
+        m_PendingQuickSave.store(true, std::memory_order_release);
+        Game::logMsg("Button map: quick save queued");
+    }
+    if (m_ButtonMapper.Pressed(BindAction::QuickLoad) && !paused)
+    {
+        m_PendingQuickLoad.store(true, std::memory_order_release);
+        Game::logMsg("Button map: quick load queued");
+    }
+    if (m_ButtonMapper.Pressed(BindAction::Recenter))
+        Recenter("mapped button");
+    if (m_ButtonMapper.Pressed(BindAction::VrSettings) && !paused && !m_WeaponMenuOpen)
+    {
+        Game::logMsg("Button map: VR settings panel");
+        OpenSettingsPanel();
+    }
+}
+
 void VR::ProcessInput()
 {
     BMVR_PROF("vr ProcessInput");
@@ -6730,6 +6843,7 @@ void VR::ProcessInput()
         m_Game->m_AnalogForward = ny;
     }
 
+    UpdateButtonMap();
     const bool menuStick = WeaponMenuStickHeld();
     UpdateWeaponMenu(menuStick, deltaMs);
     UpdateSettingsPanel();
@@ -6904,7 +7018,9 @@ void VR::ProcessInput()
         static bool s_stickTurned;
         static bool s_stickCrouchHeld;
         bool stickJump = false, stickCrouch = false;
-        if (haveTurnY)
+        // With button mapping the mapper owns stick up/down (Jump / Crouch
+        // are then ordinary mapped actions).
+        if (haveTurnY && !m_ButtonMapActive)
         {
             const float ax = fabsf(turnX), ay = fabsf(turnY);
             const bool centred = ax * ax + ay * ay < 0.25f * 0.25f;
@@ -6961,7 +7077,7 @@ void VR::ProcessInput()
             buttons |= IN_RELOAD;
         if (PressedDigitalAction(m_ActionCrouch))
             buttons |= IN_DUCK;
-        if (!haveTurnY || turnY > -0.4f)
+        if (m_ButtonMapActive || !haveTurnY || turnY > -0.4f)
         {
             if (PressedDigitalAction(m_ActionCrouchToggle, true))
                 m_CrouchToggled = !m_CrouchToggled;
@@ -7037,8 +7153,11 @@ void VR::ProcessInput()
     // FlashlightOnSquare: left Square (OpenXR left x/click = PrevItem) toggles
     // the flashlight instead of switching to the previous weapon.
     const bool prevRaw = PressedDigitalAction(m_ActionPrevItem);
-    const bool squareFlash = bmvr::g_FlashlightOnSquare && prevRaw;
-    const bool prevHeld = bmvr::g_FlashlightOnSquare ? false : prevRaw;
+    // With button mapping, FlashlightOnSquare only picks the default of that
+    // button (Flashlight vs Previous weapon); the mapper already applied it.
+    const bool squareSetting = bmvr::g_FlashlightOnSquare && !m_ButtonMapActive;
+    const bool squareFlash = squareSetting && prevRaw;
+    const bool prevHeld = squareSetting ? false : prevRaw;
     const bool pauseHeld = PressedDigitalAction(m_ActionPause);
     const bool resetHeld = PressedDigitalAction(m_ActionResetPosition);
     // Shoulder gestures (HL2VR style): left hand behind the left shoulder +
@@ -7050,12 +7169,13 @@ void VR::ProcessInput()
     // holsters (HipGestures): right hand at the right hip + grip = pistol,
     // a bit above the left hip = MP5, also armed at once.
     const bool rightShoulder = UpdateShoulderGestures(paused);
+    m_GestureZoneRight = rightShoulder;
     vr::InputDigitalActionData_t flash{};
     static bool s_flashLatched = false;
     static DWORD s_flashImpulseMs = 0;
     static int s_flashReleasePolls = 0;
     const bool flashOk = GetDigitalActionData(m_ActionFlashlight, flash);
-    if (flashOk || bmvr::g_FlashlightOnSquare)
+    if (flashOk || squareSetting)
     {
         const DWORD nowTick = GetTickCount();
         if ((flashOk && flash.bState) || squareFlash)
@@ -7111,7 +7231,10 @@ void VR::ProcessInput()
     static bool s_pauseDeferred;
     static bool s_pauseHoldFired;
     constexpr DWORD kSettingsHoldMs = 600;
-    const bool pauseHoldable = bmvr::g_SettingsTriangleHold && !paused && !IsMenuUp() && !m_SettingsOpen;
+    // Mapped buttons resolve tap vs hold in the mapper (Pause on release,
+    // VrSettings on hold), so the Pause action here is already a tap.
+    const bool pauseHoldable = bmvr::g_SettingsTriangleHold && !m_ButtonMapActive
+        && !paused && !IsMenuUp() && !m_SettingsOpen;
     if (m_GameplayEligible && pauseHeld && !s_pause)
     {
         s_pauseHoldFired = false;
@@ -9174,6 +9297,13 @@ void VR::FlushPendingGameUi()
         // command that never ran gets a message of ours.
         if (!ok)
             ShowToast("SAVE FAILED");
+    }
+    if (m_PendingQuickLoad.exchange(false, std::memory_order_acq_rel) && m_Game)
+    {
+        const bool ok = m_Game->ClientCmd_Unrestricted("load quick");
+        Game::logMsg("Quick load ClientCmd_Unrestricted ok=%d", ok ? 1 : 0);
+        if (!ok)
+            ShowToast("LOAD FAILED");
     }
     // Opening the pause menu: hold it until the head's angles reached the
     // server, so a save from the menu faces where the player looked.
@@ -14064,6 +14194,7 @@ bool VR::UpdateShoulderGestures(bool paused)
     };
 
     const bool leftIn = bmvr::g_ShoulderGestures && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
+    m_GestureZoneLeft = leftIn;
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = bmvr::g_ShoulderGestures && m_PhysicalRightTrackingValid && !m_TwoHandActive
         && inZone(m_PhysicalRightPosAbs, 1.f);

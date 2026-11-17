@@ -1,6 +1,7 @@
 #include "bmvr_flags.h"
 #include "bmvr_version.h"
 #include "openxr_bridge_protocol.h"
+#include "vr_button_map.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -189,6 +190,8 @@ namespace bmvr
     float g_StickJumpCrouchThreshold = 0.8f;
     float g_StickJumpCrouchAngle = 30.f;
     bool g_TurnBlocksJumpCrouch = true;
+    float g_ButtonHoldMs = 500.f;
+    bool g_ButtonMapping = true;
     bool g_SprintToggle = true;
     bool g_VrSettingsPause = true;
     bool g_HideHandsWithoutSuit = true;
@@ -593,6 +596,16 @@ namespace bmvr
                 const float s = static_cast<float>(atof(val));
                 if (s >= 0.5f && s <= 2.0f)
                     g_RenderScale = s;
+            }
+            else if (std::strncmp(n, "Bind.", 5) == 0)
+                SetBindFromConfig(n + 5, val);
+            else if (std::strcmp(n, "ButtonMapping") == 0)
+                g_ButtonMapping = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ButtonHoldMs") == 0)
+            {
+                const float ms = static_cast<float>(atof(val));
+                if (ms >= 200.f && ms <= 1500.f)
+                    g_ButtonHoldMs = ms;
             }
             else if (std::strcmp(n, "TurnSpeed") == 0)
             {

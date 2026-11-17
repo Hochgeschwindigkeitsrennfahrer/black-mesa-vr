@@ -7,6 +7,7 @@
 #include "vector.h"
 #include "openxr_bridge_protocol.h"
 #include "vr_runtime_backend.h"
+#include "vr_button_map.h"
 #include <cstdint>
 #include <array>
 #include <atomic>
@@ -690,6 +691,19 @@ public:
     std::atomic<int> m_PendingInvDelta{ 0 };
     std::atomic<int> m_PendingWeaponSelect{ 0 };
     std::atomic<bool> m_PendingQuickSave{ false };
+    std::atomic<bool> m_PendingQuickLoad{ false };
+    // Button mapping (OpenXR helper, protocol 18): while active, the mappable
+    // OpenXR action slots come from m_MappedDigital instead of the helper's
+    // fixed bindings (GetDigitalActionData). Menus / the VR panel use the
+    // fixed layout; a legacy slot still held at that switch reads released
+    // until it is let go (m_LegacyMask).
+    bmvr::ButtonMapper m_ButtonMapper;
+    bool m_ButtonMapActive = false;
+    bool m_MappedOverride[L4D2VR_OPENXR_ACTION_COUNT] = {};
+    L4D2VROpenXrDigitalActionDesc m_MappedDigital[L4D2VR_OPENXR_ACTION_COUNT] = {};
+    mutable bool m_LegacyMask[L4D2VR_OPENXR_ACTION_COUNT] = {};
+    bool m_GestureZoneLeft = false;   // last frame: left hand in the quick-save zone
+    bool m_GestureZoneRight = false;  // last frame: right hand in a shoulder/hip zone (or just left one)
     // Saves keep the player's view angles, and gameplay usercmds carry the
     // controller aim, so a load faced where the gun pointed. Before a quick
     // save or a pause (saves from the pause menu) a few usercmds send the head's
@@ -1155,6 +1169,7 @@ public:
     bool StereoEyesReady() const;
     void ClearUnusedDesktopBackbuffer();
     void ProcessInput();
+    void UpdateButtonMap();
     void ApplyMenuCursor();
     // Game thread only. World vgui_screen (bm_c2a5i mortar, etc.): hover is
     // C_VGuiScreen::ClientThink from EyeAngles, but clicks need VGUI
