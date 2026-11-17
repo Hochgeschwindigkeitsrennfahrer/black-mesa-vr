@@ -288,6 +288,8 @@ namespace bmvr
     float g_VrHandsRightGripRotY = 0.f;
     float g_VrHandsRightGripRotZ = -180.f;
     bool g_VrHandsUseHevGloves = true;
+    bool g_VrHandsBlackMesa = false;
+    float g_VrHandsBlackMesaScale = 0.8f;
     bool g_IsBlueShift = false;
     bool g_IsAzureSheep = false;
     uint32_t g_FullFrameActualWidth = 0;
@@ -1040,6 +1042,10 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrHandsUseHevGloves") == 0)
                 g_VrHandsUseHevGloves = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrHandsBlackMesa") == 0)
+                g_VrHandsBlackMesa = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrHandsBlackMesaScale") == 0)
+                g_VrHandsBlackMesaScale = static_cast<float>(std::atof(val));
             else if (std::strcmp(n, "CompositorPostPresentHandoff") == 0)
                 g_CompositorPostPresentHandoff = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "DesktopLeftoverRender") == 0)

@@ -3,6 +3,7 @@
 #include "bmvr_flags.h"
 #include "game.h"
 #include "vr.h"
+#include "vr_bm_hands.h"
 #include "vr_hand_asset_loader.h"
 #include "vr_hand_math.h"
 #include "vr_hand_renderer_d3d9.h"
@@ -467,6 +468,9 @@ struct BmVrGloves::Impl
     bool unavailable = false;
     bool loggedReady = false;
     std::string failure;
+    // What the loaded assets were built from, so the panel can switch live.
+    bool builtBlackMesa = false;
+    float builtBlackMesaScale = 0.f;
 
     void Fail(const std::string& reason)
     {
@@ -546,8 +550,58 @@ struct BmVrGloves::Impl
         return false;
     }
 
+    void ResetAssets()
+    {
+        for (Hand* h : { &hev[0], &hev[1], &bare[0], &bare[1] })
+        {
+            h->asset = VrHandMeshAsset{};
+            h->palette.clear();
+            h->rig = HandRig{};
+        }
+        assetAttempted = assetsLoaded = hevLoaded = bareLoaded = unavailable = false;
+        loggedReady = false;
+        failure.clear();
+    }
+
+    // Black Mesa's own hands, built from the installed game files.
+    bool LoadBlackMesaHands(float scale)
+    {
+        std::string error;
+        bool ok = true;
+        for (int i = 0; i < 2 && ok; ++i)
+            ok = BmHands::Build(BmHands::Variant::Hev, i, scale, hev[i].asset, error);
+        for (int i = 0; i < 2 && ok; ++i)
+            ok = BmHands::Build(BmHands::Variant::Bare, i, scale, bare[i].asset, error);
+        if (!ok)
+        {
+            Game::logMsg("VR Black Mesa hands failed (%s); using the glove files", error.c_str());
+            for (Hand* h : { &hev[0], &hev[1], &bare[0], &bare[1] })
+                h->asset = VrHandMeshAsset{};
+            return false;
+        }
+        for (Hand* h : { &hev[0], &hev[1], &bare[0], &bare[1] })
+            BuildBindPosePalette(h->asset, h->palette);
+        hev[0].fileName = "bm:hev_left";
+        hev[1].fileName = "bm:hev_right";
+        bare[0].fileName = "bm:bare_left";
+        bare[1].fileName = "bm:bare_right";
+        hevLoaded = bareLoaded = true;
+        Game::logMsg("VR gloves loaded source=blackmesa scale=%.2f hev=%u/%u bare=%u/%u verts",
+            scale,
+            static_cast<unsigned>(hev[0].asset.vertices.size()), static_cast<unsigned>(hev[1].asset.vertices.size()),
+            static_cast<unsigned>(bare[0].asset.vertices.size()), static_cast<unsigned>(bare[1].asset.vertices.size()));
+        return true;
+    }
+
     bool EnsureAssets()
     {
+        const bool wantBm = bmvr::g_VrHandsBlackMesa;
+        const float wantScale = std::clamp(bmvr::g_VrHandsBlackMesaScale, 0.4f, 1.5f);
+        if (assetAttempted && (wantBm != builtBlackMesa || (wantBm && std::fabs(wantScale - builtBlackMesaScale) > 1e-4f)))
+        {
+            Game::logMsg("VR gloves: source changed (Black Mesa hands %d, size %.2f), reloading", wantBm ? 1 : 0, wantScale);
+            ResetAssets();
+        }
         if (unavailable)
             return false;
         if (assetsLoaded)
@@ -555,6 +609,13 @@ struct BmVrGloves::Impl
         if (assetAttempted)
             return false;
         assetAttempted = true;
+        builtBlackMesa = wantBm;
+        builtBlackMesaScale = wantScale;
+        if (wantBm && LoadBlackMesaHands(wantScale))
+        {
+            assetsLoaded = true;
+            return true;
+        }
 
         const bool wantHev = bmvr::g_VrHandsUseHevGloves;
         const char* hevNames[2] = { "hev_glove_left_model.glb", "hev_glove_right_model.glb" };

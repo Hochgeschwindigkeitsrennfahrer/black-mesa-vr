@@ -141,6 +141,9 @@ namespace
             { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // The original release's look: flat gloves, HUD on the back of the hand.
+            // Built from the installed game's own first-person arms; nothing shipped.
+            { "Black Mesa hands", RowKind::Toggle, "VrHandsBlackMesa", &bmvr::g_VrHandsBlackMesa, nullptr, 0, 0, 0, nullptr },
+            { "Black Mesa hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
             { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
             { "Hand on gun: right", RowKind::Number, "VrHandsGunGripRight", nullptr, &bmvr::g_VrHandsGunGripRight, 0.25f, -8.f, 8.f, "%+.2f" },

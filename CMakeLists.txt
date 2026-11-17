@@ -38,6 +38,7 @@ set(BMVR_SOURCES
   src/vr_weapon_menu.cpp
   src/vr_settings_panel.cpp
   src/vr_hands.cpp
+  src/vr_bm_hands.cpp
   src/vr_hand_renderer_d3d9.cpp
   src/vr_runtime_backend.cpp
   src/openxr_helper_bridge.cpp

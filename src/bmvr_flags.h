@@ -711,6 +711,9 @@ namespace bmvr
     extern float g_VrHandsRightGripRotZ;
     // Prefer ripped HEV GLBs in VR/hands when present.
     extern bool g_VrHandsUseHevGloves;
+    // Gloves built from Black Mesa's own viewmodel arms (installed VPKs) instead of the glove files.
+    extern bool g_VrHandsBlackMesa;
+    extern float g_VrHandsBlackMesaScale;
     // True for this process when launched with -game bshift (or a bs_* map).
     // Calhoun never wears the HEV suit — use bare-hand GLBs the whole session.
     extern bool g_IsBlueShift;
