@@ -977,6 +977,8 @@ public:
     // Last CreateMove: hand within reach of a ladder. Its grip is a grab
     // there, not the mapped action (flashlight on the right grip).
     std::atomic<bool> m_LadderTouch[2]{};
+    // Last CreateMove: on a ladder, climbing by hand or mounting one.
+    std::atomic<bool> m_LadderActive{ false };
     // Hand climbing: the rung each hand took hold of (world), from the
     // map's ladder props (vr_ladder_rungs). The glove is drawn there.
     struct LadderPin

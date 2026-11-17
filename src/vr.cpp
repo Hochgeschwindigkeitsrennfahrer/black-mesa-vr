@@ -6783,8 +6783,11 @@ void VR::UpdateButtonMap()
     }
 
     bmvr::ButtonMapContext ctx;
-    ctx.gripInGestureZone[0] = m_GestureZoneLeft || m_LadderTouch[0].load(std::memory_order_acquire);
-    ctx.gripInGestureZone[1] = m_GestureZoneRight || m_LadderTouch[1].load(std::memory_order_acquire);
+    // On a ladder (hand climbing) both grips hold the ladder: no mapped
+    // grip action (flashlight) even with the hand off to the side.
+    const bool onLadderNow = m_LadderActive.load(std::memory_order_acquire);
+    ctx.gripInGestureZone[0] = m_GestureZoneLeft || onLadderNow || m_LadderTouch[0].load(std::memory_order_acquire);
+    ctx.gripInGestureZone[1] = m_GestureZoneRight || onLadderNow || m_LadderTouch[1].load(std::memory_order_acquire);
     ctx.stickBlocked = m_WeaponMenuOpen;
     m_ButtonMapper.Update(in, ctx, GetTickCount());
 
@@ -7231,10 +7234,11 @@ void VR::ProcessInput()
     const bool rightShoulder = UpdateShoulderGestures(paused);
     m_GestureZoneRight = rightShoulder;
     UpdateLadderGrips();
-    // Right grip on a ladder grabs it (PhysicalLadders): no flashlight
-    // (left Square still toggles it).
+    // Right grip on or near a ladder grabs it (PhysicalLadders): no
+    // flashlight (left Square still toggles it).
     const bool rightGripGrab = rightShoulder
-        || (!squareFlash && m_LadderTouch[1].load(std::memory_order_acquire));
+        || (!squareFlash && (m_LadderTouch[1].load(std::memory_order_acquire)
+            || m_LadderActive.load(std::memory_order_acquire)));
     vr::InputDigitalActionData_t flash{};
     static bool s_flashLatched = false;
     static DWORD s_flashImpulseMs = 0;
@@ -8169,6 +8173,7 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         ~ViewOff() { if (!climbing) v.active = false; }
     } viewOff{ m_LadderView };
     auto clearTouch = [&]() {
+        m_LadderActive.store(false, std::memory_order_release);
         m_LadderTouch[0].store(false, std::memory_order_release);
         m_LadderTouch[1].store(false, std::memory_order_release);
     };
@@ -8177,6 +8182,7 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         s_climbHand = -1;
         s_mountUntil = 0;
         m_LadderPin[0].valid = m_LadderPin[1].valid = false;
+        m_LadderActive.store(false, std::memory_order_release);
         clearTouch();
         return false;
     }
@@ -8266,6 +8272,18 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         if (h == gunHand && gunOut && bmvr::g_LadderGunHand >= 0.5f && !(grip[h] && s_prevGrip[h] && h == s_climbHand))
             touch[h] = false;   // its grip stays the mapped action
         m_LadderTouch[h].store(touch[h], std::memory_order_release);
+    }
+    // Grips near or on a ladder are ladder grabs, not the mapped action
+    // (flashlight): on it, climbing, mounting, standing at one, and for a
+    // moment after leaving it (letting go at the top).
+    {
+        static ULONGLONG s_activeUntil = 0;
+        float d = 0.f, yaw = 0.f;
+        const bool atLadder = nearestLadder(origin, d, yaw) >= 0 && d < 48.f;
+        const ULONGLONG tNow = GetTickCount64();
+        if (onLadder || s_climbHand >= 0 || s_mountUntil != 0 || atLadder)
+            s_activeUntil = tNow + 500;
+        m_LadderActive.store(tNow < s_activeUntil, std::memory_order_release);
     }
 
     auto role = [](int h) {
