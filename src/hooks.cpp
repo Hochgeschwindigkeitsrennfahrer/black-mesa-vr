@@ -3090,6 +3090,11 @@ namespace
             if (s_lc.lowered)
                 s_loweredUntil = now + 300;
             Hooks::m_VR->NoteViewmodelBeamHidden(s_lc.beamHide || now < s_loweredUntil);
+            // Same 300 ms tail for the support glove: idle blends in from the
+            // lowered pose, and the glove follows the wrist back up.
+            const int lowerState = (s_lc.lowered || now < s_loweredUntil) ? VR::kVmLowerLowered
+                : (!s_lc.beamHide && !s_lc.action ? VR::kVmLowerIdle : VR::kVmLowerOther);
+            Hooks::m_VR->NoteViewmodelLowerState(lowerState, hdr);
         }
         // Lock-free class flag from the weapon model dCalcViewModelView just
         // classified; replaces a model-info lookup + four strstr per call (this
@@ -3428,6 +3433,52 @@ namespace
         Hooks::m_VR->NoteViewmodelOffhandWorld(world);
     }
 
+    int FindWeaponRootBone(unsigned char* hdr, float rest[3], char (&bestName)[64]);
+
+    // Weapon root bone in the gun frame of this draw (origin + unit axes; the
+    // bones may carry the viewmodel scale), for the two-hand glove while the
+    // lowered clip moves the gun. Matrix columns are the bone's axes.
+    void SampleViewmodelWeaponRoot(unsigned char* hdr, const float* bones12, int nBones,
+        const Vector& gunO, const Vector& gunF, const Vector& gunR, const Vector& gunU)
+    {
+        if (!hdr || !bones12 || nBones <= 0 || !Hooks::m_VR || !Hooks::m_VR->TwoHandGripActive())
+            return;
+        static unsigned char* s_hdr = nullptr;   // render thread only
+        static int s_idx = -1;
+        if (hdr != s_hdr)
+        {
+            s_hdr = hdr;
+            float rest[3]{};
+            char name[64]{};
+            s_idx = FindWeaponRootBone(hdr, rest, name);
+        }
+        if (s_idx < 0 || s_idx >= nBones)
+            return;
+        const float* m = bones12 + s_idx * 12;
+        Vector o, ax[3];
+        BMVR_TRY
+        {
+            o = Vector(m[3], m[7], m[11]);
+            for (int c = 0; c < 3; ++c)
+                ax[c] = Vector(m[c], m[4 + c], m[8 + c]);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        if (!std::isfinite(o.x) || !std::isfinite(o.y) || !std::isfinite(o.z))
+            return;
+        for (int c = 0; c < 3; ++c)
+        {
+            Vector w = ax[c];
+            if (!std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z) || VectorNormalize(w) <= 0.01f)
+                return;
+            ax[c] = Vector(w.Dot(gunF), w.Dot(gunR), w.Dot(gunU));
+        }
+        const Vector d = o - gunO;
+        Hooks::m_VR->NoteDrawnWeaponRootLocal(hdr, Vector(d.Dot(gunF), d.Dot(gunR), d.Dot(gunU)), ax);
+    }
+
     // Frag grenade: the grenade is its own root bone (GrenadeSpawn, pins are
     // its children) and the pin-pull/throw animations swing it across the
     // view while the hidden arms do the work. In VR the hand holds still, so
@@ -3743,10 +3794,12 @@ namespace
         return 1;
     }
 
-    void NoteWeaponRootFromHdr(unsigned char* hdr, const char* modelName)
+    // The weapon is its own parentless root bone (not attached to the arms);
+    // picked by name (WeaponRootScore). Returns its index or -1.
+    int FindWeaponRootBone(unsigned char* hdr, float rest[3], char (&bestName)[64])
     {
-        if (!hdr || !Hooks::m_VR)
-            return;
+        if (!hdr)
+            return -1;
         int length = 0;
         int numbones = 0;
         int boneindex = 0;
@@ -3758,19 +3811,17 @@ namespace
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            return;
+            return -1;
         }
         if (length < 256 || length > 4 * 1024 * 1024)
-            return;
+            return -1;
         if (numbones <= 0 || numbones > 256)
-            return;
+            return -1;
         if (boneindex < 0 || boneindex + numbones * kStudioBoneSize > length)
-            return;
+            return -1;
 
         int bestScore = -1;
         int bestIndex = -1;
-        float rest[3]{};
-        char bestName[64]{};
         for (int i = 0; i < numbones; ++i)
         {
             unsigned char* bone = hdr + boneindex + i * kStudioBoneSize;
@@ -3804,8 +3855,19 @@ namespace
             }
         }
         if (bestScore < 1 || bestIndex < 0)
+            return -1;
+        return bestIndex;
+    }
+
+    void NoteWeaponRootFromHdr(unsigned char* hdr, const char* modelName)
+    {
+        if (!hdr || !Hooks::m_VR)
             return;
-        Hooks::m_VR->NoteViewmodelWeaponBake(modelName, bestName, rest[0], rest[1], rest[2]);
+        float rest[3]{};
+        char name[64]{};
+        if (FindWeaponRootBone(hdr, rest, name) < 0)
+            return;
+        Hooks::m_VR->NoteViewmodelWeaponBake(modelName, name, rest[0], rest[1], rest[2]);
     }
 
     struct HideArmsResult
@@ -7952,20 +8014,21 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             {
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
+                // Gun frame of this draw: scaled origin + target angles
+                // (VR::GunFrameNow at the same instant).
+                Vector o = targetOrigin;
+                if (needScale)
+                    o = pivot + (targetOrigin - pivot) * scale;
+                Vector gf, gr, gu;
+                QAngle::AngleVectors(targetAng, &gf, &gr, &gu);
                 Vector drawnMuzzle{};
                 if (DrawnAttachmentPoint(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, drawnMuzzle))
                 {
-                    // Gun frame of this draw: scaled origin + target angles
-                    // (VR::GunFrameNow at the same instant).
-                    Vector o = targetOrigin;
-                    if (needScale)
-                        o = pivot + (targetOrigin - pivot) * scale;
-                    Vector gf, gr, gu;
-                    QAngle::AngleVectors(targetAng, &gf, &gr, &gu);
                     const Vector d = drawnMuzzle - o;
                     m_VR->NoteDrawnMuzzleLocal(Vector(d.Dot(gf), d.Dot(gr), d.Dot(gu)));
                 }
                 SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
+                SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);

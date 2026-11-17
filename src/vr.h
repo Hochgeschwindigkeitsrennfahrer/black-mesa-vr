@@ -374,6 +374,17 @@ public:
     void NoteViewmodelBeamHidden(bool hide) { m_ViewmodelBeamHidden.store(hide, std::memory_order_relaxed); }
     // Muzzle in the gun frame, from the bones as drawn (viewmodel DME).
     void NoteDrawnMuzzleLocal(const Vector& local);
+    // Lowered set (idletolow / lowidle / lowtoidle, gun held down while aimed
+    // at a friendly): the clip moves the gun's bones, while the two-hand
+    // support glove sits on the controller-derived grip point. The glove
+    // follows the drawn weapon root bone's move away from its idle pose
+    // (the gun body; the arms are separate bones and on the pistols the left
+    // wrist barely moves). State from CalcViewModelView (game thread) for the
+    // weapon's own viewmodel header; bone samples from the draw (render thread).
+    enum : int { kVmLowerIdle = 0, kVmLowerLowered = 1, kVmLowerOther = 2 };
+    void NoteViewmodelLowerState(int state, const void* studioHdr);
+    // Weapon root bone origin and unit axes in the gun frame of that draw.
+    void NoteDrawnWeaponRootLocal(const void* studioHdr, const Vector& pos, const Vector axes[3]);
     bool ViewmodelIsRpg() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagRpg) != 0; }
     bool ViewmodelIsGluon() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGluon) != 0; }
     bool ViewmodelIsScoped() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagScoped) != 0; }
@@ -1497,6 +1508,24 @@ private:
     Vector m_TwoHandSmoothF{};
     Vector m_TwoHandSmoothU{};
     bool m_TwoHandSmoothValid = false;
+    // Lowered-gun glove follow (NoteViewmodelLowerState / NoteDrawnWeaponRootLocal).
+    std::atomic<int> m_VmLowerState{ kVmLowerOther };
+    std::atomic<const void*> m_VmLowerHdr{ nullptr };
+    std::atomic<ULONGLONG> m_VmLowerIdleSinceMs{ 0 };
+    Vector m_GunRootRefPos{};
+    Vector m_GunRootRefAx[3]{};
+    Vector m_GunRootLivePos{};
+    Vector m_GunRootLiveAx[3]{};
+    const void* m_GunRootSampleHdr = nullptr;
+    bool m_GunRootRefValid = false;
+    bool m_GunRootLiveValid = false;
+    bool m_TwoHandLoweredLogged = false;
+    float m_TwoHandLoweredMaxMove = 0.f;
+    float m_TwoHandLoweredMaxTurn = 0.f;
+    // Moves the support glove (gun-frame grip point + tracking angles) by the
+    // gun body's lowered-vs-idle delta. Caller holds m_ControllerMutex.
+    void ApplyLoweredOffhand(const Vector& f, const Vector& r, const Vector& u, float rotYaw,
+        Vector& gripLocal, QAngle& trackingAng);
     int m_AutoMatQueueModeLastRequested = -999;
     std::chrono::steady_clock::time_point m_AutoMatQueueModeLastCmdTime{};
     bool m_VrCvarsApplied = false;

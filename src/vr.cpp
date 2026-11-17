@@ -8125,6 +8125,99 @@ void VR::NoteDrawnMuzzleLocal(const Vector& local)
     m_DrawnMuzzleLocalValid = true;
 }
 
+void VR::NoteViewmodelLowerState(int state, const void* studioHdr)
+{
+    const int was = m_VmLowerState.exchange(state, std::memory_order_relaxed);
+    if (state == kVmLowerIdle && was != kVmLowerIdle)
+        m_VmLowerIdleSinceMs.store(GetTickCount64(), std::memory_order_relaxed);
+    m_VmLowerHdr.store(studioHdr, std::memory_order_relaxed);
+}
+
+void VR::NoteDrawnWeaponRootLocal(const void* studioHdr, const Vector& pos, const Vector axes[3])
+{
+    // Only the weapon's own viewmodel (Black Mesa draws a second one that idles).
+    if (!studioHdr || studioHdr != m_VmLowerHdr.load(std::memory_order_relaxed))
+        return;
+    const int state = m_VmLowerState.load(std::memory_order_relaxed);
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    if (studioHdr != m_GunRootSampleHdr)
+    {
+        m_GunRootSampleHdr = studioHdr;
+        m_GunRootRefValid = false;
+    }
+    m_GunRootLivePos = pos;
+    for (int i = 0; i < 3; ++i)
+        m_GunRootLiveAx[i] = axes[i];
+    m_GunRootLiveValid = true;
+    // Reference = idle pose, once idle has settled: the render thread draws a
+    // frame behind, and idle blends in from the clip before it over ~0.2 s.
+    if (state == kVmLowerIdle
+        && GetTickCount64() - m_VmLowerIdleSinceMs.load(std::memory_order_relaxed) >= 250)
+    {
+        m_GunRootRefPos = pos;
+        for (int i = 0; i < 3; ++i)
+            m_GunRootRefAx[i] = axes[i];
+        m_GunRootRefValid = true;
+    }
+}
+
+void VR::ApplyLoweredOffhand(const Vector& f, const Vector& r, const Vector& u, float rotYaw,
+    Vector& gripLocal, QAngle& trackingAng)
+{
+    const bool lowered = m_VmLowerState.load(std::memory_order_relaxed) == kVmLowerLowered;
+    if (!lowered)
+    {
+        // One line per lowered episode, with the largest wrist move applied.
+        if (m_TwoHandLoweredLogged)
+        {
+            m_TwoHandLoweredLogged = false;
+            static int s_log;
+            if (s_log < 20)
+            {
+                ++s_log;
+                Game::logMsg("Two-hand lowered: glove followed the gun (max moved %.1f, max turn %.0f deg)",
+                    m_TwoHandLoweredMaxMove, m_TwoHandLoweredMaxTurn);
+            }
+        }
+        m_TwoHandLoweredMaxMove = 0.f;
+        m_TwoHandLoweredMaxTurn = 0.f;
+        return;
+    }
+    if (!bmvr::g_TwoHandLoweredFollow || !m_GunRootRefValid || !m_GunRootLiveValid)
+        return;
+    const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+    const Vector moved = m_GunRootLivePos - m_GunRootRefPos;
+    if (moved.Length() > 0.5f * scale)   // implausible for one gun: leave the glove
+        return;
+    // Rigid move of the gun body in the gun frame: v -> live * ref^-1 (v - refPos) + livePos.
+    auto turn = [&](const Vector& v) {
+        return m_GunRootLiveAx[0] * v.Dot(m_GunRootRefAx[0])
+            + m_GunRootLiveAx[1] * v.Dot(m_GunRootRefAx[1])
+            + m_GunRootLiveAx[2] * v.Dot(m_GunRootRefAx[2]);
+    };
+    gripLocal = turn(gripLocal - m_GunRootRefPos) + m_GunRootLivePos;
+
+    // Glove angles: tracking space -> world (yaw) -> gun frame, turn, back.
+    Vector af, ar, au;
+    QAngle::AngleVectors(trackingAng, &af, &ar, &au);
+    auto toGunTurned = [&](Vector v) {
+        PivotYaw(v, rotYaw);
+        const Vector l = turn(Vector(v.Dot(f), v.Dot(r), v.Dot(u)));
+        Vector w = f * l.x + r * l.y + u * l.z;
+        PivotYaw(w, -rotYaw);
+        return w;
+    };
+    af = toGunTurned(af);
+    au = toGunTurned(au);
+    if (VectorNormalize(af) > 0.01f && VectorNormalize(au) > 0.01f)
+        QAngle::VectorAngles(af, au, trackingAng);
+
+    m_TwoHandLoweredLogged = true;
+    const float c = (std::max)(-1.f, (std::min)(1.f, m_GunRootLiveAx[0].Dot(m_GunRootRefAx[0])));
+    m_TwoHandLoweredMaxMove = (std::max)(m_TwoHandLoweredMaxMove, moved.Length());
+    m_TwoHandLoweredMaxTurn = (std::max)(m_TwoHandLoweredMaxTurn, std::acos(c) * 57.29578f);
+}
+
 bool VR::TryGetRawMuzzleWorld(Vector& origin) const
 {
     if (!m_IsVREnabled || !m_ControllerPoseValid || !m_Game)
@@ -13776,10 +13869,14 @@ void VR::ApplyTwoHandWeaponAim()
     gz = m_TwoHandGrabGz;
 
     auto finishDraw = [&](const Vector& f, const Vector& r, const Vector& u, float gxSlide) {
-        Vector gripYawed = f * gxSlide + r * gy + u * gz;
-        PivotYaw(gripYawed, -m_RotationOffsetY.load(std::memory_order_acquire));
+        const float rotYaw = m_RotationOffsetY.load(std::memory_order_acquire);
+        Vector local(gxSlide, gy, gz);
+        QAngle ang = leftHanded ? m_PhysicalRightAngAbs : m_LeftControllerAngAbs;
+        ApplyLoweredOffhand(f, r, u, rotYaw, local, ang);
+        Vector gripYawed = f * local.x + r * local.y + u * local.z;
+        PivotYaw(gripYawed, -rotYaw);
         m_TwoHandDrawPos = gunTracking + gripYawed;
-        m_TwoHandDrawAng = leftHanded ? m_PhysicalRightAngAbs : m_LeftControllerAngAbs;
+        m_TwoHandDrawAng = ang;
         m_TwoHandDrawValid = true;
         m_TwoHandDrawPhysicalLeft = !leftHanded;
     };
