@@ -749,6 +749,9 @@ namespace bmvr
     // Physical ladders: the view follows the climb hand every frame instead
     // of LadderMove's per-tick bursts (render offset only). On by default.
     extern bool g_PhysicalLadderSmooth;
+    // Physical ladders, the gun hand: 0 = grabbing holsters the weapon (back
+    // when off the ladder), 1 = only an empty hand grabs a ladder.
+    extern float g_LadderGunHand;
     extern float g_VrRecoilScale;
     // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
     extern bool g_RpgRocketShown;

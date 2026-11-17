@@ -976,6 +976,15 @@ public:
     // Last CreateMove: hand within reach of a ladder. Its grip is a grab
     // there, not the mapped action (flashlight on the right grip).
     std::atomic<bool> m_LadderTouch[2]{};
+    // Hand climbing: the rung each hand took hold of (world), from the
+    // map's ladder props (vr_ladder_rungs). The glove is drawn there.
+    struct LadderPin
+    {
+        bool valid = false;
+        Vector world{};
+    };
+    LadderPin m_LadderPin[2];
+    bool TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& trackingPos) const;
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover

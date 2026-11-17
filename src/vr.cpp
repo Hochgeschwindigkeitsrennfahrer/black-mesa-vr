@@ -1,4 +1,5 @@
 #include "vr.h"
+#include "vr_ladder_rungs.h"
 #include "vr_mag_reload.h"
 #include "bmvr_prof.h"
 #include "bmvr_sampler.h"
@@ -8154,6 +8155,10 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     static bool s_mountUseSent = false;
     static float s_mountYaw = 0.f;
     static ULONGLONG s_dropAt = 0;   // both hands let go: fall off at this time
+    static bool s_autoHolstered = false;
+    static ULONGLONG s_offLadderSince = 0;
+    constexpr float kRungSnapHu = 14.f;    // grab reach to a rung
+    constexpr float kRungLeaveHu = 24.f;   // hand this far off its rung lets go of it
 
     // Smooth view (PhysicalLadderViewOffset): on only while a hand climbs.
     struct ViewOff
@@ -8170,6 +8175,7 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     {
         s_climbHand = -1;
         s_mountUntil = 0;
+        m_LadderPin[0].valid = m_LadderPin[1].valid = false;
         clearTouch();
         return false;
     }
@@ -8243,18 +8249,24 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         flatDist = best >= 0 ? sqrtf(bestD2) : 1e15f;
         return best;
     };
+    const ULONGLONG now = GetTickCount64();
+    bool grip[2];
+    for (int h = 0; h < 2; ++h)
+        grip[h] = m_LadderGrip[h].load(std::memory_order_acquire) && valid[h];
+    // The gun hand climbs empty (LadderGunHand): 0 = a grab holsters the
+    // weapon (back when off the ladder), 1 = only an empty hand grabs.
+    const int gunHand = bmvr::g_LeftHanded ? 0 : 1;
+    const bool gunOut = m_HasHeldWeapon && !m_EmptyHands;
     bool touch[2]{};
     for (int h = 0; h < 2; ++h)
     {
         float d = 0.f, yaw = 0.f;
         touch[h] = valid[h] && nearestLadder(world[h], d, yaw) >= 0 && d < kTouchHu;
+        if (h == gunHand && gunOut && bmvr::g_LadderGunHand >= 0.5f && !(grip[h] && s_prevGrip[h] && h == s_climbHand))
+            touch[h] = false;   // its grip stays the mapped action
         m_LadderTouch[h].store(touch[h], std::memory_order_release);
     }
 
-    const ULONGLONG now = GetTickCount64();
-    bool grip[2];
-    for (int h = 0; h < 2; ++h)
-        grip[h] = m_LadderGrip[h].load(std::memory_order_acquire) && valid[h];
     auto role = [](int h) {
         return h == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
     };
@@ -8267,6 +8279,20 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
             s_climbHand = h;
             s_anchored = false;
             PulseHandHaptic(role(h), 1500, 0.4f);
+            if (h == gunHand && gunOut)
+            {
+                m_EmptyHands = true;
+                s_autoHolstered = true;
+                Game::logMsg("Ladder grab: weapon holstered for the climb");
+            }
+            // Put the hand on the nearest rung of the ladder props.
+            Vector onRung{};
+            float rungDist = 0.f;
+            m_LadderPin[h].valid = bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungSnapHu, onRung, &rungDist);
+            m_LadderPin[h].world = onRung;
+            if (m_LadderPin[h].valid)
+                Game::logMsg("Ladder grab: %s hand on a rung %.1f units away (%.0f,%.0f,%.0f)",
+                    h == 0 ? "left" : "right", rungDist, onRung.x, onRung.y, onRung.z);
             if (!onLadder && s_mountUntil == 0)
             {
                 // Mount like a +use at the ladder: HL2's LadderMove mounts
@@ -8285,7 +8311,35 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         }
     }
     for (int h = 0; h < 2; ++h)
+    {
         s_prevGrip[h] = grip[h];
+        // A hand lets go of its rung on release, or when it is pulled far
+        // off it (the other hand climbing with this one still squeezed).
+        if (m_LadderPin[h].valid && (!grip[h] || !valid[h]
+            || (world[h] - m_LadderPin[h].world).LengthSqr() > kRungLeaveHu * kRungLeaveHu))
+            m_LadderPin[h].valid = false;
+    }
+    // Holstered for the climb: the weapon comes back once off the ladder
+    // (300 ms, so mounting does not flicker it), unless the player took
+    // another weapon or empty hands meanwhile.
+    if (s_autoHolstered)
+    {
+        if (!m_EmptyHands)
+            s_autoHolstered = false;
+        else if (!onLadder && s_climbHand < 0 && s_mountUntil == 0)
+        {
+            if (!s_offLadderSince)
+                s_offLadderSince = now;
+            else if (now - s_offLadderSince > 300)
+            {
+                m_EmptyHands = false;
+                s_autoHolstered = false;
+                Game::logMsg("Ladder: off the ladder, weapon back");
+            }
+        }
+        else
+            s_offLadderSince = 0;
+    }
     if (s_climbHand >= 0 && !grip[s_climbHand])
     {
         // Let go: the other hand takes over if it still holds the ladder.
@@ -12451,6 +12505,8 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
             s.rightPos = snapPos;
             s.rightAng = snapAng;
         }
+        TryGetLadderPinDrawPos(true, s.body, s.leftPos);
+        TryGetLadderPinDrawPos(false, s.body, s.rightPos);
     }
     GetViewBasis(&s.fwd, &s.right, &s.up);
     s.eyeOrig[0] = GetViewOrigin(s.body);
@@ -12541,6 +12597,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             rightPos = snapPos;
             rightAng = snapAng;
         }
+        TryGetLadderPinDrawPos(true, body, leftPos);
+        TryGetLadderPinDrawPos(false, body, rightPos);
     }
     const HandDrawSnap* snap = t_HandSnap;
     if (snap)
@@ -14854,6 +14912,23 @@ bool VR::TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QA
         return false;
     trackingPos = m_TwoHandDrawPos;
     trackingAng = m_TwoHandDrawAng;
+    return true;
+}
+
+bool VR::TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& trackingPos) const
+{
+    // Hand on a rung: draw the glove there. The world shift from the
+    // controller to the rung, turned back into tracking space (tracking
+    // deltas map 1:1 onto the world, rotated by the turn yaw).
+    const LadderPin& pin = m_LadderPin[physicalLeft ? 0 : 1];
+    if (!pin.valid || !bmvr::g_PhysicalLadders)
+        return false;
+    const Vector handWorld = ControllerTrackingToWorld(body, trackingPos);
+    Vector d = pin.world - handWorld;
+    if (d.LengthSqr() > 32.f * 32.f)
+        return false;
+    PivotYaw(d, -m_RotationOffsetY.load(std::memory_order_acquire));
+    trackingPos += d;
     return true;
 }
 
