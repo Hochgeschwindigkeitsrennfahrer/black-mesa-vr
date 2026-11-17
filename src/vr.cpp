@@ -9669,6 +9669,7 @@ void VR::FlushPendingGameUi()
 {
     FlushPendingQuit();
     ExecVrConfigsOnce();
+    TickWindowFocus();
     FlushPanelEngineCommands();
     FlushCaptureEngineState();
     TickRestoreView();
@@ -10531,6 +10532,45 @@ void VR::NoteAppActivated(bool activated)
     Game::logMsg("App %s (WM_ACTIVATEAPP); %s OpenXR copies while GameUI is up",
         activated ? "activated" : "deactivated",
         activated ? "resume" : "skip");
+}
+
+void VR::TickWindowFocus()
+{
+    if (!m_Game || !m_IsVREnabled)
+        return;
+    static DWORD s_lastPollMs;
+    static int s_focused = -1;          // -1 unknown, 0 other app, 1 game
+    static bool s_releasePending;
+    static DWORD s_releaseAtMs;
+    const DWORD now = GetTickCount();
+    if (s_lastPollMs != 0 && now - s_lastPollMs < 50)
+        return;
+    s_lastPollMs = now;
+    HWND game = bmvr::GameWindow();
+    if (!game)
+        return;
+    HWND fg = GetForegroundWindow();
+    const int focused = fg == game ? 1 : 0;
+    if (focused != s_focused)
+    {
+        if (s_focused != -1)
+            Game::logMsg("Game window %s (foreground=%p game=%p)",
+                focused ? "back in the foreground" : "lost the foreground", (void*)fg, (void*)game);
+        s_focused = focused;
+        // Release on the way out too, then again once the refocusing click
+        // has been delivered (its press arrives just after the switch).
+        s_releasePending = true;
+        s_releaseAtMs = focused ? now + 300 : now;
+    }
+    if (s_releasePending && (int)(now - s_releaseAtMs) >= 0)
+    {
+        s_releasePending = false;
+        // No key number: the engine treats it like the console command and
+        // clears both held keys of the button. VR fire bits are set per
+        // usercmd from the controllers and are not affected.
+        const bool ok = m_Game->ClientCmd_Unrestricted("-attack; -attack2");
+        Game::logMsg("Focus change: released +attack/+attack2 ok=%d", ok ? 1 : 0);
+    }
 }
 
 bool VR::IsMenuUp() const

@@ -1258,6 +1258,11 @@ public:
     // WM_ACTIVATEAPP. Default true so the first frames publish before any
     // activate message. Alt-tab sets false.
     void NoteAppActivated(bool activated);
+    // Game thread, once per RenderView. Logs foreground changes of the game
+    // window and releases +attack/+attack2 after it comes back: the click
+    // that refocuses the window could latch the engine's mouse1 bind
+    // (fire held until restart, 2026-11-17).
+    void TickWindowFocus();
     bool AppActivated() const { return m_AppActivated.load(std::memory_order_relaxed); }
     // Called from the window proc before the engine's own handler, and once
     // per RenderView. No-op unless a focus transition left sound stuck.

@@ -2157,6 +2157,7 @@ Hooks::Hooks(Game* game)
     enableIfReady(hkCalcViewModelView, "CalcViewModelView");
     enableIfReady(hkGetViewModelFOV, "GetViewModelFOV");
     enableIfReady(hkGetCursorPos, "GetCursorPos");
+    enableIfReady(hkSetCursorPos, "SetCursorPos");
     enableIfReady(hkEndFrame, "EndFrame");
     enableIfReady(hkTraceRay, "TraceRay");
 }
@@ -2191,7 +2192,13 @@ int Hooks::initSourceHooks()
     // Re-enabled 2026-10-17: the phantom clicks that got it switched off in
     // 4d77b7f came from Steam Input, not from this hook.
     if (HMODULE user32 = GetModuleHandleA("user32.dll"))
+    {
         hkGetCursorPos.createHook((LPVOID)GetProcAddress(user32, "GetCursorPos"), &dGetCursorPos);
+        // The engine's mouse look re-centres the cursor every frame. Under
+        // Wine that warp lands while the pointer is over the game window even
+        // when another app has focus: hovering the window traps the cursor.
+        hkSetCursorPos.createHook((LPVOID)GetProcAddress(user32, "SetCursorPos"), &dSetCursorPos);
+    }
     if (o.AdjustEngineViewport.valid)
         hkAdjustEngineViewport.createHook((LPVOID)o.AdjustEngineViewport.address, &dAdjustEngineViewport);
     if (o.Viewport.valid)
@@ -8481,6 +8488,23 @@ BOOL WINAPI Hooks::dGetCursorPos(LPPOINT point)
         m_VR->m_CursorHookPassSec.fetch_add(1, std::memory_order_relaxed);
     }
     return hkGetCursorPos.fOriginal ? hkGetCursorPos.fOriginal(point) : FALSE;
+}
+
+BOOL WINAPI Hooks::dSetCursorPos(int x, int y)
+{
+    // Never move the pointer while the game window is not in the foreground
+    // (alt-tabbed): the VR menu pointer goes through the GetCursorPos hook
+    // and needs no real warp then.
+    HWND game = bmvr::GameWindow();
+    if (m_VR && m_VR->m_IsVREnabled && game && GetForegroundWindow() != game)
+    {
+        static std::atomic<unsigned> s_blocked{ 0 };
+        const unsigned n = s_blocked.fetch_add(1, std::memory_order_relaxed);
+        if (n < 3 || (n & (n - 1)) == 0)
+            Game::logMsg("SetCursorPos(%d,%d) skipped: game window not in the foreground (%u so far)", x, y, n + 1);
+        return TRUE;
+    }
+    return hkSetCursorPos.fOriginal ? hkSetCursorPos.fOriginal(x, y) : FALSE;
 }
 
 float __fastcall Hooks::dGetViewModelFOV(void* ecx, void* edx)
