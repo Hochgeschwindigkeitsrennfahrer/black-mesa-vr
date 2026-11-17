@@ -10,6 +10,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 struct L4D2VROpenXrInputStateDesc;
 
@@ -86,6 +88,18 @@ namespace bmvr
     void SetBind(uint32_t family, int hand, BindInput input, bool hold, BindAction a,
         std::string& configKey, std::string& configValue);
     void ResetBinds(uint32_t family);
+
+    // Presets (VR panel): 0 = the defaults; others change a few slots on top
+    // of them. Applied to one controller family.
+    int BindPresetCount();
+    const char* BindPresetName(int index);
+    bool BindPresetUsable(int index, uint32_t family); // its buttons exist on that controller
+    int MatchBindPreset(uint32_t family);               // -1 = custom
+    void ApplyBindPreset(uint32_t family, int index);
+    // Every Bind.<family>.* slot key with its config value ("" = at the
+    // default: remove the key), for the panel's save on close.
+    void CollectBindConfig(uint32_t family, std::vector<std::pair<std::string, std::string>>& set,
+        std::vector<std::string>& drop);
 
     struct ButtonMapContext
     {

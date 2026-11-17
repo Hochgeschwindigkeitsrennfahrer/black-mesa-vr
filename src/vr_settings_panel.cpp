@@ -16,6 +16,7 @@
 #include "bmvr_flags.h"
 #include "d3d9_vr.h"
 #include "bmvr_cvars.h"
+#include "vr_button_map.h"
 
 #include <algorithm>
 #include <cmath>
@@ -79,7 +80,13 @@ namespace
     // Preset: no value of its own; fmt names a table in Presets() that sets
     // several rows at once. Shows the matching preset's name ("Custom" if none
     // matches), a click applies the next one. Never saved (the values are).
-    enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection, Preset };
+    // Bind: one controller button (fmt "L.face1", "R.face2.hold"); label and value
+    // come from the detected controller and the button map; a click opens the
+    // action picker. ColumnBreak: the rows after it go to the right column
+    // (BUTTONS tab: left / right controller). BindPreset: like Preset, for the
+    // button-map presets (vr_button_map.h).
+    enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection, Preset,
+        Bind, ColumnBreak, BindPreset };
     bool IsHeading(RowKind k) { return k == RowKind::Section || k == RowKind::DevSection; }
 
     struct Row
@@ -107,16 +114,12 @@ namespace
             { "Smooth turn speed", RowKind::Number, "TurnSpeed", nullptr, &bmvr::g_TurnSpeed, 0.05f, 0.05f, 1.f, "%.2f" },
             { "MOVEMENT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Crouch only while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
-            { "Jump/crouch stick distance", RowKind::Number, "StickJumpCrouchThreshold", nullptr, &bmvr::g_StickJumpCrouchThreshold, 0.05f, 0.3f, 0.95f, "%.2f" },
-            { "Jump/crouch stick angle", RowKind::Number, "StickJumpCrouchAngle", nullptr, &bmvr::g_StickJumpCrouchAngle, 5.f, 10.f, 45.f, "%.0f\xB0" },
-            { "Turning blocks jump/crouch", RowKind::Toggle, "TurnBlocksJumpCrouch", &bmvr::g_TurnBlocksJumpCrouch, nullptr, 0, 0, 0, nullptr },
             { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
             { "GRAB GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip: left save, right crowbar", RowKind::Toggle, "ShoulderGestures", &bmvr::g_ShoulderGestures, nullptr, 0, 0, 0, nullptr },
             { "Grip at hips: pistol / MP5", RowKind::Toggle, "HipGestures", &bmvr::g_HipGestures, nullptr, 0, 0, 0, nullptr },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
-            { "Left square toggles light", RowKind::Toggle, "FlashlightOnSquare", &bmvr::g_FlashlightOnSquare, nullptr, 0, 0, 0, nullptr },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
@@ -134,6 +137,44 @@ namespace
             // Glow fades and other effects run on game time: with the game
             // paused a change only shows after the panel closes.
             { "Panel pauses the game", RowKind::Toggle, "VrSettingsPause", &bmvr::g_VrSettingsPause, nullptr, 0, 0, 0, nullptr },
+            { "BUTTONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Left column = left controller, right column = right controller. Headings name
+            // the detected controller; button names follow it (A/B, Cross/Circle).
+            { "LEFT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_left" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.trigger" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.grip" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face1" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face1.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face2" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face2.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.stickclick" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.stickclick.hold" },
+            { "Stick", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Move" },
+            { "Menu button", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Pause" },
+            { "LAYOUT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Preset", RowKind::BindPreset, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Hold this long for a button's hold action; let go earlier for its press action.
+            { "Hold time", RowKind::Number, "ButtonHoldMs", nullptr, &bmvr::g_ButtonHoldMs, 50.f, 200.f, 1500.f, "%.0f ms" },
+            // Off: the fixed layout from before mapping (if a mapping ever blocks a button).
+            { "Button mapping", RowKind::Toggle, "ButtonMapping", &bmvr::g_ButtonMapping, nullptr, 0, 0, 0, nullptr },
+            { "Reset buttons to defaults", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "binds_default" },
+            { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "RIGHT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_right" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.trigger" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.grip" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face1" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face1.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face2" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face2.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickclick" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickclick.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickup" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickdown" },
+            { "Stick sideways", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Turn" },
+            { "STICK UP / DOWN", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Stick distance", RowKind::Number, "StickJumpCrouchThreshold", nullptr, &bmvr::g_StickJumpCrouchThreshold, 0.05f, 0.3f, 0.95f, "%.2f" },
+            { "Stick angle", RowKind::Number, "StickJumpCrouchAngle", nullptr, &bmvr::g_StickJumpCrouchAngle, 5.f, 10.f, 45.f, "%.0f\xB0" },
+            { "Turning blocks up/down", RowKind::Toggle, "TurnBlocksJumpCrouch", &bmvr::g_TurnBlocksJumpCrouch, nullptr, 0, 0, 0, nullptr },
             { "HANDS & WEAPONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
@@ -329,7 +370,126 @@ namespace
         return rows;
     }
 
-    int RowHeight(const Row& r) { return IsHeading(r.kind) ? kSectionPx : kRowPx; }
+    int RowHeight(const Row& r)
+    {
+        if (r.kind == RowKind::ColumnBreak)
+            return 0;
+        return IsHeading(r.kind) ? kSectionPx : kRowPx;
+    }
+
+    // Controller the BUTTONS tab shows (VR::SetPanelController from the input state).
+    uint32_t g_PanelFamily = 0;
+    uint32_t g_PanelRaw[2] = {};
+    char g_PanelSystem[64] = {};
+    bool g_BindsChanged = false;     // saved on close (Bind.<family>.* keys)
+    int g_PickerRow = -1;            // Bind row whose action picker is open
+
+    struct BindRowSpec { int hand = 0; bmvr::BindInput input = bmvr::BindInput::Trigger; bool hold = false; bool ok = false; };
+    BindRowSpec ParseBindRow(const Row& r)
+    {
+        BindRowSpec b;
+        if (r.kind != RowKind::Bind || !r.fmt || (r.fmt[0] != 'L' && r.fmt[0] != 'R') || r.fmt[1] != '.')
+            return b;
+        b.hand = r.fmt[0] == 'L' ? 0 : 1;
+        std::string rest = r.fmt + 2;
+        const size_t dot = rest.find('.');
+        b.hold = dot != std::string::npos && rest.compare(dot + 1, std::string::npos, "hold") == 0;
+        if (dot != std::string::npos)
+            rest.resize(dot);
+        for (int i = 0; i < bmvr::kBindInputCount; ++i)
+            if (rest == bmvr::BindInputToken(static_cast<bmvr::BindInput>(i)))
+            {
+                b.input = static_cast<bmvr::BindInput>(i);
+                b.ok = true;
+            }
+        return b;
+    }
+    bool BindRowHidden(const Row& r)
+    {
+        const BindRowSpec b = ParseBindRow(r);
+        return !b.ok || !bmvr::BindInputExists(g_PanelFamily, g_PanelRaw[b.hand], b.hand, b.input);
+    }
+    std::string BindRowLabel(const Row& r)
+    {
+        const BindRowSpec b = ParseBindRow(r);
+        if (!b.ok)
+            return r.label;
+        std::string s = bmvr::BindInputLabel(g_PanelFamily, g_PanelSystem, b.hand, b.input);
+        if (b.hold)
+            s += " (hold)";
+        return s;
+    }
+    bmvr::BindAction BindRowAction(const Row& r, bool defaultOnly = false)
+    {
+        const BindRowSpec b = ParseBindRow(r);
+        const bmvr::BindSlot s = defaultOnly ? bmvr::DefaultBind(g_PanelFamily, b.hand, b.input)
+                                             : bmvr::EffectiveBind(g_PanelFamily, b.hand, b.input);
+        return b.hold ? s.hold : s.press;
+    }
+    const char* ControllerName()
+    {
+        if (L4D2VR_TextContainsI(g_PanelSystem, "PlayStation") || L4D2VR_TextContainsI(g_PanelSystem, "PS VR2"))
+            return "PS VR2 Sense";
+        switch (g_PanelFamily)
+        {
+        case L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES: return "Index";
+        case L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2: return "WMR";
+        case L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE: return "Vive";
+        case L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH: return "Touch";
+        default: return "not detected yet";
+        }
+    }
+    std::string SectionText(const Row& r)
+    {
+        if (r.fmt && std::strcmp(r.fmt, "bind_head_left") == 0)
+            return std::string("LEFT CONTROLLER (") + ControllerName() + ")";
+        if (r.fmt && std::strcmp(r.fmt, "bind_head_right") == 0)
+            return std::string("RIGHT CONTROLLER (") + ControllerName() + ")";
+        return r.label;
+    }
+    std::string BindPresetText()
+    {
+        const int i = bmvr::MatchBindPreset(g_PanelFamily);
+        return i < 0 ? "Custom" : bmvr::BindPresetName(i);
+    }
+    // Returns true when the detected controller changed (relayout + repaint).
+    bool SetPanelController(const L4D2VROpenXrInputStateDesc& in)
+    {
+        const uint32_t raw0 = in.rawHands[0].valid ? (in.rawHands[0].buttons & 0xFFFF0000u) : 0u;
+        const uint32_t raw1 = in.rawHands[1].valid ? (in.rawHands[1].buttons & 0xFFFF0000u) : 0u;
+        const bool changed = g_PanelFamily != in.reserved0 || g_PanelRaw[0] != raw0 || g_PanelRaw[1] != raw1
+            || std::strncmp(g_PanelSystem, in.systemName, sizeof(g_PanelSystem)) != 0;
+        g_PanelFamily = in.reserved0;
+        g_PanelRaw[0] = raw0;
+        g_PanelRaw[1] = raw1;
+        std::memcpy(g_PanelSystem, in.systemName, sizeof(g_PanelSystem));
+        g_PanelSystem[sizeof(g_PanelSystem) - 1] = 0;
+        return changed;
+    }
+
+    // Action picker: a grid over the content area. Cells 0..Count-1 = actions,
+    // kPickerCancel = cancel.
+    constexpr int kPickerCols = 3;
+    constexpr int kPickerCellW = 600, kPickerCellH = 76, kPickerGap = 12;
+    constexpr int kPickerCancel = 100;
+    int PickerX0() { return (kTexW - (kPickerCols * kPickerCellW + (kPickerCols - 1) * kPickerGap)) / 2; }
+    int PickerTitleY() { return kContentTop + 8; }
+    int PickerGridY() { return PickerTitleY() + 80; }
+    int PickerRows() { return (bmvr::kBindActionCount + kPickerCols - 1) / kPickerCols; }
+    int PickerCancelY() { return PickerGridY() + PickerRows() * (kPickerCellH + kPickerGap) + 16; }
+    int PickerCellAt(int px, int py)
+    {
+        if (py >= PickerCancelY() && py < PickerCancelY() + kPickerCellH && px >= kTexW / 2 - 200 && px < kTexW / 2 + 200)
+            return kPickerCancel;
+        const int gx = px - PickerX0(), gy = py - PickerGridY();
+        if (gx < 0 || gy < 0)
+            return -1;
+        const int col = gx / (kPickerCellW + kPickerGap), row = gy / (kPickerCellH + kPickerGap);
+        if (col >= kPickerCols || gx % (kPickerCellW + kPickerGap) >= kPickerCellW || gy % (kPickerCellH + kPickerGap) >= kPickerCellH)
+            return -1;
+        const int idx = row * kPickerCols + col;
+        return idx < bmvr::kBindActionCount ? idx : -1;
+    }
 
     // "Reset dev rows": every row of the DEBUG tab back to its built-in default (CapturePanelDefaults,
     // taken before config.txt), except "Show developer rows". Engine rows get console commands:
@@ -510,7 +670,8 @@ namespace
                 inDev = false;
             else if (k == RowKind::DevSection)
                 inDev = true;
-            hidden[i] = inDev && !devRows;
+            hidden[i] = (inDev && !devRows) || k == RowKind::ColumnBreak
+                || (k == RowKind::Bind && BindRowHidden(rows[i]));
         }
         const int tabW = out.tabCount > 0 ? (kTexW - 80 - (out.tabCount - 1) * kTabGapPx) / out.tabCount : 0;
         int contentBottom = kContentTop;
@@ -528,7 +689,11 @@ namespace
             for (int i = first; i < last; ++i)
                 total += hidden[i] ? 0 : RowHeight(rows[i]);
             int split = last, best = total, acc = 0;
+            int forced = -1;
             for (int i = first; i < last; ++i)
+                if (rows[i].kind == RowKind::ColumnBreak)
+                    forced = i;
+            for (int i = first; i < last && forced < 0; ++i)
             {
                 if (hidden[i])
                     continue;
@@ -543,6 +708,8 @@ namespace
                 }
                 acc += RowHeight(rows[i]);
             }
+            if (forced >= 0)
+                split = forced;
             int y[2] = { kContentTop, kContentTop };
             for (int i = first; i < last; ++i)
             {
@@ -575,7 +742,9 @@ namespace
     {
         static Layout l;
         static int s_builtFor = -1;
-        const int want = bmvr::g_PanelDevRows ? 1 : 0;
+        // Rebuilt when developer rows or the detected controller (its buttons) change.
+        const int want = (bmvr::g_PanelDevRows ? 1 : 0) | static_cast<int>(g_PanelFamily << 1)
+            | static_cast<int>(((g_PanelRaw[0] >> 16) & 0xF) << 8) | static_cast<int>(((g_PanelRaw[1] >> 16) & 0xF) << 12);
         if (s_builtFor != want)
         {
             l = BuildLayout(want != 0);
@@ -849,6 +1018,8 @@ namespace
     // Text of an Info row.
     std::string InfoText(const Row& r)
     {
+        if (r.fmt && std::strncmp(r.fmt, "fixed:", 6) == 0)
+            return std::string(r.fmt + 6) + " (fixed)";
         if (r.fmt && std::strcmp(r.fmt, "foveation") == 0)
             return bmvr::FoveationStatusText();
         if (!r.fmt || std::strcmp(r.fmt, "missing_hooks") != 0)
@@ -912,7 +1083,7 @@ namespace
             const int cw = r.kind == RowKind::Close ? c.w : kColW, mid = x + cw / 2;
             if (IsHeading(r.kind))
             {
-                c.text(r.label, x + 40, y0 + 8, x + cw - 40, y1, kAmber, 26, true, DT_LEFT);
+                c.text(SectionText(r).c_str(), x + 40, y0 + 8, x + cw - 40, y1, kAmber, 26, true, DT_LEFT);
                 if (r.kind == RowKind::DevSection)
                     c.text("developer", x + 40, y0 + 8, x + cw - 40, y1, kDim, 22, false, DT_RIGHT);
                 // 4 px: the panel is drawn minified without mipmaps, so 2 px lines dropped out.
@@ -921,6 +1092,34 @@ namespace
             }
             if (hover && r.kind != RowKind::Close)
                 c.fill(x + 16, y0 + 2, x + cw - 16, y1 - 2, kRowHover);
+            if (r.kind == RowKind::Bind || r.kind == RowKind::BindPreset)
+            {
+                // Like a Choice row: one wide button; a bind opens the action picker,
+                // the preset row applies the next preset. Changed binds in amber.
+                std::string name;
+                COLORREF ink = kText;
+                if (r.kind == RowKind::Bind)
+                {
+                    c.text(BindRowLabel(r).c_str(), x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
+                    const bmvr::BindAction a = BindRowAction(r);
+                    name = bmvr::BindActionLabel(a);
+                    if (a != BindRowAction(r, true))
+                        ink = kAmber;
+                }
+                else
+                {
+                    c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
+                    name = BindPresetText();
+                }
+                const int bx0 = x + kMinusX0 - 120;
+                c.fill(bx0, y0 + 10, x + kPlusX1, y1 - 10, hover ? kBtnHover : kBtn);
+                int fontPx = 30;
+                while (fontPx > 20 && c.textWidth(name.c_str(), fontPx, true) > (kPlusX1 - 36 - kMinusX0 + 120) - 16)
+                    fontPx -= 2;
+                c.text(name.c_str(), bx0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : ink, fontPx, true, DT_CENTER);
+                c.text(">", x + kPlusX1 - 40, y0, x + kPlusX1 - 8, y1 - 2, hover ? RGB(0, 0, 0) : kDim, 30, true, DT_CENTER);
+                continue;
+            }
             if (r.kind == RowKind::Close)
             {
                 c.fill(mid - 120, y0 + 8, mid + 120, y1 - 8, hover ? kBtnHover : kBtn);
@@ -983,6 +1182,35 @@ namespace
                 c.text("+", x + kPlusX0 + 8, y0, x + kPlusX1, y1 - 2, kText, 40, true, DT_CENTER);
                 c.text(val, x + kValueX0, y0, x + kValueX1, y1, kText, 34, true, DT_CENTER);
             }
+        }
+        // Action picker over the content area.
+        if (g_PickerRow >= 0 && g_PickerRow < static_cast<int>(rows.size()))
+        {
+            const Row& pr = rows[g_PickerRow];
+            const bmvr::BindAction cur = BindRowAction(pr), def = BindRowAction(pr, true);
+            c.fill(24, kContentTop - 8, c.w - 24, l.closeTop - 8, RGB(10, 12, 15));
+            c.fill(24, kContentTop - 8, c.w - 24, kContentTop - 4, kAmber);
+            const std::string title = std::string(pr.fmt[0] == 'L' ? "Left " : "Right ") + BindRowLabel(pr) + ":  pick an action";
+            c.text(title.c_str(), PickerX0(), PickerTitleY(), c.w - PickerX0(), PickerTitleY() + 64, kAmber, 40, true, DT_LEFT);
+            for (int a = 0; a < bmvr::kBindActionCount; ++a)
+            {
+                const int col = a % kPickerCols, row = a / kPickerCols;
+                const int cx0 = PickerX0() + col * (kPickerCellW + kPickerGap);
+                const int cy0 = PickerGridY() + row * (kPickerCellH + kPickerGap);
+                const bool hv = hoverRow == 1000 + a;
+                const bool isCur = static_cast<int>(cur) == a;
+                if (isCur)
+                    c.fill(cx0 - 4, cy0 - 4, cx0 + kPickerCellW + 4, cy0 + kPickerCellH + 4, kAmber);
+                c.fill(cx0, cy0, cx0 + kPickerCellW, cy0 + kPickerCellH, hv ? kBtnHover : kBtn);
+                std::string label = bmvr::BindActionLabel(static_cast<bmvr::BindAction>(a));
+                if (static_cast<int>(def) == a)
+                    label += " (default)";
+                c.text(label.c_str(), cx0, cy0, cx0 + kPickerCellW, cy0 + kPickerCellH, hv ? RGB(0, 0, 0) : kText, 32, true, DT_CENTER);
+            }
+            const bool hvCancel = hoverRow == 1000 + kPickerCancel;
+            const int cy = PickerCancelY();
+            c.fill(c.w / 2 - 200, cy, c.w / 2 + 200, cy + kPickerCellH, hvCancel ? kBtnHover : kOff);
+            c.text("Cancel", c.w / 2 - 200, cy, c.w / 2 + 200, cy + kPickerCellH, hvCancel ? RGB(0, 0, 0) : kText, 32, true, DT_CENTER);
         }
         c.setAlpha(238);
     }
@@ -1184,6 +1412,8 @@ void VR::OpenSettingsPanel()
     Vector yawRight = CrossProduct(yawFwd, worldUp);
     VectorNormalize(yawRight);
     const Vector eye = GetViewOrigin(body);
+    SetPanelController(m_OpenXrLastInputState);
+    g_PickerRow = -1;
     g_LatchDistHu = PanelDistanceHu();
     const Vector center = eye + yawFwd * g_LatchDistHu - worldUp * kPanelDropHu;
     // Same latching as the weapon menu: stored relative to the body and the
@@ -1225,11 +1455,15 @@ void VR::CloseSettingsPanel(const char* why)
             else
                 kv.emplace_back(r.key, FormatValue(r));
         }
+        if (g_BindsChanged)
+            bmvr::CollectBindConfig(g_PanelFamily, kv, drop);
         const bool ok = WriteConfigValues(kv, drop);
         Game::logMsg("VR settings saved to config.txt: %s (%d set, %d at default left out)",
             ok ? "ok" : "FAILED", static_cast<int>(kv.size()), static_cast<int>(drop.size()));
     }
     m_SettingsChanged = false;
+    g_BindsChanged = false;
+    g_PickerRow = -1;
     // Closed by Black Mesa's pause menu: leave the pause to that menu.
     if (m_SettingsPausedGame && !(why && std::strcmp(why, "pause") == 0))
         m_PendingPauseCmd.store(2, std::memory_order_release);
@@ -1257,6 +1491,12 @@ void VR::UpdateSettingsPanel()
     {
         CloseSettingsPanel("pause");
         return;
+    }
+    if (SetPanelController(m_OpenXrLastInputState))
+    {
+        m_SettingsDirty = true;
+        Game::logMsg("VR settings panel: controller %s (%s)", ControllerName(),
+            L4D2VR_ControllerFamilyName(g_PanelFamily));
     }
     Vector origin, fwd, right, up;
     SettingsPanelFrame(origin, fwd, right, up);
@@ -1286,10 +1526,20 @@ void VR::UpdateSettingsPanel()
                 m_SettingsHitValid = true;
                 const int px = static_cast<int>((x / kPanelWidthHu + 0.5f) * kTexW);
                 const int py = static_cast<int>((0.5f - y / PanelHeightHu()) * TexH());
-                const int r = RowAt(px, py);
+                const int r = g_PickerRow >= 0 ? -1 : RowAt(px, py);
                 hitPx = px;
                 hitPy = py;
-                if (r >= 0)
+                if (g_PickerRow >= 0)
+                {
+                    // Picker open: hover = 1000 + cell (action index or kPickerCancel).
+                    const int cell = PickerCellAt(px, py);
+                    if (cell >= 0)
+                    {
+                        row = 1000 + cell;
+                        zone = 1;
+                    }
+                }
+                else if (r >= 0)
                 {
                     row = r;
                     // -/+ zones only on number rows; elsewhere the zone
@@ -1326,14 +1576,43 @@ void VR::UpdateSettingsPanel()
         vr::InputAnalogActionData_t trig{};
         const bool haveTrig = GetAnalogActionData(m_ActionPrimaryAttack, trig);
         Game::logMsg("VR settings trigger %s: row %d (%s) zone %d at %d,%d tab %d trigger %.2f",
-            click ? "press" : "release", row, row >= 0 ? Rows()[row].label : "-", zone, hitPx, hitPy, g_Tab,
+            click ? "press" : "release", row,
+            row >= 1000 ? "picker" : row >= 0 ? (Rows()[row].kind == RowKind::Bind ? Rows()[row].fmt : Rows()[row].label) : "-",
+            zone, hitPx, hitPy, g_Tab,
             haveTrig ? trig.x : -1.f);
     }
     m_SettingsClickHeld = click;
     m_SettingsBackHeld = back;
+    if (backEdge && g_PickerRow >= 0)
+    {
+        g_PickerRow = -1;
+        m_SettingsDirty = true;
+        return;
+    }
     if (backEdge)
     {
         CloseSettingsPanel("circle");
+        return;
+    }
+    if (g_PickerRow >= 0)
+    {
+        if (!clickEdge)
+            return;
+        const int cell = row >= 1000 ? row - 1000 : -1;
+        if (cell >= 0 && cell < bmvr::kBindActionCount)
+        {
+            const BindRowSpec b = ParseBindRow(Rows()[g_PickerRow]);
+            std::string key, value;
+            bmvr::SetBind(g_PanelFamily, b.hand, b.input, b.hold, static_cast<bmvr::BindAction>(cell), key, value);
+            g_BindsChanged = true;
+            m_SettingsChanged = true;
+            Game::logMsg("VR settings: %s = %s", key.c_str(), value.empty() ? "(default)" : value.c_str());
+            PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
+        }
+        // An action, Cancel or a click beside the grid closes the picker.
+        g_PickerRow = -1;
+        m_SettingsHover = -1;
+        m_SettingsDirty = true;
         return;
     }
     // Holding the trigger on a number row's -/+ repeats the step: first repeat
@@ -1379,7 +1658,34 @@ void VR::UpdateSettingsPanel()
     case RowKind::Section:
     case RowKind::DevSection:
     case RowKind::Info:
+    case RowKind::ColumnBreak:
         return;
+    case RowKind::Bind:
+        g_PickerRow = row;
+        m_SettingsHover = -1;
+        m_SettingsDirty = true;
+        PulseHandHaptic(vr::TrackedControllerRole_RightHand, 500, 0.25f);
+        Game::logMsg("VR settings: picker for %s", r.fmt);
+        return;
+    case RowKind::BindPreset:
+    {
+        // Next usable preset; "Custom" goes back to the defaults (0).
+        const int cur = bmvr::MatchBindPreset(g_PanelFamily);
+        int next = 0;
+        if (cur >= 0)
+            for (int k = 1; k <= bmvr::BindPresetCount(); ++k)
+            {
+                const int cand = (cur + k) % bmvr::BindPresetCount();
+                if (bmvr::BindPresetUsable(cand, g_PanelFamily))
+                {
+                    next = cand;
+                    break;
+                }
+            }
+        bmvr::ApplyBindPreset(g_PanelFamily, next);
+        g_BindsChanged = true;
+        break;
+    }
     case RowKind::Preset:
     {
         const PresetSet* p = FindPresetSet(r.fmt);
@@ -1433,6 +1739,12 @@ void VR::UpdateSettingsPanel()
             bmvr::g_HandHudSide = 0.3f;
             bmvr::g_HandHudTilt = -18.f;
             bmvr::g_HandHudRoll = 14.f;
+            break;
+        }
+        if (r.fmt && std::strcmp(r.fmt, "binds_default") == 0)
+        {
+            bmvr::ResetBinds(g_PanelFamily);
+            g_BindsChanged = true;
             break;
         }
         if (r.fmt && std::strcmp(r.fmt, "dev_default") == 0)
@@ -1550,7 +1862,7 @@ void VR::UpdateSettingsPanel()
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
     if (r.kind == RowKind::Button)
         Game::logMsg("VR settings: %s pressed", r.label);
-    else if (r.kind == RowKind::Preset)
+    else if (r.kind == RowKind::Preset || r.kind == RowKind::BindPreset)
         ;   // logged with the preset name above
     else
         Game::logMsg("VR settings: %s = %s", r.label, FormatValue(r).c_str());
@@ -1589,6 +1901,39 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
         if (c.ok())
         {
             Paint(c, m_SettingsHover, m_SettingsHoverZone);
+            // Test only: BMVR_TEST_PANEL_DUMP=1 saves every repaint as
+            // VR/panel-tab<N>[-picker].bmp (full size, for screenshots).
+            static int s_dumpPanel = -1;
+            if (s_dumpPanel < 0)
+            {
+                char v[8]{};
+                s_dumpPanel = GetEnvironmentVariableA("BMVR_TEST_PANEL_DUMP", v, sizeof(v)) && v[0] == '1' ? 1 : 0;
+            }
+            if (s_dumpPanel == 1)
+            {
+                GdiFlush();
+                char name[64]{};
+                _snprintf(name, sizeof(name) - 1, "panel-tab%d%s.bmp", g_Tab, g_PickerRow >= 0 ? "-picker" : "");
+                if (FILE* f = std::fopen(bmvr::VrFilePath(name).c_str(), "wb"))
+                {
+                    BITMAPFILEHEADER fh{};
+                    BITMAPINFOHEADER ih{};
+                    ih.biSize = sizeof(ih);
+                    ih.biWidth = c.w;
+                    ih.biHeight = -c.h;
+                    ih.biPlanes = 1;
+                    ih.biBitCount = 32;
+                    ih.biCompression = BI_RGB;
+                    const DWORD bytes = static_cast<DWORD>(c.w) * c.h * 4u;
+                    fh.bfType = 0x4D42;
+                    fh.bfOffBits = sizeof(fh) + sizeof(ih);
+                    fh.bfSize = fh.bfOffBits + bytes;
+                    std::fwrite(&fh, sizeof(fh), 1, f);
+                    std::fwrite(&ih, sizeof(ih), 1, f);
+                    std::fwrite(c.px, 1, bytes, f);
+                    std::fclose(f);
+                }
+            }
             if (g_Gfx.w != c.w || g_Gfx.h != c.h)
             {
                 if (g_Gfx.sys) { g_Gfx.sys->Release(); g_Gfx.sys = nullptr; }

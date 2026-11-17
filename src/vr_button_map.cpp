@@ -294,6 +294,108 @@ namespace bmvr
             it = it->first.compare(0, prefix.size(), prefix) == 0 ? g_BindOverrides.erase(it) : std::next(it);
     }
 
+    namespace
+    {
+        struct PresetEntry { int hand; BindInput input; bool hold; BindAction action; };
+        struct BindPreset { const char* name; bool needsFaces; std::vector<PresetEntry> entries; };
+        const std::vector<BindPreset>& BindPresets()
+        {
+            static const std::vector<BindPreset> presets = {
+                // = HL2VR's own Touch defaults (trigger fire, A eject/reload, B
+                // alt-fire, stick click weapons, stick up/down jump/crouch,
+                // left stick click sprint, Y menu).
+                { "Default (HL2VR style)", false, {} },
+                // Jump on a button instead of the stick (upstream issue #16 asked
+                // for it): stick up does nothing, so turning never jumps.
+                { "Jump on A / Cross", true, {
+                    { 1, BindInput::Face1, false, BindAction::Jump },
+                    { 1, BindInput::Face2, false, BindAction::Reload },
+                    { 1, BindInput::Face2, true, BindAction::AltFire },
+                    { 1, BindInput::StickUp, false, BindAction::Nothing } } },
+            };
+            return presets;
+        }
+
+        BindSlot PresetSlot(const BindPreset& p, uint32_t family, int hand, BindInput input)
+        {
+            BindSlot s = DefaultBind(family, hand, input);
+            for (const PresetEntry& e : p.entries)
+            {
+                if (e.hand != hand || e.input != input)
+                    continue;
+                (e.hold ? s.hold : s.press) = e.action;
+            }
+            return s;
+        }
+
+        bool FamilyHasFaces(uint32_t family)
+        {
+            family = StorageFamily(family);
+            return family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES;
+        }
+    }
+
+    int BindPresetCount() { return static_cast<int>(BindPresets().size()); }
+
+    const char* BindPresetName(int index)
+    {
+        return (index >= 0 && index < BindPresetCount()) ? BindPresets()[index].name : "Custom";
+    }
+
+    bool BindPresetUsable(int index, uint32_t family)
+    {
+        return index >= 0 && index < BindPresetCount() && (!BindPresets()[index].needsFaces || FamilyHasFaces(family));
+    }
+
+    int MatchBindPreset(uint32_t family)
+    {
+        for (int i = 0; i < BindPresetCount(); ++i)
+        {
+            if (!BindPresetUsable(i, family))
+                continue;
+            bool match = true;
+            for (int hand = 0; hand < kBindHands && match; ++hand)
+                for (int in = 0; in < kBindInputCount && match; ++in)
+                {
+                    const BindSlot want = PresetSlot(BindPresets()[i], family, hand, static_cast<BindInput>(in));
+                    const BindSlot have = EffectiveBind(family, hand, static_cast<BindInput>(in));
+                    match = want.press == have.press && want.hold == have.hold;
+                }
+            if (match)
+                return i;
+        }
+        return -1;
+    }
+
+    void ApplyBindPreset(uint32_t family, int index)
+    {
+        if (!BindPresetUsable(index, family))
+            return;
+        ResetBinds(family);
+        std::string key, value;
+        for (const PresetEntry& e : BindPresets()[index].entries)
+            SetBind(family, e.hand, e.input, e.hold, e.action, key, value);
+        Game::logMsg("Button map: preset '%s' (%s)", BindPresets()[index].name,
+            L4D2VR_ControllerFamilyName(StorageFamily(family)));
+    }
+
+    void CollectBindConfig(uint32_t family, std::vector<std::pair<std::string, std::string>>& set,
+        std::vector<std::string>& drop)
+    {
+        std::lock_guard<std::mutex> lock(g_BindMutex);
+        for (int hand = 0; hand < kBindHands; ++hand)
+            for (int in = 0; in < kBindInputCount; ++in)
+                for (int hold = 0; hold < 2; ++hold)
+                {
+                    const std::string k = SlotKey(family, hand, static_cast<BindInput>(in), hold != 0);
+                    auto it = g_BindOverrides.find(k);
+                    if (it == g_BindOverrides.end())
+                        drop.push_back("Bind." + k);
+                    else
+                        set.emplace_back("Bind." + k, BindActionToken(it->second));
+                }
+    }
+
     bool ButtonMapper::RawAvailable(const L4D2VROpenXrInputStateDesc& in)
     {
         return in.rawHands[0].valid != 0 || in.rawHands[1].valid != 0;
