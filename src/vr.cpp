@@ -8153,6 +8153,7 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     static ULONGLONG s_mountUntil = 0;
     static bool s_mountUseSent = false;
     static float s_mountYaw = 0.f;
+    static ULONGLONG s_dropAt = 0;   // both hands let go: fall off at this time
 
     auto clearTouch = [&]() {
         m_LadderTouch[0].store(false, std::memory_order_release);
@@ -8288,7 +8289,25 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
             s_anchored = false;
         }
         else
+        {
             s_climbHand = -1;
+            // Both hands off: fall off like HL2VR (any grip without a
+            // ladder dismount there). A short grace lets a hand-over where
+            // the new hand grabs a moment late keep the ladder.
+            if (onLadder)
+                s_dropAt = now + 200;
+        }
+    }
+    if (s_climbHand >= 0 || !onLadder)
+        s_dropAt = 0;
+    if (s_dropAt)
+    {
+        if (now < s_dropAt)
+            return true;   // hold still meanwhile (no stick climbing)
+        s_dropAt = 0;
+        out.drop = true;
+        Game::logMsg("Ladder grab: both hands let go -> off the ladder");
+        return true;
     }
 
     if (s_mountUntil)

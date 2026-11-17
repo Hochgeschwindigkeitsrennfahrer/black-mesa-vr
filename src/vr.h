@@ -949,6 +949,7 @@ public:
     {
         bool onLadder = false;
         bool useEdge = false;   // send IN_USE this tick (mount)
+        bool drop = false;      // let go of the ladder (IN_USE on it, view straight down)
         float yaw = 0.f;        // view yaw towards the ladder while mounting
         int dir = 0;
     };
