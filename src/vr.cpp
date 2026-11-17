@@ -21042,6 +21042,20 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // is seated (it keeps the ammo count and the reserve the game's own).
     buttons &= ~IN_RELOAD;
     const int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
+    const int reserve = m_Game ? m_Game->ReadWeaponReserve(m_Game->GetActiveWeaponEntity()) : -1;
+    // Rounds the game still holds for this gun (its own magazine count, kept
+    // through the hands' swaps, plus the reserve): a new magazine/shell only
+    // comes off the hip while there are any (user: manual reloads used no ammo).
+    const int gameRounds = (clip >= 0 && reserve >= 0) ? clip + reserve : -1;
+    auto outOfAmmo = [&](const char* what) {
+        static DWORD s_buzzMs = 0;
+        if (now - s_buzzMs > 400)
+        {
+            s_buzzMs = now;
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 800, 0.4f);
+            Game::logMsg("Mag reload: no %s at the hip (clip %d, reserve %d)", what, clip, reserve);
+        }
+    };
     auto sound = [&](const char* wav) {
         if (wav && m_Game)
             m_Game->PlayUiSound(wav);
@@ -21114,6 +21128,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_boltFull = false;
             Game::logMsg("Mag reload: shotgun pump grabbed (%s)", latchedPump ? "latched support hand" : "grip held");
         }
+        else if (!boltGrab && gripEdge && w.mag != kInHand && w.shells < def.maxClip && atLeftHip()
+            && gameRounds >= 0 && w.shells >= gameRounds)
+            outOfAmmo("shell");
         else if (!boltGrab && gripEdge && w.mag != kInHand && w.shells < def.maxClip && atLeftHip())
         {
             w.mag = kInHand;
@@ -21160,11 +21177,13 @@ void VR::UpdateMagReload(uint32_t& buttons)
             if (s_boltFull && pull <= 0.15f)
             {
                 s_boltFull = false;
-                if (w.needPump)
-                    Game::logMsg("Mag reload: shotgun pumped (%d in the tube)", w.shells);
-                w.needPump = false;
+                // An empty tube chambers nothing: still needs a pump once
+                // shells are in (user).
+                w.needPump = w.shells <= 0;
+                Game::logMsg("Mag reload: shotgun pumped (%d in the tube, chambered %d)", w.shells, w.needPump ? 0 : 1);
                 // Pumped: the pump locks forward again.
-                boltGrab = false;
+                if (!w.needPump)
+                    boltGrab = false;
             }
             if (!handOnPump || (!latchedPump && released))
             {
@@ -21178,7 +21197,11 @@ void VR::UpdateMagReload(uint32_t& buttons)
         if (!canFire)
         {
             if (attack && !s_attackWas)
+            {
                 sound(def.emptyClick);
+                if (w.shells > 0 && w.needPump)
+                    ShowToast("PUMP IT", 2000, "back and forward with the left hand");
+            }
             buttons &= ~(IN_ATTACK | IN_ATTACK2);
         }
         else if (w.shells < 2)
@@ -21238,7 +21261,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_phase = 2;
         else if (s_phase == 2)
             scrub(0.5f, 0.5f, 1.f);
-        if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip())
+        if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip() && gameRounds == 0)
+            outOfAmmo("speed loader");
+        else if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip())
         {
             w.mag = kInHand;
             PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
@@ -21310,6 +21335,13 @@ void VR::UpdateMagReload(uint32_t& buttons)
         Game::logMsg("Mag reload: %s ejected (clip %d, chambered %d)", def.name, clip, w.chambered ? 1 : 0);
     }
     // Bolt / slide: left grip at it, pull back, let go.
+    else if (boltGrab && gripEdge && bmvr::g_TwoHandGripToggle)
+    {
+        // Toggle hold: a second squeeze lets go of the bolt/slide.
+        boltGrab = false;
+        s_boltFull = false;
+        Game::logMsg("Mag reload: %s bolt let go", def.name);
+    }
     else if (!boltGrab && gripEdge && w.mag != kInHand && !w.chambered && g_NearBolt.load())
     {
         boltGrab = true;
@@ -21317,6 +21349,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 1500, 0.5f);
         Game::logMsg("Mag reload: %s bolt grabbed", def.name);
     }
+    else if (w.mag == kEmpty && gripEdge && atLeftHip() && gameRounds == 0)
+        outOfAmmo("magazine");
     else if (w.mag == kEmpty && gripEdge && atLeftHip())
     {
         w.mag = kInHand;
@@ -21347,22 +21381,21 @@ void VR::UpdateMagReload(uint32_t& buttons)
     if (boltGrab)
     {
         const float pull = g_BoltPull.load();
-        if (pull >= 0.85f && !s_boltFull)
+        if (pull >= 0.85f)
         {
-            s_boltFull = true;
-            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2000, 0.6f);
+            // Pulled fully back: it springs forward on its own (no need to
+            // let go, so toggle hold works). A loaded magazine chambers a
+            // round; without one it only cycles (and closes a locked slide).
+            boltGrab = false;
+            s_boltFull = false;
+            w.chambered = (w.mag == kLoaded) && clip > 0;
+            sound(def.boltSound);
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.8f);
+            Game::logMsg("Mag reload: %s bolt pulled back, chambered %d", def.name, w.chambered ? 1 : 0);
         }
-        if (released)
+        else if (released && !bmvr::g_TwoHandGripToggle)
         {
             boltGrab = false;
-            if (s_boltFull)
-            {
-                // A pull with a loaded magazine chambers a round; without one
-                // it only cycles the action (and closes a locked slide).
-                w.chambered = (w.mag == kLoaded) && clip > 0;
-                sound(def.boltSound);
-                Game::logMsg("Mag reload: %s bolt released, chambered %d", def.name, w.chambered ? 1 : 0);
-            }
             s_boltFull = false;
         }
     }
@@ -21372,7 +21405,13 @@ void VR::UpdateMagReload(uint32_t& buttons)
     if (!canFire)
     {
         if (attack && !s_attackWas)
+        {
             sound(def.emptyClick);
+            // Loaded but nothing chambered: the step people miss.
+            if (w.mag == kLoaded && !w.chambered && clip > 0)
+                ShowToast(weapon == kWeaponGlock ? "RACK THE SLIDE" : "PULL THE CHARGING HANDLE", 2000,
+                    "left grip on it, pull back");
+        }
         buttons &= ~IN_ATTACK;
     }
     if (s_pulseReload)

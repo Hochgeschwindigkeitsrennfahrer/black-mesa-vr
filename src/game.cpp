@@ -1338,6 +1338,28 @@ C_BaseEntity* Game::FindEntityByNetworkNameContains(const char* token)
     return nullptr;
 }
 
+int Game::ReadWeaponReserve(C_BaseEntity* weapon)
+{
+    if (!weapon)
+        return -1;
+    if (!g_nvScanned)
+        ScanWristHudNetVars();
+    C_BaseEntity* player = GetLocalPlayerEntity();
+    if (!player || g_nvAmmoBase < 0 || g_nvPrimaryAmmoType < 0)
+        return -1;
+    BMVR_TRY
+    {
+        const int type = *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(weapon) + g_nvPrimaryAmmoType);
+        if (type < 0 || type >= 32)
+            return -1;
+        return *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(player) + g_nvAmmoBase + 4 * type);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1;
+    }
+}
+
 int Game::ReadWeaponClip(C_BaseEntity* weapon)
 {
     if (!weapon)

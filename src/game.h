@@ -132,6 +132,8 @@ public:
     // reads a value that is not 0 or 1. Returns -1 when unavailable.
     int ReadPlayerFlagByte(int& offset);
     int ReadWeaponClip(C_BaseEntity* weapon);
+    // The local player's reserve of the weapon's primary ammo (-1 = unknown).
+    int ReadWeaponReserve(C_BaseEntity* weapon);
     bool WeaponHasNoAmmo(C_BaseEntity* weapon);
     // m_nBody (bodygroups) of a client entity; -1 if unknown.
     int ReadEntityBody(void* entity);
