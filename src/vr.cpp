@@ -14422,8 +14422,12 @@ void VR::ApplyTwoHandWeaponAim()
     }
     else if ((bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
         && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kInHand
-        && !MagReload::g_BoltGrab.load(std::memory_order_relaxed)
-        && !(MagReload::g_NeedRack.load(std::memory_order_relaxed) && MagReload::g_NearBolt.load(std::memory_order_relaxed)))
+        // Toggle hold on the shotgun: the latched support hand works the
+        // pump (UpdateMagReload), so a squeeze on a pump that needs racking
+        // latches as usual instead of being a held pump grab.
+        && (MagReload::PumpFollowsLatch()
+            || (!MagReload::g_BoltGrab.load(std::memory_order_relaxed)
+                && !(MagReload::g_NeedRack.load(std::memory_order_relaxed) && MagReload::g_NearBolt.load(std::memory_order_relaxed)))))
     {
         bool onPoint = pistol
             ? (distToGrip < enterR)
@@ -20652,6 +20656,13 @@ std::atomic<bool> MagReload::g_ScrubActive{ false };
 std::atomic<bool> MagReload::g_NearWell{ false };
 std::atomic<bool> MagReload::g_NearBolt{ false };
 std::atomic<float> MagReload::g_BoltPull{ 0.f };
+std::atomic<float> MagReload::g_LeftPalmLocal[3]{};
+std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
+
+bool MagReload::PumpFollowsLatch()
+{
+    return bmvr::g_TwoHandGripToggle && g_Weapon.load(std::memory_order_relaxed) == kWeaponShotgun;
+}
 
 const MagReload::WeaponDef& MagReload::Def(int weapon)
 {
@@ -20843,7 +20854,18 @@ void VR::UpdateMagReload(uint32_t& buttons)
             w.shells = (std::max)(0, w.shells - (w.lastClip - clip));
             w.needPump = true;
         }
-        if (!boltGrab && gripEdge && w.mag != kInHand && (TwoHandGripActive() || g_NearBolt.load()))
+        // Toggle hold: the latched support hand is on the pump the whole
+        // time, so it pumps by moving, without a held squeeze (the squeeze
+        // that latched is let go straight away). Hold mode: grabbed on the
+        // squeeze, as before.
+        const bool latchedPump = PumpFollowsLatch() && TwoHandGripActive();
+        if (!boltGrab && latchedPump && w.mag != kInHand)
+        {
+            boltGrab = true;
+            s_boltFull = false;
+            Game::logMsg("Mag reload: shotgun pump held by the latched support hand");
+        }
+        else if (!boltGrab && !PumpFollowsLatch() && gripEdge && w.mag != kInHand && (TwoHandGripActive() || g_NearBolt.load()))
         {
             boltGrab = true;
             s_boltFull = false;
@@ -20896,14 +20918,16 @@ void VR::UpdateMagReload(uint32_t& buttons)
                     Game::logMsg("Mag reload: shotgun pumped (%d in the tube)", w.shells);
                 w.needPump = false;
             }
-            if (released)
+            if (latchedPump ? false : (PumpFollowsLatch() || released))
             {
                 boltGrab = false;
                 s_boltFull = false;
             }
         }
         g_BoltGrab.store(boltGrab);
-        const bool canFire = w.shells > 0 && !w.needPump && pull < 0.1f;
+        // Latched, the hand rests on the pump while aiming: allow a little
+        // slack before the trigger counts the pump as pulled.
+        const bool canFire = w.shells > 0 && !w.needPump && pull < (latchedPump ? 0.3f : 0.1f);
         const bool attack2 = (buttons & IN_ATTACK2) != 0;
         if (!canFire)
         {

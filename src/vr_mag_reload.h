@@ -73,4 +73,15 @@ namespace MagReload
     extern std::atomic<bool> g_NearWell;   // magazine in the hand is at the well
     extern std::atomic<bool> g_NearBolt;   // left hand is at the bolt/slide
     extern std::atomic<float> g_BoltPull;  // 0..1 of boltTravel while grabbed
+
+    // Glove draw -> viewmodel draw: centre of the drawn left fist in the
+    // left controller's frame (forward, right, up; game units) and when it
+    // was last written (GetTickCount, 0 = never). The magazine/shell in the
+    // hand sits there, so it follows the glove's own pose offsets and size.
+    extern std::atomic<float> g_LeftPalmLocal[3];
+    extern std::atomic<unsigned> g_LeftPalmMs;
+
+    // TwoHandGripToggle on the shotgun: the latched support hand holds the
+    // pump (no squeeze needed to work it).
+    bool PumpFollowsLatch();
 }

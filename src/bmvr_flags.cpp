@@ -331,8 +331,8 @@ namespace bmvr
     bool g_RpgRocketShown = true;
     float g_DebugVmSeq = -1.f;
     float g_DebugVmCycle = 0.f;
-    float g_VrMagHandForward = -3.f;
-    float g_VrMagHandUp = 3.f;
+    float g_VrMagHandForward = 0.f;
+    float g_VrMagHandUp = 0.f;
     float g_VrMagSeatDistance = 9.f;
     float g_VrBoltGrabRadius = 7.f;
     float g_VrHandsBlackMesaScale = 0.8f;

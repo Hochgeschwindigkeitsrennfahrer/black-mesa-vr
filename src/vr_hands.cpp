@@ -7,6 +7,7 @@
 #include "vr_hand_asset_loader.h"
 #include "vr_hand_math.h"
 #include "vr_hand_renderer_d3d9.h"
+#include "vr_mag_reload.h"
 
 #include "openvr.h"
 
@@ -762,6 +763,63 @@ bool BmVrGloves::WarmupGpu(IDirect3DDevice9* device)
     return ok;
 }
 
+namespace
+{
+    // Centre of the drawn left fist for the magazine in the hand
+    // (MagReload::g_LeftPalmLocal): the mean of the wrist and the middle
+    // finger's three joints as posed (curled around a held magazine, they
+    // ring the inside of the fist), in the controller frame the viewmodel
+    // draw uses (OffhandWorldPoseForDraw).
+    void StoreLeftFistCentre(const VrHandMeshAsset& asset, const std::vector<VrHandMatrixRows3x4>& palette,
+        const VrHandMatrix4& world, const Vector& controller, const QAngle& controllerAng)
+    {
+        static const VrHandMeshAsset* s_asset = nullptr;
+        static int s_joints[4] = { -1, -1, -1, -1 };
+        if (s_asset != &asset)
+        {
+            s_asset = &asset;
+            const char* names[4] = { "wrist_l", "finger_middle_0_l", "finger_middle_1_l", "finger_middle_2_l" };
+            for (int k = 0; k < 4; ++k)
+                s_joints[k] = FindNameIndex(asset.jointNames, names[k]);
+        }
+        Vector sum(0.f, 0.f, 0.f);
+        for (int k = 0; k < 4; ++k)
+        {
+            const int j = s_joints[k];
+            if (j < 0 || static_cast<size_t>(j) >= palette.size() || static_cast<size_t>(j) >= asset.bindMatrices.size())
+                return;
+            const VrHandMatrix4& bind = asset.bindMatrices[static_cast<size_t>(j)];
+            const float b[3] = { VrHandMath::Get(bind, 0, 3), VrHandMath::Get(bind, 1, 3), VrHandMath::Get(bind, 2, 3) };
+            const auto& r = palette[static_cast<size_t>(j)].v;
+            float m[3];
+            for (int row = 0; row < 3; ++row)
+                m[row] = r[row * 4 + 0] * b[0] + r[row * 4 + 1] * b[1] + r[row * 4 + 2] * b[2] + r[row * 4 + 3];
+            for (int row = 0; row < 3; ++row)
+            {
+                const float wv = VrHandMath::Get(world, row, 0) * m[0] + VrHandMath::Get(world, row, 1) * m[1]
+                    + VrHandMath::Get(world, row, 2) * m[2] + VrHandMath::Get(world, row, 3);
+                (row == 0 ? sum.x : row == 1 ? sum.y : sum.z) += wv;
+            }
+        }
+        const Vector centre = sum * 0.25f;
+        Vector f, r, u;
+        QAngle::AngleVectors(controllerAng, &f, &r, &u);
+        const Vector d = centre - controller;
+        MagReload::g_LeftPalmLocal[0].store(d.Dot(f), std::memory_order_relaxed);
+        MagReload::g_LeftPalmLocal[1].store(d.Dot(r), std::memory_order_relaxed);
+        MagReload::g_LeftPalmLocal[2].store(d.Dot(u), std::memory_order_relaxed);
+        const DWORD now = GetTickCount();
+        MagReload::g_LeftPalmMs.store(now ? now : 1, std::memory_order_relaxed);
+        static DWORD s_logMs = 0;
+        if (now - s_logMs > 5000)
+        {
+            s_logMs = now;
+            Game::logMsg("Mag reload: left fist centre %.1f fwd %.1f right %.1f up of the controller",
+                d.Dot(f), d.Dot(r), d.Dot(u));
+        }
+    }
+}
+
 bool BmVrGloves::DrawForEye(
     IDirect3DDevice9* device,
     int stereoEye,
@@ -932,6 +990,8 @@ bool BmVrGloves::DrawForEye(
             posOffset,
             rotOffset);
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
+        if (i == 0 && !gripCurl)
+            StoreLeftFistCentre(hand.asset, hand.palette, world, *origins[0], *angles[0]);
 
         // GetLightForPoint + flashlight cone once per hand per frame; the
         // second eye reuses it (same palm position, same Present tick).

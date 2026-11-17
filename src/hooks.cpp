@@ -4130,8 +4130,22 @@ namespace
         const bool handOk = vr->OffhandWorldPoseForDraw(hand, handAng);
         Vector hf, hr, hu;
         QAngle::AngleVectors(handAng, &hf, &hr, &hu);
-        const Vector anchor = hand + hf * bmvr::g_VrMagHandForward + hu * bmvr::g_VrMagHandUp;
+        // Bolt/pump grab point: the controller (tuned grab radius).
+        const Vector anchor = hand + hf * -3.f + hu * 3.f;
         const DWORD now = GetTickCount();
+        // Magazine/shell in the hand: the centre of the drawn left fist
+        // (glove draw, VrHands pose offsets and size included) when the glove
+        // drew recently, else the old controller-relative spot. Tuning
+        // offsets on top (hand frame).
+        Vector magAnchor = anchor;
+        if (const unsigned palmMs = MagReload::g_LeftPalmMs.load(std::memory_order_relaxed);
+            palmMs != 0 && now - palmMs < 500)
+        {
+            magAnchor = hand + hf * MagReload::g_LeftPalmLocal[0].load(std::memory_order_relaxed)
+                + hr * MagReload::g_LeftPalmLocal[1].load(std::memory_order_relaxed)
+                + hu * MagReload::g_LeftPalmLocal[2].load(std::memory_order_relaxed);
+        }
+        magAnchor = magAnchor + hf * bmvr::g_VrMagHandForward + hu * bmvr::g_VrMagHandUp;
         auto local = [](const float* mm, const float* p) {
             return Vector(mm[0] * p[0] + mm[1] * p[1] + mm[2] * p[2] + mm[3],
                 mm[4] * p[0] + mm[5] * p[1] + mm[6] * p[2] + mm[7],
@@ -4161,7 +4175,9 @@ namespace
             if (MagReload::g_BoltGrab.load() && handOk)
             {
                 const float along = (anchor - gunOrigin).Dot(f);
-                if (!s_grabbing)
+                // Re-anchored forward: a hand that rests on the pump/handle
+                // and drifts forward does not then read as pulled.
+                if (!s_grabbing || along > s_startAlong)
                 {
                     s_grabbing = true;
                     s_startAlong = along;
@@ -4278,18 +4294,18 @@ namespace
         // Magazine centre in the palm.
         m[3] = m[7] = m[11] = 0.f;
         const Vector c0 = local(m, def.magCenter);
-        m[3] = anchor.x - c0.x;
-        m[7] = anchor.y - c0.y;
-        m[11] = anchor.z - c0.z;
+        m[3] = magAnchor.x - c0.x;
+        m[7] = magAnchor.y - c0.y;
+        m[11] = magAnchor.z - c0.z;
         std::memcpy(s_handMag, m, sizeof(s_handMag));
         s_handMagValid = true;
-        const float dist = (anchor - well).Length();
+        const float dist = (magAnchor - well).Length();
         MagReload::g_NearWell.store(dist < bmvr::g_VrMagSeatDistance * vmScale);
         static thread_local DWORD s_logMs = 0;
         if (now - s_logMs > 1000)
         {
             s_logMs = now;
-            const Vector d = well - anchor;
+            const Vector d = well - magAnchor;
             Game::logMsg("Mag reload: magazine %.1f units from the well (well - hand: %.1f fwd %.1f right %.1f up in the hand frame)",
                 dist, d.Dot(hf), d.Dot(hr), d.Dot(hu));
         }
