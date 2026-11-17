@@ -710,6 +710,17 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
         srcIds.push_back(id);
     }
 
+    // Fingertip "nub" bones (bare hands: L_/R_Middlenub carry the middle
+    // fingertip) move with the finger's last joint; without them the tip
+    // triangles were dropped.
+    for (int f = 0; f < 5; ++f)
+    {
+        const std::string nub = std::string(1, side) + "_" + kBm[f] + "nub";
+        for (size_t b = 0; b < mdl.bones.size(); ++b)
+            if (_stricmp(mdl.bones[b].name.c_str(), nub.c_str()) == 0)
+                srcToJoint[static_cast<int>(b)] = 1 + f * 3 + 2;
+    }
+
     // Glove model space: fingers +Z, back of hand +Y, wrist at the origin.
     auto pos = [&](int joint) { return Col(mdl.bones[srcIds[joint]].world, 3); };
     const V3 wristP = pos(0);
