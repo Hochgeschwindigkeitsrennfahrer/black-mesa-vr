@@ -940,6 +940,25 @@ public:
     // stick points roughly at the ladder (mount assist, see vr.cpp); NaN
     // otherwise.
     bool LadderMode(int& moveBits, bool& onLadder, float* mountYaw = nullptr) const;
+    // Physical ladders (PhysicalLadders): a grip squeezed with the hand on a
+    // ladder mounts it (one IN_USE with the view at the ladder) and then the
+    // player moves opposite to that hand's height change, so the hand stays
+    // on the rung. Called once per CreateMove; false = not involved (stick
+    // ladder mode as before). dir: +1 climb up this tick, -1 down, 0 hold.
+    struct PhysicalLadderCmd
+    {
+        bool onLadder = false;
+        bool useEdge = false;   // send IN_USE this tick (mount)
+        float yaw = 0.f;        // view yaw towards the ladder while mounting
+        int dir = 0;
+    };
+    bool PhysicalLadderStep(PhysicalLadderCmd& out);
+    // ProcessInput: grip state per hand (0 left, 1 right) for PhysicalLadderStep.
+    void UpdateLadderGrips();
+    std::atomic<bool> m_LadderGrip[2]{};
+    // Last CreateMove: hand within reach of a ladder. Its grip is a grab
+    // there, not the mapped action (flashlight on the right grip).
+    std::atomic<bool> m_LadderTouch[2]{};
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover

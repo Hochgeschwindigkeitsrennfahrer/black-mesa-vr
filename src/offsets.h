@@ -307,6 +307,7 @@ public:
     // system pointer.
     static constexpr int kClientGpGlobalsPtr = 0x553A00; // beta 26627981 (26234270: 0x550A04)
     static constexpr int kCGlobalVars_curtime = 0xC;
+    static constexpr int kCGlobalVars_interval_per_tick = 0x1C;   // CGlobalVarsBase (SDK globalvars_base.h)
     // DT_LocalPlayerExclusive (FUN_100b7240): m_nWaterLevel +0x180 (byte),
     // m_AirFinished +0x16e4 (float). WL_Eyes == 3 is fully underwater.
     static constexpr int kCBasePlayer_nWaterLevel = 0x180;

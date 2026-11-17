@@ -961,6 +961,25 @@ bool Game::LocalPlayerAbsOrigin(Vector& out)
     return out.LengthSqr() > 0.f;
 }
 
+float Game::TickInterval()
+{
+    float t = 0.f;
+    if (m_BaseClient)
+    {
+        BMVR_TRY
+        {
+            const uintptr_t gp = *reinterpret_cast<uintptr_t*>(m_BaseClient + Offsets::kClientGpGlobalsPtr);
+            if (gp)
+                t = *reinterpret_cast<float*>(gp + Offsets::kCGlobalVars_interval_per_tick);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            t = 0.f;
+        }
+    }
+    return (t >= 0.005f && t <= 0.05f) ? t : 0.015f;
+}
+
 int Game::CollectLadders(Vector* bottoms, Vector* tops, int maxLadders)
 {
     static int s_index[64];

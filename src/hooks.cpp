@@ -8050,13 +8050,39 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     float ladderMountYaw = std::numeric_limits<float>::quiet_NaN();
     const ULONGLONG ladderNow = GetTickCount64();
     const bool afterLadderJump = ladderNow < s_ladderJumpUntil;
-    const bool ladderMode = m_VR && m_VR->m_IsVREnabled && cmd->command_number
+    // Physical ladders (VR::PhysicalLadderStep): a hand gripping the ladder
+    // drives it instead of the stick: mount = one IN_USE facing the ladder,
+    // then each tick up (view pitched up, IN_FORWARD), down (same as stick
+    // back) or hold (no bits).
+    VR::PhysicalLadderCmd physLadder{};
+    const bool ladderBase = m_VR && m_VR->m_IsVREnabled && cmd->command_number
         && m_VR->IsGameplayEligible() && !afterLadderJump
-        && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0
-        && m_VR->LadderMode(ladderBits, onLadder, &ladderMountYaw);
+        && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0;
+    const bool physLadderOn = ladderBase && (m_VR->HeldButtons() & IN_JUMP) == 0
+        && m_VR->PhysicalLadderStep(physLadder);
+    if (physLadderOn)
+    {
+        onLadder = physLadder.onLadder;
+        ladderBits = physLadder.dir > 0 ? IN_FORWARD : (physLadder.dir < 0 ? IN_BACK : 0);
+        if (!onLadder)
+        {
+            ladderMountYaw = physLadder.yaw;
+            if (physLadder.useEdge)
+                ladderBits |= IN_USE;
+        }
+    }
+    else if (m_VR && !(ladderBase && (m_VR->HeldButtons() & IN_JUMP) == 0))
+    {
+        // Keep the touch flags fresh-false when the step does not run.
+        m_VR->m_LadderTouch[0].store(false, std::memory_order_release);
+        m_VR->m_LadderTouch[1].store(false, std::memory_order_release);
+    }
+    const bool ladderMode = ladderBase
+        && (physLadderOn || m_VR->LadderMode(ladderBits, onLadder, &ladderMountYaw));
     const bool ladderMountAssist = ladderMode && !onLadder && std::isfinite(ladderMountYaw);
     const bool ladderJump = ladderMode && onLadder && (m_VR->HeldButtons() & IN_JUMP) != 0;
     const bool ladderBack = ladderMode && onLadder && !ladderJump && (ladderBits & IN_BACK) != 0;
+    const bool ladderPhysUp = physLadderOn && onLadder && physLadder.dir > 0;
     if (ladderJump)
         s_ladderJumpUntil = ladderNow + 500;
     if (ladderBack)
@@ -8136,6 +8162,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
                 pitch = 45.f;
                 yaw += 180.f;
             }
+            else if (ladderPhysUp)
+                pitch = -30.f;   // looking down at the feet would climb down
             else if (ladderMountAssist)
                 yaw = ladderMountYaw;
             static int s_ladderLog;

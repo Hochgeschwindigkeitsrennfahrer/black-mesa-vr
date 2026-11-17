@@ -6782,8 +6782,8 @@ void VR::UpdateButtonMap()
     }
 
     bmvr::ButtonMapContext ctx;
-    ctx.gripInGestureZone[0] = m_GestureZoneLeft;
-    ctx.gripInGestureZone[1] = m_GestureZoneRight;
+    ctx.gripInGestureZone[0] = m_GestureZoneLeft || m_LadderTouch[0].load(std::memory_order_acquire);
+    ctx.gripInGestureZone[1] = m_GestureZoneRight || m_LadderTouch[1].load(std::memory_order_acquire);
     ctx.stickBlocked = m_WeaponMenuOpen;
     m_ButtonMapper.Update(in, ctx, GetTickCount());
 
@@ -7228,6 +7228,11 @@ void VR::ProcessInput()
     // a bit above the left hip = MP5, also armed at once.
     const bool rightShoulder = UpdateShoulderGestures(paused);
     m_GestureZoneRight = rightShoulder;
+    UpdateLadderGrips();
+    // Right grip on a ladder grabs it (PhysicalLadders): no flashlight
+    // (left Square still toggles it).
+    const bool rightGripGrab = rightShoulder
+        || (!squareFlash && m_LadderTouch[1].load(std::memory_order_acquire));
     vr::InputDigitalActionData_t flash{};
     static bool s_flashLatched = false;
     static DWORD s_flashImpulseMs = 0;
@@ -7254,9 +7259,9 @@ void VR::ProcessInput()
             s_flashReleasePolls = 0;
             // A grip squeezed for a shoulder/hip grab is still held when
             // the hand comes forward: that press must not toggle the light.
-            if (rightShoulder)
+            if (rightGripGrab)
                 s_flashLatched = true;
-            if (!paused && !m_GameUiVisible && !s_flashLatched && !rightShoulder && (nowTick - s_flashImpulseMs) > 300)
+            if (!paused && !m_GameUiVisible && !s_flashLatched && !rightGripGrab && (nowTick - s_flashImpulseMs) > 300)
             {
                 m_PendingImpulse.store(100, std::memory_order_release);
                 s_flashImpulseMs = nowTick;
@@ -8104,6 +8109,254 @@ bool VR::LadderMode(int& moveBits, bool& onLadder, float* mountYaw) const
         moveBits |= IN_MOVERIGHT;
     else if (s < -kStickDeflection)
         moveBits |= IN_MOVELEFT;
+    return true;
+}
+
+void VR::UpdateLadderGrips()
+{
+    // Raw grip (protocol 18) when the helper publishes it: the action slots
+    // may carry whatever the button mapping put there.
+    auto gripValue = [&](int hand, vr::VRActionHandle_t h) {
+        const L4D2VROpenXrRawHandDesc& r = m_OpenXrLastInputState.rawHands[hand];
+        if (m_RuntimeBackend == VrRuntimeBackend::OpenXR && r.valid)
+            return r.grip;
+        vr::InputAnalogActionData_t a{};
+        if (GetAnalogActionData(h, a))
+            return a.x;
+        return PressedDigitalAction(h) ? 1.f : 0.f;
+    };
+    const float g[2] = { gripValue(0, m_ActionInventoryGripLeft), gripValue(1, m_ActionFlashlight) };
+    for (int h = 0; h < 2; ++h)
+    {
+        const bool was = m_LadderGrip[h].load(std::memory_order_relaxed);
+        m_LadderGrip[h].store(g[h] >= (was ? 0.45f : 0.55f), std::memory_order_release);
+    }
+}
+
+bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
+{
+    out = {};
+    // Climb state. Climbing = the player moves along the ladder by what the
+    // climb hand moved down in tracking space since it grabbed, so the hand
+    // stays where it took hold. LadderMove (HL2 func_useableladder) only
+    // knows a fixed 200 u/s up or down per tick, so each tick goes one step
+    // up, one down or holds, whichever keeps the sent total closest to the
+    // hand. Approach after HL2VR (hl_gamemovement.cpp LadderMove, roomscale
+    // ladders: velocity from the climb hand's delta), done in the usercmd
+    // because the mod does not run the movement code.
+    static int s_climbHand = -1;
+    static float s_anchorHandZ = 0.f;
+    static float s_anchorOriginZ = 0.f;
+    static float s_sent = 0.f;       // along the ladder, units
+    static bool s_anchored = false;  // set once on the ladder
+    static bool s_prevGrip[2] = {};
+    static ULONGLONG s_mountUntil = 0;
+    static bool s_mountUseSent = false;
+    static float s_mountYaw = 0.f;
+
+    auto clearTouch = [&]() {
+        m_LadderTouch[0].store(false, std::memory_order_release);
+        m_LadderTouch[1].store(false, std::memory_order_release);
+    };
+    if (!bmvr::g_PhysicalLadders || !m_Game)
+    {
+        s_climbHand = -1;
+        s_mountUntil = 0;
+        clearTouch();
+        return false;
+    }
+    Vector origin{};
+    if (!m_Game->LocalPlayerAbsOrigin(origin))
+    {
+        clearTouch();
+        return false;
+    }
+    constexpr int kMoveTypeLadder = 9;
+    const bool onLadder = m_Game->LocalPlayerMoveType() == kMoveTypeLadder;
+    out.onLadder = onLadder;
+
+    Vector bottoms[32], tops[32];
+    const int n = m_Game->CollectLadders(bottoms, tops, 32);
+    if (n <= 0)
+    {
+        s_climbHand = -1;
+        clearTouch();
+        return false;
+    }
+
+    // Hands: world position (touch test) and tracking height (climb).
+    Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    if (body.LengthSqr() <= 1.f)
+        body = m_SetupOrigin;
+    bool valid[2]{};
+    Vector world[2]{};
+    float trackZ[2]{};
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        valid[0] = m_LeftControllerTrackingValid;
+        valid[1] = m_PhysicalRightTrackingValid;
+        if (valid[0])
+        {
+            world[0] = ControllerTrackingToWorld(body, m_LeftControllerPosAbs);
+            trackZ[0] = m_LeftControllerPosAbs.z;
+        }
+        if (valid[1])
+        {
+            world[1] = ControllerTrackingToWorld(body, m_PhysicalRightPosAbs);
+            trackZ[1] = m_PhysicalRightPosAbs.z;
+        }
+    }
+
+    // A ladder here is only the line between its two player mount points
+    // (feet positions); the rungs are a little in front of it. A hand
+    // within kTouchHu of that line sideways, from just under the bottom to
+    // above the top (reaching over the top end), is on the ladder.
+    constexpr float kTouchHu = 36.f;
+    auto nearestLadder = [&](const Vector& p, float& flatDist, float& yawTo) {
+        int best = -1;
+        float bestD2 = 1e30f;
+        for (int i = 0; i < n; ++i)
+        {
+            const Vector axis = tops[i] - bottoms[i];
+            const float len2 = axis.LengthSqr();
+            float t = len2 > 1.f ? (p - bottoms[i]).Dot(axis) / len2 : 0.f;
+            t = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
+            const Vector c = bottoms[i] + axis * t;
+            const float dx = c.x - p.x, dy = c.y - p.y;
+            const float d2 = dx * dx + dy * dy;
+            const float zLo = (bottoms[i].z < tops[i].z ? bottoms[i].z : tops[i].z) - 16.f;
+            const float zHi = (bottoms[i].z > tops[i].z ? bottoms[i].z : tops[i].z) + 80.f;
+            if (p.z < zLo || p.z > zHi || d2 >= bestD2)
+                continue;
+            bestD2 = d2;
+            best = i;
+            yawTo = atan2f(dy, dx) * 180.f / 3.14159265f;
+        }
+        flatDist = best >= 0 ? sqrtf(bestD2) : 1e15f;
+        return best;
+    };
+    bool touch[2]{};
+    for (int h = 0; h < 2; ++h)
+    {
+        float d = 0.f, yaw = 0.f;
+        touch[h] = valid[h] && nearestLadder(world[h], d, yaw) >= 0 && d < kTouchHu;
+        m_LadderTouch[h].store(touch[h], std::memory_order_release);
+    }
+
+    const ULONGLONG now = GetTickCount64();
+    bool grip[2];
+    for (int h = 0; h < 2; ++h)
+        grip[h] = m_LadderGrip[h].load(std::memory_order_acquire) && valid[h];
+    auto role = [](int h) {
+        return h == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
+    };
+    // Grip pressed on the ladder: that hand climbs (the newest grab wins,
+    // like HL2VR's SetClimbHand).
+    for (int h = 0; h < 2; ++h)
+    {
+        if (grip[h] && !s_prevGrip[h] && touch[h])
+        {
+            s_climbHand = h;
+            s_anchored = false;
+            PulseHandHaptic(role(h), 1500, 0.4f);
+            if (!onLadder && s_mountUntil == 0)
+            {
+                // Mount like a +use at the ladder: HL2's LadderMove mounts
+                // on a fresh IN_USE when the view faces a ladder within 64.
+                float d = 0.f;
+                float yaw = 0.f;
+                nearestLadder(origin, d, yaw);
+                if (d < 64.f)
+                {
+                    s_mountUntil = now + 600;
+                    s_mountUseSent = false;
+                    s_mountYaw = yaw;
+                }
+            }
+            Game::logMsg("Ladder grab: %s hand%s", h == 0 ? "left" : "right", onLadder ? " (on the ladder)" : ", mounting");
+        }
+    }
+    for (int h = 0; h < 2; ++h)
+        s_prevGrip[h] = grip[h];
+    if (s_climbHand >= 0 && !grip[s_climbHand])
+    {
+        // Let go: the other hand takes over if it still holds the ladder.
+        const int other = 1 - s_climbHand;
+        if (grip[other] && touch[other])
+        {
+            s_climbHand = other;
+            s_anchored = false;
+        }
+        else
+            s_climbHand = -1;
+    }
+
+    if (s_mountUntil)
+    {
+        if (onLadder || now > s_mountUntil || s_climbHand < 0)
+        {
+            if (!onLadder && s_climbHand >= 0)
+                Game::logMsg("Ladder grab: mount did not happen (no ladder within use range facing it?)");
+            s_mountUntil = 0;
+        }
+        else
+        {
+            out.yaw = s_mountYaw;
+            out.useEdge = !s_mountUseSent;
+            s_mountUseSent = true;
+            return true;
+        }
+    }
+    if (!onLadder || s_climbHand < 0)
+        return false;
+
+    int li = -1;
+    {
+        float d = 0.f, yaw = 0.f;
+        li = nearestLadder(origin, d, yaw);
+    }
+    if (li < 0)
+        li = 0;
+    Vector axis = tops[li] - bottoms[li];
+    const float len = axis.Length();
+    const float k = len > 1.f ? axis.z / len : 1.f;   // height per unit along the ladder
+    if (fabsf(k) < 0.3f)
+        return false;   // horizontal ladder: stick only
+
+    const float hz = trackZ[s_climbHand];
+    if (!s_anchored)
+    {
+        s_anchored = true;
+        s_anchorHandZ = hz;
+        s_anchorOriginZ = origin.z;
+        s_sent = 0.f;
+    }
+    const float step = 200.f * m_Game->TickInterval();   // MAX_CLIMB_SPEED per tick
+    const float want = (s_anchorHandZ - hz) / k;
+    const float actual = (origin.z - s_anchorOriginZ) / k;
+    // The ladder ends (or anything else) stopped the player: count from
+    // where they are, so pulling further keeps asking (dismount at the top,
+    // stepping off at the bottom) instead of running up a debt.
+    if (fabsf(actual - s_sent) > 4.f * step)
+        s_sent = actual;
+    const float err = want - s_sent;
+    if (err > 0.5f * step)
+    {
+        out.dir = 1;
+        s_sent += step;
+    }
+    else if (err < -0.5f * step)
+    {
+        out.dir = -1;
+        s_sent -= step;
+    }
+    static int s_climbLog;
+    if (out.dir != 0 && s_climbLog < 40)
+    {
+        Game::logMsg("Ladder climb: %s hand, want %.1f sent %.1f actual %.1f step %.2f -> %s",
+            s_climbHand == 0 ? "left" : "right", want, s_sent, actual, step, out.dir > 0 ? "up" : "down");
+        ++s_climbLog;
+    }
     return true;
 }
 

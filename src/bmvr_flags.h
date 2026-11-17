@@ -739,6 +739,9 @@ namespace bmvr
     // ~0.15 s); both hands on the gun cut it to 30 % (pistol grip 50 %).
     // Off by default (user A/B). Strength scales every weapon's kick.
     extern bool g_VrRecoil;
+    // Physical ladders: grip a ladder with either hand and pull/push to
+    // climb (the stick still climbs too). On by default.
+    extern bool g_PhysicalLadders;
     extern float g_VrRecoilScale;
     // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
     extern bool g_RpgRocketShown;

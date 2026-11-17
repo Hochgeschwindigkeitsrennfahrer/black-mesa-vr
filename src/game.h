@@ -102,6 +102,8 @@ public:
     // World-space bottom/top mount points of the map's func_useableladders
     // (CFuncLadder; entity list rescanned at most once a second).
     int CollectLadders(Vector* bottoms, Vector* tops, int maxLadders);
+    // gpGlobals->interval_per_tick (seconds), 0.015 when unreadable.
+    float TickInterval();
     // Entity indexes of the props mounted guns turn (50cal / TOW model; the
     // func_50cal / func_tow itself is a brush with no model of its own).
     // Rescanned at most once a second.
