@@ -619,7 +619,8 @@ namespace
                 line.caption = menu ? "" : std::strcmp(r.label, "Stick sideways") == 0 ? "Sideways" : "Tilt";
                 line.text = InfoText(r);
                 line.fixed = true;
-                cardFor(part, menu ? "Menu" : (pad ? "Pad" : "Stick")).lines.push_back(line);
+                const bool ps = L4D2VR_TextContainsI(g_PanelSystem, "PlayStation") || L4D2VR_TextContainsI(g_PanelSystem, "PS VR2");
+                cardFor(part, menu ? (ps ? "Create" : "Menu") : (pad ? "Pad" : "Stick")).lines.push_back(line);
             }
         }
         // Cards stack from the top of the area; the picture is moved so its
@@ -1370,6 +1371,13 @@ namespace
             }
             for (const Card& card : PictureCards(hand))
             {
+                // Fixed-only cards (the menu button) get no line: it sits next to
+                // the stick and read as a second stick line.
+                bool fixedOnly = true;
+                for (const CardLine& ln : card.lines)
+                    fixedOnly &= ln.fixed;
+                if (fixedOnly)
+                    continue;
                 bool hot = false;
                 for (const CardLine& ln : card.lines)
                     hot |= ln.row == hoverRow;
