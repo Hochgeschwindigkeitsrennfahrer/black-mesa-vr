@@ -15097,9 +15097,49 @@ namespace vm_numpad
     }
 }
 
+// VR panel DEBUG rows "HELD WEAPON ANGLE": show the held weapon's saved
+// angle extras, write row changes back to them (and the file). Also picks up
+// numpad edits so the rows never write a stale value over them.
+void VR::SyncHeldWeaponAngleRows()
+{
+    std::string key;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        key = m_VmClass.numpadKey;
+    }
+    static std::string s_key;
+    static float s_p = 0.f, s_y = 0.f, s_r = 0.f;
+    auto it = key.empty() ? vm_numpad::g_Off.end() : vm_numpad::g_Off.find(key);
+    const float fp = it != vm_numpad::g_Off.end() ? it->second.ax : 0.f;
+    const float fy = it != vm_numpad::g_Off.end() ? it->second.ay : 0.f;
+    const float fr = it != vm_numpad::g_Off.end() ? it->second.az : 0.f;
+    if (key != s_key || fp != s_p || fy != s_y || fr != s_r)
+    {
+        // New weapon, or the numpad changed it: the rows show the file.
+        s_key = key;
+        s_p = bmvr::g_VmTunePitch = fp;
+        s_y = bmvr::g_VmTuneYaw = fy;
+        s_r = bmvr::g_VmTuneRoll = fr;
+        return;
+    }
+    if (key.empty())
+        return;
+    if (bmvr::g_VmTunePitch != s_p || bmvr::g_VmTuneYaw != s_y || bmvr::g_VmTuneRoll != s_r)
+    {
+        auto& o = vm_numpad::g_Off[key];
+        o.ax = s_p = bmvr::g_VmTunePitch;
+        o.ay = s_y = bmvr::g_VmTuneYaw;
+        o.az = s_r = bmvr::g_VmTuneRoll;
+        vm_numpad::Save();
+        Game::logMsg("Held weapon angle %s: pitch %.1f yaw %.1f roll %.1f (extras on top of the table)",
+            key.c_str(), o.ax, o.ay, o.az);
+    }
+}
+
 void VR::UpdateViewmodelNumpadAdjust(bool paused)
 {
     vm_numpad::Load();
+    SyncHeldWeaponAngleRows();
     if (paused || !m_GameplayEligible)
         return;
 

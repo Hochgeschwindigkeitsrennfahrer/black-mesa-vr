@@ -1568,6 +1568,7 @@ private:
     void PulseAimHaptic(unsigned short durationUs = 2500);
     void PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short durationUs, float amplitude = 0.6f);
     void UpdateViewmodelNumpadAdjust(bool paused);
+    void SyncHeldWeaponAngleRows();
     void ResolveWeaponViewmodelPose(float& ox, float& oy, float& oz, float& ax, float& ay, float& az) const;
     void ApplyViewmodelNumpadExtras(float& ox, float& oy, float& oz, float& ax, float& ay, float& az) const;
     void DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,

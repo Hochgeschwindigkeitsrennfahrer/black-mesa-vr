@@ -374,6 +374,12 @@ namespace
             { "Mute weapon fidget sounds", RowKind::Toggle, nullptr, &bmvr::g_MuteFidgetSounds, nullptr, 0, 0, 0, nullptr },
             { "Muzzle flash follows gun", RowKind::Toggle, nullptr, &bmvr::g_ViewmodelFxCatchUp, nullptr, 0, 0, 0, nullptr },
             { "LOADING card", RowKind::Toggle, nullptr, &bmvr::g_LoadingCard, nullptr, 0, 0, 0, nullptr },
+            // Live per-weapon angle trim for the weapon in the hand (saved in
+            // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows).
+            { "HELD WEAPON ANGLE (SAVED PER WEAPON)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Pitch", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTunePitch, 2.5f, -90.f, 90.f, "%.1f deg" },
+            { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
+            { "Roll", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneRoll, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "G-MAN GESTURE TUNING", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Force gesture (tuning)", RowKind::Toggle, nullptr, &bmvr::g_VrGmanGestureForce, nullptr, 0, 0, 0, nullptr },
             { "Finger straight", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanFingerStraight, 0.05f, 0.f, 0.5f, "%.2f" },

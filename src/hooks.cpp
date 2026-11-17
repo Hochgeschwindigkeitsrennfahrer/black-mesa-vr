@@ -3899,15 +3899,15 @@ namespace
     // have the R_Arm/L_* bones the collapse needs and a hand on a grip. The
     // grenade, satchel, tripmine, snark and Hivehand viewmodels are hands
     // holding or wearing the thing (the satchel kept a whole arm, the
-    // Hivehand a hand under the model): those keep the hidden arms. Not the
-    // crowbar either: it is drawn at scale 1, not ViewmodelScale, so its own
-    // hand came out ~1.5x the size of the gun hands.
+    // Hivehand a hand under the model): those keep the hidden arms. The
+    // crowbar is drawn at scale 1, not ViewmodelScale: ShrinkViewmodelRightHand
+    // brings its hand to the gun hands' size.
     bool GunRightHandForModel(const char* modelName)
     {
         if (!bmvr::g_VrGunRightHand || bmvr::g_LeftHanded || !modelName)
             return false;
         static const char* kGuns[] = { "v_glock", "v_357", "v_mp5", "v_shotgun", "v_crossbow", "v_rpg",
-            "v_gauss", "v_tau", "v_egon", "v_gluon" };
+            "v_gauss", "v_tau", "v_egon", "v_gluon", "v_crowbar" };
         char buf[128]{};
         strncpy_s(buf, modelName, _TRUNCATE);
         for (char* c = buf; *c; ++c)
@@ -3916,6 +3916,61 @@ namespace
             if (std::strstr(buf, g))
                 return true;
         return false;
+    }
+
+    // Crowbar with its own right hand: the crowbar is drawn at scale 1 while
+    // the guns (and their hands) use ViewmodelScale, so its hand looked ~1.5x
+    // too big. Scales R_Wrist and the finger bones by k around the fist
+    // centre (wrist + middle finger joints as posed), so the smaller fist
+    // still closes on the handle.
+    void ShrinkViewmodelRightHand(unsigned char* hdr, float* bones, int nBones, float k)
+    {
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_idx[24]{};
+        static thread_local int s_n = 0, s_centre[4]{ -1, -1, -1, -1 };
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_n = 0;
+            static const char* kHand[] = { "R_Wrist", "R_Thumb1", "R_Thumb2", "R_Thumb3", "R_Index1", "R_Index2",
+                "R_Index3", "R_Middle1", "R_Middle2", "R_Middle3", "R_Ring1", "R_Ring2", "R_Ring3", "R_Pinky1",
+                "R_Pinky2", "R_Pinky3", "R_Middlenub" };
+            for (const char* n : kHand)
+            {
+                const int i = FindStudioBoneIndex(hdr, n);
+                if (i >= 0 && s_n < 24)
+                    s_idx[s_n++] = i;
+            }
+            const char* kCentre[4] = { "R_Wrist", "R_Middle1", "R_Middle2", "R_Middle3" };
+            for (int c = 0; c < 4; ++c)
+                s_centre[c] = FindStudioBoneIndex(hdr, kCentre[c]);
+            Game::logMsg("Gun right hand: crowbar hand shrink over %d bones, k=%.2f", s_n, k);
+        }
+        if (!bones || !(k > 0.2f && k < 1.5f) || std::fabs(k - 1.f) < 0.01f)
+            return;
+        float c[3] = { 0.f, 0.f, 0.f };
+        for (int i = 0; i < 4; ++i)
+        {
+            if (s_centre[i] < 0 || s_centre[i] >= nBones)
+                return;
+            const float* m = bones + s_centre[i] * 12;
+            c[0] += m[3] * 0.25f;
+            c[1] += m[7] * 0.25f;
+            c[2] += m[11] * 0.25f;
+        }
+        for (int j = 0; j < s_n; ++j)
+        {
+            if (s_idx[j] >= nBones)
+                continue;
+            float* m = bones + s_idx[j] * 12;
+            for (int r = 0; r < 3; ++r)
+            {
+                m[r * 4 + 0] *= k;
+                m[r * 4 + 1] *= k;
+                m[r * 4 + 2] *= k;
+                m[r * 4 + 3] = c[r] + (m[r * 4 + 3] - c[r]) * k;
+            }
+        }
     }
 
     bool CollapseViewmodelArmBones(unsigned char* hdr, float* bones, int nBones)
@@ -9055,7 +9110,12 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                 SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
                 if (gunRightHand)
+                {
                     CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
+                    if (m_VR->m_VmClass.crowbar)
+                        ShrinkViewmodelRightHand(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
+                            bmvr::g_ViewmodelScale / scale);
+                }
                 ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, targetAng,
                     needScale ? scale : 1.f);
             }

@@ -326,6 +326,7 @@ namespace bmvr
     bool g_VrMagReload = false;
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = true;
+    float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f;
     bool g_PhysicalLadderSmooth = true;
     float g_LadderGunHand = 0.f;
     float g_VrRecoilScale = 1.f;
