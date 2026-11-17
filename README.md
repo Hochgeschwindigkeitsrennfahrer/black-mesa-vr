@@ -167,7 +167,8 @@ and [marnovdm](https://github.com/marnovdm).
 Huge thanks to:
 - **wormslayer** for HL2VR.
 - **keyou91** for [L4D2VR](https://github.com/keyou91/l4d2vr), the foundation of the VR implementation.
-- **martysl1** (Discord), for the eye-MSAA experiment that gave us a helpful early lead for the MSAA feature.
+- **martysl1** (Discord), whose AA4 experiment showed that multisampling only the eye images works with Black Mesa's
+  deferred renderer; that idea is the basis of the MSAA feature.
 - Our testers and contributors, for their patience and help:
   - TheRealBubble
   - SilentVortiguant ([check out his YouTube](https://www.youtube.com/@SilentVortigauntVR))
