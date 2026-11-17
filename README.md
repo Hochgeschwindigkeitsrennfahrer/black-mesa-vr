@@ -152,6 +152,7 @@ The file explains every setting in comments.
 - **Very heavy outdoor views can still drop below the headset's refresh rate:** the game draws every eye separately,
   and its render thread is the limit there.
 - **Your hands disappear below the water surface** when you reach into water.
+- **Some monitors in the world pulse** (their brightness goes subtly up and down).
 - **Stand-up and cutscene scenes rotate your view** with the scene's camera. Turn off
   **Controls → VIEW → Cutscene cameras move the view** if that bothers you.
 - If shots don't line up with the gun, **recenter**: tap the right stick, or **Controls → VIEW → Recenter view**.
