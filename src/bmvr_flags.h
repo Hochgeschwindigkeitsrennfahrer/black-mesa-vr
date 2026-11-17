@@ -714,6 +714,8 @@ namespace bmvr
     // Gloves built from Black Mesa's own viewmodel arms (installed VPKs) instead of the glove files.
     extern bool g_VrHandsBlackMesa;
     extern float g_VrHandsBlackMesaScale;
+    // The weapon's own right hand (viewmodel arms, left arm + forearms collapsed) on the gun.
+    extern bool g_VrGunRightHand;
     // True for this process when launched with -game bshift (or a bs_* map).
     // Calhoun never wears the HEV suit — use bare-hand GLBs the whole session.
     extern bool g_IsBlueShift;

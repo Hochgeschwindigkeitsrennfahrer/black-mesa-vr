@@ -3674,6 +3674,90 @@ namespace
     // keep GrenadeSpawn where it sits in idle (entity-relative pose recorded
     // during idle1/idle2) and let only the pins move. Returns the extra delta
     // to apply to every bone before the rigid move, or false for none.
+    // "Gun's own right hand": the viewmodel's arms body part stays drawn, but
+    // every left-arm bone and the right upper/forearm collapse to a point at
+    // the right wrist. What is left is the stock right hand on the grip (same
+    // art and grip pose the gun was animated with); the left hand is the glove.
+    // Left and right arm meshes share no vertex (checked on v_glock/v_mp5/
+    // v_shotgun, all arm variants), so nothing of the left arm can stretch.
+    bool CollapseViewmodelArmBones(unsigned char* hdr, float* bones, int nBones)
+    {
+        struct Cache
+        {
+            unsigned char* hdr = nullptr;
+            int wrist = -1;
+            int count = 0;
+            int idx[48]{};
+        };
+        static thread_local Cache c;
+        if (!hdr || !bones || nBones <= 0)
+            return false;
+        if (c.hdr != hdr)
+        {
+            c = Cache{};
+            c.hdr = hdr;
+            c.wrist = FindStudioBoneIndex(hdr, "R_Wrist");
+            int length = 0, numbones = 0, boneindex = 0;
+            BMVR_TRY
+            {
+                length = *reinterpret_cast<int*>(hdr + kStudioHdrLength);
+                numbones = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
+                boneindex = *reinterpret_cast<int*>(hdr + kStudioHdrBoneIndex);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                numbones = 0;
+            }
+            if (c.wrist >= 0 && numbones > 0 && numbones <= kMaxStudioBones
+                && boneindex >= 0 && boneindex + numbones * kStudioBoneSize <= length)
+            {
+                for (int i = 0; i < numbones && c.count < 48; ++i)
+                {
+                    unsigned char* bone = hdr + boneindex + i * kStudioBoneSize;
+                    int szname = 0;
+                    BMVR_TRY { szname = *reinterpret_cast<int*>(bone); }
+                    __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+                    const char* n = StudioRelString(bone, szname);
+                    const bool left = _strnicmp(n, "L_", 2) == 0
+                        || _stricmp(n, "SCI_Hand_Forearm_L") == 0 || _stricmp(n, "gman_arms_l") == 0;
+                    const bool rightArm = _stricmp(n, "R_Arm") == 0 || _stricmp(n, "R_Forearm") == 0
+                        || _stricmp(n, "SCI_Hand_Forearm_R") == 0 || _stricmp(n, "gman_arms_r") == 0;
+                    if (left || rightArm)
+                        c.idx[c.count++] = i;
+                }
+            }
+            static int s_log;
+            if (s_log < 6)
+            {
+                Game::logMsg("Gun right hand: wrist=%d collapsed bones=%d", c.wrist, c.count);
+                ++s_log;
+            }
+        }
+        if (c.wrist < 0 || c.wrist >= nBones || c.count == 0)
+            return false;
+        BMVR_TRY
+        {
+            const float* w = bones + c.wrist * 12;
+            const float t[3] = { w[3], w[7], w[11] };
+            for (int k = 0; k < c.count; ++k)
+            {
+                if (c.idx[k] >= nBones)
+                    continue;
+                float* m = bones + c.idx[k] * 12;
+                for (int r = 0; r < 3; ++r)
+                {
+                    m[r * 4 + 0] = m[r * 4 + 1] = m[r * 4 + 2] = 0.f;
+                    m[r * 4 + 3] = t[r];
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        return true;
+    }
+
     bool GrenadeHoldCorrection(unsigned char* hdr, const void* bones, int nBones,
         const float entity[3][4], float out[3][4])
     {
@@ -8013,6 +8097,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             ++s_dmeEnter;
         }
         hideArms = bmvr::g_HideViewmodelArms
+            && !(bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded)
             && isViewmodel
             && m_VR
             && m_VR->m_IsVREnabled
@@ -8082,6 +8167,16 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
 
     const bool vrViewmodelPass = m_VR && m_VR->PassThroughWarmupDone()
         && m_VR->StereoWorldPassActive();
+    // Turning the gun's own right hand on gives back the arm meshes hidden
+    // for this map; off zeroes them again on the next draw.
+    static bool s_gunRightHand = false;
+    const bool gunRightHand = bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded;
+    if (isViewmodel && gunRightHand != s_gunRightHand)
+    {
+        s_gunRightHand = gunRightHand;
+        if (gunRightHand)
+            RestoreArmBodypartMeshes();
+    }
     if (isViewmodel && vrViewmodelPass && m_VR->IsGameplayEligible() && EngineInGame())
         ApplyViewmodelStudioWork(state, modelName, body, skin, hideArms, pCustomBoneToWorld);
 
@@ -8218,6 +8313,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 }
                 SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                 SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
+                if (gunRightHand)
+                    CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);

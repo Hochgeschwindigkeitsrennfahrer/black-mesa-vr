@@ -116,6 +116,8 @@ namespace bmvr
               Kind::Float, -135.f, 135.f, nullptr, &g_VrHandsRollDeg },
             { "bmvr_hands_blackmesa", "VR: hands built from Black Mesa's own first-person arms (game files) instead of the glove files",
               Kind::Bool, 0.f, 1.f, &g_VrHandsBlackMesa, nullptr },
+            { "bmvr_gun_right_hand", "VR: the weapon's own right hand holds the gun (first-person arms with the left arm and forearm hidden)",
+              Kind::Bool, 0.f, 1.f, &g_VrGunRightHand, nullptr },
             { "bmvr_hands_blackmesa_size", "VR: size of the Black Mesa hands (1 = the game's first-person size)",
               Kind::Float, 0.4f, 1.5f, nullptr, &g_VrHandsBlackMesaScale },
             { "bmvr_hand_classic", "VR: classic hands: flat gloves (no roll, no gun-grip shift) and the hand HUD back on the hand",
