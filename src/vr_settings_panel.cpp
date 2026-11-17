@@ -72,7 +72,12 @@ namespace
     bool IsEngineKey(const char* key) { return IsEngineCvarKey(key) || IsEngineCmdKey(key); }
 
     // Info: a read-only status line (label left, text from InfoText right); not clickable.
-    enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info };
+    // Choice: a float stepped lo..hi by step, shown by name; fmt = "Name0|Name1|..."
+    // (index = (value - lo) / step), a click cycles to the next (wraps).
+    // DevSection: a heading whose rows (up to the next heading or tab) only show
+    // with "Show developer rows" on (bmvr::g_PanelDevRows); still saved/loaded.
+    enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection };
+    bool IsHeading(RowKind k) { return k == RowKind::Section || k == RowKind::DevSection; }
 
     struct Row
     {
@@ -92,29 +97,7 @@ namespace
     {
         // A Tab row starts a tab; its rows follow until the next Tab row.
         static std::vector<Row> rows = {
-            { "INTERACTION", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
-            { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
-            { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
-            { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
-            { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
-            { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
-            { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
-            { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
-            { "Left square toggles light", RowKind::Toggle, "FlashlightOnSquare", &bmvr::g_FlashlightOnSquare, nullptr, 0, 0, 0, nullptr },
-            { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Zoom follows the gun", RowKind::Toggle, "ScopeFollowsGun", &bmvr::g_ScopeFollowsGun, nullptr, 0, 0, 0, nullptr },
-            { "Raise to face zooms (2 hands)", RowKind::Toggle, "ScopeRaiseToZoom", &bmvr::g_ScopeRaiseToZoom, nullptr, 0, 0, 0, nullptr },
-            { "Raise distance", RowKind::Number, "ScopeRaiseMeters", nullptr, &bmvr::g_ScopeRaiseMeters, 0.02f, 0.1f, 0.6f, "%.2f m" },
-            { "Zoom smoothing", RowKind::Number, "ScopeGunSmoothSec", nullptr, &bmvr::g_ScopeGunSmoothSec, 0.02f, 0.f, 0.5f, "%.2f s" },
-            { "MOUNTED GUNS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Turn per hand move", RowKind::Number, "MountedGunGain", nullptr, &bmvr::g_MountedGunGain, 0.25f, 0.5f, 4.f, "%.2fx" },
-            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
-            { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
-            { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
+            { "CONTROLS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "TURNING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Snap turning", RowKind::Toggle, "SnapTurning", &bmvr::g_SnapTurning, nullptr, 0, 0, 0, nullptr },
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
@@ -128,14 +111,101 @@ namespace
             { "GRAB GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip: left save, right crowbar", RowKind::Toggle, "ShoulderGestures", &bmvr::g_ShoulderGestures, nullptr, 0, 0, 0, nullptr },
             { "Grip at hips: pistol / MP5", RowKind::Toggle, "HipGestures", &bmvr::g_HipGestures, nullptr, 0, 0, 0, nullptr },
+            { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
+            { "Left square toggles light", RowKind::Toggle, "FlashlightOnSquare", &bmvr::g_FlashlightOnSquare, nullptr, 0, 0, 0, nullptr },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
+            { "MENUS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Weapon menu faces the eye", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
+            { "Game menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
+            { "Game menu size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
+            { "Game menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
+            { "Menu pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
+            { "THIS PANEL", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Hold Triangle/Y for this panel", RowKind::Toggle, "SettingsTriangleHold", &bmvr::g_SettingsTriangleHold, nullptr, 0, 0, 0, nullptr },
+            // The gear only hides while the Triangle hold can open this panel.
+            { "VR gear in weapon menu", RowKind::Toggle, "WeaponMenuSettingsGear", &bmvr::g_WeaponMenuSettingsGear, nullptr, 0, 0, 0, nullptr },
+            // Glow fades and other effects run on game time: with the game
+            // paused a change only shows after the panel closes.
+            { "Panel pauses the game", RowKind::Toggle, "VrSettingsPause", &bmvr::g_VrSettingsPause, nullptr, 0, 0, 0, nullptr },
+            { "HANDS & WEAPONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Resets this tab's hand and HUD placement (also turns classic hands off).
+            { "Reset hands + HUD to default", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
+            // The original release's look: flat gloves, HUD on the back of the hand.
+            { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
+            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
+            { "Hand on gun: right", RowKind::Number, "VrHandsGunGripRight", nullptr, &bmvr::g_VrHandsGunGripRight, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
+            { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
+            { "HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
+            { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
+            { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
+            { "HUD POSITION", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "HUD size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
+            { "Up from the hand", RowKind::Number, "HandHudUp", nullptr, &bmvr::g_HandHudUp, 0.25f, -4.f, 8.f, "%+.2f" },
+            { "Forward (- = to the wrist)", RowKind::Number, "HandHudForward", nullptr, &bmvr::g_HandHudForward, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Sideways (+ = left)", RowKind::Number, "HandHudSide", nullptr, &bmvr::g_HandHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
+            { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
+            { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
+            { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
+            { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
+            { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
+            { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
+            { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
+            { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
+            { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
+            { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Zoom follows the gun", RowKind::Toggle, "ScopeFollowsGun", &bmvr::g_ScopeFollowsGun, nullptr, 0, 0, 0, nullptr },
+            { "Raise to face zooms (2 hands)", RowKind::Toggle, "ScopeRaiseToZoom", &bmvr::g_ScopeRaiseToZoom, nullptr, 0, 0, 0, nullptr },
+            { "Raise distance", RowKind::Number, "ScopeRaiseMeters", nullptr, &bmvr::g_ScopeRaiseMeters, 0.02f, 0.1f, 0.6f, "%.2f m" },
+            { "Zoom smoothing", RowKind::Number, "ScopeGunSmoothSec", nullptr, &bmvr::g_ScopeGunSmoothSec, 0.02f, 0.f, 0.5f, "%.2f s" },
+            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
+            { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
+            { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
+            { "MOUNTED GUNS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Turn per hand move", RowKind::Number, "MountedGunGain", nullptr, &bmvr::g_MountedGunGain, 0.25f, 0.5f, 4.f, "%.2fx" },
             { "GRAPHICS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Frame cap", RowKind::Choice, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "Off|Headset +10|2x headset" },
+            // Coarser shading away from the centre: fixed = around each lens centre,
+            // eye-tracked = where you look (lens centre while there is no gaze). The GPU
+            // feature turns on at game start when this is not off.
+            { "Foveated (restart)", RowKind::Choice, "Foveated", nullptr, &bmvr::g_Foveated, 1.f, 0.f, 2.f, "Off|Fixed|Eye-tracked" },
+            { "Foveation now", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "foveation" },
+            { "Foveated: sharp radius", RowKind::Number, "FoveatedInner", nullptr, &bmvr::g_FoveatedInner, 0.05f, 0.1f, 1.f, "%.2f" },
+            { "Foveated: half-rate radius", RowKind::Number, "FoveatedMid", nullptr, &bmvr::g_FoveatedMid, 0.05f, 0.2f, 1.5f, "%.2f" },
+            { "ANTI-ALIASING (MSAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "MSAA on edges", RowKind::Choice, "Msaa", nullptr, &bmvr::g_MsaaF, 2.f, 0.f, 4.f, "Off|2x|4x" },
+            // Leaves, grass, fences: their cut-out edges get the MSAA samples
+            // too (softer, less crawl; can look a bit thinner). Needs MSAA on.
+            { "MSAA on foliage edges", RowKind::Toggle, "AlphaToCoverage", &bmvr::g_AlphaToCoverage, nullptr, 0, 0, 0, nullptr },
+            // Smoke, sparks and drips are drawn last, after the MSAA resolve:
+            // much cheaper where particles fill the view. Models, wires and
+            // glass keep MSAA; the gun loses it only while particles are in view.
+            { "MSAA skips particles", RowKind::Toggle, "MsaaParticles1x", &bmvr::g_MsaaParticles1x, nullptr, 0, 0, 0, nullptr },
+            { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
+            { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
+            { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
+            { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
+            { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
+            { "IMAGE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
+            // Mip LOD bias in the 3D views (experimental): + = softer textures;
+            // foliage and fences look more solid, at the cost of detail. Does
+            // not fix the shimmering sand outdoors. Menus and the HUD stay sharp.
+            { "Texture calm (LOD bias)", RowKind::Number, "LodBias", nullptr, &bmvr::g_LodBias, 0.25f, -0.5f, 2.f, "%+.2f" },
+            { "Smoke stays upright", RowKind::Toggle, "ParticleLevel", &bmvr::g_ParticleLevel, nullptr, 0, 0, 0, nullptr },
             { "LENS FLARES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Reset flare values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "flare_default" },
-            { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
             { "Fade out at angle", RowKind::Number, "FlareFadeAngle", nullptr, &bmvr::g_FlareFadeAngle, 5.f, 0.f, 90.f, "%.0f\xB0" },
             { "Strength on the light", RowKind::Number, "FlareLightScale", nullptr, &bmvr::g_FlareLightScale, 0.05f, 0.f, 1.f, "%.2f" },
             { "Large round haze", RowKind::Number, "FlareHazeScale", nullptr, &bmvr::g_FlareHazeScale, 0.05f, 0.f, 1.f, "%.2f" },
@@ -146,92 +216,40 @@ namespace
             { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
             { "Dark when hidden after", RowKind::Number, "GlowHideMs", nullptr, &bmvr::g_GlowHideMs, 10.f, 0.f, 500.f, "%.0f ms" },
             { "Glows level, face you", RowKind::Toggle, "SpriteLevel", &bmvr::g_SpriteLevel, nullptr, 0, 0, 0, nullptr },
-            { "Smoke stays upright", RowKind::Toggle, "ParticleLevel", &bmvr::g_ParticleLevel, nullptr, 0, 0, 0, nullptr },
-            { "ANTI-ALIASING (MSAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "MSAA on edges (0 = off)", RowKind::Number, "Msaa", nullptr, &bmvr::g_MsaaF, 2.f, 0.f, 4.f, "%.0fx" },
-            // Leaves, grass, fences: their cut-out edges get the MSAA samples
-            // too (softer, less crawl; can look a bit thinner). Needs MSAA on.
-            { "MSAA on foliage edges", RowKind::Toggle, "AlphaToCoverage", &bmvr::g_AlphaToCoverage, nullptr, 0, 0, 0, nullptr },
-            // Smoke, sparks and drips are drawn last, after the MSAA resolve:
-            // much cheaper where particles fill the view. Models, wires and
-            // glass keep MSAA; the gun loses it only while particles are in view.
-            { "MSAA skips particles", RowKind::Toggle, "MsaaParticles1x", &bmvr::g_MsaaParticles1x, nullptr, 0, 0, 0, nullptr },
-            // Mip LOD bias in the 3D views (experimental): + = softer textures;
-            // foliage and fences look more solid, at the cost of detail. Does
-            // not fix the shimmering sand outdoors. Menus and the HUD stay sharp.
-            { "Texture calm (LOD bias)", RowKind::Number, "LodBias", nullptr, &bmvr::g_LodBias, 0.25f, -0.5f, 2.f, "%+.2f" },
-            { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
-            { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
-            { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
-            { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
-            { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
-            { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
-            { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Frame cap (0 off, 1 +10, 2 x2)", RowKind::Number, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "%.0f" },
-            // Coarser shading away from the centre: 1 = around each lens centre,
-            // 2 = where you look (eye tracking; lens centre while there is no
-            // gaze). The GPU feature turns on at game start when this is 1 or 2.
-            { "Foveated (0 off, 1 fixed, 2 eye; restart)", RowKind::Number, "Foveated", nullptr, &bmvr::g_Foveated, 1.f, 0.f, 2.f, "%.0f" },
-            { "Foveation now", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "foveation" },
-            { "Foveated: sharp radius", RowKind::Number, "FoveatedInner", nullptr, &bmvr::g_FoveatedInner, 0.05f, 0.1f, 1.f, "%.2f" },
-            { "Foveated: half-rate radius", RowKind::Number, "FoveatedMid", nullptr, &bmvr::g_FoveatedMid, 0.05f, 0.2f, 1.5f, "%.2f" },
             { "REFLECTIONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
             { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
-            { "HAND HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Reset hands + HUD to default", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
-            { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
-            // The original release's look: flat gloves, HUD on the back of the hand.
-            { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
-            { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
-            { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
-            { "Panel size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
-            { "Up from the hand", RowKind::Number, "HandHudUp", nullptr, &bmvr::g_HandHudUp, 0.25f, -4.f, 8.f, "%+.2f" },
-            { "Forward (- = to the wrist)", RowKind::Number, "HandHudForward", nullptr, &bmvr::g_HandHudForward, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Sideways (+ = left)", RowKind::Number, "HandHudSide", nullptr, &bmvr::g_HandHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
-            { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
-            { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
-            { "WEAPON MENU", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Tilt to face the eye", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
-            // The gear only hides while the Triangle hold can open this panel.
-            { "VR gear slot", RowKind::Toggle, "WeaponMenuSettingsGear", &bmvr::g_WeaponMenuSettingsGear, nullptr, 0, 0, 0, nullptr },
-            { "Hold Triangle/Y for this panel", RowKind::Toggle, "SettingsTriangleHold", &bmvr::g_SettingsTriangleHold, nullptr, 0, 0, 0, nullptr },
-            { "MENU", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
-            { "Menu size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
-            { "Menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
-            { "Pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
             { "DEBUG", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // One section, so "Show developer rows" keeps its spot (left column) when the rows below appear.
+            { "DIAGNOSTICS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Offsets that no longer match the game: gameplay ones also raise the "VR MOD OUT
             // OF DATE" toast, debug-only ones (PerfLog stats, profiling) only show here.
             { "Missing hooks", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "missing_hooks" },
-            // Capture/view tests are not saved (no key): always off after a restart.
-            { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
             // Eye GPU ms every ~5 s (timestamp queries); with the always-on "Frame budget" CPU line it shows
             // whether a scene is CPU- or GPU-limited.
             { "GPU timing in log", RowKind::Toggle, "GpuPassTiming", &bmvr::g_GpuPassTiming, nullptr, 0, 0, 0, nullptr },
+            // Shows the DevSection groups below (A/B switches, tests, engine cvars); saved.
+            { "Show developer rows", RowKind::Toggle, "VrPanelDevRows", &bmvr::g_PanelDevRows, nullptr, 0, 0, 0, nullptr },
             // CPU/GPU work removed without changing the image; off = the stock path, for A/B.
-            { "SAVINGS (SAME IMAGE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "SAVINGS (SAME IMAGE)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Post copies: swap, no copy", RowKind::Toggle, "PostCopySwap", &bmvr::g_PostCopySwap, nullptr, 0, 0, 0, nullptr },
             { "Light shadows: once per frame", RowKind::Toggle, "ShadowsOncePerFrame", &bmvr::g_ShadowsOncePerFrame, nullptr, 0, 0, 0, nullptr },
-            { "CAPTURE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
+            { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
+            // Capture/view tests are not saved (no key): always off after a restart.
+            { "LOGS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Lens flare positions per eye into the log; switch on when a flare sits in the wrong place.
             { "Flare position log", RowKind::Toggle, nullptr, &bmvr::g_FlareLog, nullptr, 0, 0, 0, nullptr },
             { "Glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
-            { "VIEW TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "VIEW TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
-            // Glow fades and other effects run on game time: with the game
-            // paused a change only shows after the panel closes.
-            { "Panel pauses the game", RowKind::Toggle, "VrSettingsPause", &bmvr::g_VrSettingsPause, nullptr, 0, 0, 0, nullptr },
-            // Skips Black Mesa's Xen fog (Xog) draws by material: 1 = the global fog
-            // (__gbxog0), 2 = the local fog volumes, 3 = both. Draw hooks run while on.
-            { "Hide Xen fog (1 glob, 2 vol, 3 both)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugHideXog, 1.f, 0.f, 3.f, "%.0f" },
-            { "Blank eye (0 off, 1 L, 2 R)", RowKind::Number, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "%.0f" },
+            // Skips Black Mesa's Xen fog (Xog) draws by material: global = __gbxog0,
+            // volumes = the local fog volumes. Draw hooks run while on.
+            { "Hide Xen fog", RowKind::Choice, nullptr, nullptr, &bmvr::g_DebugHideXog, 1.f, 0.f, 3.f, "Off|Global|Volumes|Both" },
+            { "Blank eye", RowKind::Choice, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "Off|Left|Right" },
             // Experiments; saved like the other settings, off by default.
-            { "TESTS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
             { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
             { "Titles level in the room", RowKind::Toggle, "TitleLevel", &bmvr::g_TitleLevel, nullptr, 0, 0, 0, nullptr },
@@ -239,7 +257,7 @@ namespace
             { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
             // Engine cvars: "cvar:" keys go to the console on the game thread
             // (never saved); the shown value is read back while the panel is open.
-            { "ENGINE (CONSOLE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "ENGINE (CONSOLE)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "sv_cheats", RowKind::Toggle, "cvar:sv_cheats", &g_EngSvCheats, nullptr, 0, 0, 0, nullptr },
             { "r_occlusion", RowKind::Toggle, "cvar:r_occlusion", &g_EngOcclusion, nullptr, 0, 0, 0, nullptr },
             // Black Mesa's GPU-query occlusion (engine/occlusionproxy draws + query readback, per eye).
@@ -252,20 +270,12 @@ namespace
             { "God mode", RowKind::Toggle, "cmd:god", &g_DevGod, nullptr, 0, 0, 0, nullptr },
             { "No clip", RowKind::Toggle, "cmd:noclip", &g_DevNoclip, nullptr, 0, 0, 0, nullptr },
             { "No target", RowKind::Toggle, "cmd:notarget", &g_DevNotarget, nullptr, 0, 0, 0, nullptr },
-            // Hand/glove placement tuning; saved like the other settings.
-            { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
-            { "Hand on gun: right", RowKind::Number, "VrHandsGunGripRight", nullptr, &bmvr::g_VrHandsGunGripRight, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
-            { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
             // bmvr_* fixes and tests (on/off for A/B); not saved: a restart
             // brings back the defaults.
-            { "MOD SWITCHES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Pose valid never blinks", RowKind::Toggle, nullptr, &bmvr::g_PoseFlagsNoBlink, nullptr, 0, 0, 0, nullptr },
+            { "FIXES: RENDERING", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow queries per eye", RowKind::Toggle, nullptr, &bmvr::g_PixelVisPerEye, nullptr, 0, 0, 0, nullptr },
             { "Glow through objects fix", RowKind::Toggle, nullptr, &bmvr::g_GlowCountDepthFix, nullptr, 0, 0, 0, nullptr },
-            { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
+            { "Glow hold", RowKind::Number, nullptr, nullptr, &bmvr::g_GlowHold, 0.1f, 0.f, 2.f, "%.1f s" },
             { "Lights culled per eye", RowKind::Toggle, nullptr, &bmvr::g_LightCullEyeView, nullptr, 0, 0, 0, nullptr },
             { "Flares: one layout", RowKind::Toggle, nullptr, &bmvr::g_FlareSharedLayout, nullptr, 0, 0, 0, nullptr },
             { "Flares level with horizon", RowKind::Toggle, nullptr, &bmvr::g_FlareLevel, nullptr, 0, 0, 0, nullptr },
@@ -275,6 +285,9 @@ namespace
             { "Water line: no clip", RowKind::Toggle, nullptr, &bmvr::g_WaterLineClipFix, nullptr, 0, 0, 0, nullptr },
             { "Xen ground fog off", RowKind::Toggle, nullptr, &bmvr::g_XenGlobalFogOff, nullptr, 0, 0, 0, nullptr },
             { "Rope normals fix", RowKind::Toggle, nullptr, &bmvr::g_ViewProjNormalFix, nullptr, 0, 0, 0, nullptr },
+            { "FIXES: TRACKING, WEAPONS, GAME", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Pose valid never blinks", RowKind::Toggle, nullptr, &bmvr::g_PoseFlagsNoBlink, nullptr, 0, 0, 0, nullptr },
+            { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Guns skip draw animation", RowKind::Toggle, nullptr, &bmvr::g_SkipDrawAnim, nullptr, 0, 0, 0, nullptr },
             { "Tau/crossbow switch fix", RowKind::Toggle, nullptr, &bmvr::g_DeltaSeqIdle, nullptr, 0, 0, 0, nullptr },
@@ -282,8 +295,7 @@ namespace
             { "Mute weapon fidget sounds", RowKind::Toggle, nullptr, &bmvr::g_MuteFidgetSounds, nullptr, 0, 0, 0, nullptr },
             { "Muzzle flash follows gun", RowKind::Toggle, nullptr, &bmvr::g_ViewmodelFxCatchUp, nullptr, 0, 0, 0, nullptr },
             { "LOADING card", RowKind::Toggle, nullptr, &bmvr::g_LoadingCard, nullptr, 0, 0, 0, nullptr },
-            { "Glow hold", RowKind::Number, nullptr, nullptr, &bmvr::g_GlowHold, 0.1f, 0.f, 2.f, "%.1f s" },
-            { "G-MAN GESTURE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "G-MAN GESTURE TUNING", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Force gesture (tuning)", RowKind::Toggle, nullptr, &bmvr::g_VrGmanGestureForce, nullptr, 0, 0, 0, nullptr },
             { "Finger straight", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanFingerStraight, 0.05f, 0.f, 0.5f, "%.2f" },
             { "Thumb curl", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanThumbCurl, 0.1f, 0.f, 2.f, "%.1f" },
@@ -294,91 +306,145 @@ namespace
         return rows;
     }
 
-    int RowHeight(const Row& r) { return r.kind == RowKind::Section ? kSectionPx : kRowPx; }
+    int RowHeight(const Row& r) { return IsHeading(r.kind) ? kSectionPx : kRowPx; }
+
+    // Name of a Choice row's current value ("" if out of range).
+    std::string ChoiceText(const Row& r)
+    {
+        if (!r.f || !r.fmt || r.step <= 0.f)
+            return {};
+        int idx = static_cast<int>(std::lround((*r.f - r.lo) / r.step));
+        const char* p = r.fmt;
+        while (idx > 0 && *p)
+        {
+            if (*p++ == '|')
+                --idx;
+        }
+        if (idx != 0 || !*p)
+        {
+            char buf[32]{};
+            _snprintf(buf, sizeof(buf) - 1, "%g", *r.f);
+            return buf;
+        }
+        const char* e = std::strchr(p, '|');
+        return e ? std::string(p, e) : std::string(p);
+    }
 
     // Tab shown on the panel; kept while the game runs.
     int g_Tab = 0;
+    // Distance the open panel was placed at (PanelDistanceHu at open / last relayout).
+    float g_LatchDistHu = 0.f;
 
     // Each tab's rows split into two columns at the section heading that best
     // halves that tab's height. The panel is as tall as the tallest tab, so it
     // does not change size or move when you switch tabs. Tab buttons sit in a
     // bar under the title, Close at the bottom of every tab. The row table is
     // fixed, so this is built once.
+    // Rows under a DevSection are left out (tab -2) while developer rows are off; the layout is
+    // rebuilt when that switch changes, so the panel shrinks to the tallest visible tab.
     struct Layout
     {
-        std::vector<int> tab, col, top, x0, x1;   // tab -1 = shown on every tab
+        std::vector<int> tab, col, top, x0, x1;   // tab -1 = shown on every tab, -2 = hidden
         int tabCount = 0;
         int closeTop = 0;
         int bottom = 0;
     };
+    Layout BuildLayout(bool devRows)
+    {
+        const auto& rows = Rows();
+        const int n = static_cast<int>(rows.size());
+        Layout out;
+        out.tab.assign(n, -1);
+        out.col.assign(n, 0);
+        out.top.assign(n, 0);
+        out.x0.assign(n, 0);
+        out.x1.assign(n, 0);
+        std::vector<int> tabRows;
+        for (int i = 0; i < n; ++i)
+            if (rows[i].kind == RowKind::Tab)
+                tabRows.push_back(i);
+        out.tabCount = static_cast<int>(tabRows.size());
+        // Developer-only rows: everything from a DevSection to the next heading/tab.
+        std::vector<bool> hidden(n, false);
+        bool inDev = false;
+        for (int i = 0; i < n; ++i)
+        {
+            const RowKind k = rows[i].kind;
+            if (k == RowKind::Tab || k == RowKind::Close || k == RowKind::Section)
+                inDev = false;
+            else if (k == RowKind::DevSection)
+                inDev = true;
+            hidden[i] = inDev && !devRows;
+        }
+        const int tabW = out.tabCount > 0 ? (kTexW - 80 - (out.tabCount - 1) * kTabGapPx) / out.tabCount : 0;
+        int contentBottom = kContentTop;
+        for (int t = 0; t < out.tabCount; ++t)
+        {
+            const int ti = tabRows[t];
+            out.top[ti] = kHeaderPx;
+            out.x0[ti] = 40 + t * (tabW + kTabGapPx);
+            out.x1[ti] = out.x0[ti] + tabW;
+            const int first = ti + 1;
+            int last = first;   // one past this tab's rows
+            while (last < n && rows[last].kind != RowKind::Tab && rows[last].kind != RowKind::Close)
+                ++last;
+            int total = 0;
+            for (int i = first; i < last; ++i)
+                total += hidden[i] ? 0 : RowHeight(rows[i]);
+            int split = last, best = total, acc = 0;
+            for (int i = first; i < last; ++i)
+            {
+                if (hidden[i])
+                    continue;
+                if (i > first && IsHeading(rows[i].kind))
+                {
+                    const int worst = acc > total - acc ? acc : total - acc;
+                    if (worst < best)
+                    {
+                        best = worst;
+                        split = i;
+                    }
+                }
+                acc += RowHeight(rows[i]);
+            }
+            int y[2] = { kContentTop, kContentTop };
+            for (int i = first; i < last; ++i)
+            {
+                if (hidden[i])
+                {
+                    out.tab[i] = -2;
+                    continue;
+                }
+                const int c = i < split ? 0 : 1;
+                out.tab[i] = t;
+                out.col[i] = c;
+                out.top[i] = y[c];
+                y[c] += RowHeight(rows[i]);
+            }
+            contentBottom = (std::max)({ contentBottom, y[0], y[1] });
+        }
+        out.closeTop = contentBottom + 16;
+        out.bottom = out.closeTop + kRowPx;
+        for (int i = 0; i < n; ++i)
+        {
+            if (rows[i].kind != RowKind::Close)
+                continue;
+            out.top[i] = out.closeTop;
+            out.x0[i] = 0;
+            out.x1[i] = kTexW;
+        }
+        return out;
+    }
     const Layout& GetLayout()
     {
-        static Layout l = [] {
-            const auto& rows = Rows();
-            const int n = static_cast<int>(rows.size());
-            Layout out;
-            out.tab.assign(n, -1);
-            out.col.assign(n, 0);
-            out.top.assign(n, 0);
-            out.x0.assign(n, 0);
-            out.x1.assign(n, 0);
-            std::vector<int> tabRows;
-            for (int i = 0; i < n; ++i)
-                if (rows[i].kind == RowKind::Tab)
-                    tabRows.push_back(i);
-            out.tabCount = static_cast<int>(tabRows.size());
-            const int tabW = out.tabCount > 0 ? (kTexW - 80 - (out.tabCount - 1) * kTabGapPx) / out.tabCount : 0;
-            int contentBottom = kContentTop;
-            for (int t = 0; t < out.tabCount; ++t)
-            {
-                const int ti = tabRows[t];
-                out.top[ti] = kHeaderPx;
-                out.x0[ti] = 40 + t * (tabW + kTabGapPx);
-                out.x1[ti] = out.x0[ti] + tabW;
-                const int first = ti + 1;
-                int last = first;   // one past this tab's rows
-                while (last < n && rows[last].kind != RowKind::Tab && rows[last].kind != RowKind::Close)
-                    ++last;
-                int total = 0;
-                for (int i = first; i < last; ++i)
-                    total += RowHeight(rows[i]);
-                int split = last, best = total, acc = 0;
-                for (int i = first; i < last; ++i)
-                {
-                    if (i > first && rows[i].kind == RowKind::Section)
-                    {
-                        const int worst = acc > total - acc ? acc : total - acc;
-                        if (worst < best)
-                        {
-                            best = worst;
-                            split = i;
-                        }
-                    }
-                    acc += RowHeight(rows[i]);
-                }
-                int y[2] = { kContentTop, kContentTop };
-                for (int i = first; i < last; ++i)
-                {
-                    const int c = i < split ? 0 : 1;
-                    out.tab[i] = t;
-                    out.col[i] = c;
-                    out.top[i] = y[c];
-                    y[c] += RowHeight(rows[i]);
-                }
-                contentBottom = (std::max)({ contentBottom, y[0], y[1] });
-            }
-            out.closeTop = contentBottom + 16;
-            out.bottom = out.closeTop + kRowPx;
-            for (int i = 0; i < n; ++i)
-            {
-                if (rows[i].kind != RowKind::Close)
-                    continue;
-                out.top[i] = out.closeTop;
-                out.x0[i] = 0;
-                out.x1[i] = kTexW;
-            }
-            return out;
-        }();
+        static Layout l;
+        static int s_builtFor = -1;
+        const int want = bmvr::g_PanelDevRows ? 1 : 0;
+        if (s_builtFor != want)
+        {
+            l = BuildLayout(want != 0);
+            s_builtFor = want;
+        }
         return l;
     }
     int RowTop(int index) { return GetLayout().top[index]; }
@@ -386,7 +452,7 @@ namespace
     bool RowVisible(int index)
     {
         const int t = GetLayout().tab[index];
-        return t < 0 || t == g_Tab;
+        return t == -1 || t == g_Tab;
     }
     // Row under texture x/y, or -1 (headings are not interactive). Tab
     // buttons and Close are rows too.
@@ -408,7 +474,7 @@ namespace
             if (l.tab[i] != g_Tab || l.col[i] != c)
                 continue;
             if (py >= l.top[i] && py < l.top[i] + RowHeight(rows[i]))
-                return (k == RowKind::Section || k == RowKind::Info) ? -1 : i;
+                return (IsHeading(k) || k == RowKind::Info) ? -1 : i;
         }
         return -1;
     }
@@ -696,9 +762,11 @@ namespace
             const int y0 = RowTop(i), y1 = y0 + RowHeight(r);
             const int x = r.kind == RowKind::Close ? 0 : RowX(i);
             const int cw = r.kind == RowKind::Close ? c.w : kColW, mid = x + cw / 2;
-            if (r.kind == RowKind::Section)
+            if (IsHeading(r.kind))
             {
                 c.text(r.label, x + 40, y0 + 8, x + cw - 40, y1, kAmber, 26, true, DT_LEFT);
+                if (r.kind == RowKind::DevSection)
+                    c.text("developer", x + 40, y0 + 8, x + cw - 40, y1, kDim, 22, false, DT_RIGHT);
                 // 4 px: the panel is drawn minified without mipmaps, so 2 px lines dropped out.
                 c.fill(x + 40, y1 - 6, x + cw - 40, y1 - 2, RGB(90, 70, 20));
                 continue;
@@ -736,7 +804,15 @@ namespace
                 continue;
             }
             c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
-            if (r.kind == RowKind::Toggle)
+            if (r.kind == RowKind::Choice)
+            {
+                // One wide button (the -/+ span); a click picks the next value.
+                c.fill(x + kMinusX0, y0 + 10, x + kPlusX1, y1 - 10, hover ? kBtnHover : kBtn);
+                c.text(ChoiceText(r).c_str(), x + kMinusX0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : kText,
+                    30, true, DT_CENTER);
+                c.text(">", x + kPlusX1 - 40, y0, x + kPlusX1 - 8, y1 - 2, hover ? RGB(0, 0, 0) : kDim, 30, true, DT_CENTER);
+            }
+            else if (r.kind == RowKind::Toggle)
             {
                 const bool on = r.b && *r.b;
                 c.fill(x + kPillX0, y0 + 10, x + kPillX1, y1 - 10, on ? kOn : kOff);
@@ -936,7 +1012,8 @@ void VR::OpenSettingsPanel()
     Vector yawRight = CrossProduct(yawFwd, worldUp);
     VectorNormalize(yawRight);
     const Vector eye = GetViewOrigin(body);
-    const Vector center = eye + yawFwd * PanelDistanceHu() - worldUp * kPanelDropHu;
+    g_LatchDistHu = PanelDistanceHu();
+    const Vector center = eye + yawFwd * g_LatchDistHu - worldUp * kPanelDropHu;
     // Same latching as the weapon menu: stored relative to the body and the
     // turn offset, so the panel stays put in the room while you look around.
     m_SettingsLatchDelta = center - body;
@@ -1128,8 +1205,17 @@ void VR::UpdateSettingsPanel()
     switch (r.kind)
     {
     case RowKind::Section:
+    case RowKind::DevSection:
     case RowKind::Info:
         return;
+    case RowKind::Choice:
+        if (!r.f || r.step <= 0.f)
+            return;
+        {
+            float v = std::round((*r.f - r.lo) / r.step) * r.step + r.lo + r.step;
+            *r.f = v > r.hi + r.step * 0.5f ? r.lo : std::clamp(v, r.lo, r.hi);
+        }
+        break;
     case RowKind::Tab:
     {
         int t = 0;
@@ -1229,6 +1315,19 @@ void VR::UpdateSettingsPanel()
             return;
         break;
     }
+    // Developer rows shown/hidden: the panel changes height, so it moves to the
+    // distance that fits it again (in the latched frame, like on open).
+    if (r.b == &bmvr::g_PanelDevRows)
+    {
+        const float d = PanelDistanceHu();
+        m_SettingsLatchDelta = m_SettingsLatchDelta + m_SettingsLatchFwd * (d - g_LatchDistHu);
+        Game::logMsg("VR settings panel: developer rows %s, %d px tall, distance %.1f -> %.1f",
+            bmvr::g_PanelDevRows ? "shown" : "hidden", TexH(), g_LatchDistHu, d);
+        g_LatchDistHu = d;
+        m_SettingsHover = -1;
+        m_SettingsHoverZone = -1;
+        s_repeatRow = -1;
+    }
     // Pause switched while the panel is open: apply it now.
     if (r.b == &bmvr::g_VrSettingsPause && bmvr::g_VrSettingsPause != m_SettingsPausedGame)
     {
@@ -1261,7 +1360,10 @@ void VR::UpdateSettingsPanel()
         return;
     }
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
-    Game::logMsg("VR settings: %s = %s", r.label, FormatValue(r).c_str());
+    if (r.kind == RowKind::Button)
+        Game::logMsg("VR settings: %s pressed", r.label);
+    else
+        Game::logMsg("VR settings: %s = %s", r.label, FormatValue(r).c_str());
 }
 
 void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,

@@ -594,7 +594,7 @@ namespace bmvr
     // 0 this long shows the glow at 0 at once (no glow through walls).
     extern float g_GlowSmooth;
     extern float g_GlowHideMs;
-    // Tests (VR panel Debug -> TESTS), default off:
+    // Tests (VR panel Debug -> TESTS, developer rows), default off:
     // GlowProxyScale (bmvr_glow_proxy_scale, default 1.5 since 2026-11-11,
     // 1 = stock): the glow occlusion test area is this many times wider, so a query counts more pixels and
     // its visible fraction moves in finer steps.
@@ -652,14 +652,17 @@ namespace bmvr
     // Left = -deg, right = +deg, same convention as the Index roll. One value
     // for every controller: on Index the pose already carries
     // g_VrHandsIndexRollDeg, so the glove adds only the difference (90 = as
-    // before). Not applied to a hand posed on a weapon; never touches the
-    // tracked pose, so guns and aim are unaffected.
+    // before). Also on a hand posed on a weapon (it then sits under the gun);
+    // never touches the tracked pose, so guns and aim are unaffected.
     extern float g_VrHandsRollDeg;
     // Classic hands (the original release's pose, off by default): gloves lie
     // flat on the controller (no g_VrHandsRollDeg, no gun-grip shift) and the
     // hand HUD sits kHandHudClassicDrop lower, back on the hand instead of
     // above the rolled thumb. The HAND HUD rows still apply on top.
     extern bool g_VrHandsClassicPose;
+    // VR panel DEBUG "Show developer rows" (VrPanelDevRows, default off): shows the
+    // developer groups (A/B switches, tests, engine cvars) on the DEBUG tab.
+    extern bool g_PanelDevRows;
     // HandHudUp was raised 1.05 -> 2.2 only to clear the rolled thumb.
     constexpr float kHandHudClassicDrop = 1.15f;
     extern float g_VrHandsGunGripRight;

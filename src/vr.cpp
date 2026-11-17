@@ -12716,7 +12716,7 @@ namespace
         up = HudRotate(up, left, kPitch);
         left = HudRotate(left, fwd, kRoll);
         up = HudRotate(up, fwd, kRoll);
-        // Size/offsets/angles from the panel (Graphics -> HAND HUD) / bmvr_hand_hud_*.
+        // Size/offsets/angles from the panel (Hands & Weapons -> HUD POSITION) / bmvr_hand_hud_*.
         const float size = bmvr::g_HandHudSize;
         const float lift = bmvr::g_HandHudUp - (bmvr::g_VrHandsClassicPose ? bmvr::kHandHudClassicDrop : 0.f);
         const Vector center = ctrlPos + up * lift + fwd * bmvr::g_HandHudForward

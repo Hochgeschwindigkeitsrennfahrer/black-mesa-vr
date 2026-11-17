@@ -217,7 +217,7 @@ namespace
             else if (key == "ipd") ss >> fresh.ipd;
             else if (key == "perflog")
             {
-                // Same as the VR panel's Debug -> Performance log row.
+                // Same as the VR panel's Debug -> DIAGNOSTICS "Performance log" row.
                 int on = 0;
                 ss >> on;
                 bmvr::g_PerfLog = on != 0;

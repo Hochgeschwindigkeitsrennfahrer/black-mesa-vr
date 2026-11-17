@@ -250,6 +250,7 @@ namespace bmvr
     float g_VrHandsIndexRollDeg = 90.f;
     float g_VrHandsRollDeg = 90.f;
     bool g_VrHandsClassicPose = false;
+    bool g_PanelDevRows = false;
     float g_VrHandsGunGripRight = 1.2f;
     float g_VrHandsGunGripUp = 0.f;
     float g_VrHandsGunGripForward = 0.f;
@@ -958,6 +959,8 @@ namespace bmvr
                 g_VrHandsGunGripUp = std::clamp(static_cast<float>(atof(val)), -8.f, 8.f);
             else if (std::strcmp(n, "VrHandsGunGripForward") == 0)
                 g_VrHandsGunGripForward = std::clamp(static_cast<float>(atof(val)), -12.f, 12.f);
+            else if (std::strcmp(n, "VrPanelDevRows") == 0)
+                g_PanelDevRows = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsClassicPose") == 0)
                 g_VrHandsClassicPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsRollDeg") == 0)
