@@ -8355,8 +8355,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         m_VR->m_LadderTouch[0].store(false, std::memory_order_release);
         m_VR->m_LadderTouch[1].store(false, std::memory_order_release);
     }
+    // Hands only (PhysicalLadders without LadderStickClimb): no stick mount
+    // assist and no stick climbing; walking into a ladder does not mount it
+    // either (sv_ladder_useonly, VR::SyncLadderUseOnly).
+    const bool ladderHandsOnly = bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb;
     const bool ladderMode = ladderBase
-        && (physLadderOn || m_VR->LadderMode(ladderBits, onLadder, &ladderMountYaw));
+        && (physLadderOn || (!ladderHandsOnly && m_VR->LadderMode(ladderBits, onLadder, &ladderMountYaw)));
+    const bool ladderStickBlocked = ladderHandsOnly && physLadder.onLadder;
     const bool ladderMountAssist = ladderMode && !onLadder && std::isfinite(ladderMountYaw);
     const bool ladderJump = ladderMode && onLadder && (m_VR->HeldButtons() & IN_JUMP) != 0;
     const bool ladderBack = ladderMode && onLadder && !ladderJump && (ladderBits & IN_BACK) != 0;
@@ -8565,6 +8570,12 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         }
         else if (afterLadderJump && cmd->forwardmove > 0.f)
             cmd->forwardmove = 0.f;
+        if (ladderStickBlocked && !ladderJump)
+        {
+            // On a ladder the hands climb; the stick moves nothing.
+            cmd->forwardmove = 0.f;
+            cmd->sidemove = 0.f;
+        }
         const int inv = m_VR->m_PendingInvDelta.exchange(0, std::memory_order_acq_rel);
         if (inv != 0 && m_Game)
         {

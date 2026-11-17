@@ -759,6 +759,11 @@ namespace bmvr
     // Physical ladders, the gun hand: 0 = grabbing holsters the weapon (back
     // when off the ladder), 1 = only an empty hand grabs a ladder.
     extern float g_LadderGunHand;
+    // Physical ladders: the stick also mounts (walk-on, mount assist) and
+    // climbs, as before hand climbing. Off = hands only (sv_ladder_useonly).
+    extern bool g_LadderStickClimb;
+    // Physical ladders: glove this far (units) in front of the rung it holds.
+    extern float g_LadderHandBack;
     extern float g_VrRecoilScale;
     // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
     extern bool g_RpgRocketShown;

@@ -8292,6 +8292,18 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
             m_LadderPin[h].valid = bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungSnapHu, onRung, &rungDist);
             m_LadderPin[h].world = onRung;
             if (m_LadderPin[h].valid)
+            {
+                // Glove a little in front of the rung (towards the player's
+                // side of the ladder), so the fist closes round it rather
+                // than through it.
+                float d = 0.f, yawToLine = 0.f;
+                if (nearestLadder(onRung, d, yawToLine) >= 0 && d > 0.5f)
+                {
+                    const float r = yawToLine * 3.14159265f / 180.f;
+                    m_LadderPin[h].world += Vector(cosf(r), sinf(r), 0.f) * bmvr::g_LadderHandBack;
+                }
+            }
+            if (m_LadderPin[h].valid)
                 Game::logMsg("Ladder grab: %s hand on a rung %.1f units away (%.0f,%.0f,%.0f)",
                     h == 0 ? "left" : "right", rungDist, onRung.x, onRung.y, onRung.z);
             if (!onLadder && s_mountUntil == 0)
@@ -9720,9 +9732,35 @@ bool VR::TakeHeadAimCmd()
     return true;
 }
 
+void VR::SyncLadderUseOnly()
+{
+    // Hands-only ladders: HL2's walk-on auto-mount off, a +use (what a hand
+    // grab sends) still mounts. Server cvar, not archived: set once per map
+    // and when the setting changes; set back to 0 only if we set it.
+    static int s_sent = -1;
+    static std::string s_map;
+    if (!m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+        return;
+    const int want = (bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb) ? 1 : 0;
+    if (want == s_sent && s_map == m_CurrentMapName)
+        return;
+    if (want == 0 && s_sent != 1)
+    {
+        s_sent = 0;
+        s_map = m_CurrentMapName;
+        return;
+    }
+    const bool ok = m_Game->ClientCmd_Unrestricted(want ? "sv_ladder_useonly 1" : "sv_ladder_useonly 0");
+    Game::logMsg("Ladders: sv_ladder_useonly %d (%s) ok=%d", want,
+        want ? "hands only, no walk-on mount" : "stick climbing", ok ? 1 : 0);
+    s_sent = want;
+    s_map = m_CurrentMapName;
+}
+
 void VR::FlushPendingGameUi()
 {
     FlushPendingQuit();
+    SyncLadderUseOnly();
     ExecVrConfigsOnce();
     TickWindowFocus();
     FlushPanelEngineCommands();
