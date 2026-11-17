@@ -189,7 +189,7 @@ namespace
             { "MSAA on edges", RowKind::Choice, "Msaa", nullptr, &bmvr::g_MsaaF, 2.f, 0.f, 4.f, "Off|2x|4x" },
             // Leaves, grass, fences: their cut-out edges get the MSAA samples
             // too (softer, less crawl; can look a bit thinner). Needs MSAA on.
-            { "MSAA on foliage edges", RowKind::Toggle, "AlphaToCoverage", &bmvr::g_AlphaToCoverage, nullptr, 0, 0, 0, nullptr },
+            { "MSAA on leaves + fences", RowKind::Toggle, "AlphaToCoverage", &bmvr::g_AlphaToCoverage, nullptr, 0, 0, 0, nullptr },
             // Smoke, sparks and drips are drawn last, after the MSAA resolve:
             // much cheaper where particles fill the view. Models, wires and
             // glass keep MSAA; the gun loses it only while particles are in view.
