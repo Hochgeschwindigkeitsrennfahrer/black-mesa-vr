@@ -5512,8 +5512,8 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
     }
     else
         Game::logMsg("debug dump: no publish slot (%u)", slot);
-    DumpSurfaceBmp(dev, m_D9HUDSurface, base + "-hud.bmp", 2);
-    DumpSurfaceBmp(dev, m_D9HUDSurface, base + "-hud-alpha.bmp", 2, true);
+    DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud.bmp", 2);
+    DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud-alpha.bmp", 2, true);
     if (m_PhaseDumpBackbuffer)
     {
         m_PhaseDumpBackbuffer = false;
@@ -16847,6 +16847,8 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     ReleaseT(m_BlitEventQuery);
     ReleaseT(m_D9HUDSurface);
     ReleaseT(m_D9HUDTexture);
+    ReleaseT(m_D9HUDPublishSurface);
+    ReleaseT(m_D9HUDPublishTexture);
     ReleaseT(m_D9DesktopMirrorSurface);
     ReleaseT(m_D9DesktopMirrorTexture);
     m_DesktopMirrorHasImage.store(false, std::memory_order_release);
@@ -17804,8 +17806,8 @@ void VR::PreparePauseHudForVgui(IMatRenderContext* ctx)
 {
     // HL2VR RenderHUD / DrawMainMenu: OverrideAlphaWriteEnable so VGUI
     // writes destination alpha. Empty pixels stay the D3D clear (0,0,0,0).
-    if (m_D9HUDSurface && !m_VKHUD.m_VRTexture.handle)
-        FillSharedTexture(m_D9HUDSurface, m_VKHUD);
+    if (m_D9HUDPublishSurface && !m_VKHUD.m_VRTexture.handle)
+        FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
     SehOverrideAlphaWrite(ctx, true, true);
     m_PauseHudAlphaOverridden = (ctx != nullptr);
 }
@@ -17833,25 +17835,49 @@ void VR::FinishPauseHudExtraPaint(IMatRenderContext* ctx)
 // options window, not the Advanced one). So first alpha = max(a, 8 * max(rgb))
 // from a copy of the layer: anything a dialog painted, even dark grey, turns
 // opaque; untouched pixels (cleared 0,0,0,0) stay transparent.
-static IDirect3DPixelShader9* PauseAlphaFromColourShader(IDirect3DDevice9* device)
+struct LayerShaderCache
 {
-    static IDirect3DDevice9* s_device;
-    static IDirect3DPixelShader9* s_ps;
-    static bool s_failed;
-    if (s_device == device && (s_ps || s_failed))
+    IDirect3DDevice9* device = nullptr;
+    IDirect3DPixelShader9* ps = nullptr;
+    bool failed = false;
+};
+
+static IDirect3DPixelShader9* CompileLayerShader(IDirect3DDevice9* device, LayerShaderCache& cache,
+    const char* src, size_t srcLen, const char* name)
+{
+    IDirect3DPixelShader9*& s_ps = cache.ps;
+    if (cache.device == device && (s_ps || cache.failed))
         return s_ps;
-    s_device = device;
+    cache.device = device;
     s_ps = nullptr;
-    s_failed = true;
+    cache.failed = true;
     HMODULE dll = LoadLibraryA("d3dcompiler_47.dll");
     if (!dll)
         dll = LoadLibraryA("d3dcompiler_43.dll");
     auto compile = dll ? reinterpret_cast<pD3DCompile>(GetProcAddress(dll, "D3DCompile")) : nullptr;
     if (!compile)
     {
-        Game::logMsg("Pause alpha: D3DCompile missing");
+        Game::logMsg("%s: D3DCompile missing", name);
         return nullptr;
     }
+    ID3DBlob* code = nullptr;
+    ID3DBlob* err = nullptr;
+    if (SUCCEEDED(compile(src, srcLen, name, nullptr, nullptr, "main", "ps_2_0", 0, 0, &code, &err)) && code)
+    {
+        if (SUCCEEDED(device->CreatePixelShader(static_cast<const DWORD*>(code->GetBufferPointer()), &s_ps)))
+            cache.failed = false;
+    }
+    else
+        Game::logMsg("%s: shader compile failed: %s", name, err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
+    if (code) code->Release();
+    if (err) err->Release();
+    Game::logMsg("%s: shader %s", name, s_ps ? "ready" : "unavailable");
+    return s_ps;
+}
+
+static IDirect3DPixelShader9* PauseAlphaFromColourShader(IDirect3DDevice9* device)
+{
+    static LayerShaderCache s_cache;
     static const char kSrc[] =
         "sampler2D s : register(s0);\n"
         "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
@@ -17859,19 +17885,28 @@ static IDirect3DPixelShader9* PauseAlphaFromColourShader(IDirect3DDevice9* devic
         "  float m = max(c.r, max(c.g, c.b));\n"
         "  return float4(0, 0, 0, saturate(max(c.a, m * 8.0)));\n"
         "}\n";
-    ID3DBlob* code = nullptr;
-    ID3DBlob* err = nullptr;
-    if (SUCCEEDED(compile(kSrc, sizeof(kSrc) - 1, "pause_alpha.hlsl", nullptr, nullptr, "main", "ps_2_0", 0, 0, &code, &err)) && code)
-    {
-        if (SUCCEEDED(device->CreatePixelShader(static_cast<const DWORD*>(code->GetBufferPointer()), &s_ps)))
-            s_failed = false;
-    }
-    else
-        Game::logMsg("Pause alpha: shader compile failed: %s", err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
-    if (code) code->Release();
-    if (err) err->Release();
-    Game::logMsg("Pause alpha: alpha-from-colour shader %s", s_ps ? "ready" : "unavailable");
-    return s_ps;
+    return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "pause_alpha.hlsl");
+}
+
+// Title layer (intro credits, chapter/location text): VGUI paints onto the
+// cleared (0,0,0,0) RT with SRCALPHA (normal fonts) or SRCALPHA/ONE (Black
+// Mesa's credit fonts are additive), so colour = c*a and alpha = a*a. The
+// helper composites the layer as UNPREMULTIPLIED alpha. The pause menu's
+// opaque boost made faint and fading credits opaque c*a: dark grey-brown
+// instead of orange (user, 2026-11-17). Here: alpha = sqrt(a*a), colour =
+// (c*a)/a = c, so the text keeps its colour and fades as it does flat.
+static IDirect3DPixelShader9* TitleStraightAlphaShader(IDirect3DDevice9* device)
+{
+    static LayerShaderCache s_cache;
+    static const char kSrc[] =
+        "sampler2D s : register(s0);\n"
+        "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+        "  float4 c = tex2D(s, uv);\n"
+        "  float a = max(sqrt(c.a), max(c.r, max(c.g, c.b)));\n"
+        "  float3 rgb = a > 0.004 ? saturate(c.rgb / a) : float3(0, 0, 0);\n"
+        "  return float4(rgb, a);\n"
+        "}\n";
+    return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_alpha.hlsl");
 }
 
 static IDirect3DTexture9* PauseLayerCopy(IDirect3DDevice9* device, const D3DSURFACE_DESC& desc)
@@ -18070,6 +18105,93 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         prevDs->Release();
 }
 
+static void TitleLayerStraightAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf)
+{
+    D3DSURFACE_DESC desc{};
+    if (!device || !surf || FAILED(surf->GetDesc(&desc)))
+        return;
+    IDirect3DPixelShader9* ps = TitleStraightAlphaShader(device);
+    IDirect3DTexture9* copy = ps ? PauseLayerCopy(device, desc) : nullptr;
+    IDirect3DSurface9* copySurf = nullptr;
+    if (!copy || FAILED(copy->GetSurfaceLevel(0, &copySurf)) || !copySurf)
+        return;
+    if (FAILED(device->StretchRect(surf, nullptr, copySurf, nullptr, D3DTEXF_POINT)))
+    {
+        copySurf->Release();
+        return;
+    }
+    copySurf->Release();
+    IDirect3DStateBlock9* saved = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
+        return;
+    IDirect3DSurface9* prevRt = nullptr;
+    IDirect3DSurface9* prevDs = nullptr;
+    device->GetRenderTarget(0, &prevRt);
+    device->GetDepthStencilSurface(&prevDs);
+    if (SUCCEEDED(device->SetRenderTarget(0, surf)))
+    {
+        device->SetDepthStencilSurface(nullptr);
+        D3DVIEWPORT9 vp{ 0, 0, desc.Width, desc.Height, 0.f, 1.f };
+        device->SetViewport(&vp);
+        device->SetVertexShader(nullptr);
+        device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+        device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN
+            | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+        device->SetTexture(0, copy);
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
+        device->SetPixelShader(ps);
+        struct VT { float x, y, z, rhw; float u, v; };
+        const float w = static_cast<float>(desc.Width) - 0.5f, h = static_cast<float>(desc.Height) - 0.5f;
+        const VT tq[4] = { { -0.5f, -0.5f, 0.f, 1.f, 0.f, 0.f }, { w, -0.5f, 0.f, 1.f, 1.f, 0.f },
+            { -0.5f, h, 0.f, 1.f, 0.f, 1.f }, { w, h, 0.f, 1.f, 1.f, 1.f } };
+        device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tq, sizeof(VT));
+    }
+    saved->Apply();
+    saved->Release();
+    if (prevRt)
+    {
+        device->SetRenderTarget(0, prevRt);
+        prevRt->Release();
+    }
+    device->SetDepthStencilSurface(prevDs);
+    if (prevDs)
+        prevDs->Release();
+    static int s_log;
+    if (s_log++ < 2)
+        Game::logMsg("Title layer: straight alpha %ux%u", desc.Width, desc.Height);
+}
+
+void VR::NoteHudPainted()
+{
+    // Copy the finished layer to what the helper reads (see m_D9HUDPublishSurface).
+    if (m_D9HUDSurface && m_D9HUDPublishSurface)
+    {
+        IDirect3DDevice9* device = nullptr;
+        if (SUCCEEDED(m_D9HUDSurface->GetDevice(&device)) && device)
+        {
+            const HRESULT hr = device->StretchRect(m_D9HUDSurface, nullptr, m_D9HUDPublishSurface, nullptr, D3DTEXF_POINT);
+            static int s_fail;
+            if (FAILED(hr) && s_fail++ < 4)
+                Game::logMsg("HUD publish copy failed hr=0x%08X", (unsigned)hr);
+            device->Release();
+        }
+    }
+    m_HudPaintedThisFrame.store(true, std::memory_order_release);
+}
+
 void VR::StampPauseOverlayCursor()
 {
     if (!g_D3DVR9 || !m_D9HUDSurface)
@@ -18082,7 +18204,9 @@ void VR::StampPauseOverlayCursor()
     if (bmvr::g_PauseMenuColourFromFrame && !title)
         PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
     const int alphaPasses = static_cast<int>(bmvr::g_PauseMenuAlphaPasses + 0.5f);
-    if (alphaPasses > 0)
+    if (title)
+        TitleLayerStraightAlpha(device, m_D9HUDSurface);
+    else if (alphaPasses > 0)
         FixPauseLayerAlpha(device, m_D9HUDSurface, alphaPasses > 6 ? 6 : alphaPasses);
     if (!title)
         DrawMenuCursorOnSurface(device, m_D9HUDSurface);
@@ -18143,7 +18267,7 @@ void VR::EnsureHudOverlay()
         return;
 
     auto sizeOk = [&]() -> bool {
-        if (!m_D9HUDSurface)
+        if (!m_D9HUDSurface || !m_D9HUDPublishSurface)
             return false;
         D3DSURFACE_DESC d{};
         if (FAILED(m_D9HUDSurface->GetDesc(&d)))
@@ -18155,8 +18279,8 @@ void VR::EnsureHudOverlay()
 
     if (sizeOk())
     {
-        if (!m_VKHUD.m_VRTexture.handle && m_D9HUDSurface)
-            FillSharedTexture(m_D9HUDSurface, m_VKHUD);
+        if (!m_VKHUD.m_VRTexture.handle && m_D9HUDPublishSurface)
+            FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
         if (m_VKHUD.m_VRTexture.handle)
         {
             if (!m_HudOverlayReady)
@@ -18188,28 +18312,38 @@ void VR::EnsureHudOverlay()
         std::lock_guard<TextureStateMutex> lock(m_TextureMutex);
         ReleaseT(m_D9HUDSurface);
         ReleaseT(m_D9HUDTexture);
+        ReleaseT(m_D9HUDPublishSurface);
+        ReleaseT(m_D9HUDPublishTexture);
         m_VKHUD = SharedTextureHolder{};
         m_HudOverlayReady = false;
-        m_CreatingTextureID = Texture_HUD;
-        const HRESULT hr = device->CreateTexture(wantW, wantH, 1, D3DUSAGE_RENDERTARGET,
+        // Paint target: not shared. Publish copy: shared with the helper.
+        HRESULT hr = device->CreateTexture(wantW, wantH, 1, D3DUSAGE_RENDERTARGET,
             D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &m_D9HUDTexture, nullptr);
-        m_CreatingTextureID = Texture_None;
-        if (FAILED(hr) || !m_D9HUDTexture)
+        if (SUCCEEDED(hr) && m_D9HUDTexture)
+        {
+            m_CreatingTextureID = Texture_HUD;
+            hr = device->CreateTexture(wantW, wantH, 1, D3DUSAGE_RENDERTARGET,
+                D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &m_D9HUDPublishTexture, nullptr);
+            m_CreatingTextureID = Texture_None;
+        }
+        if (FAILED(hr) || !m_D9HUDTexture || !m_D9HUDPublishTexture)
         {
             Game::logMsg("HUD D3D CreateTexture failed hr=0x%08X %ux%u",
                 (unsigned)hr, wantW, wantH);
+            ReleaseT(m_D9HUDTexture);
+            ReleaseT(m_D9HUDPublishTexture);
             device->Release();
             return;
         }
-        if (!m_D9HUDSurface)
-            m_D9HUDTexture->GetSurfaceLevel(0, &m_D9HUDSurface);
-        if (m_D9HUDSurface && !m_VKHUD.m_VRTexture.handle)
-            FillSharedTexture(m_D9HUDSurface, m_VKHUD);
-        Game::logMsg("HUD D3D RT %ux%u surf=%p vk=%p",
-            wantW, wantH, (void*)m_D9HUDSurface, m_VKHUD.m_VRTexture.handle);
+        m_D9HUDTexture->GetSurfaceLevel(0, &m_D9HUDSurface);
+        m_D9HUDPublishTexture->GetSurfaceLevel(0, &m_D9HUDPublishSurface);
+        if (m_D9HUDPublishSurface && !m_VKHUD.m_VRTexture.handle)
+            FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
+        Game::logMsg("HUD D3D RT %ux%u surf=%p publish=%p vk=%p",
+            wantW, wantH, (void*)m_D9HUDSurface, (void*)m_D9HUDPublishSurface, m_VKHUD.m_VRTexture.handle);
     }
 
-    if (m_D9HUDSurface && m_VKHUD.m_VRTexture.handle)
+    if (m_D9HUDSurface && m_D9HUDPublishSurface && m_VKHUD.m_VRTexture.handle)
     {
         m_HudOverlayReady = true;
         ClearHudSurface(false);
@@ -18248,6 +18382,8 @@ void VR::ClearHudSurface(bool opaque)
     {
         const D3DCOLOR color = opaque ? D3DCOLOR_ARGB(255, 0, 0, 0) : D3DCOLOR_ARGB(0, 0, 0, 0);
         device->Clear(0, nullptr, D3DCLEAR_TARGET, color, 1.f, 0);
+        if (m_D9HUDPublishSurface && SUCCEEDED(device->SetRenderTarget(0, m_D9HUDPublishSurface)))
+            device->Clear(0, nullptr, D3DCLEAR_TARGET, color, 1.f, 0);
         if (prev)
             device->SetRenderTarget(0, prev);
     }
@@ -18979,9 +19115,9 @@ void VR::SubmitVRTextures()
             {
                 if (HudPaintedThisFrame())
                 {
-                    if (SUCCEEDED(SehTransferSurfaceNoWait(m_D9HUDSurface)))
+                    if (SUCCEEDED(SehTransferSurfaceNoWait(m_D9HUDPublishSurface)))
                     {
-                        FillSharedTexture(m_D9HUDSurface, m_VKHUD);
+                        FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
                         m_HudOverlayHasImage = true;
                     }
                     else
@@ -19043,8 +19179,8 @@ void VR::SubmitVRTextures()
                 {
                     if (HudPaintedThisFrame())
                     {
-                        g_D3DVR9->TransferSurface(m_D9HUDSurface, FALSE);
-                        FillSharedTexture(m_D9HUDSurface, m_VKHUD);
+                        g_D3DVR9->TransferSurface(m_D9HUDPublishSurface, FALSE);
+                        FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
                         m_HudPaintedThisFrame.store(false, std::memory_order_release);
                         m_HudOverlayHasImage = true;
                     }
@@ -19231,8 +19367,8 @@ void VR::SubmitVRTextures()
             {
                 if (HudPaintedThisFrame())
                 {
-                    g_D3DVR9->TransferSurface(m_D9HUDSurface, FALSE);
-                    FillSharedTexture(m_D9HUDSurface, m_VKHUD);
+                    g_D3DVR9->TransferSurface(m_D9HUDPublishSurface, FALSE);
+                    FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
                     m_HudPaintedThisFrame.store(false, std::memory_order_release);
                     m_HudOverlayHasImage = true;
                 }
@@ -19379,8 +19515,8 @@ void VR::SubmitVRTextures()
     if (WantPauseWorldOverlay() && m_HudOverlayReady && m_D9HUDSurface
         && m_HudPaintedThisFrame.load(std::memory_order_acquire))
     {
-        g_D3DVR9->TransferSurface(m_D9HUDSurface, FALSE);
-        FillSharedTexture(m_D9HUDSurface, m_VKHUD);
+        g_D3DVR9->TransferSurface(m_D9HUDPublishSurface, FALSE);
+        FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
         m_HudPaintedThisFrame.store(false, std::memory_order_release);
         m_HudOverlayHasImage = true;
     }

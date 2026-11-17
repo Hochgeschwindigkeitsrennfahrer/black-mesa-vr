@@ -479,6 +479,12 @@ public:
     IDirect3DDevice9* m_D9NekoPostOutputTransferShaderDevice = nullptr;
     IDirect3DTexture9* m_D9HUDTexture = nullptr;
     IDirect3DSurface9* m_D9HUDSurface = nullptr;
+    // What the helper reads (m_VKHUD): a copy of m_D9HUDSurface made when a
+    // paint is complete. The helper copies the shared image at its own time;
+    // reading the RT VGUI clears and repaints every frame showed half-painted
+    // or empty layers (title text / pause menu flicker, 2026-11-17).
+    IDirect3DTexture9* m_D9HUDPublishTexture = nullptr;
+    IDirect3DSurface9* m_D9HUDPublishSurface = nullptr;
     IDirect3DSurface9* m_D9ScopeSurface = nullptr;
     IDirect3DTexture9* m_D9ScopeLensScratchTexture = nullptr;
     IDirect3DSurface9* m_D9ScopeLensScratchSurface = nullptr;
@@ -1213,7 +1219,8 @@ public:
     void FinishPauseHudExtraPaint(IMatRenderContext* ctx);
     void StampPauseOverlayCursor();
     bool IntersectMenuPanelUv(float& u, float& v);
-    void NoteHudPainted() { m_HudPaintedThisFrame.store(true, std::memory_order_release); }
+    // Paint complete: copy the HUD RT to the publish surface, then flag it.
+    void NoteHudPainted();
     bool HudPaintedThisFrame() const { return m_HudPaintedThisFrame.load(std::memory_order_acquire); }
     void UpdateCrowbarMelee();
     // Hand throw: sampled every input frame; read by the server grenade hooks.
