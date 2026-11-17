@@ -125,8 +125,6 @@ keeps bare hands for the whole campaign, and the weapon wheel and wrist HUD turn
 
 ### In Black Mesa's video options
 - **Anti-aliasing: FXAA** (the mod tunes it for the headset).
-- **Water detail: Reflect world** is fine. "Reflect all" also reflects objects such as doors, at a cost; so far we
-  know one spot (a doorway in On A Rail) where a missing door shows as a hole in the water reflection.
 - Lower shadow and light quality first if you run short on frame rate; those cost more in VR than in flat play.
 
 ### In `VR\config.txt` (not in the panel)
@@ -169,7 +167,7 @@ and [marnovdm](https://github.com/marnovdm).
 Huge thanks to:
 - **wormslayer** for HL2VR.
 - **keyou91** for [L4D2VR](https://github.com/keyou91/l4d2vr), the foundation of the VR implementation.
-- **martysl1** (Discord), whose eye-MSAA experiment made the MSAA feature possible.
+- **martysl1** (Discord), for the eye-MSAA experiment that gave us a helpful early lead for the MSAA feature.
 - Our testers and contributors, for their patience and help:
   - TheRealBubble
   - SilentVortiguant ([check out his YouTube](https://www.youtube.com/@SilentVortigauntVR))
