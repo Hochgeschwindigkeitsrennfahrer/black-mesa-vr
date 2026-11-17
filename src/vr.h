@@ -702,6 +702,14 @@ public:
     bool m_MappedOverride[L4D2VR_OPENXR_ACTION_COUNT] = {};
     L4D2VROpenXrDigitalActionDesc m_MappedDigital[L4D2VR_OPENXR_ACTION_COUNT] = {};
     mutable bool m_LegacyMask[L4D2VR_OPENXR_ACTION_COUNT] = {};
+    // VR recoil (g_VrRecoil): current upward kick in degrees, decays; added
+    // to the aim and the viewmodel basis.
+    std::atomic<float> m_RecoilKickDeg{ 0.f };
+    void* m_RecoilWeapon = nullptr;
+    int m_RecoilClip = -1;
+    DWORD m_RecoilLastMs = 0;
+    DWORD m_RecoilAttackMs = 0;
+    void UpdateVrRecoil();
     bool m_GestureZoneLeft = false;   // last frame: left hand in the quick-save zone
     bool m_GestureZoneRight = false;  // last frame: right hand in a shoulder/hip zone (or just left one)
     // Saves keep the player's view angles, and gameplay usercmds carry the

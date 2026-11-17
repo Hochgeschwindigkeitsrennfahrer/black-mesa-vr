@@ -725,6 +725,11 @@ namespace bmvr
     extern bool g_VrGunRightHand;
     // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
     extern bool g_VrMagReload;
+    // VR recoil: each shot kicks the gun + aim up (per-weapon amount, back in
+    // ~0.15 s); both hands on the gun cut it to 30 % (pistol grip 50 %).
+    // Off by default (user A/B). Strength scales every weapon's kick.
+    extern bool g_VrRecoil;
+    extern float g_VrRecoilScale;
     // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
     extern bool g_RpgRocketShown;
     extern float g_DebugVmSeq, g_DebugVmCycle; // debug: hold the viewmodel on a sequence/cycle (-1 = off)

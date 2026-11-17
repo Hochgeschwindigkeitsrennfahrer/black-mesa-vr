@@ -294,6 +294,8 @@ namespace bmvr
     bool g_VrHandsBlackMesa = false;
     bool g_VrGunRightHand = false;
     bool g_VrMagReload = false;
+    bool g_VrRecoil = false;
+    float g_VrRecoilScale = 1.f;
     bool g_RpgRocketShown = true;
     float g_DebugVmSeq = -1.f;
     float g_DebugVmCycle = 0.f;
@@ -1066,6 +1068,14 @@ namespace bmvr
                 g_VrHandsUseHevGloves = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RpgRocketShown") == 0)
                 g_RpgRocketShown = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrRecoil") == 0)
+                g_VrRecoil = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrRecoilScale") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 0.25f && v <= 3.f)
+                    g_VrRecoilScale = v;
+            }
             else if (std::strcmp(n, "VrMagReload") == 0)
                 g_VrMagReload = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGunRightHand") == 0)

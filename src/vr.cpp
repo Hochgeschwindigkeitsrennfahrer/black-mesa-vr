@@ -6678,6 +6678,63 @@ void VR::ApplyTurnStick(float stickX, float deltaMs)
     m_RotationOffsetY.store(offset, std::memory_order_release);
 }
 
+void VR::UpdateVrRecoil()
+{
+    const DWORD now = GetTickCount();
+    const float dt = m_RecoilLastMs ? (std::min)(static_cast<float>(now - m_RecoilLastMs) * 0.001f, 0.1f) : 0.f;
+    m_RecoilLastMs = now;
+    // Back toward the hand's own aim with a ~0.12 s time constant (95 % in
+    // ~0.35 s), so a burst climbs and a pause settles.
+    float kick = m_RecoilKickDeg.load(std::memory_order_relaxed) * expf(-dt / 0.12f);
+    if (kick < 0.01f)
+        kick = 0.f;
+    if (!bmvr::g_VrRecoil || !m_Game || m_EmptyHands)
+    {
+        m_RecoilKickDeg.store(0.f, std::memory_order_relaxed);
+        m_RecoilWeapon = nullptr;
+        m_RecoilClip = -1;
+        return;
+    }
+    if (PressedDigitalAction(m_ActionPrimaryAttack) || PressedDigitalAction(m_ActionSecondaryAttack))
+        m_RecoilAttackMs = now;
+    C_BaseEntity* weapon = m_Game->GetActiveWeaponEntity();
+    const int clip = weapon ? m_Game->ReadWeaponClip(weapon) : -1;
+    // A shot = the held gun's clip went down while a fire button was down
+    // (reloads only raise it; a manual-magazine eject happens without one).
+    if (weapon && weapon == m_RecoilWeapon && clip >= 0 && m_RecoilClip > clip
+        && now - m_RecoilAttackMs < 400)
+    {
+        float perShot = 0.f;
+        if (m_VmClass.shotgun) perShot = 7.f;
+        else if (m_VmClass.revolver) perShot = 7.f;
+        else if (m_VmClass.mp5) perShot = 1.2f;
+        else if (m_VmClass.glock) perShot = 2.5f;
+        else if (m_VmClass.crossbow) perShot = 1.5f;
+        bool twoHand = false, pistolGrip = false;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            twoHand = m_TwoHandActive;
+            pistolGrip = m_VmClass.offhandPistol;
+        }
+        const float hands = twoHand ? (pistolGrip ? 0.5f : 0.3f) : 1.f;
+        const int shots = (std::min)(m_RecoilClip - clip, 3);
+        const float add = perShot * static_cast<float>(shots) * hands * bmvr::g_VrRecoilScale;
+        kick = (std::min)(kick + add, 15.f);
+        static int s_recoilLog;
+        if (add > 0.f && s_recoilLog < 60)
+        {
+            ++s_recoilLog;
+            // aim = the firing pitch before this shot's kick is stored
+            // (Source: negative = up), for checking the kick direction.
+            Game::logMsg("VR recoil: %d shot(s) +%.1f deg (%s, x%.2f) -> kick %.1f deg, aim pitch %.1f",
+                shots, add, twoHand ? "two hands" : "one hand", hands, kick, GetAimAngles().x);
+        }
+    }
+    m_RecoilWeapon = weapon;
+    m_RecoilClip = clip;
+    m_RecoilKickDeg.store(kick, std::memory_order_relaxed);
+}
+
 void VR::UpdateButtonMap()
 {
     using bmvr::BindAction;
@@ -6844,6 +6901,7 @@ void VR::ProcessInput()
     }
 
     UpdateButtonMap();
+    UpdateVrRecoil();
     const bool menuStick = WeaponMenuStickHeld();
     UpdateWeaponMenu(menuStick, deltaMs);
     UpdateSettingsPanel();
@@ -7922,6 +7980,8 @@ QAngle VR::GetAimAngles() const
     // Trim the shot direction only. The viewmodel keeps its tuned pose, so a
     // grip that consistently lands low is corrected without rotating models.
     aim.x -= bmvr::g_AimPitchOffset;
+    // VR recoil: up = negative pitch (the viewmodel basis gets the same kick).
+    aim.x -= m_RecoilKickDeg.load(std::memory_order_relaxed);
     if (aim.x > 180.f) aim.x -= 360.f;
     if (aim.x < -180.f) aim.x += 360.f;
     if (aim.x > 89.f) aim.x = 89.f;
@@ -13893,6 +13953,15 @@ void VR::ApplyViewmodelBasisOffsets()
     m_ViewmodelRight = VectorRotate(m_ViewmodelRight, m_ViewmodelForward, az);
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, az);
     ApplyTwoHandWeaponAim();
+    // VR recoil: muzzle up around the gun hand (after the two-hand aim, so it
+    // shows with both hands too; GetAimAngles' two-hand path reads this basis).
+    if (const float kick = m_RecoilKickDeg.load(std::memory_order_relaxed); kick > 0.f)
+    {
+        // VectorRotate about Right with a positive angle = muzzle up
+        // (headless: -kick pitched the two-hand aim down).
+        m_ViewmodelForward = VectorRotate(m_ViewmodelForward, m_ViewmodelRight, kick);
+        m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelRight, kick);
+    }
 }
 
 void VR::ApplyTwoHandWeaponAim()
