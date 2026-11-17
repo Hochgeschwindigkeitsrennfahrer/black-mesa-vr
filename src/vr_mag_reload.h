@@ -80,6 +80,9 @@ namespace MagReload
     // hand sits there, so it follows the glove's own pose offsets and size.
     extern std::atomic<float> g_LeftPalmLocal[3];
     extern std::atomic<unsigned> g_LeftPalmMs;
+    // Shotgun pump back stroke: a spent hull flies out of the ejection port
+    // (GetTickCount, 0 = none).
+    extern std::atomic<unsigned> g_EjectTick;
 
     // TwoHandGripToggle on the shotgun: the latched support hand holds the
     // pump (no squeeze needed to work it).

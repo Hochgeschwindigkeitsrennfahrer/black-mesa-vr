@@ -4233,6 +4233,69 @@ namespace
         {
             MagReload::g_NearWell.store(false);
             s_handMagValid = false;
+            // Shotgun pump back stroke: the gun's own shell flies out of the
+            // ejection port (ShellEject bone) up and to the right, tumbling,
+            // and falls; gone after ~1 s. Stands in for the stock pump clip's
+            // AE_CLIENT_EJECT_CUSTOM, which goes with that clip.
+            static thread_local unsigned char* s_ejectHdr = nullptr;
+            static thread_local int s_ejectBone = -1;
+            if (s_ejectHdr != hdr)
+            {
+                s_ejectHdr = hdr;
+                s_ejectBone = def.tube ? FindStudioBoneIndex(hdr, "ShellEject") : -1;
+            }
+            const unsigned ejectTick = MagReload::g_EjectTick.load(std::memory_order_relaxed);
+            const float te = ejectTick ? (now - ejectTick) * 0.001f : 99.f;
+            if (def.tube && s_ejectBone >= 0 && s_ejectBone < nBones && te < 1.0f)
+            {
+                static thread_local unsigned s_ejectSeen = 0;
+                static thread_local Vector s_port, s_vel, s_spinAxis;
+                static thread_local float s_rot0[3][3];
+                if (s_ejectSeen != ejectTick)
+                {
+                    s_ejectSeen = ejectTick;
+                    const float* e = bones + s_ejectBone * 12;
+                    s_port = Vector(e[3], e[7], e[11]);
+                    // Units/s (before the viewmodel scale): right, up, a little back.
+                    s_vel = (r * 70.f + u * 60.f - f * 15.f) * vmScale;
+                    s_spinAxis = f;
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                            s_rot0[i][j] = m[i * 4 + j];
+                    // A shell bone the idle pose hides (zero scale): lay it
+                    // along the gun instead.
+                    const float sx = s_rot0[0][0] * s_rot0[0][0] + s_rot0[1][0] * s_rot0[1][0] + s_rot0[2][0] * s_rot0[2][0];
+                    if (sx < 0.25f)
+                    {
+                        const Vector col[3] = { f, r * -1.f, u };
+                        for (int j = 0; j < 3; ++j)
+                        {
+                            s_rot0[0][j] = col[j].x;
+                            s_rot0[1][j] = col[j].y;
+                            s_rot0[2][j] = col[j].z;
+                        }
+                    }
+                    Game::logMsg("Mag reload: shotgun hull ejected (shell bone scale %.2f)", std::sqrt(sx));
+                }
+                // Tumble: rotate the shell's frame about the gun's forward axis.
+                const float a = te * 12.f; // ~2 turns/s
+                const float c = std::cos(a), sn = std::sin(a);
+                const Vector k = s_spinAxis;
+                float Rk[3][3] = {
+                    { c + k.x * k.x * (1 - c), k.x * k.y * (1 - c) - k.z * sn, k.x * k.z * (1 - c) + k.y * sn },
+                    { k.y * k.x * (1 - c) + k.z * sn, c + k.y * k.y * (1 - c), k.y * k.z * (1 - c) - k.x * sn },
+                    { k.z * k.x * (1 - c) - k.y * sn, k.z * k.y * (1 - c) + k.x * sn, c + k.z * k.z * (1 - c) } };
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        m[i * 4 + j] = Rk[i][0] * s_rot0[0][j] + Rk[i][1] * s_rot0[1][j] + Rk[i][2] * s_rot0[2][j];
+                const Vector pos = s_port + s_vel * te - Vector(0.f, 0.f, 0.5f * 386.f * te * te);
+                m[3] = m[7] = m[11] = 0.f;
+                const Vector c0 = local(m, def.magCenter);
+                m[3] = pos.x - c0.x;
+                m[7] = pos.y - c0.y;
+                m[11] = pos.z - c0.z;
+                return;
+            }
             // Shotgun: a shell let go of falls; the stock shell otherwise.
             const float t = dropTick ? (now - dropTick) * 0.001f : 99.f;
             if (def.wellBone && t < 1.2f && MagReload::g_DropFrom.load() == 1)
