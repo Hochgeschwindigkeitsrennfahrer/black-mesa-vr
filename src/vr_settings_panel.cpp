@@ -318,25 +318,26 @@ namespace
     {
         const char* id;
         int count;                 // values per preset
+        int def;                   // index of the built-in default (bmvr_flags.cpp)
         float* targets[3];
         struct { const char* name; float v[3]; } items[3];
     };
-    // First item of each = the built-in default (bmvr_flags.cpp).
+    // Items in order (one direction per click); the default is marked on the panel.
     const std::vector<PresetSet>& Presets()
     {
         static const std::vector<PresetSet> sets = {
             // FXAA 3.11 terms: sub-pixel smoothing, edge threshold, dark edge threshold.
             // Sharp keeps texture detail (about as sharp as the stock game); Smooth is
             // FXAA's own sub-pixel default with most edges treated (softer, calmer).
-            { "fxaa", 3, { &bmvr::g_FxaaSubpixel, &bmvr::g_FxaaEdgeThreshold, &bmvr::g_FxaaEdgeThresholdMin },
-              { { "Sharp (default)", { 0.25f, 0.166f, 0.0833f } },
+            { "fxaa", 3, 0, { &bmvr::g_FxaaSubpixel, &bmvr::g_FxaaEdgeThreshold, &bmvr::g_FxaaEdgeThresholdMin },
+              { { "Sharp", { 0.25f, 0.166f, 0.0833f } },
                 { "Balanced", { 0.5f, 0.125f, 0.0625f } },
                 { "Smooth", { 0.75f, 0.063f, 0.0312f } } } },
             // Cubemap reflection strength, walls/floors and props/NPCs.
-            { "envmap", 2, { &bmvr::g_EnvmapScaleWorld, &bmvr::g_EnvmapScaleModels, nullptr },
-              { { "Calm (default)", { 0.4f, 0.8f, 0.f } },
-                { "Calmer", { 0.2f, 0.5f, 0.f } },
-                { "Full (as in game)", { 1.f, 1.f, 0.f } } } },
+            { "envmap", 2, 1, { &bmvr::g_EnvmapScaleWorld, &bmvr::g_EnvmapScaleModels, nullptr },
+              { { "Full", { 1.f, 1.f, 0.f } },   // as in the game
+                { "Balanced", { 0.4f, 0.8f, 0.f } },
+                { "Subtle", { 0.2f, 0.5f, 0.f } } } },
         };
         return sets;
     }
@@ -366,7 +367,9 @@ namespace
         if (!p)
             return {};
         const int i = PresetIndex(*p);
-        return i < 0 ? "Custom" : p->items[i].name;
+        if (i < 0)
+            return "Custom";
+        return std::string(p->items[i].name) + (i == p->def ? " (default)" : "");
     }
 
     // Name of a Choice row's current value ("" if out of range).
@@ -388,7 +391,10 @@ namespace
             return buf;
         }
         const char* e = std::strchr(p, '|');
-        return e ? std::string(p, e) : std::string(p);
+        std::string name = e ? std::string(p, e) : std::string(p);
+        if (g_DefaultsCaptured && std::lround((*r.f - r.lo) / r.step) == std::lround((r.defF - r.lo) / r.step))
+            name += " (default)";
+        return name;
     }
 
     // Tab shown on the panel; kept while the game runs.
@@ -883,8 +889,13 @@ namespace
             {
                 // One wide button (the -/+ span); a click picks the next value.
                 c.fill(x + kMinusX0, y0 + 10, x + kPlusX1, y1 - 10, hover ? kBtnHover : kBtn);
-                c.text((r.kind == RowKind::Preset ? PresetText(r) : ChoiceText(r)).c_str(), x + kMinusX0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : kText,
-                    30, true, DT_CENTER);
+                const std::string name = r.kind == RowKind::Preset ? PresetText(r) : ChoiceText(r);
+                // Long names ("Headset +10 (default)") get a smaller font instead of spilling over.
+                int fontPx = 30;
+                while (fontPx > 20 && c.textWidth(name.c_str(), fontPx, true) > (kPlusX1 - 36 - kMinusX0) - 16)
+                    fontPx -= 2;
+                c.text(name.c_str(), x + kMinusX0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : kText,
+                    fontPx, true, DT_CENTER);
                 c.text(">", x + kPlusX1 - 40, y0, x + kPlusX1 - 8, y1 - 2, hover ? RGB(0, 0, 0) : kDim, 30, true, DT_CENTER);
             }
             else if (r.kind == RowKind::Toggle)
@@ -1288,7 +1299,8 @@ void VR::UpdateSettingsPanel()
         const PresetSet* p = FindPresetSet(r.fmt);
         if (!p)
             return;
-        const int next = (PresetIndex(*p) + 1) % 3;   // custom (-1) -> the first (default)
+        const int cur = PresetIndex(*p);
+        const int next = cur < 0 ? p->def : (cur + 1) % 3;   // custom -> the default
         for (int k = 0; k < p->count; ++k)
             *p->targets[k] = p->items[next].v[k];
         Game::logMsg("VR settings: %s preset = %s", r.fmt, p->items[next].name);

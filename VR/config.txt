@@ -186,7 +186,7 @@ FlareSharedLayout=true
 # Strength of the other layers away from the light (bmvr_flare_ghosts). All three are in the VR settings panel.
 
 # FXAA settings, also in the VR settings panel and as bmvr_fxaa_* console commands.
-# The panel's FXAA Preset sets all three: Sharp (default) 0.25/0.166/0.0833, Balanced 0.5/0.125/0.0625, Smooth 0.75/0.063/0.0312.
+# The panel's FXAA Preset sets all three: Sharp 0.25/0.166/0.0833 (default), Balanced 0.5/0.125/0.0625, Smooth 0.75/0.063/0.0312.
 # The game never passes the mat_fxaa_* cvars to the shader and runs FXAA with all values at 0.
 # FxaaApply=true (default) sends these values instead. false keeps the stock behaviour.
 # Sub-pixel smoothing: 0 off, 0.25 about as sharp as with FxaaApply=false, 0.75 FXAA's own default, 1 softest.
