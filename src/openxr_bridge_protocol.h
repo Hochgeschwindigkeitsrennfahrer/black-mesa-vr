@@ -26,13 +26,15 @@ inline void L4D2VR_SeqlockAcquire()
 }
 
 constexpr uint32_t L4D2VR_OPENXR_BRIDGE_MAGIC = 0x5258344Cu; // L4XR
-constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 17;
+constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 18;
 // 13: XR_KHR_visibility_mask hidden triangle list (NDC xy per eye).
 // 14: helperConsumingFrameId / helperConsumedFrameId (helper -> game blit
 //     progress; the game reuses a publish slot only once the helper's blit
 //     out of it has finished on the GPU).
 // 17: L4D2VROpenXrInputStateDesc.eyeGaze (XR_EXT_eye_gaze_interaction ray in
 //     head view space, for eye-tracked foveated rendering).
+// 18: L4D2VROpenXrInputStateDesc.rawHands + systemName (physical buttons per
+//     hand for the DLL's button mapping; legacy actions stay as they were).
 // L4D2VROpenXrRuntimeViewConfigDesc.reserved0: 0 = recommended size only
 // (CreateDevice), 1 = xrLocateViews FOV (InitOpenXR stereo fusion).
 constexpr uint32_t L4D2VR_OPENXR_RUNTIME_VIEW_SIZE_ONLY = 0;
@@ -385,6 +387,30 @@ struct L4D2VROpenXrEyeGazeDesc
     float reserved1 = 0.0f;
 };
 
+// Physical inputs per hand (protocol 18). face1 = A/X/Cross (lower face
+// button), face2 = B/Y/Circle (upper). Index: A/B on both hands. Controllers
+// without face buttons (WMR, Vive wand) report none of those bits.
+enum : uint32_t
+{
+    L4D2VR_RAW_BUTTON_FACE1 = 1u << 0,
+    L4D2VR_RAW_BUTTON_FACE2 = 1u << 1,
+    L4D2VR_RAW_BUTTON_STICK_CLICK = 1u << 2,
+    L4D2VR_RAW_BUTTON_MENU = 1u << 3,
+    L4D2VR_RAW_BUTTON_FACE1_PRESENT = 1u << 16, // bound on the active profile
+    L4D2VR_RAW_BUTTON_FACE2_PRESENT = 1u << 17,
+    L4D2VR_RAW_BUTTON_STICK_CLICK_PRESENT = 1u << 18,
+    L4D2VR_RAW_BUTTON_GRIP_PRESENT = 1u << 19,
+};
+
+struct L4D2VROpenXrRawHandDesc
+{
+    uint32_t valid = 0;   // raw actions created and the hand is active
+    uint32_t buttons = 0; // L4D2VR_RAW_BUTTON_*
+    float trigger = 0.0f; // 0..1
+    float grip = 0.0f;    // 0..1 (squeeze/click profiles: 0 or 1)
+    float stick[2] = {};  // thumbstick / joystick / trackpad
+};
+
 struct L4D2VROpenXrInputStateDesc
 {
     uint32_t valid = 0;
@@ -397,6 +423,8 @@ struct L4D2VROpenXrInputStateDesc
     L4D2VROpenXrAnalogActionDesc analogActions[L4D2VR_OPENXR_ACTION_COUNT] = {};
     L4D2VROpenXrHandTrackingDesc handTracking[L4D2VR_OPENXR_HAND_COUNT] = {};
     L4D2VROpenXrEyeGazeDesc eyeGaze = {};
+    L4D2VROpenXrRawHandDesc rawHands[L4D2VR_OPENXR_HAND_COUNT] = {};
+    char systemName[64] = {}; // XrSystemProperties.systemName (PS VR2 vs Quest labels)
 };
 
 struct L4D2VROpenXrHapticRequestDesc
