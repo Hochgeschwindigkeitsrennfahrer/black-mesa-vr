@@ -3895,6 +3895,29 @@ namespace
     // art and grip pose the gun was animated with); the left hand is the glove.
     // Left and right arm meshes share no vertex (checked on v_glock/v_mp5/
     // v_shotgun, all arm variants), so nothing of the left arm can stretch.
+    // "Gun's own right hand" only on the guns: their rigs
+    // have the R_Arm/L_* bones the collapse needs and a hand on a grip. The
+    // grenade, satchel, tripmine, snark and Hivehand viewmodels are hands
+    // holding or wearing the thing (the satchel kept a whole arm, the
+    // Hivehand a hand under the model): those keep the hidden arms. Not the
+    // crowbar either: it is drawn at scale 1, not ViewmodelScale, so its own
+    // hand came out ~1.5x the size of the gun hands.
+    bool GunRightHandForModel(const char* modelName)
+    {
+        if (!bmvr::g_VrGunRightHand || bmvr::g_LeftHanded || !modelName)
+            return false;
+        static const char* kGuns[] = { "v_glock", "v_357", "v_mp5", "v_shotgun", "v_crossbow", "v_rpg",
+            "v_gauss", "v_tau", "v_egon", "v_gluon" };
+        char buf[128]{};
+        strncpy_s(buf, modelName, _TRUNCATE);
+        for (char* c = buf; *c; ++c)
+            *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
+        for (const char* g : kGuns)
+            if (std::strstr(buf, g))
+                return true;
+        return false;
+    }
+
     bool CollapseViewmodelArmBones(unsigned char* hdr, float* bones, int nBones)
     {
         struct Cache
@@ -4152,7 +4175,15 @@ namespace
                 + hr * MagReload::g_LeftPalmLocal[1].load(std::memory_order_relaxed)
                 + hu * MagReload::g_LeftPalmLocal[2].load(std::memory_order_relaxed);
         }
-        magAnchor = magAnchor + hf * bmvr::g_VrMagHandForward + hu * bmvr::g_VrMagHandUp;
+        // Bottom of the magazine at the bottom of the fist, so the top sticks
+        // out and is easy to seat (user, 2026-11-18). Magazine centre to its
+        // bottom along the gun's up axis, measured from v_mp5 / v_glock /
+        // v_crossbow (model units at scale 1); the fist is ~8 cm tall (index
+        // to pinky) around its centre. Shell and speed loader: small, as is.
+        static const float kMagBelowCentre[MagReload::kWeaponCount] = { 0.f, 5.26f, 3.93f, 0.f, 6.21f, 0.f };
+        const float fistHalf = 0.04f * (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f);
+        const float lift = (std::max)(0.f, kMagBelowCentre[weapon] * vmScale - fistHalf);
+        magAnchor = magAnchor + hf * bmvr::g_VrMagHandForward + hu * (bmvr::g_VrMagHandUp + lift);
         auto local = [](const float* mm, const float* p) {
             return Vector(mm[0] * p[0] + mm[1] * p[1] + mm[2] * p[2] + mm[3],
                 mm[4] * p[0] + mm[5] * p[1] + mm[6] * p[2] + mm[7],
@@ -8801,7 +8832,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             }
         }
         hideArms = bmvr::g_HideViewmodelArms
-            && !(bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded)
+            && !GunRightHandForModel(modelName)
             && isViewmodel
             && m_VR
             && m_VR->m_IsVREnabled
@@ -8873,14 +8904,18 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         && m_VR->StereoWorldPassActive();
     // Turning the gun's own right hand on gives back the arm meshes hidden
     // for this map; off zeroes them again on the next draw.
+    // Keyed to the setting, not the model: the gun and BM's always-idle
+    // hands viewmodel take turns here. Models outside GunRightHandForModel
+    // get hideArms and are zeroed again on their next draw.
     static bool s_gunRightHand = false;
-    const bool gunRightHand = bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded;
-    if (isViewmodel && gunRightHand != s_gunRightHand)
+    const bool gunRightHandSetting = bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded;
+    if (isViewmodel && gunRightHandSetting != s_gunRightHand)
     {
-        s_gunRightHand = gunRightHand;
-        if (gunRightHand)
+        s_gunRightHand = gunRightHandSetting;
+        if (gunRightHandSetting)
             RestoreArmBodypartMeshes();
     }
+    const bool gunRightHand = isViewmodel && GunRightHandForModel(modelName);
     if (isViewmodel && vrViewmodelPass && m_VR->IsGameplayEligible() && EngineInGame())
         ApplyViewmodelStudioWork(state, modelName, body, skin, hideArms, pCustomBoneToWorld);
 
