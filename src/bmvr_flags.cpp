@@ -144,7 +144,7 @@ namespace bmvr
     float g_DebugHideXog = 0.f;
     bool g_FlareLog = false;
     bool g_FreezeHead = false;
-    float g_FrameCapMode = 2.f;
+    float g_FrameCapMode = 1.f;
     bool g_VrHandThrow = true;
     float g_MountedGunGain = 1.75f;
     float g_ThrowScale = 5.5f;

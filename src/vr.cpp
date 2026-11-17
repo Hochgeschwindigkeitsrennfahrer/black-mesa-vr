@@ -15290,11 +15290,11 @@ void VR::TickOpenXrHelperWatchdog()
 
 // Uncapped (fps_max 300) the game rendered ~272 stereo pairs/s for the 90
 // the headset shows: GPU 99 % busy vs 44 % at fps_max 100 (2026-10-27).
-// FrameCap 2 (default) = twice the headset rate: always a frame <= half a
-// refresh old, at a steady age (user: clearly smoothest). 1 = rate + 10 beats
-// against the refresh (newest frame's age cycles 0..10 ms ten times a second
-// = uneven motion). 0 = leave the game's value (restores 300 if we changed
-// it). The live value is read back so a cfg/console change is undone and
+// FrameCap 1 (default since 2026-11-17, user) = rate + 10: the least extra
+// GPU work above the headset rate (the newest frame's age cycles 0..10 ms ten
+// times a second; on 10-27 the user found 2 smoother, later chose 1). 2 =
+// twice the headset rate: always a frame <= half a refresh old, at a steady
+// age. 0 = leave the game's value (restores 300 if we changed it). The live value is read back so a cfg/console change is undone and
 // logged. Runs on the Present path (VR::Update), where the OpenXR cap has
 // set fps_max since 2026-10-27.
 void VR::ApplyFrameCap(int nominalHz, float sourceHz, const char* source)

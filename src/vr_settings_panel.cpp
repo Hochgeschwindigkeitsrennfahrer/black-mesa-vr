@@ -76,7 +76,10 @@ namespace
     // (index = (value - lo) / step), a click cycles to the next (wraps).
     // DevSection: a heading whose rows (up to the next heading or tab) only show
     // with "Show developer rows" on (bmvr::g_PanelDevRows); still saved/loaded.
-    enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection };
+    // Preset: no value of its own; fmt names a table in Presets() that sets
+    // several rows at once. Shows the matching preset's name ("Custom" if none
+    // matches), a click applies the next one. Never saved (the values are).
+    enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection, Preset };
     bool IsHeading(RowKind k) { return k == RowKind::Section || k == RowKind::DevSection; }
 
     struct Row
@@ -192,8 +195,9 @@ namespace
             // glass keep MSAA; the gun loses it only while particles are in view.
             { "MSAA skips particles", RowKind::Toggle, "MsaaParticles1x", &bmvr::g_MsaaParticles1x, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Reset FXAA values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa_default" },
             { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
+            // Sets the three values below; "Custom" when they match no preset.
+            { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa" },
             { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
             { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
             { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
@@ -216,7 +220,9 @@ namespace
             { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
             { "Dark when hidden after", RowKind::Number, "GlowHideMs", nullptr, &bmvr::g_GlowHideMs, 10.f, 0.f, 500.f, "%.0f ms" },
             { "Glows level, face you", RowKind::Toggle, "SpriteLevel", &bmvr::g_SpriteLevel, nullptr, 0, 0, 0, nullptr },
-            { "REFLECTIONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Cubemap reflection strength: less = less shimmer on shiny floors/walls and props.
+            { "REFLECTIONS (SHIMMER)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "envmap" },
             { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
             { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
             { "DEBUG", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -307,6 +313,61 @@ namespace
     }
 
     int RowHeight(const Row& r) { return IsHeading(r.kind) ? kSectionPx : kRowPx; }
+
+    struct PresetSet
+    {
+        const char* id;
+        int count;                 // values per preset
+        float* targets[3];
+        struct { const char* name; float v[3]; } items[3];
+    };
+    // First item of each = the built-in default (bmvr_flags.cpp).
+    const std::vector<PresetSet>& Presets()
+    {
+        static const std::vector<PresetSet> sets = {
+            // FXAA 3.11 terms: sub-pixel smoothing, edge threshold, dark edge threshold.
+            // Sharp keeps texture detail (about as sharp as the stock game); Smooth is
+            // FXAA's own sub-pixel default with most edges treated (softer, calmer).
+            { "fxaa", 3, { &bmvr::g_FxaaSubpixel, &bmvr::g_FxaaEdgeThreshold, &bmvr::g_FxaaEdgeThresholdMin },
+              { { "Sharp (default)", { 0.25f, 0.166f, 0.0833f } },
+                { "Balanced", { 0.5f, 0.125f, 0.0625f } },
+                { "Smooth", { 0.75f, 0.063f, 0.0312f } } } },
+            // Cubemap reflection strength, walls/floors and props/NPCs.
+            { "envmap", 2, { &bmvr::g_EnvmapScaleWorld, &bmvr::g_EnvmapScaleModels, nullptr },
+              { { "Calm (default)", { 0.4f, 0.8f, 0.f } },
+                { "Calmer", { 0.2f, 0.5f, 0.f } },
+                { "Full (as in game)", { 1.f, 1.f, 0.f } } } },
+        };
+        return sets;
+    }
+    const PresetSet* FindPresetSet(const char* id)
+    {
+        for (const PresetSet& p : Presets())
+            if (id && std::strcmp(p.id, id) == 0)
+                return &p;
+        return nullptr;
+    }
+    // Index of the preset the current values match, or -1 (custom).
+    int PresetIndex(const PresetSet& p)
+    {
+        for (int i = 0; i < 3; ++i)
+        {
+            bool match = true;
+            for (int k = 0; k < p.count && match; ++k)
+                match = std::fabs(*p.targets[k] - p.items[i].v[k]) <= 1e-3f;
+            if (match)
+                return i;
+        }
+        return -1;
+    }
+    std::string PresetText(const Row& r)
+    {
+        const PresetSet* p = FindPresetSet(r.fmt);
+        if (!p)
+            return {};
+        const int i = PresetIndex(*p);
+        return i < 0 ? "Custom" : p->items[i].name;
+    }
 
     // Name of a Choice row's current value ("" if out of range).
     std::string ChoiceText(const Row& r)
@@ -642,6 +703,18 @@ namespace
             FillRect(dc, &r, b);
             DeleteObject(b);
         }
+        int textWidth(const char* s, int height, bool bold)
+        {
+            HFONT f = CreateFontA(-height, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+                ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+                DEFAULT_PITCH | FF_SWISS, "Arial");
+            HGDIOBJ of = SelectObject(dc, f);
+            SIZE sz{};
+            GetTextExtentPoint32A(dc, s, static_cast<int>(std::strlen(s)), &sz);
+            SelectObject(dc, of);
+            DeleteObject(f);
+            return sz.cx;
+        }
         void text(const char* s, int x0, int y0, int x1, int y1, COLORREF c, int height, bool bold, UINT align)
         {
             HFONT f = CreateFontA(-height, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
@@ -781,7 +854,9 @@ namespace
             }
             if (r.kind == RowKind::Button)
             {
-                c.fill(mid - 180, y0 + 8, mid + 180, y1 - 8, hover ? kBtnHover : kBtn);
+                // At least 360 px, wider for a long label, never past the column.
+                const int half = (std::min)(cw / 2 - 24, (std::max)(180, c.textWidth(r.label, 34, true) / 2 + 28));
+                c.fill(mid - half, y0 + 8, mid + half, y1 - 8, hover ? kBtnHover : kBtn);
                 c.text(r.label, x, y0, x + cw, y1, hover ? RGB(0, 0, 0) : kText, 34, true, DT_CENTER);
                 continue;
             }
@@ -804,11 +879,11 @@ namespace
                 continue;
             }
             c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
-            if (r.kind == RowKind::Choice)
+            if (r.kind == RowKind::Choice || r.kind == RowKind::Preset)
             {
                 // One wide button (the -/+ span); a click picks the next value.
                 c.fill(x + kMinusX0, y0 + 10, x + kPlusX1, y1 - 10, hover ? kBtnHover : kBtn);
-                c.text(ChoiceText(r).c_str(), x + kMinusX0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : kText,
+                c.text((r.kind == RowKind::Preset ? PresetText(r) : ChoiceText(r)).c_str(), x + kMinusX0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : kText,
                     30, true, DT_CENTER);
                 c.text(">", x + kPlusX1 - 40, y0, x + kPlusX1 - 8, y1 - 2, hover ? RGB(0, 0, 0) : kDim, 30, true, DT_CENTER);
             }
@@ -1208,6 +1283,17 @@ void VR::UpdateSettingsPanel()
     case RowKind::DevSection:
     case RowKind::Info:
         return;
+    case RowKind::Preset:
+    {
+        const PresetSet* p = FindPresetSet(r.fmt);
+        if (!p)
+            return;
+        const int next = (PresetIndex(*p) + 1) % 3;   // custom (-1) -> the first (default)
+        for (int k = 0; k < p->count; ++k)
+            *p->targets[k] = p->items[next].v[k];
+        Game::logMsg("VR settings: %s preset = %s", r.fmt, p->items[next].name);
+        break;
+    }
     case RowKind::Choice:
         if (!r.f || r.step <= 0.f)
             return;
@@ -1234,14 +1320,6 @@ void VR::UpdateSettingsPanel()
         CloseSettingsPanel("close row");
         return;
     case RowKind::Button:
-        // The FXAA values back at their defaults; on or off stays as it is.
-        if (r.fmt && std::strcmp(r.fmt, "fxaa_default") == 0)
-        {
-            bmvr::g_FxaaSubpixel = 0.25f;
-            bmvr::g_FxaaEdgeThreshold = 0.166f;
-            bmvr::g_FxaaEdgeThresholdMin = 0.0833f;
-            break;
-        }
         // Hands + hand HUD placement back at their defaults (classic pose off, thumb-up roll,
         // gun grip, HUD spot); HUD and hit flash on/off stay as they are.
         if (r.fmt && std::strcmp(r.fmt, "handhud_default") == 0)
@@ -1362,6 +1440,8 @@ void VR::UpdateSettingsPanel()
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
     if (r.kind == RowKind::Button)
         Game::logMsg("VR settings: %s pressed", r.label);
+    else if (r.kind == RowKind::Preset)
+        ;   // logged with the preset name above
     else
         Game::logMsg("VR settings: %s = %s", r.label, FormatValue(r).c_str());
 }
