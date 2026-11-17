@@ -221,6 +221,7 @@ namespace bmvr
     bool g_TurnBlocksJumpCrouch = true;
     float g_ButtonHoldMs = 500.f;
     bool g_ButtonMapping = true;
+    bool g_ControlsPicture = true;
     bool g_SprintToggle = true;
     bool g_VrSettingsPause = true;
     bool g_HideHandsWithoutSuit = true;
@@ -633,6 +634,8 @@ namespace bmvr
                 SetBindFromConfig(n + 5, val);
             else if (std::strcmp(n, "ButtonMapping") == 0)
                 g_ButtonMapping = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "ControlsPicture") == 0)
+                g_ControlsPicture = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ButtonHoldMs") == 0)
             {
                 const float ms = static_cast<float>(atof(val));

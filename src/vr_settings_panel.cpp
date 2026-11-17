@@ -17,6 +17,7 @@
 #include "d3d9_vr.h"
 #include "bmvr_cvars.h"
 #include "vr_button_map.h"
+#include "vr_controller_models.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -84,9 +86,11 @@ namespace
     // come from the detected controller and the button map; a click opens the
     // action picker. ColumnBreak: the rows after it go to the right column
     // (CONTROLS tab: left / right controller). BindPreset: like Preset, for the
-    // button-map presets (vr_button_map.h).
+    // button-map presets (vr_button_map.h). BindPicture (fmt "L"/"R"): that
+    // controller drawn from its SteamVR model with a card per button; the card
+    // lines are the hand's Bind rows (hidden while the picture shows).
     enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection, Preset,
-        Bind, ColumnBreak, BindPreset };
+        Bind, ColumnBreak, BindPreset, BindPicture };
     bool IsHeading(RowKind k) { return k == RowKind::Section || k == RowKind::DevSection; }
 
     struct Row
@@ -150,8 +154,11 @@ namespace
             { "Hold time", RowKind::Number, "ButtonHoldMs", nullptr, &bmvr::g_ButtonHoldMs, 50.f, 200.f, 1500.f, "%.0f ms" },
             // Off: the fixed layout from before mapping (if a mapping ever blocks a button).
             { "Button mapping", RowKind::Toggle, "ButtonMapping", &bmvr::g_ButtonMapping, nullptr, 0, 0, 0, nullptr },
+            // Off (or no SteamVR model found): the button list below.
+            { "Controller pictures", RowKind::Toggle, "ControlsPicture", &bmvr::g_ControlsPicture, nullptr, 0, 0, 0, nullptr },
             { "Reset buttons to defaults", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "binds_default" },
             { "LEFT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_left" },
+            { "", RowKind::BindPicture, nullptr, nullptr, nullptr, 0, 0, 0, "L" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.trigger" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.grip" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face1" },
@@ -160,8 +167,8 @@ namespace
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face2.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.stickclick" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.stickclick.hold" },
-            { "Stick", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Move" },
-            { "Menu button", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Pause" },
+            { "Stick", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixedL:Move" },
+            { "Menu button", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixedL:Pause" },
             { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "STICK UP / DOWN", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Stick distance", RowKind::Number, "StickJumpCrouchThreshold", nullptr, &bmvr::g_StickJumpCrouchThreshold, 0.05f, 0.3f, 0.95f, "%.2f" },
@@ -169,6 +176,7 @@ namespace
             { "Turning blocks up/down", RowKind::Toggle, "TurnBlocksJumpCrouch", &bmvr::g_TurnBlocksJumpCrouch, nullptr, 0, 0, 0, nullptr },
             { "Stick down: crouch while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
             { "RIGHT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_right" },
+            { "", RowKind::BindPicture, nullptr, nullptr, nullptr, 0, 0, 0, "R" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.trigger" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.grip" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face1" },
@@ -179,7 +187,7 @@ namespace
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickclick.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickup" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickdown" },
-            { "Stick sideways", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Turn" },
+            { "Stick sideways", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixedR:Turn" },
             { "HANDS & WEAPONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
@@ -375,10 +383,13 @@ namespace
         return rows;
     }
 
+    int PictureAreaHeight(int hand);
     int RowHeight(const Row& r)
     {
         if (r.kind == RowKind::ColumnBreak)
             return 0;
+        if (r.kind == RowKind::BindPicture)
+            return PictureAreaHeight(r.fmt && r.fmt[0] == 'R' ? 1 : 0);
         return IsHeading(r.kind) ? kSectionPx : kRowPx;
     }
 
@@ -470,6 +481,234 @@ namespace
         std::memcpy(g_PanelSystem, in.systemName, sizeof(g_PanelSystem));
         g_PanelSystem[sizeof(g_PanelSystem) - 1] = 0;
         return changed;
+    }
+
+    std::string InfoText(const Row& r);
+
+    // ---- Controller pictures (CONTROLS tab) ----
+    // Like the PS5 button assignment screen: each controller from its thumb
+    // side, drawn beside the panel (left one past the left edge, right one past
+    // the right edge, in "wings" of the panel texture), so the panel keeps its
+    // size. Inside, one card per button; a line runs from each card out of the
+    // panel to its button. Card lines are the hand's Bind rows (same picker).
+    constexpr int kPicW = 460, kPicH = 760;
+    constexpr int kWingPx = kPicW + 40;
+    constexpr int kCardX0 = 40, kCardW = kColW - 80, kCardHeadPx = 38, kCardLinePx = 46, kCardGap = 10;
+
+    std::shared_ptr<const bmvr::ctlmodel::Models> g_PanelModels;
+    int g_PanelModelsGen = -1;
+    const bmvr::ctlmodel::Models* PanelModels()
+    {
+        const int gen = bmvr::ctlmodel::Generation();
+        if (gen != g_PanelModelsGen)
+        {
+            g_PanelModels = bmvr::ctlmodel::Current();
+            g_PanelModelsGen = gen;
+        }
+        return g_PanelModels.get();
+    }
+    // That hand's column shows the picture instead of its button rows.
+    bool PictureShown(int hand)
+    {
+        if (!bmvr::g_ControlsPicture || hand < 0 || hand > 1)
+            return false;
+        const bmvr::ctlmodel::Models* m = PanelModels();
+        return m && m->hand[hand].ok;
+    }
+    // Hand of a Bind / BindPicture / fixed Info row, else -1.
+    int RowHand(const Row& r)
+    {
+        if (!r.fmt)
+            return -1;
+        if (r.kind == RowKind::Bind || r.kind == RowKind::BindPicture)
+            return r.fmt[0] == 'L' ? 0 : r.fmt[0] == 'R' ? 1 : -1;
+        if (r.kind == RowKind::Info && std::strncmp(r.fmt, "fixedL:", 7) == 0)
+            return 0;
+        if (r.kind == RowKind::Info && std::strncmp(r.fmt, "fixedR:", 7) == 0)
+            return 1;
+        return -1;
+    }
+
+    struct CardLine
+    {
+        int row = -1;            // Bind row (clickable) or the fixed Info row
+        std::string caption;     // "Hold", "Up", ... ("" = press)
+        std::string text;        // action
+        bool changed = false;
+        bool fixed = false;
+    };
+    struct Card
+    {
+        int part = 0;
+        std::string head;
+        std::vector<CardLine> lines;
+        float ax = 0.f, ay = 0.f;   // anchor, column-local (area top = 0)
+        int y0 = 0, y1 = 0;
+    };
+    // Picture position in column-local x (outside the column: in the wing).
+    int PicX(int hand) { return hand == 0 ? 20 - kWingPx : kColW + 20; }
+    int PictureTop(int hand);   // picture y (area-local): its buttons level with the card stack
+    int CardX0(int) { return kCardX0; }
+    // Leader lines: card's outer edge -> elbow just past the panel edge -> button.
+    int LeaderElbowX(int hand) { return hand == 0 ? -18 : kColW + 18; }
+
+    std::vector<Card> PictureCards(int hand, int* picTopOut = nullptr)
+    {
+        std::vector<Card> cards;
+        const bmvr::ctlmodel::Models* m = PanelModels();
+        if (!m || !m->hand[hand].ok)
+            return cards;
+        const bmvr::ctlmodel::HandModel& hm = m->hand[hand];
+        auto cardFor = [&](int part, const std::string& head) -> Card& {
+            for (Card& c : cards)
+                if (c.part == part)
+                    return c;
+            Card c;
+            c.part = part;
+            c.head = head;
+            c.ax = static_cast<float>(PicX(hand)) + hm.picture.anchorX[part];
+            c.ay = hm.picture.anchorY[part];   // picture-local until the stack is known
+            cards.push_back(c);
+            return cards.back();
+        };
+        const bool pad = g_PanelFamily == L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE;
+        const auto& rows = Rows();
+        for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+        {
+            const Row& r = rows[i];
+            if (RowHand(r) != hand)
+                continue;
+            if (r.kind == RowKind::Bind)
+            {
+                if (BindRowHidden(r))
+                    continue;
+                const BindRowSpec b = ParseBindRow(r);
+                int part = bmvr::ctlmodel::kStick;
+                std::string caption;
+                switch (b.input)
+                {
+                case bmvr::BindInput::Trigger: part = bmvr::ctlmodel::kTrigger; break;
+                case bmvr::BindInput::Grip: part = bmvr::ctlmodel::kGrip; break;
+                case bmvr::BindInput::Face1: part = bmvr::ctlmodel::kFace1; break;
+                case bmvr::BindInput::Face2: part = bmvr::ctlmodel::kFace2; break;
+                case bmvr::BindInput::StickClick: caption = "Click"; break;
+                case bmvr::BindInput::StickUp: caption = "Up"; break;
+                case bmvr::BindInput::StickDown: caption = "Down"; break;
+                default: break;
+                }
+                if (b.hold)
+                    caption = caption.empty() ? "Hold" : caption + " hold";
+                if (!hm.has[part])
+                    part = bmvr::ctlmodel::kStick;   // drawn without a line if that is missing too
+                const std::string head = part == bmvr::ctlmodel::kStick ? (pad ? "Pad" : "Stick")
+                    : bmvr::BindInputLabel(g_PanelFamily, g_PanelSystem, hand, b.input);
+                CardLine line;
+                line.row = i;
+                line.caption = caption;
+                const bmvr::BindAction a = BindRowAction(r);
+                line.text = bmvr::BindActionLabel(a);
+                line.changed = a != BindRowAction(r, true);
+                cardFor(part, head).lines.push_back(line);
+            }
+            else if (r.kind == RowKind::Info)
+            {
+                const bool menu = std::strcmp(r.label, "Menu button") == 0;
+                const int part = menu ? bmvr::ctlmodel::kMenu : bmvr::ctlmodel::kStick;
+                CardLine line;
+                line.row = i;
+                line.caption = menu ? "" : std::strcmp(r.label, "Stick sideways") == 0 ? "Sideways" : "Tilt";
+                line.text = InfoText(r);
+                line.fixed = true;
+                cardFor(part, menu ? "Menu" : (pad ? "Pad" : "Stick")).lines.push_back(line);
+            }
+        }
+        // Cards stack from the top of the area; the picture is moved so its
+        // buttons sit level with the middle of the stack. Cards are ordered by
+        // the angle of their line seen from the panel edge, so the lines fan
+        // out without crossing; any pair that still crosses is swapped.
+        int stackH = -kCardGap;
+        for (const Card& c : cards)
+            stackH += kCardHeadPx + static_cast<int>(c.lines.size()) * kCardLinePx + 6 + kCardGap;
+        float meanY = 0.f;
+        for (const Card& c : cards)
+            meanY += c.ay;
+        meanY = cards.empty() ? 0.f : meanY / static_cast<float>(cards.size());
+        const int picTop = 8 + stackH / 2 - static_cast<int>(meanY);
+        if (picTopOut)
+            *picTopOut = picTop;
+        for (Card& c : cards)
+            c.ay += static_cast<float>(picTop);
+        const float elbowX = static_cast<float>(LeaderElbowX(hand));
+        const float midY = 8.f + stackH * 0.5f;
+        std::stable_sort(cards.begin(), cards.end(), [&](const Card& a, const Card& b) {
+            const float sa = (a.ay - midY) / (std::max)(1.f, std::fabs(elbowX - a.ax));
+            const float sb = (b.ay - midY) / (std::max)(1.f, std::fabs(elbowX - b.ax));
+            return sa < sb;
+        });
+        auto stack = [&]() {
+            int y = 8;
+            for (Card& c : cards)
+            {
+                c.y0 = y;
+                c.y1 = y + kCardHeadPx + static_cast<int>(c.lines.size()) * kCardLinePx + 6;
+                y = c.y1 + kCardGap;
+            }
+        };
+        auto crosses = [&](const Card& a, const Card& b) {
+            const float ax0 = elbowX, ay0 = static_cast<float>(a.y0 + kCardHeadPx / 2);
+            const float bx0 = elbowX, by0 = static_cast<float>(b.y0 + kCardHeadPx / 2);
+            auto side = [](float px, float py, float qx, float qy, float rx, float ry) {
+                return (qx - px) * (ry - py) - (qy - py) * (rx - px);
+            };
+            const float d1 = side(ax0, ay0, a.ax, a.ay, bx0, by0), d2 = side(ax0, ay0, a.ax, a.ay, b.ax, b.ay);
+            const float d3 = side(bx0, by0, b.ax, b.ay, ax0, ay0), d4 = side(bx0, by0, b.ax, b.ay, a.ax, a.ay);
+            return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
+        };
+        stack();
+        for (int iter = 0; iter < 24; ++iter)
+        {
+            bool swapped = false;
+            for (size_t i = 0; i < cards.size() && !swapped; ++i)
+                for (size_t j = i + 1; j < cards.size() && !swapped; ++j)
+                    if (crosses(cards[i], cards[j]))
+                    {
+                        std::swap(cards[i], cards[j]);
+                        stack();
+                        swapped = true;
+                    }
+            if (!swapped)
+                break;
+        }
+        return cards;
+    }
+    int PictureTop(int hand)
+    {
+        int top = 8;
+        PictureCards(hand, &top);
+        return top;
+    }
+    int PictureAreaHeight(int hand)
+    {
+        int bottom = 0;
+        for (const Card& c : PictureCards(hand))
+            bottom = (std::max)(bottom, c.y1);
+        return bottom + 12;
+    }
+
+    // Bind row under a point of the picture area (column-local), or -1.
+    int PictureHit(int hand, int lx, int ly)
+    {
+        const int x0 = CardX0(hand);
+        if (lx < x0 || lx >= x0 + kCardW)
+            return -1;
+        for (const Card& c : PictureCards(hand))
+            for (size_t k = 0; k < c.lines.size(); ++k)
+            {
+                const int y = c.y0 + kCardHeadPx + static_cast<int>(k) * kCardLinePx;
+                if (ly >= y && ly < y + kCardLinePx && !c.lines[k].fixed)
+                    return c.lines[k].row;
+            }
+        return -1;
     }
 
     // Action picker: a grid over the content area. Cells 0..Count-1 = actions,
@@ -675,8 +914,12 @@ namespace
                 inDev = false;
             else if (k == RowKind::DevSection)
                 inDev = true;
+            // Picture shown: the hand's Bind and fixed rows are its card lines instead.
+            const int hand = RowHand(rows[i]);
             hidden[i] = (inDev && !devRows) || k == RowKind::ColumnBreak
-                || (k == RowKind::Bind && BindRowHidden(rows[i]));
+                || (k == RowKind::Bind && BindRowHidden(rows[i]))
+                || (k == RowKind::BindPicture && !PictureShown(hand))
+                || (k != RowKind::BindPicture && hand >= 0 && PictureShown(hand));
         }
         const int tabW = out.tabCount > 0 ? (kTexW - 80 - (out.tabCount - 1) * kTabGapPx) / out.tabCount : 0;
         int contentBottom = kContentTop;
@@ -749,10 +992,13 @@ namespace
         static int s_builtFor = -1;
         // Rebuilt when developer rows or the detected controller (its buttons) change.
         const int want = (bmvr::g_PanelDevRows ? 1 : 0) | static_cast<int>(g_PanelFamily << 1)
-            | static_cast<int>(((g_PanelRaw[0] >> 16) & 0xF) << 8) | static_cast<int>(((g_PanelRaw[1] >> 16) & 0xF) << 12);
+            | static_cast<int>(((g_PanelRaw[0] >> 16) & 0xF) << 8) | static_cast<int>(((g_PanelRaw[1] >> 16) & 0xF) << 12)
+            | (PictureShown(0) ? 1 << 16 : 0) | (PictureShown(1) ? 1 << 17 : 0);
         if (s_builtFor != want)
         {
-            l = BuildLayout(want != 0);
+            // Bit 0 only: the other bits are the controller (was want != 0, so
+            // developer rows showed once a controller was detected).
+            l = BuildLayout((want & 1) != 0);
             s_builtFor = want;
         }
         return l;
@@ -784,7 +1030,11 @@ namespace
             if (l.tab[i] != g_Tab || l.col[i] != c)
                 continue;
             if (py >= l.top[i] && py < l.top[i] + RowHeight(rows[i]))
+            {
+                if (k == RowKind::BindPicture)
+                    return PictureHit(RowHand(rows[i]), px - c * kColW, py - l.top[i]);
                 return (IsHeading(k) || k == RowKind::Info) ? -1 : i;
+            }
         }
         return -1;
     }
@@ -1023,8 +1273,8 @@ namespace
     // Text of an Info row.
     std::string InfoText(const Row& r)
     {
-        if (r.fmt && std::strncmp(r.fmt, "fixed:", 6) == 0)
-            return std::string(r.fmt + 6) + " (fixed)";
+        if (r.fmt && std::strncmp(r.fmt, "fixed", 5) == 0 && std::strchr(r.fmt, ':'))
+            return std::string(std::strchr(r.fmt, ':') + 1) + " (fixed)";
         if (r.fmt && std::strcmp(r.fmt, "foveation") == 0)
             return bmvr::FoveationStatusText();
         if (!r.fmt || std::strcmp(r.fmt, "missing_hooks") != 0)
@@ -1040,6 +1290,119 @@ namespace
         else
             _snprintf(buf, sizeof(buf) - 1, "%d gameplay, %d debug", game, debug);
         return buf;
+    }
+
+    // One controller's cards (RowKind::BindPicture); picture and lines: ComposeWings.
+    void PaintPicture(Canvas& c, int hand, int top, int hoverRow)
+    {
+        const int colX = hand * kColW;
+        const int cx0 = colX + CardX0(hand), cx1 = cx0 + kCardW;
+        for (const Card& card : PictureCards(hand))
+        {
+            const int y0 = top + card.y0;
+            c.fill(cx0, y0, cx1, top + card.y1, RGB(26, 31, 38));
+            c.fill(cx0, y0, cx1, y0 + 4, RGB(90, 70, 20));
+            c.text(card.head.c_str(), cx0 + 16, y0 + 4, cx1 - 16, y0 + kCardHeadPx, kAmber, 28, true, DT_LEFT);
+            for (size_t k = 0; k < card.lines.size(); ++k)
+            {
+                const CardLine& ln = card.lines[k];
+                const int ly0 = y0 + kCardHeadPx + static_cast<int>(k) * kCardLinePx;
+                const int ly1 = ly0 + kCardLinePx;
+                const bool hv = !ln.fixed && ln.row == hoverRow;
+                const int capW = ln.caption.empty() ? 0 : 180;
+                if (!ln.fixed)
+                    c.fill(cx0 + 10, ly0 + 3, cx1 - 10, ly1 - 3, hv ? kBtnHover : kBtn);
+                if (capW)
+                    c.text(ln.caption.c_str(), cx0 + 24, ly0, cx0 + 24 + capW, ly1, hv ? RGB(0, 0, 0) : kDim, 26, false, DT_LEFT);
+                const int tx0 = cx0 + 24 + capW, tx1 = cx1 - (ln.fixed ? 20 : 44);
+                int fontPx = 30;
+                while (fontPx > 20 && c.textWidth(ln.text.c_str(), fontPx, true) > tx1 - tx0)
+                    fontPx -= 2;
+                const COLORREF ink = hv ? RGB(0, 0, 0) : ln.fixed ? kDim : ln.changed ? kAmber : kText;
+                c.text(ln.text.c_str(), tx0, ly0, tx1, ly1, ink, fontPx, !ln.fixed, DT_LEFT);
+                if (!ln.fixed)
+                    c.text(">", cx1 - 44, ly0, cx1 - 14, ly1 - 2, hv ? RGB(0, 0, 0) : kDim, 28, true, DT_CENTER);
+            }
+        }
+    }
+
+    // Width of each side wing: the panel texture is the body plus a wing on
+    // both sides while controller pictures can show (all tabs, so the panel
+    // does not move when you switch; the wings are clear off the CONTROLS tab).
+    int WingPx() { return (PictureShown(0) || PictureShown(1)) ? kWingPx : 0; }
+
+    // body (painted panel) -> out (wings + body): controller pictures in the
+    // wings and the lines from the cards to the buttons (CONTROLS tab only).
+    void ComposeWings(const Canvas& body, Canvas& out, int hoverRow)
+    {
+        const int wing = (out.w - body.w) / 2;
+        GdiFlush();
+        std::memset(out.px, 0, static_cast<size_t>(out.w) * out.h * 4u);
+        for (int y = 0; y < body.h && y < out.h; ++y)
+            std::memcpy(out.px + static_cast<size_t>(y) * out.w + wing, body.px + static_cast<size_t>(y) * body.w,
+                static_cast<size_t>(body.w) * 4u);
+        const auto& rows = Rows();
+        const Layout& l = GetLayout();
+        const bmvr::ctlmodel::Models* m = PanelModels();
+        for (int i = 0; m && i < static_cast<int>(rows.size()); ++i)
+        {
+            if (rows[i].kind != RowKind::BindPicture || l.tab[i] != g_Tab)
+                continue;
+            const int hand = RowHand(rows[i]);
+            if (!PictureShown(hand))
+                continue;
+            const int top = l.top[i];
+            const int colX = wing + hand * kColW;   // column origin in out
+            const bmvr::ctlmodel::Picture& pic = m->hand[hand].picture;
+            const int px0 = colX + PicX(hand), py0 = top + PictureTop(hand);
+            for (int y = 0; y < pic.h; ++y)
+            {
+                const int dy = py0 + y;
+                if (dy < 0 || dy >= out.h)
+                    continue;
+                for (int x = 0; x < pic.w; ++x)
+                {
+                    const int dx = px0 + x;
+                    const uint32_t sp = pic.px[static_cast<size_t>(y) * pic.w + x];
+                    if ((sp >> 24) && dx >= 0 && dx < out.w)
+                        out.px[static_cast<size_t>(dy) * out.w + dx] = sp;
+                }
+            }
+            for (const Card& card : PictureCards(hand))
+            {
+                bool hot = false;
+                for (const CardLine& ln : card.lines)
+                    hot |= ln.row == hoverRow;
+                const COLORREF ink = hot ? kAmber : RGB(170, 140, 80);
+                const int ly = top + card.y0 + kCardHeadPx / 2;
+                const int edge = colX + (hand == 0 ? CardX0(hand) : CardX0(hand) + kCardW);
+                const int elbow = colX + LeaderElbowX(hand);
+                const int ax = colX + static_cast<int>(card.ax), ay = top + static_cast<int>(card.ay);
+                HPEN pen = CreatePen(PS_SOLID, hot ? 5 : 3, ink);
+                HGDIOBJ op = SelectObject(out.dc, pen);
+                MoveToEx(out.dc, edge, ly, nullptr);
+                LineTo(out.dc, elbow, ly);
+                LineTo(out.dc, ax, ay);
+                HBRUSH br = CreateSolidBrush(ink);
+                HGDIOBJ ob = SelectObject(out.dc, br);
+                Ellipse(out.dc, ax - 8, ay - 8, ax + 9, ay + 9);
+                SelectObject(out.dc, ob);
+                SelectObject(out.dc, op);
+                DeleteObject(br);
+                DeleteObject(pen);
+            }
+        }
+        // GDI writes alpha 0: the body keeps the panel opacity, drawn wing pixels are opaque.
+        GdiFlush();
+        for (int y = 0; y < out.h; ++y)
+            for (int x = 0; x < out.w; ++x)
+            {
+                uint32_t& p = out.px[static_cast<size_t>(y) * out.w + x];
+                if (x >= wing && x < wing + body.w)
+                    p = (p & 0x00FFFFFFu) | (238u << 24);
+                else if (!(p >> 24) && (p & 0x00FFFFFFu))
+                    p |= 0xFF000000u;
+            }
     }
 
     void Paint(Canvas& c, int hoverRow, int hoverZone)
@@ -1093,6 +1456,11 @@ namespace
                     c.text("developer", x + 40, y0 + 8, x + cw - 40, y1, kDim, 22, false, DT_RIGHT);
                 // 4 px: the panel is drawn minified without mipmaps, so 2 px lines dropped out.
                 c.fill(x + 40, y1 - 6, x + cw - 40, y1 - 2, RGB(90, 70, 20));
+                continue;
+            }
+            if (r.kind == RowKind::BindPicture)
+            {
+                PaintPicture(c, RowHand(r), y0, hoverRow);
                 continue;
             }
             if (hover && r.kind != RowKind::Close)
@@ -1503,6 +1871,8 @@ void VR::UpdateSettingsPanel()
         Game::logMsg("VR settings panel: controller %s (%s)", ControllerName(),
             L4D2VR_ControllerFamilyName(g_PanelFamily));
     }
+    if (bmvr::g_ControlsPicture && (g_PanelFamily != 0 || g_PanelSystem[0]))
+        bmvr::ctlmodel::Request(g_PanelFamily, g_PanelSystem, kPicW, kPicH);
     Vector origin, fwd, right, up;
     SettingsPanelFrame(origin, fwd, right, up);
 
@@ -1664,6 +2034,7 @@ void VR::UpdateSettingsPanel()
     case RowKind::DevSection:
     case RowKind::Info:
     case RowKind::ColumnBreak:
+    case RowKind::BindPicture:
         return;
     case RowKind::Bind:
         g_PickerRow = row;
@@ -1900,12 +2271,24 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
         s_paintedFovStatus = std::move(fovStatus);
         m_SettingsDirty = true;
     }
+    // Controller models finished loading (or changed): relayout + repaint.
+    static int s_paintedModelGen = -1;
+    if (bmvr::ctlmodel::Generation() != s_paintedModelGen)
+    {
+        s_paintedModelGen = bmvr::ctlmodel::Generation();
+        m_SettingsDirty = true;
+    }
     if (m_SettingsDirty.exchange(false) || !g_Gfx.gpu)
     {
-        Canvas c(kTexW, TexH());
-        if (c.ok())
+        Canvas body(kTexW, TexH());
+        const int wing = WingPx();
+        Canvas wide(wing ? kTexW + 2 * wing : 1, wing ? TexH() : 1);
+        if (body.ok() && (!wing || wide.ok()))
         {
-            Paint(c, m_SettingsHover, m_SettingsHoverZone);
+            Paint(body, m_SettingsHover, m_SettingsHoverZone);
+            if (wing)
+                ComposeWings(body, wide, m_SettingsHover);
+            Canvas& c = wing ? wide : body;
             // Test only: BMVR_TEST_PANEL_DUMP=1 saves every repaint as
             // VR/panel-tab<N>[-picker].bmp (full size, for screenshots).
             static int s_dumpPanel = -1;
@@ -1980,7 +2363,9 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
 
     Vector po, pf, pr, pu;
     SettingsPanelFrame(po, pf, pr, pu);
-    const float hw = kPanelWidthHu * 0.5f, hh = PanelHeightHu() * 0.5f;
+    // The texture may be wider than the panel body (controller picture wings).
+    const float hw = kPanelWidthHu * 0.5f * (g_Gfx.w > 0 ? static_cast<float>(g_Gfx.w) / kTexW : 1.f);
+    const float hh = PanelHeightHu() * 0.5f;
     const Vector corners[4] = { po - pr * hw + pu * hh, po + pr * hw + pu * hh, po - pr * hw - pu * hh, po + pr * hw - pu * hh };
     MenuVertTex v[4]{};
     const float uv[4][2] = { { 0, 0 }, { 1, 0 }, { 0, 1 }, { 1, 1 } };

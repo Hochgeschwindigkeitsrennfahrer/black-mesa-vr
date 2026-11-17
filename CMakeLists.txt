@@ -35,6 +35,7 @@ set(BMVR_SOURCES
   src/vr_audio_focus.cpp
   src/offset_checks.cpp
   src/vr_button_map.cpp
+  src/vr_controller_models.cpp
   src/vr_crowbar.cpp
   src/vr_weapon_menu.cpp
   src/vr_settings_panel.cpp

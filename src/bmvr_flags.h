@@ -451,6 +451,10 @@ namespace bmvr
     // fixed bindings, as before mapping existed (fallback if a mapping bug
     // blocks a button).
     extern bool g_ButtonMapping;
+    // VR panel CONTROLS tab: show each controller as a picture (SteamVR render
+    // model) with a label per button, and label the controllers in your hands.
+    // false (or no model found) = the plain list.
+    extern bool g_ControlsPicture;
     // SprintToggle=true: one sprint click (left stick click) keeps sprinting
     // until the left stick returns to centre or sprint is clicked again
     // (default false = hold the click).
