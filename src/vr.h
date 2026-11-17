@@ -1522,10 +1522,9 @@ private:
     bool m_TwoHandLoweredLogged = false;
     float m_TwoHandLoweredMaxMove = 0.f;
     float m_TwoHandLoweredMaxTurn = 0.f;
-    // Moves the support glove (gun-frame grip point + tracking angles) by the
-    // gun body's lowered-vs-idle delta. Caller holds m_ControllerMutex.
-    void ApplyLoweredOffhand(const Vector& f, const Vector& r, const Vector& u, float rotYaw,
-        Vector& gripLocal, QAngle& trackingAng);
+    // Moves the support glove's gun-frame grip point with the gun body's
+    // lowered-vs-idle move; its angles stay. Caller holds m_ControllerMutex.
+    void ApplyLoweredOffhand(Vector& gripLocal);
     int m_AutoMatQueueModeLastRequested = -999;
     std::chrono::steady_clock::time_point m_AutoMatQueueModeLastCmdTime{};
     bool m_VrCvarsApplied = false;

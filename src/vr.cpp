@@ -8161,8 +8161,7 @@ void VR::NoteDrawnWeaponRootLocal(const void* studioHdr, const Vector& pos, cons
     }
 }
 
-void VR::ApplyLoweredOffhand(const Vector& f, const Vector& r, const Vector& u, float rotYaw,
-    Vector& gripLocal, QAngle& trackingAng)
+void VR::ApplyLoweredOffhand(Vector& gripLocal)
 {
     const bool lowered = m_VmLowerState.load(std::memory_order_relaxed) == kVmLowerLowered;
     if (!lowered)
@@ -8175,7 +8174,7 @@ void VR::ApplyLoweredOffhand(const Vector& f, const Vector& r, const Vector& u, 
             if (s_log < 20)
             {
                 ++s_log;
-                Game::logMsg("Two-hand lowered: glove followed the gun (max moved %.1f, max turn %.0f deg)",
+                Game::logMsg("Two-hand lowered: glove followed the gun (palm moved up to %.1f, gun turned up to %.0f deg)",
                     m_TwoHandLoweredMaxMove, m_TwoHandLoweredMaxTurn);
             }
         }
@@ -8189,32 +8188,25 @@ void VR::ApplyLoweredOffhand(const Vector& f, const Vector& r, const Vector& u, 
     const Vector moved = m_GunRootLivePos - m_GunRootRefPos;
     if (moved.Length() > 0.5f * scale)   // implausible for one gun: leave the glove
         return;
-    // Rigid move of the gun body in the gun frame: v -> live * ref^-1 (v - refPos) + livePos.
+    // Points on the gun body: v -> live * ref^-1 (v - refPos) + livePos.
     auto turn = [&](const Vector& v) {
         return m_GunRootLiveAx[0] * v.Dot(m_GunRootRefAx[0])
             + m_GunRootLiveAx[1] * v.Dot(m_GunRootRefAx[1])
             + m_GunRootLiveAx[2] * v.Dot(m_GunRootRefAx[2]);
     };
-    gripLocal = turn(gripLocal - m_GunRootRefPos) + m_GunRootLivePos;
-
-    // Glove angles: tracking space -> world (yaw) -> gun frame, turn, back.
-    Vector af, ar, au;
-    QAngle::AngleVectors(trackingAng, &af, &ar, &au);
-    auto toGunTurned = [&](Vector v) {
-        PivotYaw(v, rotYaw);
-        const Vector l = turn(Vector(v.Dot(f), v.Dot(r), v.Dot(u)));
-        Vector w = f * l.x + r * l.y + u * l.z;
-        PivotYaw(w, -rotYaw);
-        return w;
-    };
-    af = toGunTurned(af);
-    au = toGunTurned(au);
-    if (VectorNormalize(af) > 0.01f && VectorNormalize(au) > 0.01f)
-        QAngle::VectorAngles(af, au, trackingAng);
-
+    // The glove keeps its own pose and tilt (user 2026-11-17): it only moves,
+    // by as much as the gun point under the palm moves. The glove's origin is
+    // at the wrist, ~9 cm behind the palm along the gun; moving the origin
+    // point instead leaves the palm above a gun that pitches down.
+    const Vector palm = gripLocal + Vector(0.09f * scale, 0.f, 0.f);
+    const Vector palmMove = turn(palm - m_GunRootRefPos) + m_GunRootLivePos - palm;
+    gripLocal = gripLocal + palmMove;
     m_TwoHandLoweredLogged = true;
-    const float c = (std::max)(-1.f, (std::min)(1.f, m_GunRootLiveAx[0].Dot(m_GunRootRefAx[0])));
-    m_TwoHandLoweredMaxMove = (std::max)(m_TwoHandLoweredMaxMove, moved.Length());
+    // Rotation angle from the trace of live * ref^-1.
+    const float tr = m_GunRootLiveAx[0].Dot(m_GunRootRefAx[0]) + m_GunRootLiveAx[1].Dot(m_GunRootRefAx[1])
+        + m_GunRootLiveAx[2].Dot(m_GunRootRefAx[2]);
+    const float c = (std::max)(-1.f, (std::min)(1.f, (tr - 1.f) * 0.5f));
+    m_TwoHandLoweredMaxMove = (std::max)(m_TwoHandLoweredMaxMove, palmMove.Length());
     m_TwoHandLoweredMaxTurn = (std::max)(m_TwoHandLoweredMaxTurn, std::acos(c) * 57.29578f);
 }
 
@@ -13871,12 +13863,11 @@ void VR::ApplyTwoHandWeaponAim()
     auto finishDraw = [&](const Vector& f, const Vector& r, const Vector& u, float gxSlide) {
         const float rotYaw = m_RotationOffsetY.load(std::memory_order_acquire);
         Vector local(gxSlide, gy, gz);
-        QAngle ang = leftHanded ? m_PhysicalRightAngAbs : m_LeftControllerAngAbs;
-        ApplyLoweredOffhand(f, r, u, rotYaw, local, ang);
+        ApplyLoweredOffhand(local);
         Vector gripYawed = f * local.x + r * local.y + u * local.z;
         PivotYaw(gripYawed, -rotYaw);
         m_TwoHandDrawPos = gunTracking + gripYawed;
-        m_TwoHandDrawAng = ang;
+        m_TwoHandDrawAng = leftHanded ? m_PhysicalRightAngAbs : m_LeftControllerAngAbs;
         m_TwoHandDrawValid = true;
         m_TwoHandDrawPhysicalLeft = !leftHanded;
     };
