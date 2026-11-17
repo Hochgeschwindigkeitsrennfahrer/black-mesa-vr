@@ -180,8 +180,8 @@ namespace
             { "Frame cap", RowKind::Choice, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "Off|Headset +10|2x headset" },
             // Coarser shading away from the centre: fixed = around each lens centre,
             // eye-tracked = where you look (lens centre while there is no gaze). The GPU
-            // feature turns on at game start when this is not off.
-            { "Foveated (restart)", RowKind::Choice, "Foveated", nullptr, &bmvr::g_Foveated, 1.f, 0.f, 2.f, "Off|Fixed|Eye-tracked" },
+            // feature turns on at game start when this is not off; "Foveation now" says when a restart is needed.
+            { "Foveated rendering", RowKind::Choice, "Foveated", nullptr, &bmvr::g_Foveated, 1.f, 0.f, 2.f, "Off|Fixed|Eye-tracked" },
             { "Foveation now", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "foveation" },
             { "Foveated: sharp radius", RowKind::Number, "FoveatedInner", nullptr, &bmvr::g_FoveatedInner, 0.05f, 0.1f, 1.f, "%.2f" },
             { "Foveated: half-rate radius", RowKind::Number, "FoveatedMid", nullptr, &bmvr::g_FoveatedMid, 0.05f, 0.2f, 1.5f, "%.2f" },
