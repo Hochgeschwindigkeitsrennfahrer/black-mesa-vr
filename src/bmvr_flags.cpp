@@ -291,7 +291,7 @@ namespace bmvr
     bool g_VrHandsBlackMesa = false;
     bool g_VrGunRightHand = false;
     bool g_VrMagReload = false;
-    bool g_RpgRocketAfterLoad = true;
+    bool g_RpgRocketShown = true;
     float g_DebugVmSeq = -1.f;
     float g_DebugVmCycle = 0.f;
     float g_VrMagHandForward = -3.f;
@@ -1051,8 +1051,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrHandsUseHevGloves") == 0)
                 g_VrHandsUseHevGloves = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "RpgRocketAfterLoad") == 0)
-                g_RpgRocketAfterLoad = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "RpgRocketShown") == 0)
+                g_RpgRocketShown = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrMagReload") == 0)
                 g_VrMagReload = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGunRightHand") == 0)

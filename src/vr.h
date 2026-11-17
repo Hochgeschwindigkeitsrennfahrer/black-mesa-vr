@@ -808,8 +808,6 @@ public:
     uint32_t m_PassThroughMainViews = 0;
     bool m_AppliedVrPerfCvars = false;
     std::string m_CurrentMapName;
-    // Every level init (new map, save load, level change).
-    std::atomic<unsigned> m_LevelInitCount{ 0 };
     std::string m_ScreenFxMap;
     IMaterial* m_ScreenFxMaterials[4] = {};   // [3] = Xen global fog __gbxog0 (XenGlobalFogOff)
     bool m_ScreenFxNoDraw[4] = {};

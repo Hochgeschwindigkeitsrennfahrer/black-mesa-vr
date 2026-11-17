@@ -3090,33 +3090,19 @@ namespace
         return false;
     }
 
-    // RPG rocket after a load / level change: Black Mesa shows the rocket in
-    // the tube only through client animation events (reload shows it at 0.24,
-    // the first-pickup clip at 0.73, firing hides it). A viewmodel made fresh
-    // by a save load starts with the rocket off and nothing turns it back on
-    // until the next fire + reload. Once per level init: idle, rocket off and
-    // rockets in reserve = show it, as the reload would have left it.
-    void FixRpgRocketAfterLoad(void* viewmodel, unsigned char* hdr, const char* label)
+    // RPG rocket: Black Mesa shows the rocket in the tube only through client
+    // animation events (reload shows it at 0.24, the first-pickup clip at
+    // 0.73, firing hides it). Anything that resets or cuts those clips leaves
+    // a loaded RPG with an empty tube until the next fire + reload: a save
+    // load (headless: body 7 -> 0), and switching while a clip runs (the VR
+    // weapon menu switches on hover). The weapon's m_bNeedReload says what is
+    // true: 1 from the shot until the reload starts (rocket in flight), else
+    // a rocket is loaded. Rocket off + not needing a reload + no fire/reload
+    // clip + rockets in reserve = show it, as the reload would have.
+    void FixRpgRocketShown(void* viewmodel, unsigned char* hdr, const char* label)
     {
-        // Two cases: (1) the first look after a level init (new map / level
-        // change), rocket off; (2) a save load on the same map, which resets
-        // the viewmodel's body without a level init: the rocket goes from on
-        // to off while the gun only idles. Firing turns it off inside the
-        // fire clip, so a switch-off counts only after 10 quiet idle frames
-        // in a row (a fire/reload clip in between cancels it).
-        static unsigned s_gen = ~0u;
-        static bool s_firstLookDone = false;
-        static int s_lastRocket = -1;
-        static int s_quietOff = 0;
-        if (!Hooks::m_VR || !Hooks::m_Game)
+        if (!Hooks::m_Game)
             return;
-        const unsigned gen = Hooks::m_VR->m_LevelInitCount.load(std::memory_order_relaxed);
-        if (gen != s_gen)
-        {
-            s_gen = gen;
-            s_firstLookDone = false;
-            s_quietOff = 0;
-        }
         if (!StudioHdrMatchesModel(hdr, "models/weapons/v_rpg.mdl")
             || !StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))
             return;
@@ -3127,43 +3113,40 @@ namespace
         if (body < 0)
             return;
         const int rocket = (body / base) % models;
+        C_BaseEntity* weapon = Hooks::m_Game->GetActiveWeaponEntity();
+        int need = -1, inRel = -1;
+        Hooks::m_Game->ReadWeaponReloadFlags(weapon, need, inRel);
         char lb[32]{};
         for (int i = 0; label && i < 31 && label[i]; ++i)
             lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
-        const bool quiet = std::strstr(lb, "idle") && !std::strstr(lb, "fire") && !std::strstr(lb, "reload");
-        auto show = [&](const char* why) {
-            if (Hooks::m_Game->WeaponHasNoAmmo(Hooks::m_Game->GetActiveWeaponEntity()))
-            {
-                Game::logMsg("RPG rocket (%s): tube empty, no rockets in reserve, left off", why);
-                return false;
-            }
-            const int fixed = body + base;
-            Hooks::m_Game->WriteEntityBody(viewmodel, fixed);
-            Game::logMsg("RPG rocket (%s): body %d -> %d (rocket shown, as the reload leaves it)", why, body, fixed);
-            return true;
-        };
-        int now = rocket;
-        if (!s_firstLookDone && quiet)
+        const bool clip = std::strstr(lb, "fire") || std::strstr(lb, "reload");
         {
-            s_firstLookDone = true;
-            if (rocket == 0 && show("after a level init"))
-                now = 1;
-        }
-        else if (s_lastRocket == 1 && rocket == 0 && quiet)
-        {
-            // Still "on" for the bookkeeping until it has been off and quiet long enough.
-            if (++s_quietOff >= 10)
+            static int s_lastKey = -999, s_logs = 0;
+            const int key = need * 100 + (clip ? 10 : 0) + rocket;
+            if (key != s_lastKey && s_logs < 100)
             {
-                s_quietOff = 0;
-                if (show("reset while idle (save load)"))
-                    now = 1;
+                ++s_logs;
+                s_lastKey = key;
+                Game::logMsg("RPG state: needReload=%d rocket=%d seq '%s'", need, rocket, label ? label : "?");
             }
-            else
-                now = 1;
         }
-        else
-            s_quietOff = 0;
-        s_lastRocket = now;
+        static int s_offFrames = 0;
+        if (rocket != 0 || need != 0 || clip)
+        {
+            s_offFrames = 0;
+            return;
+        }
+        // A few frames, so a fire clip arriving right after the event is seen first.
+        if (++s_offFrames < 5)
+            return;
+        s_offFrames = 0;
+        if (Hooks::m_Game->WeaponHasNoAmmo(weapon))
+            return;
+        const int fixed = body + base;
+        Hooks::m_Game->WriteEntityBody(viewmodel, fixed);
+        static int s_fixLogs = 0;
+        if (s_fixLogs++ < 50)
+            Game::logMsg("RPG rocket: loaded but not shown (seq '%s'), body %d -> %d", label ? label : "?", body, fixed);
     }
 
     void ForceViewmodelIdlePose(void* viewmodel, unsigned char* hdr)
@@ -3369,8 +3352,8 @@ namespace
             }
         }
         const char* label = StudioSequenceLabel(hdr, seq);
-        if (bmvr::g_RpgRocketAfterLoad && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
-            FixRpgRocketAfterLoad(viewmodel, hdr, label);
+        if (bmvr::g_RpgRocketShown && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
+            FixRpgRocketShown(viewmodel, hdr, label);
         const bool melee = Hooks::m_VR->IsPerformingMelee();
         // Classify once per sequence change instead of three lowercase passes
         // + ~30 strstr on every CalcViewModelView. The label is a copy, so the

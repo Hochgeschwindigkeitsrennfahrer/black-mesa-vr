@@ -718,8 +718,8 @@ namespace bmvr
     extern bool g_VrGunRightHand;
     // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
     extern bool g_VrMagReload;
-    // Show the RPG rocket after a save load / level change (stock leaves it off until the next reload).
-    extern bool g_RpgRocketAfterLoad;
+    // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
+    extern bool g_RpgRocketShown;
     extern float g_DebugVmSeq, g_DebugVmCycle; // debug: hold the viewmodel on a sequence/cycle (-1 = off)
     extern float g_VrMagHandForward, g_VrMagHandUp, g_VrMagSeatDistance; // game units
     extern float g_VrBoltGrabRadius; // game units (before the viewmodel scale)

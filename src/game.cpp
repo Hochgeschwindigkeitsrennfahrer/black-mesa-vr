@@ -607,6 +607,8 @@ namespace
     int g_nvClip1 = -1;
     int g_nvClip2 = -1;
     int g_nvBody = -1; // C_BaseAnimating m_nBody (bodygroups)
+    int g_nvNeedReload = -1; // C_Weapon_RPG m_bNeedReload
+    int g_nvInReload = -1;   // C_BaseCombatWeapon m_bInReload
     int g_nvAmmoBase = -1;
     int g_nvPrimaryAmmoType = -1;
     int g_nvSecondaryAmmoType = -1;
@@ -742,6 +744,8 @@ void Game::ScanWristHudNetVars()
     if (g_nvArmor < 0)
         g_nvArmor = 0x17C0;
     g_nvBody = FindRecvPropOffsetPlus4(base, imgSize, "m_nBody", 0x100, 0x1000);
+    g_nvNeedReload = FindRecvPropOffsetPlus4(base, imgSize, "m_bNeedReload", 0x800, 0x3000, false);
+    g_nvInReload = FindRecvPropOffsetPlus4(base, imgSize, "m_bInReload", 0x800, 0x3000, false);
     g_nvClip1 = FindRecvPropOffsetPlus4(base, imgSize, "m_iClip1", 0x800, 0x3000);
     g_nvClip2 = FindRecvPropOffsetPlus4(base, imgSize, "m_iClip2", 0x800, 0x3000);
     g_nvAmmoBase = FindRecvPropOffsetPlus4(base, imgSize, "m_iAmmo", 0x800, 0x3000);
@@ -1350,6 +1354,27 @@ int Game::ReadEntityBody(void* entity)
     {
         return -1;
     }
+}
+
+int Game::ReadWeaponReloadFlags(void* weapon, int& needReload, int& inReload)
+{
+    if (!g_nvScanned)
+        ScanWristHudNetVars();
+    needReload = inReload = -1;
+    if (!weapon)
+        return -1;
+    BMVR_TRY
+    {
+        if (g_nvNeedReload >= 0)
+            needReload = *reinterpret_cast<volatile unsigned char*>(reinterpret_cast<unsigned char*>(weapon) + g_nvNeedReload);
+        if (g_nvInReload >= 0)
+            inReload = *reinterpret_cast<volatile unsigned char*>(reinterpret_cast<unsigned char*>(weapon) + g_nvInReload);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1;
+    }
+    return 0;
 }
 
 bool Game::WriteEntityBody(void* entity, int body)
