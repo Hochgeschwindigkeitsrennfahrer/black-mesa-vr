@@ -32,15 +32,16 @@ newest release that matches your Black Mesa build (the release notes say which b
 - **Crossbow scope built for VR:** bring the crossbow to your face with both hands to zoom; the zoomed view follows the
   crossbow, with smoothing for hand tremor.
 - **Mounted guns** (50 cal, TOW) you steer with your hands.
-- **Ladders you can grab**, per-hand item holding and use.
-- **Health, suit and ammo on your hands**, an ammo counter on the weapon, and a **red flash at the edges of the view
-  when you get hit**.
+- **Ladders that work in VR:** push the stick roughly towards a ladder to get on, also while swimming; no need to
+  face it exactly as the game normally wants.
+- **Per-hand item holding and use.**
+- **Health, suit and ammo on your hands**, an ammo counter on the weapon, and a **short red flash over the view when
+  you get hit**.
 - **Aim marker and laser:** red laser dot, laser beam with adjustable width, or the classic amber ticks; all optional.
 - **Flashlight** on the right grip, optionally in the left hand or on the left Square/X button.
-- Snap or smooth turning, crouch while held or toggle, sprint toggle, recenter, cutscene cameras that can move your
-  view (or not, if you prefer comfort).
-- **Bare hands until you get the HEV suit** (and throughout Blue Shift), HEV gloves after that. A "classic flat hands"
-  option brings back the original look.
+- Snap or smooth turning, crouch while held or toggle, sprint toggle, recenter. Cutscene cameras can take your view
+  with them as the scene was made; turn that off if it is too much for your VR legs.
+- **Bare hands until you get the HEV suit** (and throughout Blue Shift), HEV gloves after that.
 - **VR main menu and pause menu** in the world, with a motion-controller pointer, and Black Mesa's loading screens
   as a flat panel.
 
@@ -147,15 +148,13 @@ The file explains every setting in comments.
 ## Known issues
 - **Thin lit objects stay jagged even with MSAA 4x** (railings, thin bars). Black Mesa lights the scene in a separate
   pass at 1x that MSAA cannot reach. FXAA softens it.
-- **Odd reflections in door glass, windows and shiny surfaces** come from the maps' cubemaps, not the mod. The
-  REFLECTIONS presets make them less visible.
+- **Odd reflections in door glass and windows** look like Black Mesa's own bugs, not the mod's.
 - **Very heavy outdoor views can still drop below the headset's refresh rate:** the game draws every eye separately,
   and its render thread is the limit there.
 - **Your hands disappear below the water surface** when you reach into water.
 - **Some monitors in the world pulse** (their brightness goes subtly up and down).
 - **Stand-up and cutscene scenes rotate your view** with the scene's camera. Turn off
   **Controls → VIEW → Cutscene cameras move the view** if that bothers you.
-- If shots don't line up with the gun, **recenter**: tap the right stick, or **Controls → VIEW → Recenter view**.
 - **Manual (physical) reloading is not implemented**; reload is a button (A).
 - The first launch after an update recompiles shaders: expect some hitches in the first minutes.
 
