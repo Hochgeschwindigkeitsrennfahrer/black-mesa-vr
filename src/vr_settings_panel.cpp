@@ -260,8 +260,6 @@ namespace
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
-            { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
-            { "Titles level in the room", RowKind::Toggle, "TitleLevel", &bmvr::g_TitleLevel, nullptr, 0, 0, 0, nullptr },
             { "Head hold: angle", RowKind::Number, "PoseHoldDeg", nullptr, &bmvr::g_PoseHoldDeg, 0.02f, 0.f, 1.f, "%.2f\xB0" },
             { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
             // Engine cvars: "cvar:" keys go to the console on the game thread
@@ -297,6 +295,8 @@ namespace
             { "Screen quads: identity model", RowKind::Toggle, nullptr, &bmvr::g_ScreenSpaceModelFix, nullptr, 0, 0, 0, nullptr },
             { "Xen ground fog off", RowKind::Toggle, nullptr, &bmvr::g_XenGlobalFogOff, nullptr, 0, 0, 0, nullptr },
             { "Rope normals fix", RowKind::Toggle, nullptr, &bmvr::g_ViewProjNormalFix, nullptr, 0, 0, 0, nullptr },
+            { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
+            { "Titles level in the room", RowKind::Toggle, "TitleLevel", &bmvr::g_TitleLevel, nullptr, 0, 0, 0, nullptr },
             { "FIXES: TRACKING, WEAPONS, GAME", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Pose valid never blinks", RowKind::Toggle, nullptr, &bmvr::g_PoseFlagsNoBlink, nullptr, 0, 0, 0, nullptr },
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },

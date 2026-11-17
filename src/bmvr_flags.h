@@ -614,12 +614,12 @@ namespace bmvr
     // LOADING card on in-game loads (bmvr_loading_card, default on). Test switch
     // for the 2026-11-11 stuck-head-pose-after-load report.
     extern bool g_LoadingCard;
-    // TitleLevel (default false, panel DEBUG > TESTS): intro logo / chapter
+    // TitleLevel (default true since 2026-11-17, panel DEBUG > FIXES: RENDERING): intro logo / chapter
     // titles placed level with the room at the head's yaw when they appear and
     // left there (like the pause menu) instead of head-locked (turning,
     // pitching and rolling with the headset).
     extern bool g_TitleLevel;
-    // ParticlesLast (default false, panel DEBUG > TESTS): hold the main view's
+    // ParticlesLast (default true since 2026-11-17, panel DEBUG > FIXES: RENDERING): hold the main view's
     // particles to the end of the translucent pass also when "MSAA skips
     // particles" does not (MSAA 0 or that row off), as a pure draw-order change
     // without the 1x switch. The engine's distance sort can put a big water
