@@ -613,6 +613,9 @@ namespace
             else if (r.kind == RowKind::Info)
             {
                 const bool menu = std::strcmp(r.label, "Menu button") == 0;
+                // The menu button (PS VR2: Create) cannot be mapped: left out of the picture.
+                if (menu)
+                    continue;
                 const int part = menu ? bmvr::ctlmodel::kMenu : bmvr::ctlmodel::kStick;
                 CardLine line;
                 line.row = i;
@@ -623,6 +626,42 @@ namespace
                 cardFor(part, menu ? (ps ? "Create" : "Menu") : (pad ? "Pad" : "Stick")).lines.push_back(line);
             }
         }
+        // What the grip grabs besides its mapped action (gesture zones, ladders,
+        // the support hand): fixed lines, so a "Nothing" grip is not misread.
+        for (Card& c : cards)
+        {
+            if (c.part != bmvr::ctlmodel::kGrip)
+                continue;
+            auto fixedLine = [&](const char* caption, const std::string& text) {
+                CardLine ln;
+                ln.caption = caption;
+                ln.text = text;
+                ln.fixed = true;
+                c.lines.push_back(ln);
+            };
+            std::string grab = hand == 0 ? "Gun with two hands" : "";
+            if (bmvr::g_PhysicalLadders)
+                grab += grab.empty() ? "Ladders" : ", ladders";
+            if (!grab.empty())
+                fixedLine("Grab", grab);
+            if (hand == 0 && bmvr::g_ShoulderGestures)
+                fixedLine("Shoulder", "Quick save");
+            if (hand == 1)
+            {
+                std::string zones;
+                if (bmvr::g_ShoulderGestures)
+                    zones = std::string("Shoulder ") + bmvr::GestureWeaponName(static_cast<int>(bmvr::g_GestureWeaponShoulder));
+                if (bmvr::g_HipGestures)
+                {
+                    zones += zones.empty() ? "" : ", ";
+                    zones += std::string("hips ") + bmvr::GestureWeaponName(static_cast<int>(bmvr::g_GestureWeaponHipRight))
+                        + " / " + bmvr::GestureWeaponName(static_cast<int>(bmvr::g_GestureWeaponHipLeft));
+                }
+                if (!zones.empty())
+                    fixedLine("Take", zones);
+            }
+        }
+
         // Cards stack from the top of the area; the picture is moved so its
         // buttons sit level with the middle of the stack. Cards are ordered by
         // the angle of their line seen from the panel edge, so the lines fan
@@ -1380,7 +1419,7 @@ namespace
                     continue;
                 bool hot = false;
                 for (const CardLine& ln : card.lines)
-                    hot |= ln.row == hoverRow;
+                    hot |= !ln.fixed && ln.row == hoverRow;
                 const COLORREF ink = hot ? kAmber : RGB(170, 140, 80);
                 const int ly = top + card.y0 + kCardHeadPx / 2;
                 const int edge = colX + (hand == 0 ? CardX0(hand) : CardX0(hand) + kCardW);
