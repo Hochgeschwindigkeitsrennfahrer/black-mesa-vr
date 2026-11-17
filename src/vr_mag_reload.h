@@ -2,7 +2,7 @@
 
 #include <atomic>
 
-// Manual magazines (VrMagReload): MP5 and glock. State is shared between the
+// Manual magazines (VrMagReload): MP5, glock and the shotgun (pump + shells). State is shared between the
 // input code (game thread, VR::UpdateMagReload) and the viewmodel draw
 // (render thread, ApplyMagReloadBones in hooks.cpp), which moves the gun's
 // own magazine and bolt/slide bones. Nothing new is drawn: the magazine in
@@ -21,7 +21,8 @@ namespace MagReload
         kWeaponNone = 0,
         kWeaponMp5 = 1,
         kWeaponGlock = 2,
-        kWeaponCount = 3,
+        kWeaponShotgun = 3,
+        kWeaponCount = 4,
     };
 
     struct WeaponDef
@@ -38,6 +39,11 @@ namespace MagReload
         // since the bone origins sit elsewhere on the gun.
         float magCenter[3];
         float boltCenter[3];
+        // Tube-fed (shotgun): "magazine" = one shell, "bolt" = the pump,
+        // "well" = the loading port on wellBone (not the shell's own pose).
+        bool tube;
+        const char* wellBone;
+        float wellCenter[3];
     };
     const WeaponDef& Def(int weapon);
 

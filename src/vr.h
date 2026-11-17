@@ -375,6 +375,7 @@ public:
     int MagReloadWeaponNow() const;
     // Left controller world pose for the viewmodel draw (render thread).
     bool OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const;
+    bool ViewmodelIsShotgun() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagShotgun) != 0; }
     bool ViewmodelIsGlock() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGlock) != 0; }
     bool ViewmodelIsMp5() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagMp5) != 0; }
     // Viewmodel sequence is a reload/draw/holster/pump-style action: the

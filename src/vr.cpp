@@ -20087,14 +20087,17 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
     // Sounds: Black Mesa has one wav per whole reload, so the handling sounds
     // come from the Half-Life 2 sounds the game mounts itself (hl2/).
     static const WeaponDef kDefs[kWeaponCount] = {
-        { "none", nullptr, nullptr, 0, 0.f, false, nullptr, nullptr, { 0, 0, 0 }, { 0, 0, 0 } },
-        // Centres measured from v_mp5 / v_glock (bind pose, 2026-11-17).
+        { "none", nullptr, nullptr, 0, 0.f, false, nullptr, nullptr, { 0, 0, 0 }, { 0, 0, 0 }, false, nullptr, { 0, 0, 0 } },
+        // Centres measured from v_mp5 / v_glock / v_shotgun (bind pose, 2026-11-17).
         { "mp5", "Clip_New", "Bolt_New", 30, 4.0f, false,
           "weapons/mp5/empty.wav", "weapons/smg1/switch_single.wav",
-          { 0.00f, -8.93f, -8.32f }, { 1.04f, -14.23f, 1.49f } },
+          { 0.00f, -8.93f, -8.32f }, { 1.04f, -14.23f, 1.49f }, false, nullptr, { 0, 0, 0 } },
         { "glock", "bone_clip", "Bone01", 17, 1.8f, true,
           "weapons/pistol/pistol_empty.wav", "weapons/glock/reload_roundchambered.wav",
-          { 3.90f, -0.12f, 0.04f }, { 2.56f, -0.09f, 0.04f } },
+          { 3.90f, -0.12f, 0.04f }, { 2.56f, -0.09f, 0.04f }, false, nullptr, { 0, 0, 0 } },
+        { "shotgun", "bone_shell", "bone_pump", 8, 4.5f, false,
+          "weapons/shotgun/empty.wav", "weapons/shotgun/pump.wav",
+          { 2.53f, -0.02f, 0.06f }, { 8.60f, 0.30f, -0.21f }, true, "bone_gun", { 7.20f, -1.22f, 0.68f } },
     };
     return kDefs[(weapon >= 0 && weapon < kWeaponCount) ? weapon : 0];
 }
@@ -20131,6 +20134,8 @@ int VR::MagReloadWeaponNow() const
         return MagReload::kWeaponMp5;
     if (ViewmodelIsGlock())
         return MagReload::kWeaponGlock;
+    if (ViewmodelIsShotgun())
+        return MagReload::kWeaponShotgun;
     return MagReload::kWeaponNone;
 }
 
@@ -20144,6 +20149,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
         int mag = kLoaded;
         bool chambered = true;
         int lastClip = -1;
+        int shells = -1;      // shotgun: shells the hands put in the tube
+        bool needPump = false;
     };
     static WeaponState s_w[kWeaponCount];
     static bool s_reloadWas = false, s_gripWas = false, s_attackWas = false;
@@ -20209,6 +20216,134 @@ void VR::UpdateMagReload(uint32_t& buttons)
     const bool released = grip < 0.35f;
     bool boltGrab = g_BoltGrab.load();
 
+    // Left hip: mirror of the right-hand pistol holster zone.
+    auto atLeftHip = [&]() -> bool {
+        if (!m_HmdPoseValid || !m_LeftControllerTrackingValid)
+            return false;
+        const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+        Vector fwd = m_HmdForward;
+        fwd.z = 0.f;
+        if (VectorNormalize(fwd) <= 0.01f)
+            return false;
+        const Vector right = CrossProduct(fwd, Vector(0.f, 0.f, 1.f));
+        const Vector d = m_LeftControllerPosAbs - m_HmdPosAbs;
+        const float along = d.Dot(fwd) / scale;
+        const float lateral = -d.Dot(right) / scale;
+        const float height = d.z / scale;
+        const bool in = along > -0.43f && along < 0.10f && height > -1.03f && height < -0.45f
+            && lateral > 0.05f && lateral < 0.45f;
+        static int s_missLog;
+        if (!in && s_missLog < 20)
+        {
+            ++s_missLog;
+            Game::logMsg("Mag reload: grip outside the hip zone (%.2f m ahead, %.2f m up, %.2f m left of the head)",
+                along, height, lateral);
+        }
+        return in;
+    };
+
+    if (def.tube)
+    {
+        // Shotgun: the mod counts the shells the hands put in; the game's
+        // own reload fills the tube in the background (it cannot stop after
+        // one shell without firing), so its count is only an upper bound.
+        if (w.shells < 0)
+            w.shells = (std::max)(0, clip);
+        if (clip >= 0 && w.lastClip >= 0 && clip < w.lastClip)
+        {
+            w.shells = (std::max)(0, w.shells - (w.lastClip - clip));
+            w.needPump = true;
+        }
+        if (!boltGrab && gripEdge && w.mag != kInHand && (TwoHandGripActive() || g_NearBolt.load()))
+        {
+            boltGrab = true;
+            s_boltFull = false;
+        }
+        else if (!boltGrab && gripEdge && w.mag != kInHand && w.shells < def.maxClip && atLeftHip())
+        {
+            w.mag = kInHand;
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
+            Game::logMsg("Mag reload: shotgun shell taken from the hip (%d in the tube)", w.shells);
+        }
+        if (w.mag == kInHand)
+        {
+            if (g_NearWell.load())
+            {
+                w.mag = kLoaded;
+                ++w.shells;
+                static const char* kInsert[3] = { "weapons/shotgun/reload1.wav", "weapons/shotgun/reload2.wav", "weapons/shotgun/reload3.wav" };
+                sound(kInsert[now % 3]);
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
+                // The game tops the tube up when it is behind the hands.
+                if (clip >= 0 && clip < w.shells)
+                {
+                    s_pulseReload = true;
+                    s_pulseUntil = now + 200;
+                }
+                Game::logMsg("Mag reload: shotgun shell in (%d in the tube, game %d)", w.shells, clip);
+            }
+            else if (released)
+            {
+                w.mag = kLoaded;
+                g_DropFrom.store(1);
+                g_DropTick.store(now ? now : 1);
+                Game::logMsg("Mag reload: shotgun shell dropped");
+            }
+        }
+        float pull = 0.f;
+        if (boltGrab)
+        {
+            pull = g_BoltPull.load();
+            if (pull >= 0.85f && !s_boltFull)
+            {
+                s_boltFull = true;
+                sound(def.boltSound);
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2000, 0.7f);
+            }
+            if (s_boltFull && pull <= 0.15f)
+            {
+                s_boltFull = false;
+                if (w.needPump)
+                    Game::logMsg("Mag reload: shotgun pumped (%d in the tube)", w.shells);
+                w.needPump = false;
+            }
+            if (released)
+            {
+                boltGrab = false;
+                s_boltFull = false;
+            }
+        }
+        g_BoltGrab.store(boltGrab);
+        const bool canFire = w.shells > 0 && !w.needPump && pull < 0.1f;
+        const bool attack2 = (buttons & IN_ATTACK2) != 0;
+        if (!canFire)
+        {
+            if (attack && !s_attackWas)
+                sound(def.emptyClick);
+            buttons &= ~(IN_ATTACK | IN_ATTACK2);
+        }
+        else if (w.shells < 2)
+            buttons &= ~IN_ATTACK2;
+        (void)attack2;
+        if (s_pulseReload)
+        {
+            if (now < s_pulseUntil)
+                buttons |= IN_RELOAD;
+            else
+                s_pulseReload = false;
+        }
+        g_SlideLocked.store(false);
+        g_NeedRack.store(w.needPump);
+        g_State.store(w.mag);
+        if (clip != w.lastClip && w.lastClip >= 0)
+            Game::logMsg("Mag reload: shotgun game clip %d -> %d (tube %d, pump %d)", w.lastClip, clip, w.shells, w.needPump ? 1 : 0);
+        w.lastClip = clip;
+        s_reloadWas = reload;
+        s_gripWas = gripDown;
+        s_attackWas = attack;
+        return;
+    }
+
     if ((w.mag == kLoaded || w.mag == kDry) && reload && !s_reloadWas)
     {
         w.mag = kEmpty;
@@ -20226,35 +20361,11 @@ void VR::UpdateMagReload(uint32_t& buttons)
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 1500, 0.5f);
         Game::logMsg("Mag reload: %s bolt grabbed", def.name);
     }
-    else if (w.mag == kEmpty && gripEdge && m_HmdPoseValid && m_LeftControllerTrackingValid)
+    else if (w.mag == kEmpty && gripEdge && atLeftHip())
     {
-        // Left hip: mirror of the right-hand pistol holster zone.
-        const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
-        Vector fwd = m_HmdForward;
-        fwd.z = 0.f;
-        if (VectorNormalize(fwd) > 0.01f)
-        {
-            const Vector right = CrossProduct(fwd, Vector(0.f, 0.f, 1.f));
-            const Vector d = m_LeftControllerPosAbs - m_HmdPosAbs;
-            const float along = d.Dot(fwd) / scale;
-            const float lateral = -d.Dot(right) / scale;
-            const float height = d.z / scale;
-            const bool atHip = along > -0.43f && along < 0.10f && height > -1.03f && height < -0.45f
-                && lateral > 0.05f && lateral < 0.45f;
-            static int s_missLog;
-            if (atHip)
-            {
-                w.mag = kInHand;
-                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
-                Game::logMsg("Mag reload: %s magazine taken from the hip", def.name);
-            }
-            else if (s_missLog < 20)
-            {
-                ++s_missLog;
-                Game::logMsg("Mag reload: grip outside the hip zone (%.2f m ahead, %.2f m up, %.2f m left of the head)",
-                    along, height, lateral);
-            }
-        }
+        w.mag = kInHand;
+        PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
+        Game::logMsg("Mag reload: %s magazine taken from the hip", def.name);
     }
     else if (w.mag == kInHand)
     {

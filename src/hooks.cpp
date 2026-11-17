@@ -3294,7 +3294,9 @@ namespace
             char lb[64]{};
             for (int i = 0; i < 63 && label[i]; ++i)
                 lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
-            if (std::strstr(lb, "reload"))
+            const bool shotgunClip = MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponShotgun
+                && (std::strstr(lb, "shell") || std::strstr(lb, "pump"));
+            if (std::strstr(lb, "reload") || shotgunClip)
             {
                 static int s_log;
                 if (s_log++ < 20)
@@ -3794,13 +3796,14 @@ namespace
         }
         const MagReload::WeaponDef& def = MagReload::Def(weapon);
         static thread_local unsigned char* s_hdr = nullptr;
-        static thread_local int s_mag = -1, s_bolt = -1;
+        static thread_local int s_mag = -1, s_bolt = -1, s_wellBone = -1;
         if (s_hdr != hdr)
         {
             s_hdr = hdr;
             s_mag = FindStudioBoneIndex(hdr, def.magBone);
             s_bolt = FindStudioBoneIndex(hdr, def.boltBone);
-            Game::logMsg("Mag reload: %s magazine bone %d, bolt bone %d", def.name, s_mag, s_bolt);
+            s_wellBone = def.wellBone ? FindStudioBoneIndex(hdr, def.wellBone) : -1;
+            Game::logMsg("Mag reload: %s magazine bone %d, bolt bone %d, port bone %d", def.name, s_mag, s_bolt, s_wellBone);
         }
         Vector f, r, u;
         QAngle::AngleVectors(gunAng, &f, &r, &u);
@@ -3862,7 +3865,15 @@ namespace
         if (s_mag < 0 || s_mag >= nBones)
             return;
         float* m = bones + s_mag * 12;
-        const Vector well = local(m, def.magCenter);
+        // Magazine guns: where the magazine sits in the gun. Shotgun: the
+        // loading port on the gun body.
+        Vector well = local(m, def.magCenter);
+        if (def.tube)
+        {
+            if (s_wellBone < 0 || s_wellBone >= nBones)
+                return;
+            well = local(bones + s_wellBone * 12, def.wellCenter);
+        }
         static thread_local float s_handMag[12]{};
         static thread_local bool s_handMagValid = false;
         static thread_local unsigned s_seenDrop = 0;
@@ -3881,6 +3892,13 @@ namespace
         {
             MagReload::g_NearWell.store(false);
             s_handMagValid = false;
+            // Shotgun: a shell let go of falls; the stock shell otherwise.
+            const float t = dropTick ? (now - dropTick) * 0.001f : 99.f;
+            if (def.tube && t < 1.2f && MagReload::g_DropFrom.load() == 1)
+            {
+                std::memcpy(m, s_drop, sizeof(s_drop));
+                m[11] -= (std::min)(0.5f * 386.f * t * t, 48.f);
+            }
             return;
         }
         if (st == MagReload::kEmpty)
