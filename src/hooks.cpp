@@ -1,4 +1,5 @@
 #include "hooks.h"
+#include "vr_mag_reload.h"
 #include "offset_checks.h"
 #include "game.h"
 #include "sdk.h"
@@ -3756,6 +3757,85 @@ namespace
             return false;
         }
         return true;
+    }
+
+    // Manual MP5 magazine (prototype): the gun's own magazine bone is hidden
+    // while ejected, or moved to the left hand (same orientation to the left
+    // controller as it has to the gun), and reports when it is near the well.
+    void ApplyMagReloadBones(VR* vr, unsigned char* hdr, float* bones, int nBones, const QAngle& gunAng)
+    {
+        const int st = MagReload::g_State.load(std::memory_order_relaxed);
+        if (st == MagReload::kLoaded || st == MagReload::kDry || !vr)
+        {
+            MagReload::g_NearWell.store(false);
+            return;
+        }
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_clip = -1;
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_clip = FindStudioBoneIndex(hdr, "Clip_New");
+            Game::logMsg("Mag reload: magazine bone %d", s_clip);
+        }
+        if (s_clip < 0 || s_clip >= nBones)
+            return;
+        float* m = bones + s_clip * 12;
+        const Vector well(m[3], m[7], m[11]);
+        if (st == MagReload::kEmpty)
+        {
+            for (int r = 0; r < 3; ++r)
+                m[r * 4 + 0] = m[r * 4 + 1] = m[r * 4 + 2] = 0.f;
+            MagReload::g_NearWell.store(false);
+            return;
+        }
+        Vector hand;
+        QAngle handAng;
+        if (!vr->OffhandWorldPoseForDraw(hand, handAng))
+            return;
+        // Source basis as columns: forward, left, up.
+        auto basis = [](const QAngle& a, float out[3][3]) {
+            Vector f, r, u;
+            QAngle::AngleVectors(a, &f, &r, &u);
+            const Vector c[3] = { f, r * -1.f, u };
+            for (int i = 0; i < 3; ++i)
+            {
+                out[0][i] = c[i].x;
+                out[1][i] = c[i].y;
+                out[2][i] = c[i].z;
+            }
+        };
+        float L[3][3], G[3][3], D[3][3], R[3][3];
+        basis(handAng, L);
+        basis(gunAng, G);
+        // D = L * G^T
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                D[i][j] = L[i][0] * G[j][0] + L[i][1] * G[j][1] + L[i][2] * G[j][2];
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                R[i][j] = D[i][0] * m[0 * 4 + j] + D[i][1] * m[1 * 4 + j] + D[i][2] * m[2 * 4 + j];
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                m[i * 4 + j] = R[i][j];
+        // Magazine top in the palm: a little ahead of and above the controller origin.
+        Vector f, r, u;
+        QAngle::AngleVectors(handAng, &f, &r, &u);
+        const Vector at = hand + f * bmvr::g_VrMagHandForward + u * bmvr::g_VrMagHandUp;
+        m[3] = at.x;
+        m[7] = at.y;
+        m[11] = at.z;
+        const float dist = (at - well).Length();
+        MagReload::g_NearWell.store(dist < bmvr::g_VrMagSeatDistance);
+        static thread_local DWORD s_logMs = 0;
+        const DWORD now = GetTickCount();
+        if (now - s_logMs > 1000)
+        {
+            s_logMs = now;
+            const Vector d = well - at;
+            Game::logMsg("Mag reload: magazine %.1f units from the well (well - hand: %.1f fwd %.1f right %.1f up in the hand frame)",
+                dist, d.Dot(f), d.Dot(r), d.Dot(u));
+        }
     }
 
     bool GrenadeHoldCorrection(unsigned char* hdr, const void* bones, int nBones,
@@ -8315,6 +8395,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
                 if (gunRightHand)
                     CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
+                if (m_VR->ViewmodelIsMp5())
+                    ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, targetAng);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);

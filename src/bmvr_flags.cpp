@@ -290,6 +290,10 @@ namespace bmvr
     bool g_VrHandsUseHevGloves = true;
     bool g_VrHandsBlackMesa = false;
     bool g_VrGunRightHand = false;
+    bool g_VrMagReload = false;
+    float g_VrMagHandForward = 2.f;
+    float g_VrMagHandUp = -1.f;
+    float g_VrMagSeatDistance = 6.f;
     float g_VrHandsBlackMesaScale = 0.8f;
     bool g_IsBlueShift = false;
     bool g_IsAzureSheep = false;
@@ -1043,6 +1047,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrHandsUseHevGloves") == 0)
                 g_VrHandsUseHevGloves = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrMagReload") == 0)
+                g_VrMagReload = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGunRightHand") == 0)
                 g_VrGunRightHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesa") == 0)

@@ -1,4 +1,5 @@
 #include "vr.h"
+#include "vr_mag_reload.h"
 #include "bmvr_prof.h"
 #include "bmvr_sampler.h"
 #include "game.h"
@@ -7018,6 +7019,7 @@ void VR::ProcessInput()
         else if (nx < -sideThreshold)
             buttons |= IN_MOVELEFT;
     }
+    UpdateMagReload(buttons);
     m_HeldButtons.store(buttons, std::memory_order_release);
 
     if ((buttons & IN_ATTACK) && !m_FirstAttackLogged)
@@ -13873,7 +13875,8 @@ void VR::ApplyTwoHandWeaponAim()
                 : (holdingSqueeze && lat <= stayR
                     && along >= (alongMin - slop) && along <= (alongMax + slop));
     }
-    else if (bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
+    else if ((bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
+        && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kInHand)
     {
         bool onPoint = pistol
             ? (distToGrip < enterR)
@@ -20062,4 +20065,152 @@ void BmvrAuditNoteMaterial(const char* name)
 std::string bmvr::FoveationStatusText()
 {
     return FoveationStatusNow();
+}
+
+// ---- Manual MP5 magazine (prototype) ----
+std::atomic<int> MagReload::g_State{ MagReload::kLoaded };
+std::atomic<bool> MagReload::g_NearWell{ false };
+
+bool VR::OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    bool ok;
+    Vector tracking;
+    if (m_StereoFramePoseActive)
+    {
+        ok = m_StereoFrameLeftCtrlValid;
+        tracking = m_StereoFrameLeftCtrlPos;
+        ang = m_StereoFrameLeftCtrlAng;
+    }
+    else
+    {
+        ok = m_LeftControllerTrackingValid;
+        tracking = m_LeftControllerPosAbs;
+        ang = m_LeftControllerAngAbs;
+    }
+    if (!ok)
+        return false;
+    const Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+    pos = ControllerTrackingToWorld(body, tracking);
+    return true;
+}
+
+void VR::UpdateMagReload(uint32_t& buttons)
+{
+    using namespace MagReload;
+    static bool s_reloadWas = false, s_gripWas = false;
+    static DWORD s_pulseUntil = 0;
+    static bool s_pulseReload = false;
+    const DWORD now = GetTickCount();
+    const bool reload = (buttons & IN_RELOAD) != 0;
+    const bool on = bmvr::g_VrMagReload && !bmvr::g_LeftHanded && ViewmodelIsMp5()
+        && m_HasHeldWeapon && !m_EmptyHands && m_GameplayEligible;
+    if (!on)
+    {
+        if (g_State.exchange(kLoaded) != kLoaded)
+            Game::logMsg("Mag reload: off or weapon changed -> loaded");
+        s_reloadWas = reload;
+        s_pulseReload = false;
+        return;
+    }
+    // The reload button only ejects; the game's reload runs when a magazine
+    // is seated (it keeps the ammo count and the reserve the game's own).
+    buttons &= ~IN_RELOAD;
+    int st = g_State.load();
+    static int s_lastClip = -1;
+    const int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
+    // Fired dry: the game reloads by itself once the trigger is let go
+    // (checked headless 2026-11-17). The magazine stays in and the trigger
+    // stays blocked until it is swapped; the game's refill is bookkeeping.
+    if (st == kLoaded && clip == 0 && s_lastClip > 0)
+    {
+        st = kDry;
+        Game::logMsg("Mag reload: fired dry, swap the magazine");
+    }
+    const float grip = LeftSupportGripValue();
+    const bool gripDown = grip > 0.6f;
+    const bool gripEdge = gripDown && !s_gripWas;
+    const bool released = grip < 0.35f;
+    if ((st == kLoaded || st == kDry) && reload && !s_reloadWas)
+    {
+        st = kEmpty;
+        if (m_Game)
+            m_Game->PlayUiSound("weapons/mp5/empty.wav");
+        PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.5f);
+        Game::logMsg("Mag reload: ejected (clip %d)",
+            m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1);
+    }
+    else if (st == kEmpty && gripEdge && m_HmdPoseValid && m_LeftControllerTrackingValid)
+    {
+        // Left hip: mirror of the right-hand pistol holster zone.
+        const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+        Vector fwd = m_HmdForward;
+        fwd.z = 0.f;
+        if (VectorNormalize(fwd) > 0.01f)
+        {
+            const Vector right = CrossProduct(fwd, Vector(0.f, 0.f, 1.f));
+            const Vector d = m_LeftControllerPosAbs - m_HmdPosAbs;
+            const float along = d.Dot(fwd) / scale;
+            const float lateral = -d.Dot(right) / scale;
+            const float height = d.z / scale;
+            const bool atHip = along > -0.43f && along < 0.10f && height > -1.03f && height < -0.45f
+                && lateral > 0.05f && lateral < 0.45f;
+            static int s_missLog;
+            if (atHip)
+            {
+                st = kInHand;
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
+                Game::logMsg("Mag reload: magazine taken from the hip");
+            }
+            else if (s_missLog < 20)
+            {
+                ++s_missLog;
+                Game::logMsg("Mag reload: grip outside the hip zone (%.2f m ahead, %.2f m up, %.2f m left of the head)",
+                    along, height, lateral);
+            }
+        }
+    }
+    else if (st == kInHand)
+    {
+        if (g_NearWell.load())
+        {
+            st = kLoaded;
+            const int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
+            s_pulseReload = clip >= 0 && clip < 30;
+            s_pulseUntil = now + 200;
+            if (m_Game)
+                m_Game->PlayUiSound("weapons/mp5/empty.wav");
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+            Game::logMsg("Mag reload: seated (clip %d, game reload %d)", clip, s_pulseReload ? 1 : 0);
+        }
+        else if (released)
+        {
+            st = kEmpty;
+            Game::logMsg("Mag reload: magazine dropped");
+        }
+    }
+    static bool s_attackWas = false;
+    const bool attack = (buttons & IN_ATTACK) != 0;
+    if (st != kLoaded)
+    {
+        if (attack && !s_attackWas && m_Game)
+            m_Game->PlayUiSound("weapons/mp5/empty.wav");
+        buttons &= ~IN_ATTACK;
+    }
+    s_attackWas = attack;
+    if (s_pulseReload)
+    {
+        if (now < s_pulseUntil)
+            buttons |= IN_RELOAD;
+        else
+            s_pulseReload = false;
+    }
+    g_State.store(st);
+    s_reloadWas = reload;
+    s_gripWas = gripDown;
+    // Clip changes while on: shows the game's reload landing, and any
+    // automatic reload the game does on its own (not after a seat).
+    if (clip > s_lastClip && s_lastClip >= 0)
+        Game::logMsg("Mag reload: clip %d -> %d (state %d)", s_lastClip, clip, st);
+    s_lastClip = clip;
 }

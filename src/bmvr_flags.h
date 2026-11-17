@@ -716,6 +716,9 @@ namespace bmvr
     extern float g_VrHandsBlackMesaScale;
     // The weapon's own right hand (viewmodel arms, left arm + forearms collapsed) on the gun.
     extern bool g_VrGunRightHand;
+    // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
+    extern bool g_VrMagReload;
+    extern float g_VrMagHandForward, g_VrMagHandUp, g_VrMagSeatDistance; // game units
     // True for this process when launched with -game bshift (or a bs_* map).
     // Calhoun never wears the HEV suit — use bare-hand GLBs the whole session.
     extern bool g_IsBlueShift;

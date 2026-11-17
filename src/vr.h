@@ -368,6 +368,10 @@ public:
         kVmFlagGluon = 1u << 4,
         kVmFlagMp5 = 1u << 5,
     };
+    // Manual MP5 magazine (VrMagReload): eject / hip grab / seat, game thread.
+    void UpdateMagReload(uint32_t& buttons);
+    // Left controller world pose for the viewmodel draw (render thread).
+    bool OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const;
     bool ViewmodelIsMp5() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagMp5) != 0; }
     // Viewmodel sequence is a reload/draw/holster/pump-style action: the
     // gun moves away from the aim, so the laser beam is hidden.
