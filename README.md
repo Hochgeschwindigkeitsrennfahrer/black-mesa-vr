@@ -161,13 +161,19 @@ The file explains every setting in comments.
 **Reporting a bug:** attach `bmvr_log.txt` (next to `bms.exe`). For visual problems, **Debug → Capture debug frame**
 while the problem is visible helps a lot.
 
-## Huge thanks to wormslayer for HL2VR, and to my testers and contributors for their patience and help:
+## Credits
 
-marnovdm for quality of life features and polish, beta support, MSAA and foveated rendering (https://github.com/marnovdm)
-TheRealBubble
-SilentVortiguant - [Check out his youtube](https://www.youtube.com/@SilentVortigauntVR).
-yakupagagaming
-Discord user martysl1, whose eye-MSAA experiment made the MSAA feature possible.
+**Developers:** [Hochgeschwindigkeitsrennfahrer](https://github.com/Hochgeschwindigkeitsrennfahrer) (original author)
+and [marnovdm](https://github.com/marnovdm).
 
-Credits for the custom models:
-https://steamcommunity.com/sharedfiles/filedetails/?id=2969302231 (HEV Gloves)
+Huge thanks to:
+- **wormslayer** for HL2VR.
+- **keyou91** for [L4D2VR](https://github.com/keyou91/l4d2vr), the foundation of the VR implementation.
+- **martysl1** (Discord), whose eye-MSAA experiment made the MSAA feature possible.
+- Our testers and contributors, for their patience and help:
+  - TheRealBubble
+  - SilentVortiguant ([check out his YouTube](https://www.youtube.com/@SilentVortigauntVR))
+  - yakupagagaming
+
+Custom models:
+- [HEV gloves](https://steamcommunity.com/sharedfiles/filedetails/?id=2969302231)
