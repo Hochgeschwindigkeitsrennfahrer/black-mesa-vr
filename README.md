@@ -15,8 +15,7 @@ extended for Black Mesa, with weapon selection, crowbar swinging and more adapte
 
 A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 
-**Download:** [Releases page](https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr/releases). Take the
-newest release that matches your Black Mesa build (the release notes say which build).
+**Download:** [Releases page](https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr/releases): get the latest release.
 
 ## Features
 
@@ -74,7 +73,7 @@ defaults reach you with each update.
 ## Install
 
 ### What you need
-- **Black Mesa on Steam**, updated to the build named in the release notes. On **Linux** use the **Proton** version
+- **Black Mesa on Steam**, up to date on the default branch (no beta). On **Linux** use the **Proton** version
   of the game (Properties → Compatibility), not a native build.
 - A PC VR headset with an **OpenXR runtime**: SteamVR, Meta Link, Virtual Desktop (VDXR), WMR and others.
 
