@@ -640,6 +640,18 @@ namespace bmvr::sampler
         static DWORD s_mainTid = 0, s_renderTid = 0;
         const ULONGLONG now = GetTickCount64();
         ++s_frames;
+        // Frame-time distribution (what a headset feels: frames over the refresh interval get
+        // reprojected). One QPC read per frame; up to 4096 intervals per 10 s window.
+        static LARGE_INTEGER s_qpf{}, s_lastQpc{};
+        static float s_intervals[4096];
+        static int s_nIntervals = 0;
+        LARGE_INTEGER q;
+        QueryPerformanceCounter(&q);
+        if (s_qpf.QuadPart == 0)
+            QueryPerformanceFrequency(&s_qpf);
+        if (s_lastQpc.QuadPart != 0 && s_nIntervals < 4096)
+            s_intervals[s_nIntervals++] = static_cast<float>((q.QuadPart - s_lastQpc.QuadPart) * 1000.0 / s_qpf.QuadPart);
+        s_lastQpc = q;
         if (s_startMs != 0 && now - s_startMs < 10000)
             return;
         const DWORD mainTid = g_CpuTid[0].load(std::memory_order_relaxed);
@@ -664,7 +676,27 @@ namespace bmvr::sampler
                 (now - s_startMs) / 1000.0, s_frames, wall, 1000.0 / wall, rr - pace, 100.0 * (rr - pace) / wall, pace,
                 (std::max)(0.0, wall - rr), same ? 0.0 : mm, pose, same ? 0.0 : (std::max)(0.0, wall - mm - pose),
                 same ? " (same thread as render)" : "", pp - rr - (same ? 0.0 : mm));
+            if (s_nIntervals >= 20)
+            {
+                // Ignore hitches longer than 250 ms (loads, alt-tab) for the percentiles' sake.
+                int n = 0, fast = 0;
+                for (int i = 0; i < s_nIntervals; ++i)
+                    if (s_intervals[i] < 250.f)
+                    {
+                        s_intervals[n++] = s_intervals[i];
+                        if (s_intervals[i] <= 11.6f)
+                            ++fast;
+                    }
+                if (n >= 20)
+                {
+                    std::sort(s_intervals, s_intervals + n);
+                    Game::logMsg("Frame times (%.0f s): %d frames, %.1f %% <= 11.6 ms (90 Hz), p50 %.2f, p95 %.2f, p99 %.2f, max %.1f ms",
+                        (now - s_startMs) / 1000.0, n, 100.0 * fast / n, s_intervals[n / 2], s_intervals[n * 95 / 100],
+                        s_intervals[n * 99 / 100], s_intervals[n - 1]);
+                }
+            }
         }
+        s_nIntervals = 0;
         s_startMs = now;
         s_frames = 0;
         g_PaceWaitMs = 0.0;

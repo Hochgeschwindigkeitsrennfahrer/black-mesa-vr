@@ -238,6 +238,9 @@ namespace
             { "GPU timing in log", RowKind::Toggle, "GpuPassTiming", &bmvr::g_GpuPassTiming, nullptr, 0, 0, 0, nullptr },
             // Shows the DevSection groups below (A/B switches, tests, engine cvars); saved.
             { "Show developer rows", RowKind::Toggle, "VrPanelDevRows", &bmvr::g_PanelDevRows, nullptr, 0, 0, 0, nullptr },
+            // Every row of this tab back to its built-in default (logs, A/B fixes, tests, engine rows;
+            // god/noclip/notarget off). "Show developer rows" stays as it is.
+            { "Reset dev rows", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "dev_default" },
             // CPU/GPU work removed without changing the image; off = the stock path, for A/B.
             { "SAVINGS (SAME IMAGE)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Post copies: swap, no copy", RowKind::Toggle, "PostCopySwap", &bmvr::g_PostCopySwap, nullptr, 0, 0, 0, nullptr },
@@ -276,6 +279,8 @@ namespace
             { "God mode", RowKind::Toggle, "cmd:god", &g_DevGod, nullptr, 0, 0, 0, nullptr },
             { "No clip", RowKind::Toggle, "cmd:noclip", &g_DevNoclip, nullptr, 0, 0, 0, nullptr },
             { "No target", RowKind::Toggle, "cmd:notarget", &g_DevNotarget, nullptr, 0, 0, 0, nullptr },
+            // sv_cheats 1 + impulse 101: all weapons and ammo (applied when the game runs again).
+            { "All weapons", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "impulse101" },
             // bmvr_* fixes and tests (on/off for A/B); not saved: a restart
             // brings back the defaults.
             { "FIXES: RENDERING", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -316,6 +321,58 @@ namespace
     }
 
     int RowHeight(const Row& r) { return IsHeading(r.kind) ? kSectionPx : kRowPx; }
+
+    // "Reset dev rows": every row of the DEBUG tab back to its built-in default (CapturePanelDefaults,
+    // taken before config.txt), except "Show developer rows". Engine rows get console commands:
+    // god/noclip/notarget (toggles) are switched off before the cvars, so sv_cheats 0 comes last.
+    // Returns the number of rows changed; each one is logged.
+    int ResetDevRows()
+    {
+        std::vector<Row>& rows = Rows();
+        size_t i = 0;
+        while (i < rows.size() && !(rows[i].kind == RowKind::Tab && std::strcmp(rows[i].label, "DEBUG") == 0))
+            ++i;
+        std::vector<std::string> toggles, cvars;
+        int changed = 0;
+        for (++i; i < rows.size() && rows[i].kind != RowKind::Tab && rows[i].kind != RowKind::Close; ++i)
+        {
+            Row& r = rows[i];
+            if (r.b == &bmvr::g_PanelDevRows)
+                continue;
+            char cmd[96]{};
+            if (r.kind == RowKind::Toggle && r.b && *r.b != r.defB)
+            {
+                *r.b = r.defB;
+                if (IsEngineCmdKey(r.key))
+                    toggles.emplace_back(r.key + 4);
+                else if (IsEngineCvarKey(r.key))
+                {
+                    _snprintf(cmd, sizeof(cmd) - 1, "%s %d", r.key + 5, r.defB ? 1 : 0);
+                    cvars.emplace_back(cmd);
+                }
+                Game::logMsg("VR settings reset: %s -> %s", r.label, r.defB ? "on" : "off");
+                ++changed;
+            }
+            else if ((r.kind == RowKind::Number || r.kind == RowKind::Choice) && r.f && std::fabs(*r.f - r.defF) > 1e-4f)
+            {
+                *r.f = r.defF;
+                if (IsEngineCvarKey(r.key))
+                {
+                    _snprintf(cmd, sizeof(cmd) - 1, "%s %g", r.key + 5, r.defF);
+                    cvars.emplace_back(cmd);
+                }
+                Game::logMsg("VR settings reset: %s -> %g", r.label, r.defF);
+                ++changed;
+            }
+        }
+        std::lock_guard<std::mutex> lock(g_EngCmdLock);
+        for (std::string& c : toggles)
+            g_EngCmds.push_back(std::move(c));
+        for (std::string& c : cvars)
+            g_EngCmds.push_back(std::move(c));
+        Game::logMsg("VR settings reset: developer rows back to defaults, %d changed", changed);
+        return changed;
+    }
 
     struct PresetSet
     {
@@ -1367,6 +1424,18 @@ void VR::UpdateSettingsPanel()
             bmvr::g_HandHudSide = 0.3f;
             bmvr::g_HandHudTilt = -18.f;
             bmvr::g_HandHudRoll = 14.f;
+            break;
+        }
+        if (r.fmt && std::strcmp(r.fmt, "dev_default") == 0)
+        {
+            ResetDevRows();
+            break;
+        }
+        if (r.fmt && std::strcmp(r.fmt, "impulse101") == 0)
+        {
+            std::lock_guard<std::mutex> lock(g_EngCmdLock);
+            g_EngCmds.emplace_back("sv_cheats 1");
+            g_EngCmds.emplace_back("impulse 101");
             break;
         }
         // The glow values back at their defaults.
