@@ -125,8 +125,8 @@ keeps bare hands for the whole campaign, and the weapon wheel and wrist HUD turn
 
 ### In Black Mesa's video options
 - **Anti-aliasing: FXAA** (the mod tunes it for the headset).
-- **Water detail: Reflect all** if your PC can afford it. With "Reflect world", doors, signs and other objects are
-  missing from water reflections, which shows as holes in some places (On A Rail).
+- **Water detail: Reflect world** is fine. "Reflect all" also reflects objects such as doors, at a cost; so far we
+  know one spot (a doorway in On A Rail) where a missing door shows as a hole in the water reflection.
 - Lower shadow and light quality first if you run short on frame rate; those cost more in VR than in flat play.
 
 ### In `VR\config.txt` (not in the panel)
