@@ -1404,7 +1404,7 @@ public:
     bool GmanGestureActive() const { return m_GmanGestureActive.load(std::memory_order_relaxed); }
     bool TwoHandGripActive() const { return m_TwoHandActive; }
     // Live L_Wrist (or L_Hand) world origin from DrawModelExecute bone matrices.
-    void NoteViewmodelOffhandWorld(const Vector& worldOrigin);
+    void NoteViewmodelOffhandWorld(const Vector& worldOrigin, bool sideHandle = false);
     bool TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QAngle& trackingAng) const;
     bool HudOverlayReady() const { return m_HudOverlayReady; }
     void EnsureHudOverlay();

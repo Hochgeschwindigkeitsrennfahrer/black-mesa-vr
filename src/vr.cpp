@@ -13823,10 +13823,12 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
         setTwoHand(0.24f, 0.00f, 0.02f, true, false, 0.25f, 0.08f);
     else if (out.rpg)
         setTwoHand(0.22f, 0.00f, 0.025f);
-    else if (has("gauss") || has("tau"))
-        setTwoHand(0.23f, 0.02f, 0.015f);
-    else if (out.gluon)
-        setTwoHand(0.20f, 0.03f, 0.02f);
+    else if (has("gauss") || has("tau") || out.gluon)
+        // The handle on the gun's left side (body bone + measured point, see
+        // SampleViewmodelOffhandGrip). Snap mode like the pistols (glove on
+        // the handle, aim stays on the gun hand): a handle beside the gun
+        // hand gives no usable aim line. The fixed point is only a fallback.
+        setTwoHand(0.20f, 0.03f, 0.02f, true, true, 0.f, 0.07f);
     else if (has("hgun") || has("hive") || has("hornet"))
         setTwoHand(0.16f, 0.02f, 0.02f);
     else if (has("glock") || has("pistol") || has("9mm") || has("beretta")
@@ -14331,7 +14333,7 @@ bool VR::ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const
     return gx > 0.5f;
 }
 
-void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin)
+void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin, bool sideHandle)
 {
     if (!m_ControllerPoseValid || !m_VmClass.twoHand || !m_VmClass.offhandUseBone)
         return;
@@ -14347,10 +14349,23 @@ void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin)
     const float gy = rel.Dot(m_ViewmodelRight);
     const float gz = rel.Dot(m_ViewmodelUp);
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
-    if (gx < 0.08f * scale || gx > 0.55f * scale)
+    // A side handle (gluon) sits beside the gun hand, not ahead of it: only
+    // a sanity distance applies.
+    const bool outside = sideHandle
+        ? (gx * gx + gy * gy + gz * gz > (0.45f * scale) * (0.45f * scale))
+        : (gx < 0.08f * scale || gx > 0.55f * scale
+            || std::fabs(gy) > 0.18f * scale || std::fabs(gz) > 0.18f * scale);
+    if (outside)
+    {
+        static int s_rejectLog;
+        if (s_rejectLog < 8)
+        {
+            ++s_rejectLog;
+            Game::logMsg("Off-hand grip bone rejected gx,gy,gz=(%.2f,%.2f,%.2f) m (fwd 0.08..0.55, side/up within 0.18)",
+                gx / scale, gy / scale, gz / scale);
+        }
         return;
-    if (std::fabs(gy) > 0.18f * scale || std::fabs(gz) > 0.18f * scale)
-        return;
+    }
     const bool changed = !m_OffhandGripBoneValid
         || std::fabs(m_OffhandGripGx - gx) > 0.4f
         || std::fabs(m_OffhandGripGy - gy) > 0.4f
@@ -14362,7 +14377,7 @@ void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin)
     static int s_offhandLog;
     if (changed && s_offhandLog < 8)
     {
-        Game::logMsg("Off-hand grip from L_Wrist gx,gy,gz=(%.2f,%.2f,%.2f) hu", gx, gy, gz);
+        Game::logMsg("Off-hand grip from %s gx,gy,gz=(%.2f,%.2f,%.2f) hu", sideHandle ? "side handle" : "L_Wrist", gx, gy, gz);
         ++s_offhandLog;
     }
 }

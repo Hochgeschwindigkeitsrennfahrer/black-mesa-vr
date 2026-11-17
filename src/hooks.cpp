@@ -3777,7 +3777,36 @@ namespace
     {
         if (!hdr || !bones12 || nBones <= 0 || !Hooks::m_VR)
             return;
-        int idx = FindStudioBoneIndex(hdr, "L_Wrist");
+        // Tau / gluon: the support grip is the handle on the gun's left side.
+        // The stock left hand is posed for the flat camera (~0.4 m off the VR
+        // gun), so the point comes from the gun's own body bone instead:
+        // middle of the left rod, in that bone's frame, measured from the
+        // models' vertices (v_egon.vvd: rod x 7.4..9.6, z -5.5..-15.7, where
+        // the stock L_Wrist binds; v_gauss.vvd: rod x 7..12.9 sloping down).
+        // Not Egon_handle: that is the gluon's right-hand pistol grip on top.
+        struct SideHandle { const char* bone; float local[3]; };
+        static const SideHandle kSideHandles[] =
+        {
+            { "Egon_Root", { 8.5f, -1.4f, -12.5f } },
+            { "V_TauCannon_Ref", { 10.0f, -12.5f, -5.5f } },
+        };
+        float local[3] = { 0.f, 0.f, 0.f };
+        bool sideHandle = false;
+        int idx = -1;
+        for (const SideHandle& h : kSideHandles)
+        {
+            idx = FindStudioBoneIndex(hdr, h.bone);
+            if (idx >= 0)
+            {
+                sideHandle = true;
+                local[0] = h.local[0];
+                local[1] = h.local[1];
+                local[2] = h.local[2];
+                break;
+            }
+        }
+        if (idx < 0)
+            idx = FindStudioBoneIndex(hdr, "L_Wrist");
         if (idx < 0)
             idx = FindStudioBoneIndex(hdr, "L_Hand");
         if (idx < 0 || idx >= nBones)
@@ -3786,9 +3815,9 @@ namespace
         Vector world{};
         BMVR_TRY
         {
-            world.x = m[3];
-            world.y = m[7];
-            world.z = m[11];
+            world.x = m[0] * local[0] + m[1] * local[1] + m[2] * local[2] + m[3];
+            world.y = m[4] * local[0] + m[5] * local[1] + m[6] * local[2] + m[7];
+            world.z = m[8] * local[0] + m[9] * local[1] + m[10] * local[2] + m[11];
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -3798,7 +3827,7 @@ namespace
             return;
         if (world.LengthSqr() <= 1.f)
             return;
-        Hooks::m_VR->NoteViewmodelOffhandWorld(world);
+        Hooks::m_VR->NoteViewmodelOffhandWorld(world, sideHandle);
     }
 
     int FindWeaponRootBone(unsigned char* hdr, float rest[3], char (&bestName)[64]);
