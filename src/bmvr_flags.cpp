@@ -183,6 +183,35 @@ namespace bmvr
     // Optional features: off unless enabled in VR/config.txt.
     bool g_ShoulderGestures = true;
     bool g_HipGestures = true;
+    float g_GestureWeaponShoulder = 0.f;
+    float g_GestureWeaponHipRight = 1.f;
+    float g_GestureWeaponHipLeft = 3.f;
+    namespace
+    {
+        struct GestureWeapon { const char* name; const char* parts[4]; };
+        const GestureWeapon kGestureWeapons[kGestureWeaponCount] =
+        {
+            { "crowbar", { "crowbar", "wrench", nullptr } },
+            { "pistol", { "glock", nullptr } },
+            { ".357", { "357", "python", nullptr } },
+            { "mp5", { "mp5", nullptr } },
+            { "shotgun", { "shotgun", nullptr } },
+            { "crossbow", { "crossbow", nullptr } },
+            { "rpg", { "rpg", nullptr } },
+            { "tau", { "tau", "gauss", nullptr } },
+            { "gluon", { "gluon", "egon", nullptr } },
+            { "hivehand", { "hivehand", "hgun", nullptr } },
+            { "grenade", { "frag", "grenade", nullptr } },
+        };
+    }
+    const char* GestureWeaponName(int index)
+    {
+        return (index >= 0 && index < kGestureWeaponCount) ? kGestureWeapons[index].name : "crowbar";
+    }
+    const char* const* GestureWeaponParts(int index)
+    {
+        return kGestureWeapons[(index >= 0 && index < kGestureWeaponCount) ? index : 0].parts;
+    }
     bool g_SettingsTriangleHold = true;
     bool g_WeaponMenuSettingsGear = true;
     bool g_WeaponMenuTilt = true;
@@ -764,6 +793,14 @@ namespace bmvr
                 g_ShoulderGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "HipGestures") == 0)
                 g_HipGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "GestureWeaponShoulder") == 0 || std::strcmp(n, "GestureWeaponHipRight") == 0
+                || std::strcmp(n, "GestureWeaponHipLeft") == 0)
+            {
+                const int w = atoi(val);
+                if (w >= 0 && w < kGestureWeaponCount)
+                    (n[13] == 'S' ? g_GestureWeaponShoulder : n[16] == 'R' ? g_GestureWeaponHipRight : g_GestureWeaponHipLeft)
+                        = static_cast<float>(w);
+            }
             else if (std::strcmp(n, "SettingsTriangleHold") == 0)
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "WeaponMenuSettingsGear") == 0)

@@ -14277,14 +14277,14 @@ bool VR::UpdateShoulderGestures(bool paused)
     }
     // Selects the first inventory weapon whose network or model name has one
     // of the given parts. Already held = nothing to do (still counts).
-    auto grabWeapon = [&](const char* label, std::initializer_list<const char*> parts) {
+    auto grabWeapon = [&](const char* label, const char* const* parts) {
         if (!m_Game)
             return;
         auto matches = [&](const char* nm) {
             if (!nm)
                 return false;
-            for (const char* part : parts)
-                if (strstr(nm, part))
+            for (const char* const* part = parts; *part; ++part)
+                if (strstr(nm, *part))
                     return true;
             return false;
         };
@@ -14321,7 +14321,10 @@ bool VR::UpdateShoulderGestures(bool paused)
     };
     const float rightGrip = gripValue(m_ActionFlashlight);
     if (step(s_right, rightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
-        grabWeapon("crowbar", { "crowbar", "wrench" });
+    {
+        const int w = static_cast<int>(bmvr::g_GestureWeaponShoulder + 0.5f);
+        grabWeapon(bmvr::GestureWeaponName(w), bmvr::GestureWeaponParts(w));
+    }
 
     // Hip holsters (right hand only): right hip = pistol, a bit above the
     // left hip (cross draw) = MP5. Close to the body (a gun aimed forward is
@@ -14341,9 +14344,15 @@ bool VR::UpdateShoulderGestures(bool paused)
     const bool hipRightIn = hipsOn && inHip(m_PhysicalRightPosAbs, 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f);
     const bool hipLeftIn = hipsOn && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f);
     if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
-        grabWeapon("pistol", { "glock" });
+    {
+        const int w = static_cast<int>(bmvr::g_GestureWeaponHipRight + 0.5f);
+        grabWeapon(bmvr::GestureWeaponName(w), bmvr::GestureWeaponParts(w));
+    }
     if (step(s_hipLeft, hipLeftIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
-        grabWeapon("mp5", { "mp5" });
+    {
+        const int w = static_cast<int>(bmvr::g_GestureWeaponHipLeft + 0.5f);
+        grabWeapon(bmvr::GestureWeaponName(w), bmvr::GestureWeaponParts(w));
+    }
 
     // Also for 1 s after leaving a zone, so the grip squeeze that took the
     // weapon cannot toggle the flashlight on the way forward.

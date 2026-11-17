@@ -420,6 +420,16 @@ namespace bmvr
     // Optional features, default off:
     extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
     extern bool g_HipGestures;           // right hand + grip at right hip = pistol, above left hip = MP5
+    // Weapon each grab zone takes (index into GestureWeaponName / parts):
+    // 0 crowbar, 1 pistol, 2 .357, 3 MP5, 4 shotgun, 5 crossbow, 6 RPG,
+    // 7 tau, 8 gluon, 9 hivehand, 10 grenade. Floats for the panel's Choice rows.
+    extern float g_GestureWeaponShoulder;  // right shoulder (default crowbar)
+    extern float g_GestureWeaponHipRight;  // right hip (default pistol)
+    extern float g_GestureWeaponHipLeft;   // above the left hip, cross draw (default MP5)
+    constexpr int kGestureWeaponCount = 11;
+    const char* GestureWeaponName(int index);
+    // Name parts matched against the inventory's network / model names (nullptr-terminated).
+    const char* const* GestureWeaponParts(int index);
     extern bool g_SettingsTriangleHold;  // Triangle/Y hold opens the VR settings panel, tap pauses on release
     extern bool g_WeaponMenuSettingsGear; // VR gear slot in the weapon menu (always shown without SettingsTriangleHold)
     extern bool g_WeaponMenuTilt;        // weapon menu opened low tilts back to face the eye
