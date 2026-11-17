@@ -113,7 +113,6 @@ namespace
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
             { "Smooth turn speed", RowKind::Number, "TurnSpeed", nullptr, &bmvr::g_TurnSpeed, 0.05f, 0.05f, 1.f, "%.2f" },
             { "MOVEMENT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Crouch only while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
             { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
             { "GRAB GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip at shoulders (left: save)", RowKind::Toggle, "ShoulderGestures", &bmvr::g_ShoulderGestures, nullptr, 0, 0, 0, nullptr },
@@ -144,6 +143,13 @@ namespace
             { "BUTTONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Left column = left controller, right column = right controller. Headings name
             // the detected controller; button names follow it (A/B, Cross/Circle).
+            { "LAYOUT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Preset", RowKind::BindPreset, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Hold this long for a button's hold action; let go earlier for its press action.
+            { "Hold time", RowKind::Number, "ButtonHoldMs", nullptr, &bmvr::g_ButtonHoldMs, 50.f, 200.f, 1500.f, "%.0f ms" },
+            // Off: the fixed layout from before mapping (if a mapping ever blocks a button).
+            { "Button mapping", RowKind::Toggle, "ButtonMapping", &bmvr::g_ButtonMapping, nullptr, 0, 0, 0, nullptr },
+            { "Reset buttons to defaults", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "binds_default" },
             { "LEFT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_left" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.trigger" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.grip" },
@@ -155,14 +161,12 @@ namespace
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.stickclick.hold" },
             { "Stick", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Move" },
             { "Menu button", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Pause" },
-            { "LAYOUT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Preset", RowKind::BindPreset, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            // Hold this long for a button's hold action; let go earlier for its press action.
-            { "Hold time", RowKind::Number, "ButtonHoldMs", nullptr, &bmvr::g_ButtonHoldMs, 50.f, 200.f, 1500.f, "%.0f ms" },
-            // Off: the fixed layout from before mapping (if a mapping ever blocks a button).
-            { "Button mapping", RowKind::Toggle, "ButtonMapping", &bmvr::g_ButtonMapping, nullptr, 0, 0, 0, nullptr },
-            { "Reset buttons to defaults", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "binds_default" },
             { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "STICK UP / DOWN", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Stick distance", RowKind::Number, "StickJumpCrouchThreshold", nullptr, &bmvr::g_StickJumpCrouchThreshold, 0.05f, 0.3f, 0.95f, "%.2f" },
+            { "Stick angle", RowKind::Number, "StickJumpCrouchAngle", nullptr, &bmvr::g_StickJumpCrouchAngle, 5.f, 10.f, 45.f, "%.0f\xB0" },
+            { "Turning blocks up/down", RowKind::Toggle, "TurnBlocksJumpCrouch", &bmvr::g_TurnBlocksJumpCrouch, nullptr, 0, 0, 0, nullptr },
+            { "Stick down: crouch while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
             { "RIGHT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_right" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.trigger" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.grip" },
@@ -175,10 +179,6 @@ namespace
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickup" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickdown" },
             { "Stick sideways", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixed:Turn" },
-            { "STICK UP / DOWN", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Stick distance", RowKind::Number, "StickJumpCrouchThreshold", nullptr, &bmvr::g_StickJumpCrouchThreshold, 0.05f, 0.3f, 0.95f, "%.2f" },
-            { "Stick angle", RowKind::Number, "StickJumpCrouchAngle", nullptr, &bmvr::g_StickJumpCrouchAngle, 5.f, 10.f, 45.f, "%.0f\xB0" },
-            { "Turning blocks up/down", RowKind::Toggle, "TurnBlocksJumpCrouch", &bmvr::g_TurnBlocksJumpCrouch, nullptr, 0, 0, 0, nullptr },
             { "HANDS & WEAPONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
