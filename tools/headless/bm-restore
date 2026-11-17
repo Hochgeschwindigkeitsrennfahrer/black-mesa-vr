@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bm-restore <capture>-state.txt <outdir> [--no-capture] [--timescale X] [--wait S] [-- extra scenario lines file]
+"""bm-restore <capture>-state.txt <outdir> [--no-capture] [--timescale X] [--wait S] [--pre FILE] [-- extra scenario lines file]
 
 Puts a headless run (bm-scenario, fake VR runtime) exactly where a VR panel "Capture debug frame" was taken and takes
 the same capture again, so the two can be compared.
@@ -15,6 +15,8 @@ The view is NOT taken from the save: a load re-latches the recenter point and sy
 restore loads the save (position, duck, world state), replays the raw poses, sets turn offset + recenter point
 exactly (bmvr_restore_view) and moves the player until the engine eye is the captured one (setpos, corrected).
 Moving platforms (engine eye speed > 2 u/s at capture) get host_timescale 0.05 unless --timescale says otherwise.
+--pre FILE: scenario lines run before the view is restored (e.g. `cmd god`, `cmd noclip` to hold the player still in
+water currents, so repeat launches give the same view; noclip + --timescale 1 instead of the slow-motion default).
 
 The save is looked up in the live save folder, then in an overlay next to the capture (headless captures need
 BMVR_KEEP_UPPER=1). Env as for bm-scenario (BMVR_DLL etc.); this sets BMVR_BASE_CONFIG, BMVR_EYE_SIZE,
@@ -81,6 +83,7 @@ def main():
     if "--timescale" in args:
         timescale = args[args.index("--timescale") + 1]
     settle = args[args.index("--wait") + 1] if "--wait" in args else "6"
+    pre = args[args.index("--pre") + 1] if "--pre" in args else None
     extra = None
     if "--" in args:
         extra = args[args.index("--") + 1]
@@ -184,6 +187,9 @@ def main():
             lines.append(f"fake raw {slot} " + " ".join(st["raw " + slot]))
     lines.append("wait 2")
     lines += settings_cmds
+    if pre:
+        with open(pre, encoding="utf-8") as f:
+            lines += [l.rstrip("\n") for l in f]
     if timescale:
         lines.append(f"cmd host_timescale {timescale}")
     lines.append(f"cmd bmvr_restore_view {st['turn'][0]} {' '.join(zp[:3])} {' '.join(za[:3])} {' '.join(target[:3])}")
