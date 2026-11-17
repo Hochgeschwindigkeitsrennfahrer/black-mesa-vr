@@ -106,7 +106,7 @@ say otherwise; it only holds what you changed.
 **Uninstall:** run `UNINSTALL-BMVR.bat` next to `bms.exe` and type `YES`. Steam's "Verify integrity of game files"
 also restores the stock files.
 
-**Blue Shift / Azure Sheep:** same install, plus `-game bshift` (or `-game asheep`) in the launch options. Calhoun
+**Blue Shift:** same install, plus `-game bshift` in the launch options. Calhoun
 keeps bare hands for the whole campaign, and the weapon wheel and wrist HUD turn security-guard blue.
 
 ## Recommended setup
