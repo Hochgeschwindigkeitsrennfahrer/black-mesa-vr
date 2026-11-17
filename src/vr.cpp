@@ -3821,6 +3821,7 @@ void VR::PollMapFromEngine()
 void VR::OnLevelInit(const char* newmap)
 {
     m_CurrentMapName = newmap ? newmap : "";
+    m_LevelInitCount.fetch_add(1);
     g_EyeRtReset = true;   // RTs may be recreated with the map: drop the per-eye copies (SkyWaterPerEye)
     m_GameplayEligible = IsGameplayMapName(newmap);
     bmvr::NoteEngineMapName(newmap);

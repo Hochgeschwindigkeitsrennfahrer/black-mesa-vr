@@ -131,6 +131,9 @@ public:
     int ReadPlayerFlagByte(int& offset);
     int ReadWeaponClip(C_BaseEntity* weapon);
     bool WeaponHasNoAmmo(C_BaseEntity* weapon);
+    // m_nBody (bodygroups) of a client entity; -1 if unknown.
+    int ReadEntityBody(void* entity);
+    bool WriteEntityBody(void* entity, int body);
     const char* GetActiveWeaponModelName();
     const char* GetEntityModelName(C_BaseEntity* entity);
     // Precache/load a client model by path. Null if the file is missing.

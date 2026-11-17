@@ -606,6 +606,7 @@ namespace
     int g_nvArmor = -1;
     int g_nvClip1 = -1;
     int g_nvClip2 = -1;
+    int g_nvBody = -1; // C_BaseAnimating m_nBody (bodygroups)
     int g_nvAmmoBase = -1;
     int g_nvPrimaryAmmoType = -1;
     int g_nvSecondaryAmmoType = -1;
@@ -740,6 +741,7 @@ void Game::ScanWristHudNetVars()
     g_nvArmor = FindDatamapFieldOffset(base, imgSize, "m_ArmorValue", 0x1000, 0x4000);
     if (g_nvArmor < 0)
         g_nvArmor = 0x17C0;
+    g_nvBody = FindRecvPropOffsetPlus4(base, imgSize, "m_nBody", 0x100, 0x1000);
     g_nvClip1 = FindRecvPropOffsetPlus4(base, imgSize, "m_iClip1", 0x800, 0x3000);
     g_nvClip2 = FindRecvPropOffsetPlus4(base, imgSize, "m_iClip2", 0x800, 0x3000);
     g_nvAmmoBase = FindRecvPropOffsetPlus4(base, imgSize, "m_iAmmo", 0x800, 0x3000);
@@ -1332,6 +1334,37 @@ int Game::ReadWeaponClip(C_BaseEntity* weapon)
         return -1;
     }
     return clip;
+}
+
+int Game::ReadEntityBody(void* entity)
+{
+    if (!g_nvScanned)
+        ScanWristHudNetVars();
+    if (!entity || g_nvBody < 0)
+        return -1;
+    BMVR_TRY
+    {
+        return *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(entity) + g_nvBody);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1;
+    }
+}
+
+bool Game::WriteEntityBody(void* entity, int body)
+{
+    if (!entity || g_nvBody < 0)
+        return false;
+    BMVR_TRY
+    {
+        *reinterpret_cast<volatile int*>(reinterpret_cast<unsigned char*>(entity) + g_nvBody) = body;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
 }
 
 bool Game::WeaponHasNoAmmo(C_BaseEntity* weapon)

@@ -311,6 +311,7 @@ namespace
             { "Two-hand: gun not lowered", RowKind::Toggle, nullptr, &bmvr::g_TwoHandNoLower, nullptr, 0, 0, 0, nullptr },
             { "Support hand follows lowered gun", RowKind::Toggle, nullptr, &bmvr::g_TwoHandLoweredFollow, nullptr, 0, 0, 0, nullptr },
             { "No crossbow scope animation", RowKind::Toggle, nullptr, &bmvr::g_ScopeClipIdle, nullptr, 0, 0, 0, nullptr },
+            { "RPG rocket after a load", RowKind::Toggle, nullptr, &bmvr::g_RpgRocketAfterLoad, nullptr, 0, 0, 0, nullptr },
             { "Mute weapon fidget sounds", RowKind::Toggle, nullptr, &bmvr::g_MuteFidgetSounds, nullptr, 0, 0, 0, nullptr },
             { "Muzzle flash follows gun", RowKind::Toggle, nullptr, &bmvr::g_ViewmodelFxCatchUp, nullptr, 0, 0, 0, nullptr },
             { "LOADING card", RowKind::Toggle, nullptr, &bmvr::g_LoadingCard, nullptr, 0, 0, 0, nullptr },

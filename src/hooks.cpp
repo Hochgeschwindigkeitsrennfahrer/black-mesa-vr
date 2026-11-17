@@ -3054,6 +3054,118 @@ namespace
         return found;
     }
 
+    const char* StudioRelString(const unsigned char* base, int rel);
+    bool StudioHdrMatchesModel(unsigned char* hdr, const char* model);
+
+    // Base and model count of a body part ("rocket", "arms"...); false if absent.
+    bool FindBodypartBase(unsigned char* hdr, const char* name, int& base, int& models)
+    {
+        if (!hdr)
+            return false;
+        int numbody = 0, bodyindex = 0;
+        BMVR_TRY
+        {
+            numbody = *reinterpret_cast<int*>(hdr + kStudioHdrNumBodyparts);
+            bodyindex = *reinterpret_cast<int*>(hdr + kStudioHdrBodypartIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        for (int bi = 0; bi < numbody && bi < 16; ++bi)
+        {
+            unsigned char* bp = hdr + bodyindex + bi * kStudioBodypartSize;
+            int szname = 0, nummodels = 0, b = 0;
+            BMVR_TRY
+            {
+                szname = *reinterpret_cast<int*>(bp);
+                nummodels = *reinterpret_cast<int*>(bp + 4);
+                b = *reinterpret_cast<int*>(bp + 8);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+            if (_stricmp(StudioRelString(bp, szname), name) == 0)
+            {
+                base = b;
+                models = nummodels;
+                return b > 0 && nummodels > 0;
+            }
+        }
+        return false;
+    }
+
+    // RPG rocket after a load / level change: Black Mesa shows the rocket in
+    // the tube only through client animation events (reload shows it at 0.24,
+    // the first-pickup clip at 0.73, firing hides it). A viewmodel made fresh
+    // by a save load starts with the rocket off and nothing turns it back on
+    // until the next fire + reload. Once per level init: idle, rocket off and
+    // rockets in reserve = show it, as the reload would have left it.
+    void FixRpgRocketAfterLoad(void* viewmodel, unsigned char* hdr, const char* label)
+    {
+        // Two cases: (1) the first look after a level init (new map / level
+        // change), rocket off; (2) a save load on the same map, which resets
+        // the viewmodel's body without a level init: the rocket goes from on
+        // to off while the gun only idles. Firing turns it off inside the
+        // fire clip, so a switch-off counts only after 10 quiet idle frames
+        // in a row (a fire/reload clip in between cancels it).
+        static unsigned s_gen = ~0u;
+        static bool s_firstLookDone = false;
+        static int s_lastRocket = -1;
+        static int s_quietOff = 0;
+        if (!Hooks::m_VR || !Hooks::m_Game)
+            return;
+        const unsigned gen = Hooks::m_VR->m_LevelInitCount.load(std::memory_order_relaxed);
+        if (gen != s_gen)
+        {
+            s_gen = gen;
+            s_firstLookDone = false;
+            s_quietOff = 0;
+        }
+        if (!StudioHdrMatchesModel(hdr, "models/weapons/v_rpg.mdl")
+            || !StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))
+            return;
+        int base = 0, models = 0;
+        if (!FindBodypartBase(hdr, "rocket", base, models) || models < 2)
+            return;
+        const int body = Hooks::m_Game->ReadEntityBody(viewmodel);
+        if (body < 0)
+            return;
+        const int rocket = (body / base) % models;
+        char lb[32]{};
+        for (int i = 0; label && i < 31 && label[i]; ++i)
+            lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+        const bool quiet = std::strstr(lb, "idle") && !std::strstr(lb, "fire") && !std::strstr(lb, "reload");
+        auto show = [&](const char* why) {
+            if (Hooks::m_Game->WeaponHasNoAmmo(Hooks::m_Game->GetActiveWeaponEntity()))
+            {
+                Game::logMsg("RPG rocket (%s): tube empty, no rockets in reserve, left off", why);
+                return false;
+            }
+            const int fixed = body + base;
+            Hooks::m_Game->WriteEntityBody(viewmodel, fixed);
+            Game::logMsg("RPG rocket (%s): body %d -> %d (rocket shown, as the reload leaves it)", why, body, fixed);
+            return true;
+        };
+        int now = rocket;
+        if (!s_firstLookDone && quiet)
+        {
+            s_firstLookDone = true;
+            if (rocket == 0 && show("after a level init"))
+                now = 1;
+        }
+        else if (s_lastRocket == 1 && rocket == 0 && quiet)
+        {
+            // Still "on" for the bookkeeping until it has been off and quiet long enough.
+            if (++s_quietOff >= 10)
+            {
+                s_quietOff = 0;
+                if (show("reset while idle (save load)"))
+                    now = 1;
+            }
+            else
+                now = 1;
+        }
+        else
+            s_quietOff = 0;
+        s_lastRocket = now;
+    }
+
     void ForceViewmodelIdlePose(void* viewmodel, unsigned char* hdr)
     {
         if (!viewmodel)
@@ -3257,6 +3369,8 @@ namespace
             }
         }
         const char* label = StudioSequenceLabel(hdr, seq);
+        if (bmvr::g_RpgRocketAfterLoad && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
+            FixRpgRocketAfterLoad(viewmodel, hdr, label);
         const bool melee = Hooks::m_VR->IsPerformingMelee();
         // Classify once per sequence change instead of three lowercase passes
         // + ~30 strstr on every CalcViewModelView. The label is a copy, so the
@@ -8506,6 +8620,25 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 (m_VR && m_VR->IsGameplayEligible()) ? 1 : 0,
                 body, skin, entityIndex, pCustomBoneToWorld ? 1 : 0);
             ++s_dmeEnter;
+        }
+        // Body (bodygroup) changes of the drawn viewmodel, e.g. the RPG's
+        // rocket, which client animation events switch on and off.
+        if (isViewmodel && modelName)
+        {
+            static char s_bodyModel[96]{};
+            static int s_lastBody = -1;
+            static int s_bodyLogs = 0;
+            if (std::strncmp(s_bodyModel, modelName, sizeof(s_bodyModel) - 1) != 0)
+            {
+                strncpy_s(s_bodyModel, modelName, _TRUNCATE);
+                s_lastBody = body;
+            }
+            else if (body != s_lastBody && s_bodyLogs < 200)
+            {
+                ++s_bodyLogs;
+                Game::logMsg("Viewmodel body %s %d -> %d", modelName, s_lastBody, body);
+                s_lastBody = body;
+            }
         }
         hideArms = bmvr::g_HideViewmodelArms
             && !(bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded)
