@@ -377,6 +377,7 @@ public:
     };
     // Manual MP5 magazine (VrMagReload): eject / hip grab / seat, game thread.
     void UpdateMagReload(uint32_t& buttons);
+    void UpdateGrenadePin(uint32_t& buttons);
     int MagReloadWeaponNow() const;
     // Left controller world pose for the viewmodel draw (render thread).
     bool OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const;

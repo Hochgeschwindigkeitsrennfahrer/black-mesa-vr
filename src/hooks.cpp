@@ -4467,6 +4467,101 @@ namespace
         }
     }
 
+    // Frag grenade pin (VR::UpdateGrenadePin). The pin (rod Grenade_Pin2 ->
+    // Grenade_Pin1 -> ring Grenad_Pin1, children of GrenadeSpawn) follows the
+    // left fist while held/pulled, falls when let go and stays gone until
+    // the next grenade. The ring centre is measured from v_grenade.
+    void ApplyGrenadePinBones(VR* vr, unsigned char* hdr, float* bones, int nBones, float vmScale)
+    {
+        if (!MagReload::g_PinWeapon.load(std::memory_order_relaxed) || !vr)
+        {
+            MagReload::g_PinNear.store(false);
+            return;
+        }
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_pin[3] = { -1, -1, -1 };
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_pin[0] = FindStudioBoneIndex(hdr, "Grenade_Pin2");
+            s_pin[1] = FindStudioBoneIndex(hdr, "Grenade_Pin1");
+            s_pin[2] = FindStudioBoneIndex(hdr, "Grenad_Pin1");
+            Game::logMsg("Grenade pin: bones %d %d %d", s_pin[0], s_pin[1], s_pin[2]);
+        }
+        for (int i = 0; i < 3; ++i)
+            if (s_pin[i] < 0 || s_pin[i] >= nBones)
+                return;
+        Vector hand;
+        QAngle handAng;
+        if (!vr->OffhandWorldPoseForDraw(hand, handAng))
+            return;
+        Vector hf, hr, hu;
+        QAngle::AngleVectors(handAng, &hf, &hr, &hu);
+        Vector fist = hand + hf * -3.f + hu * 3.f;
+        const DWORD now = GetTickCount();
+        if (const unsigned palmMs = MagReload::g_LeftPalmMs.load(std::memory_order_relaxed);
+            palmMs != 0 && now - palmMs < 500)
+            fist = hand + hf * MagReload::g_LeftPalmLocal[0].load(std::memory_order_relaxed)
+                + hr * MagReload::g_LeftPalmLocal[1].load(std::memory_order_relaxed)
+                + hu * MagReload::g_LeftPalmLocal[2].load(std::memory_order_relaxed);
+        const float* ring = bones + s_pin[2] * 12;
+        const float rc[3] = { 0.f, 0.05f, -0.74f };
+        const Vector ringPos(ring[0] * rc[0] + ring[1] * rc[1] + ring[2] * rc[2] + ring[3],
+            ring[4] * rc[0] + ring[5] * rc[1] + ring[6] * rc[2] + ring[7],
+            ring[8] * rc[0] + ring[9] * rc[1] + ring[10] * rc[2] + ring[11]);
+        const int st = MagReload::g_PinState.load(std::memory_order_relaxed);
+        MagReload::g_PinNear.store(st == MagReload::kPinIn
+            && (fist - ringPos).Length() < bmvr::g_VrBoltGrabRadius * vmScale);
+        static thread_local bool s_holding = false;
+        static thread_local Vector s_grabOffset; // ring - fist at the grab
+        static thread_local Vector s_lastDelta;  // last pin move (for the drop)
+        auto move = [&](const Vector& d) {
+            for (int i = 0; i < 3; ++i)
+            {
+                float* m = bones + s_pin[i] * 12;
+                m[3] += d.x;
+                m[7] += d.y;
+                m[11] += d.z;
+            }
+        };
+        if (st == MagReload::kPinIn)
+        {
+            s_holding = false;
+            MagReload::g_PinPull.store(0.f);
+            return;
+        }
+        if (st == MagReload::kPinHeld || st == MagReload::kPinPulledInHand)
+        {
+            if (!s_holding)
+            {
+                s_holding = true;
+                s_grabOffset = ringPos - fist;
+            }
+            // The ring stays where the fist took it; the pin comes along.
+            const Vector d = fist + s_grabOffset - ringPos;
+            if (st == MagReload::kPinHeld)
+                MagReload::g_PinPull.store(d.Length() / (vmScale > 0.05f ? vmScale : 1.f));
+            move(d);
+            s_lastDelta = d;
+            return;
+        }
+        // Dropped: falls ~1 s from where the hand let go, then gone.
+        s_holding = false;
+        const unsigned drop = MagReload::g_PinDropTick.load(std::memory_order_relaxed);
+        const float t = drop ? (now - drop) * 0.001f : 99.f;
+        if (t < 1.f)
+        {
+            move(s_lastDelta - Vector(0.f, 0.f, (std::min)(0.5f * 386.f * t * t, 48.f)));
+            return;
+        }
+        for (int i = 0; i < 3; ++i)
+        {
+            float* m = bones + s_pin[i] * 12;
+            for (int r = 0; r < 3; ++r)
+                m[r * 4 + 0] = m[r * 4 + 1] = m[r * 4 + 2] = 0.f;
+        }
+    }
+
     bool GrenadeHoldCorrection(unsigned char* hdr, const void* bones, int nBones,
         const float entity[3][4], float out[3][4])
     {
@@ -9118,6 +9213,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 }
                 ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, targetAng,
                     needScale ? scale : 1.f);
+                ApplyGrenadePinBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
+                    needScale ? scale : 1.f);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);
@@ -13316,6 +13413,9 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
             return grenade;
         }
     }
+    // Frag thrown by the local player: the next grenade comes with its pin.
+    if (type == kGrenadeTypeFrag && ShouldRewriteShootAngles(owner))
+        MagReload::g_PinThrown.store(true);
     Vector hand{};
     if (type != kGrenadeTypeFrag || !bmvr::g_VrHandThrow || !velocity || !m_VR
         || !ShouldRewriteShootAngles(owner) || !m_VR->TryGetThrowVelocity(hand))

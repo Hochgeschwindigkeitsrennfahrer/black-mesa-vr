@@ -7195,6 +7195,7 @@ void VR::ProcessInput()
             buttons |= IN_MOVELEFT;
     }
     UpdateMagReload(buttons);
+    UpdateGrenadePin(buttons);
     m_HeldButtons.store(buttons, std::memory_order_release);
 
     if ((buttons & IN_ATTACK) && !m_FirstAttackLogged)
@@ -20814,6 +20815,95 @@ std::atomic<float> MagReload::g_BoltPull{ 0.f };
 std::atomic<float> MagReload::g_LeftPalmLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
+std::atomic<bool> MagReload::g_PinWeapon{ false };
+std::atomic<int> MagReload::g_PinState{ MagReload::kPinIn };
+std::atomic<unsigned> MagReload::g_PinDropTick{ 0 };
+std::atomic<bool> MagReload::g_PinNear{ false };
+std::atomic<float> MagReload::g_PinPull{ 0.f };
+std::atomic<bool> MagReload::g_PinThrown{ false };
+
+// Frag grenade pin (VrGrenadePin, with VrMagReload): the trigger stays
+// blocked until the left hand pulls the pin (grip at the ring, pull ~6 cm).
+// Pulled, the mod holds IN_ATTACK so the game's pin-pull clip runs while the
+// arm winds up; press and let go of the trigger to throw (hand velocity as
+// before). Alt-fire (roll) is left to the game. A thrown grenade's successor
+// comes with its pin (dGrenadeCreate sets g_PinThrown).
+void VR::UpdateGrenadePin(uint32_t& buttons)
+{
+    using namespace MagReload;
+    bool isGrenade = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        isGrenade = m_VmClass.numpadKey == "grenade";
+    }
+    const bool on = bmvr::g_VrGrenadePin && bmvr::g_VrMagReload && !bmvr::g_LeftHanded
+        && isGrenade && m_HasHeldWeapon && !m_EmptyHands && m_GameplayEligible;
+    static int s_state = kPinIn;
+    static bool s_gripWas = false, s_trigSeen = false;
+    const float grip = LeftSupportGripValue();
+    const bool gripDown = grip > 0.6f;
+    const bool gripEdge = gripDown && !s_gripWas;
+    s_gripWas = gripDown;
+    if (g_PinThrown.exchange(false) || !on)
+    {
+        if (s_state != kPinIn)
+            Game::logMsg("Grenade pin: back in (%s)", on ? "grenade thrown" : "weapon changed");
+        s_state = kPinIn;
+        s_trigSeen = false;
+    }
+    g_PinWeapon.store(on);
+    if (!on)
+    {
+        g_PinState.store(kPinIn);
+        return;
+    }
+    const bool trigger = (buttons & IN_ATTACK) != 0;
+    const DWORD now = GetTickCount();
+    switch (s_state)
+    {
+    case kPinIn:
+        if (gripEdge && g_PinNear.load())
+        {
+            s_state = kPinHeld;
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 1500, 0.5f);
+            Game::logMsg("Grenade pin: ring taken");
+        }
+        break;
+    case kPinHeld:
+        if (!gripDown)
+            s_state = kPinIn;
+        else if (g_PinPull.load() >= 2.5f)
+        {
+            s_state = kPinPulledInHand;
+            s_trigSeen = false;
+            if (m_Game)
+                m_Game->PlayUiSound("weapons/grenade/special1.wav");
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+            Game::logMsg("Grenade pin: pulled");
+        }
+        break;
+    case kPinPulledInHand:
+        if (!gripDown)
+        {
+            s_state = kPinDropped;
+            g_PinDropTick.store(now ? now : 1);
+        }
+        break;
+    default:
+        break;
+    }
+    if (s_state == kPinIn || s_state == kPinHeld)
+        buttons &= ~IN_ATTACK;
+    else
+    {
+        // Armed: held for the game until the trigger has been pressed and let go.
+        if (trigger)
+            s_trigSeen = true;
+        if (!s_trigSeen || trigger)
+            buttons |= IN_ATTACK;
+    }
+    g_PinState.store(s_state);
+}
 
 bool MagReload::PumpFollowsLatch()
 {

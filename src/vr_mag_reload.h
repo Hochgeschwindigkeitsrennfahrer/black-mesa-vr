@@ -84,6 +84,16 @@ namespace MagReload
     // (GetTickCount, 0 = none).
     extern std::atomic<unsigned> g_EjectTick;
 
+    // Frag grenade pin (VrGrenadePin). Game thread -> draw: state; draw ->
+    // game thread: left fist at the ring, how far the pin has been pulled.
+    enum : int { kPinIn = 0, kPinHeld = 1, kPinPulledInHand = 2, kPinDropped = 3 };
+    extern std::atomic<bool> g_PinWeapon;   // the frag grenade is drawn with the feature on
+    extern std::atomic<int> g_PinState;
+    extern std::atomic<unsigned> g_PinDropTick;
+    extern std::atomic<bool> g_PinNear;
+    extern std::atomic<float> g_PinPull;    // model units at scale 1 since the grab
+    extern std::atomic<bool> g_PinThrown;   // set by the frag spawn hook: next grenade has its pin
+
     // TwoHandGripToggle on the shotgun: the latched support hand holds the
     // pump (no squeeze needed to work it).
     bool PumpFollowsLatch();

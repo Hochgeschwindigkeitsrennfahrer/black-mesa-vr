@@ -739,6 +739,9 @@ namespace bmvr
     extern bool g_VrGunRightHand;
     // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
     extern bool g_VrMagReload;
+    // Frag grenade: pull the pin with the left hand before it can be thrown
+    // (only with VrMagReload on). On by default.
+    extern bool g_VrGrenadePin;
     // VR recoil: each shot kicks the gun + aim up (per-weapon amount, back in
     // ~0.15 s); both hands on the gun cut it to 30 % (pistol grip 50 %).
     // Off by default (user A/B). Strength scales every weapon's kick.
