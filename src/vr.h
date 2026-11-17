@@ -701,6 +701,8 @@ public:
     DWORD m_GameUiActivateMs = 0;
     DWORD m_MenuLastVisibleMs = 0;
     int m_MenuPointerHand = 1;
+    // Last time the right hand's ray hit the menu panel (right has priority).
+    DWORD m_MenuRightHitMs = 0;
     void* m_EngineVGuiFromPaint = nullptr;
     void* m_VguiPanel = nullptr; // vgui2.dll VGUI_Panel009
     unsigned int m_TitleHudPanels[2] = {};

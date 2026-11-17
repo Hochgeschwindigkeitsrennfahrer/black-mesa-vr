@@ -10175,18 +10175,32 @@ bool VR::IntersectMenuPanelUv(float& u, float& v)
         return RayHitQuadUv(pose->position, dir, ul, ur, ll, u, v);
     };
 
-    const uint32_t first = (m_MenuPointerHand == 0)
-        ? L4D2VR_OPENXR_HAND_LEFT : L4D2VR_OPENXR_HAND_RIGHT;
-    const uint32_t second = (first == L4D2VR_OPENXR_HAND_LEFT)
-        ? L4D2VR_OPENXR_HAND_RIGHT : L4D2VR_OPENXR_HAND_LEFT;
-    if (tryHand(first))
-        return true;
-    if (tryHand(second))
+    // Right hand first. With both hands resting in front, both rays can hit
+    // the panel; the old "keep the last hand, switch on a miss" rule let them
+    // take the pointer from each other on every brief miss (user,
+    // 2026-11-17). The left hand points only while the right has been off
+    // the panel for kLeftAfterRightMs.
+    constexpr DWORD kLeftAfterRightMs = 400;
+    const DWORD now = GetTickCount();
+    const int was = m_MenuPointerHand;
+    if (tryHand(L4D2VR_OPENXR_HAND_RIGHT))
     {
-        m_MenuPointerHand = (second == L4D2VR_OPENXR_HAND_LEFT) ? 0 : 1;
-        return true;
+        m_MenuRightHitMs = now;
+        m_MenuPointerHand = 1;
     }
-    return false;
+    else if (m_MenuRightHitMs != 0 && now - m_MenuRightHitMs < kLeftAfterRightMs)
+        return false;
+    else if (tryHand(L4D2VR_OPENXR_HAND_LEFT))
+        m_MenuPointerHand = 0;
+    else
+        return false;
+    if (m_MenuPointerHand != was)
+    {
+        static int s_log;
+        if (s_log++ < 20)
+            Game::logMsg("Menu pointer hand -> %s", m_MenuPointerHand ? "right" : "left");
+    }
+    return true;
 }
 
 void VR::ApplyWorldVguiTriggerClick(CUserCmd* cmd)
