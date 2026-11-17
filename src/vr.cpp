@@ -20078,6 +20078,7 @@ std::atomic<bool> MagReload::g_BoltGrab{ false };
 std::atomic<bool> MagReload::g_NeedRack{ false };
 std::atomic<unsigned> MagReload::g_DropTick{ 0 };
 std::atomic<int> MagReload::g_DropFrom{ 0 };
+std::atomic<int> MagReload::g_DisplayClip{ -1 };
 std::atomic<bool> MagReload::g_NearWell{ false };
 std::atomic<bool> MagReload::g_NearBolt{ false };
 std::atomic<float> MagReload::g_BoltPull{ 0.f };
@@ -20186,6 +20187,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         g_State.store(kLoaded);
         g_SlideLocked.store(false);
         g_NeedRack.store(false);
+        g_DisplayClip.store(-1);
         s_reloadWas = reload;
         s_pulseReload = false;
         return;
@@ -20334,6 +20336,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         }
         g_SlideLocked.store(false);
         g_NeedRack.store(w.needPump);
+        g_DisplayClip.store(w.shells);
         g_State.store(w.mag);
         if (clip != w.lastClip && w.lastClip >= 0)
             Game::logMsg("Mag reload: shotgun game clip %d -> %d (tube %d, pump %d)", w.lastClip, clip, w.shells, w.needPump ? 1 : 0);
@@ -20429,6 +20432,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // Open (locked back) slide: glock with an empty chamber.
     g_SlideLocked.store(def.slideLocksBack && !w.chambered);
     g_NeedRack.store(!w.chambered);
+    g_DisplayClip.store((w.mag == kLoaded) ? clip : 0);
     g_State.store(w.mag);
     if (clip > w.lastClip && w.lastClip >= 0)
         Game::logMsg("Mag reload: %s clip %d -> %d (mag %d)", def.name, w.lastClip, clip, w.mag);

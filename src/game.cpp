@@ -1,4 +1,5 @@
 #include "game.h"
+#include "vr_mag_reload.h"
 #include "offset_checks.h"
 #include "sdk.h"
 #include "vr.h"
@@ -1445,6 +1446,10 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
     const int clip2 = rdInt(weapon, g_nvClip2);
     if (clip < 0 && clip2 >= 0)
         clip = clip2;
+    // Manual magazines: what is really in the gun (no magazine = 0, the
+    // shotgun's own shell count).
+    if (const int shown = MagReload::g_DisplayClip.load(std::memory_order_relaxed); shown >= 0)
+        clip = shown;
     const int ammoType = rdInt(weapon, g_nvPrimaryAmmoType);
     if (player && g_nvAmmoBase >= 0 && ammoType >= 0 && ammoType < 32)
         reserve = rdInt(player, g_nvAmmoBase + 4 * ammoType);

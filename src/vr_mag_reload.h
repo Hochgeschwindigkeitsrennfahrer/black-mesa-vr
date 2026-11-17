@@ -55,6 +55,7 @@ namespace MagReload
     extern std::atomic<bool> g_NeedRack;    // chamber empty: the bolt/slide is grabbable
     extern std::atomic<unsigned> g_DropTick; // a magazine left the gun/hand at this GetTickCount
     extern std::atomic<int> g_DropFrom;     // 0 = from the gun, 1 = from the hand
+    extern std::atomic<int> g_DisplayClip;  // ammo HUD count while on (-1 = the game's)
 
     // Draw -> game thread.
     extern std::atomic<bool> g_NearWell;   // magazine in the hand is at the well
