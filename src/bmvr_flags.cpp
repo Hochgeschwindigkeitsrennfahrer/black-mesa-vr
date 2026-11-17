@@ -291,6 +291,8 @@ namespace bmvr
     bool g_VrHandsBlackMesa = false;
     bool g_VrGunRightHand = false;
     bool g_VrMagReload = false;
+    float g_DebugVmSeq = -1.f;
+    float g_DebugVmCycle = 0.f;
     float g_VrMagHandForward = -3.f;
     float g_VrMagHandUp = 3.f;
     float g_VrMagSeatDistance = 9.f;

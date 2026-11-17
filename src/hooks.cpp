@@ -3024,6 +3024,36 @@ namespace
         return best;
     }
 
+    int FindSequenceByLabel(unsigned char* hdr, const char* name)
+    {
+        if (!hdr || !name)
+            return -1;
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local const char* s_name = nullptr;
+        static thread_local int s_seq = -1;
+        if (hdr == s_hdr && name == s_name)
+            return s_seq;
+        int numSeq = 0;
+        BMVR_TRY { numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
+        int found = -1;
+        for (int i = 0; i < numSeq && i < 128; ++i)
+        {
+            const char* label = StudioSequenceLabel(hdr, i);
+            if (label && _stricmp(label, name) == 0)
+            {
+                found = i;
+                break;
+            }
+        }
+        s_hdr = hdr;
+        s_name = name;
+        s_seq = found;
+        if (found < 0)
+            Game::logMsg("Mag reload: sequence '%s' not in this viewmodel", name);
+        return found;
+    }
+
     void ForceViewmodelIdlePose(void* viewmodel, unsigned char* hdr)
     {
         if (!viewmodel)
@@ -3194,6 +3224,37 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return;
+        }
+        // Stock clip held at one cycle: the hands scrub it (manual magazines,
+        // MagReload::g_ScrubSeq), or the debug hold (bmvr_debug_vm_seq /
+        // bmvr_debug_vm_cycle). The draw keeps the gun body at its idle pose.
+        if (Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
+        {
+            int scrubSeq = -1;
+            float scrubCycle = 0.f;
+            if (bmvr::g_DebugVmSeq >= 0.f)
+            {
+                scrubSeq = static_cast<int>(bmvr::g_DebugVmSeq + 0.5f);
+                scrubCycle = bmvr::g_DebugVmCycle;
+            }
+            else if (const char* name = MagReload::g_ScrubSeq.load(std::memory_order_relaxed))
+            {
+                scrubSeq = FindSequenceByLabel(hdr, name);
+                scrubCycle = MagReload::g_ScrubCycle.load(std::memory_order_relaxed);
+            }
+            MagReload::g_ScrubActive.store(scrubSeq >= 0, std::memory_order_relaxed);
+            if (scrubSeq >= 0)
+            {
+                BMVR_TRY
+                {
+                    *reinterpret_cast<int*>(static_cast<char*>(viewmodel) + kViewmodelSequence) = scrubSeq;
+                    *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelCycle) = scrubCycle;
+                    *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelPlaybackRate) = 0.f;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {}
+                Hooks::m_VR->NoteViewmodelBeamHidden(false);
+                return;
+            }
         }
         const char* label = StudioSequenceLabel(hdr, seq);
         const bool melee = Hooks::m_VR->IsPerformingMelee();
@@ -3779,6 +3840,135 @@ namespace
         return true;
     }
 
+    bool InvertMatrix3x4General(const float in[3][4], float out[3][4])
+    {
+        const float a = in[0][0], b = in[0][1], c = in[0][2];
+        const float d = in[1][0], e = in[1][1], f = in[1][2];
+        const float g = in[2][0], h = in[2][1], i = in[2][2];
+        const float A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+        const float det = a * A + b * B + c * C;
+        if (fabsf(det) < 1e-12f)
+            return false;
+        const float k = 1.f / det;
+        out[0][0] = A * k; out[0][1] = -(b * i - c * h) * k; out[0][2] = (b * f - c * e) * k;
+        out[1][0] = B * k; out[1][1] = (a * i - c * g) * k; out[1][2] = -(a * f - c * d) * k;
+        out[2][0] = C * k; out[2][1] = -(a * h - b * g) * k; out[2][2] = (a * e - b * d) * k;
+        for (int r = 0; r < 3; ++r)
+            out[r][3] = -(out[r][0] * in[0][3] + out[r][1] * in[1][3] + out[r][2] * in[2][3]);
+        return true;
+    }
+
+    // While a stock clip is scrubbed by the hands, the clip also swings the
+    // whole gun. Hold the gun body bone at the pose it had in idle (relative
+    // to the draw's gun frame) and move every bone by the same correction, so
+    // only the parts that move relative to the body animate.
+    void StabilizeScrubbedBody(unsigned char* hdr, float* bones, int nBones, const Vector& gunOrigin, const QAngle& gunAng)
+    {
+        const int weapon = MagReload::g_Weapon.load(std::memory_order_relaxed);
+        const char* bodyName = MagReload::Def(weapon).bodyBone;
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_weapon = -1;
+        static thread_local int s_body = -1;
+        static thread_local float s_idleLocal[3][4]{};
+        static thread_local bool s_idleValid = false;
+        if (s_hdr != hdr || s_weapon != weapon)
+        {
+            s_hdr = hdr;
+            s_weapon = weapon;
+            s_body = bodyName ? FindStudioBoneIndex(hdr, bodyName) : -1;
+            s_idleValid = false;
+            Game::logMsg("Scrub: body bone '%s' = %d", bodyName ? bodyName : "-", s_body);
+        }
+        {
+            static thread_local int s_lastState = -1;
+            const int state = (MagReload::g_ScrubActive.load() ? 2 : 0) + (s_idleValid ? 1 : 0);
+            static thread_local int s_stateLogs = 0;
+            if (state != s_lastState && s_stateLogs < 40)
+            {
+                ++s_stateLogs;
+                s_lastState = state;
+                Game::logMsg("Scrub: active=%d idleCaptured=%d body=%d", state >> 1, state & 1, s_body);
+            }
+        }
+        if (s_body < 0 || s_body >= nBones)
+            return;
+        float gf[3][4], gfInv[3][4];
+        BuildMatrix3x4FromOrgAngles(gf, gunOrigin, gunAng);
+        InvertMatrix3x4TR(gf, gfInv);
+        float (*all)[3][4] = reinterpret_cast<float (*)[3][4]>(bones);
+        float* body = &all[s_body][0][0];
+        // Right-arm bones (the stock hand on the grip): held at their idle
+        // pose relative to the body too; the clips move that hand off the
+        // grip for the parts the left hand does in VR.
+        static thread_local int s_armCount = 0;
+        static thread_local int s_arm[40]{};
+        static thread_local float s_armRel[40][3][4]{};
+        static thread_local unsigned char* s_armHdr = nullptr;
+        if (s_armHdr != hdr)
+        {
+            s_armHdr = hdr;
+            s_armCount = 0;
+            int numbones = 0, boneindex = 0;
+            BMVR_TRY
+            {
+                numbones = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
+                boneindex = *reinterpret_cast<int*>(hdr + kStudioHdrBoneIndex);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { numbones = 0; }
+            for (int i = 0; i < numbones && i < nBones && s_armCount < 40; ++i)
+            {
+                unsigned char* bone = hdr + boneindex + i * kStudioBoneSize;
+                int szname = 0;
+                BMVR_TRY { szname = *reinterpret_cast<int*>(bone); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+                const char* n = StudioRelString(bone, szname);
+                if (_strnicmp(n, "R_", 2) == 0 || _stricmp(n, "SCI_Hand_Forearm_R") == 0 || _stricmp(n, "gman_arms_r") == 0)
+                    s_arm[s_armCount++] = i;
+            }
+        }
+        if (!MagReload::g_ScrubActive.load(std::memory_order_relaxed))
+        {
+            // Idle pose only (not mid-fire / mid-draw).
+            bool idle = false;
+            if (Hooks::m_Game)
+            {
+                void* vm = Hooks::m_Game->GetViewModelEntity();
+                int seq = -1;
+                BMVR_TRY { if (vm) seq = *reinterpret_cast<int*>(static_cast<char*>(vm) + kViewmodelSequence); }
+                __except (EXCEPTION_EXECUTE_HANDLER) {}
+                const char* label = seq >= 0 ? StudioSequenceLabel(hdr, seq) : nullptr;
+                char lb[64]{};
+                for (int i = 0; label && i < 63 && label[i]; ++i)
+                    lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+                idle = std::strstr(lb, "idle") && !std::strstr(lb, "low") && !std::strstr(lb, "sprint");
+            }
+            if (idle)
+            {
+                MulMatrix3x4(gfInv, all[s_body], s_idleLocal);
+                float bodyInv[3][4];
+                if (InvertMatrix3x4General(all[s_body], bodyInv))
+                {
+                    for (int k = 0; k < s_armCount; ++k)
+                        MulMatrix3x4(bodyInv, all[s_arm[k]], s_armRel[k]);
+                    s_idleValid = true;
+                }
+            }
+            return;
+        }
+        if (!s_idleValid)
+            return;
+        float target[3][4], cur[3][4], curInv[3][4], delta[3][4];
+        MulMatrix3x4(gf, s_idleLocal, target);
+        std::memcpy(cur, body, sizeof(cur));
+        if (!InvertMatrix3x4General(cur, curInv))
+            return;
+        MulMatrix3x4(target, curInv, delta);
+        for (int b = 0; b < nBones; ++b)
+            MulMatrix3x4(delta, all[b], all[b]);
+        for (int k = 0; k < s_armCount; ++k)
+            MulMatrix3x4(all[s_body], s_armRel[k], all[s_arm[k]]);
+    }
+
     // Manual magazines (VrMagReload, vr_mag_reload.h). Works on the copied
     // bone matrices of the gun's own viewmodel: the magazine bone is hidden,
     // dropped, or placed at the left hand (same orientation to the left
@@ -3797,9 +3987,11 @@ namespace
         const MagReload::WeaponDef& def = MagReload::Def(weapon);
         static thread_local unsigned char* s_hdr = nullptr;
         static thread_local int s_mag = -1, s_bolt = -1, s_wellBone = -1;
-        if (s_hdr != hdr)
+        static thread_local int s_weapon = -1;
+        if (s_hdr != hdr || s_weapon != weapon)
         {
             s_hdr = hdr;
+            s_weapon = weapon;
             s_mag = FindStudioBoneIndex(hdr, def.magBone);
             s_bolt = FindStudioBoneIndex(hdr, def.boltBone);
             s_wellBone = def.wellBone ? FindStudioBoneIndex(hdr, def.wellBone) : -1;
@@ -3868,7 +4060,7 @@ namespace
         // Magazine guns: where the magazine sits in the gun. Shotgun: the
         // loading port on the gun body.
         Vector well = local(m, def.magCenter);
-        if (def.tube)
+        if (def.wellBone)
         {
             if (s_wellBone < 0 || s_wellBone >= nBones)
                 return;
@@ -3894,7 +4086,21 @@ namespace
             s_handMagValid = false;
             // Shotgun: a shell let go of falls; the stock shell otherwise.
             const float t = dropTick ? (now - dropTick) * 0.001f : 99.f;
-            if (def.tube && t < 1.2f && MagReload::g_DropFrom.load() == 1)
+            if (def.wellBone && t < 1.2f && MagReload::g_DropFrom.load() == 1)
+            {
+                std::memcpy(m, s_drop, sizeof(s_drop));
+                m[11] -= (std::min)(0.5f * 386.f * t * t, 48.f);
+            }
+            return;
+        }
+        // .357: the cylinder and loader follow the scrubbed stock clip; only
+        // a loader let go of falls.
+        if (st == MagReload::kEmpty && def.bodyBone && def.wellBone)
+        {
+            MagReload::g_NearWell.store(false);
+            s_handMagValid = false;
+            const float t = dropTick ? (now - dropTick) * 0.001f : 99.f;
+            if (t < 1.2f && MagReload::g_DropFrom.load() == 1)
             {
                 std::memcpy(m, s_drop, sizeof(s_drop));
                 m[11] -= (std::min)(0.5f * 386.f * t * t, 48.f);
@@ -8503,6 +8709,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             {
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
+                StabilizeScrubbedBody(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
+                    needScale ? pivot + (targetOrigin - pivot) * scale : targetOrigin, targetAng);
                 // Gun frame of this draw: scaled origin + target angles
                 // (VR::GunFrameNow at the same instant).
                 Vector o = targetOrigin;

@@ -22,7 +22,9 @@ namespace MagReload
         kWeaponMp5 = 1,
         kWeaponGlock = 2,
         kWeaponShotgun = 3,
-        kWeaponCount = 4,
+        kWeaponCrossbow = 4,
+        kWeapon357 = 5,
+        kWeaponCount = 6,
     };
 
     struct WeaponDef
@@ -44,6 +46,9 @@ namespace MagReload
         bool tube;
         const char* wellBone;
         float wellCenter[3];
+        // Gun body bone: held at its idle pose while a stock clip is
+        // scrubbed by the hands (nullptr = no scrubbing for this gun).
+        const char* bodyBone;
     };
     const WeaponDef& Def(int weapon);
 
@@ -56,6 +61,13 @@ namespace MagReload
     extern std::atomic<unsigned> g_DropTick; // a magazine left the gun/hand at this GetTickCount
     extern std::atomic<int> g_DropFrom;     // 0 = from the gun, 1 = from the hand
     extern std::atomic<int> g_DisplayClip;  // ammo HUD count while on (-1 = the game's)
+
+    // Stock clip scrubbed by the hands: sequence label + cycle, frozen (the
+    // gun body is held at its idle pose so only the moving parts animate).
+    extern std::atomic<const char*> g_ScrubSeq; // nullptr = not scrubbing
+    extern std::atomic<float> g_ScrubCycle;
+    // Set by the viewmodel code when a scrub (or the debug hold) is applied.
+    extern std::atomic<bool> g_ScrubActive;
 
     // Draw -> game thread.
     extern std::atomic<bool> g_NearWell;   // magazine in the hand is at the well

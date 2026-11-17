@@ -13582,6 +13582,8 @@ void VR::NoteViewmodelModel(const char* modelName)
         if (m_VmClass.gluon) flags |= kVmFlagGluon;
         if (m_VmClass.mp5) flags |= kVmFlagMp5;
         if (m_VmClass.glock) flags |= kVmFlagGlock;
+        if (m_VmClass.crossbow) flags |= kVmFlagCrossbow;
+        if (m_VmClass.revolver) flags |= kVmFlag357;
         m_VmClassFlags.store(flags, std::memory_order_relaxed);
         Game::logMsg("Viewmodel model %s", modelName);
     }
@@ -13621,13 +13623,13 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     else if (has("glock") || has("pistol") || has("9mm") || has("beretta"))
     { out.ox = 16.5f; out.oy = 4.f; out.oz = -7.f; out.ax = 0.f; out.numpadKey = "glock"; out.glock = true; }
     else if (has("357") || has("python") || has("revolver"))
-    { out.ox = 10.f; out.oy = 3.5f; out.oz = -5.5f; out.ax = 0.5f; out.numpadKey = "357"; }
+    { out.ox = 10.f; out.oy = 3.5f; out.oz = -5.5f; out.ax = 0.5f; out.numpadKey = "357"; out.revolver = true; }
     else if (has("mp5") || has("smg") || has("mp5k"))
     { out.ox = 9.f; out.oy = 4.5f; out.oz = -9.f; out.ax = 2.f; out.ay = -1.5f; out.numpadKey = "mp5"; }
     else if (has("shotgun") || has("spas") || has("pump"))
     { out.ox = 9.f; out.oy = 8.f; out.oz = -9.5f; out.ax = -1.5f; out.ay = -4.5f; out.numpadKey = "shotgun"; }
     else if (has("crossbow"))
-    { out.ox = 12.5f; out.oy = 11.35f; out.oz = -13.f; out.ax = 1.5f; out.ay = -3.5f; out.az = -3.f; out.numpadKey = "crossbow"; }
+    { out.ox = 12.5f; out.oy = 11.35f; out.oz = -13.f; out.ax = 1.5f; out.ay = -3.5f; out.az = -3.f; out.numpadKey = "crossbow"; out.crossbow = true; }
     else if (has("rpg") || has("rocket"))
     { out.ox = 12.f; out.oy = 10.5f; out.oz = -6.5f; out.ax = -1.f; out.numpadKey = "rpg"; }
     else if (has("gauss") || has("tau"))
@@ -20079,6 +20081,9 @@ std::atomic<bool> MagReload::g_NeedRack{ false };
 std::atomic<unsigned> MagReload::g_DropTick{ 0 };
 std::atomic<int> MagReload::g_DropFrom{ 0 };
 std::atomic<int> MagReload::g_DisplayClip{ -1 };
+std::atomic<const char*> MagReload::g_ScrubSeq{ nullptr };
+std::atomic<float> MagReload::g_ScrubCycle{ 0.f };
+std::atomic<bool> MagReload::g_ScrubActive{ false };
 std::atomic<bool> MagReload::g_NearWell{ false };
 std::atomic<bool> MagReload::g_NearBolt{ false };
 std::atomic<float> MagReload::g_BoltPull{ 0.f };
@@ -20088,17 +20093,28 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
     // Sounds: Black Mesa has one wav per whole reload, so the handling sounds
     // come from the Half-Life 2 sounds the game mounts itself (hl2/).
     static const WeaponDef kDefs[kWeaponCount] = {
-        { "none", nullptr, nullptr, 0, 0.f, false, nullptr, nullptr, { 0, 0, 0 }, { 0, 0, 0 }, false, nullptr, { 0, 0, 0 } },
+        { "none", nullptr, nullptr, 0, 0.f, false, nullptr, nullptr, { 0, 0, 0 }, { 0, 0, 0 }, false, nullptr, { 0, 0, 0 }, nullptr },
         // Centres measured from v_mp5 / v_glock / v_shotgun (bind pose, 2026-11-17).
         { "mp5", "Clip_New", "Bolt_New", 30, 4.0f, false,
           "weapons/mp5/empty.wav", "weapons/smg1/switch_single.wav",
-          { 0.00f, -8.93f, -8.32f }, { 1.04f, -14.23f, 1.49f }, false, nullptr, { 0, 0, 0 } },
+          { 0.00f, -8.93f, -8.32f }, { 1.04f, -14.23f, 1.49f }, false, nullptr, { 0, 0, 0 }, nullptr },
         { "glock", "bone_clip", "Bone01", 17, 1.8f, true,
           "weapons/pistol/pistol_empty.wav", "weapons/glock/reload_roundchambered.wav",
-          { 3.90f, -0.12f, 0.04f }, { 2.56f, -0.09f, 0.04f }, false, nullptr, { 0, 0, 0 } },
+          { 3.90f, -0.12f, 0.04f }, { 2.56f, -0.09f, 0.04f }, false, nullptr, { 0, 0, 0 }, nullptr },
         { "shotgun", "bone_shell", "bone_pump", 8, 4.5f, false,
           "weapons/shotgun/empty.wav", "weapons/shotgun/pump.wav",
-          { 2.53f, -0.02f, 0.06f }, { 8.60f, 0.30f, -0.21f }, true, "bone_gun", { 7.20f, -1.22f, 0.68f } },
+          { 2.53f, -0.02f, 0.06f }, { 8.60f, 0.30f, -0.21f }, true, "bone_gun", { 7.20f, -1.22f, 0.68f }, nullptr },
+        // Crossbow: box magazine only. Black Mesa cocks it by sliding the
+        // whole rear stock back with the gun hand, which has no natural VR
+        // motion, so the stock cocking clip after each shot stays.
+        { "crossbow", "clip_export_bone", nullptr, 5, 0.f, false,
+          "weapons/crossbow/empty.wav", nullptr,
+          { 0.01f, -0.33f, 0.20f }, { 1.88f, -0.77f, 0.06f }, false, nullptr, { 0, 0, 0 }, "body_export_bone" },
+        // .357: speed loader into the swung-out cylinder (Chamber); the
+        // cylinder scrubs the stock gun_reload1 clip.
+        { "357", "speed_loader", nullptr, 6, 0.f, false,
+          "weapons/pistol/pistol_empty.wav", nullptr,
+          { 0.00f, -0.01f, -0.15f }, { 0, 0, 0 }, false, "Chamber", { 0.03f, 0.01f, -0.51f }, "357" },
     };
     return kDefs[(weapon >= 0 && weapon < kWeaponCount) ? weapon : 0];
 }
@@ -20137,6 +20153,10 @@ int VR::MagReloadWeaponNow() const
         return MagReload::kWeaponGlock;
     if (ViewmodelIsShotgun())
         return MagReload::kWeaponShotgun;
+    if (ViewmodelIsCrossbow())
+        return MagReload::kWeaponCrossbow;
+    if (ViewmodelIs357())
+        return MagReload::kWeapon357;
     return MagReload::kWeaponNone;
 }
 
@@ -20178,6 +20198,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         // A magazine in the hand is dropped by a weapon switch.
         if (weapon != kWeaponNone && s_w[weapon].mag == kInHand)
             s_w[weapon].mag = kEmpty;
+        g_ScrubSeq.store(nullptr);
         Game::logMsg("Mag reload: weapon %s (mag %d, chambered %d)", Def(weapon).name,
             weapon ? s_w[weapon].mag : 0, weapon ? (s_w[weapon].chambered ? 1 : 0) : 1);
     }
@@ -20188,6 +20209,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         g_SlideLocked.store(false);
         g_NeedRack.store(false);
         g_DisplayClip.store(-1);
+        g_ScrubSeq.store(nullptr);
         s_reloadWas = reload;
         s_pulseReload = false;
         return;
@@ -20209,7 +20231,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     if (w.mag == kLoaded && clip == 0 && w.lastClip > 0)
     {
         w.mag = kDry;
-        w.chambered = false;
+        w.chambered = def.boltBone == nullptr; // no bolt/slide to work: nothing to rack
         Game::logMsg("Mag reload: %s fired dry, swap the magazine", def.name);
     }
     const float grip = LeftSupportGripValue();
@@ -20340,6 +20362,102 @@ void VR::UpdateMagReload(uint32_t& buttons)
         g_State.store(w.mag);
         if (clip != w.lastClip && w.lastClip >= 0)
             Game::logMsg("Mag reload: shotgun game clip %d -> %d (tube %d, pump %d)", w.lastClip, clip, w.shells, w.needPump ? 1 : 0);
+        w.lastClip = clip;
+        s_reloadWas = reload;
+        s_gripWas = gripDown;
+        s_attackWas = attack;
+        return;
+    }
+
+    if (weapon == kWeapon357)
+    {
+        // .357: the cylinder is the stock gun_reload1 clip, scrubbed in two
+        // timed parts: open + eject (cycle 0.02 -> 0.5), then insert + close
+        // (0.62 -> 0.97) once the speed loader reaches the open cylinder.
+        // The clip's whole-reload sound sits at cycle 0, so it starts after.
+        static int s_phase = 0; // 0 none, 1 opening, 2 open, 3 closing
+        static DWORD s_phaseMs = 0;
+        auto scrub = [&](float a, float b, float secs) {
+            const float t = std::clamp((now - s_phaseMs) * 0.001f / secs, 0.f, 1.f);
+            g_ScrubSeq.store("gun_reload1");
+            g_ScrubCycle.store(a + (b - a) * t);
+            return t >= 1.f;
+        };
+        if (w.mag != kInHand && w.mag != kEmpty)
+            s_phase = 0;
+        else if (s_phase == 0)
+            s_phase = 2; // back from a weapon switch with the cylinder open
+        if ((w.mag == kLoaded || w.mag == kDry) && reload && !s_reloadWas)
+        {
+            w.mag = kEmpty;
+            s_phase = 1;
+            s_phaseMs = now;
+            // The game's reload runs while the hands work (ammo stays the
+            // game's); its own clip is not shown.
+            s_pulseReload = clip >= 0 && clip < def.maxClip;
+            s_pulseUntil = now + 200;
+            sound("weapons/357/357_reload1.wav");
+            Game::logMsg("Mag reload: 357 cylinder open (clip %d, game reload %d)", clip, s_pulseReload ? 1 : 0);
+        }
+        if (s_phase == 1 && scrub(0.02f, 0.5f, 0.7f))
+            s_phase = 2;
+        else if (s_phase == 2)
+            scrub(0.5f, 0.5f, 1.f);
+        if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip())
+        {
+            w.mag = kInHand;
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
+            Game::logMsg("Mag reload: 357 speed loader taken from the hip");
+        }
+        else if (w.mag == kInHand && s_phase == 2)
+        {
+            if (g_NearWell.load())
+            {
+                s_phase = 3;
+                s_phaseMs = now;
+                sound("weapons/357/357_reload3.wav");
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+                Game::logMsg("Mag reload: 357 speed loader in");
+            }
+            else if (released)
+            {
+                w.mag = kEmpty;
+                g_DropFrom.store(1);
+                g_DropTick.store(now ? now : 1);
+                Game::logMsg("Mag reload: 357 speed loader dropped");
+            }
+        }
+        if (s_phase == 3 && scrub(0.62f, 0.97f, 0.8f))
+        {
+            s_phase = 0;
+            w.mag = kLoaded;
+            w.chambered = true;
+            sound("weapons/357/357_reload4.wav");
+            Game::logMsg("Mag reload: 357 cylinder closed (clip %d)", clip);
+        }
+        if (s_phase == 0)
+            g_ScrubSeq.store(nullptr);
+        // While the loader goes in, it is the clip's own loader, not the hand's.
+        g_State.store(s_phase == 3 ? kEmpty : w.mag);
+        const bool canFire = w.mag == kLoaded && s_phase == 0;
+        if (!canFire)
+        {
+            if (attack && !s_attackWas)
+                sound(def.emptyClick);
+            buttons &= ~IN_ATTACK;
+        }
+        if (s_pulseReload)
+        {
+            if (now < s_pulseUntil)
+                buttons |= IN_RELOAD;
+            else
+                s_pulseReload = false;
+        }
+        g_SlideLocked.store(false);
+        g_NeedRack.store(false);
+        g_DisplayClip.store(w.mag == kLoaded ? clip : 0);
+        if (clip > w.lastClip && w.lastClip >= 0)
+            Game::logMsg("Mag reload: 357 clip %d -> %d (mag %d)", w.lastClip, clip, w.mag);
         w.lastClip = clip;
         s_reloadWas = reload;
         s_gripWas = gripDown;

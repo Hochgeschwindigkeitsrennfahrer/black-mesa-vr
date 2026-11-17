@@ -718,6 +718,7 @@ namespace bmvr
     extern bool g_VrGunRightHand;
     // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
     extern bool g_VrMagReload;
+    extern float g_DebugVmSeq, g_DebugVmCycle; // debug: hold the viewmodel on a sequence/cycle (-1 = off)
     extern float g_VrMagHandForward, g_VrMagHandUp, g_VrMagSeatDistance; // game units
     extern float g_VrBoltGrabRadius; // game units (before the viewmodel scale)
     // True for this process when launched with -game bshift (or a bs_* map).
