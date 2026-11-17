@@ -8983,15 +8983,43 @@ void VR::ApplyMenuNavigation()
     if (GetAnalogActionData(m_ActionTurn, turn))
         turnY = turn.y;
     static DWORD s_wheelMs;
+    // Scroll diagnosis (user 2026-11-17: held stick stops scrolling, a new
+    // push restarts it): once a second while the stick is held, wheel posts
+    // vs calls here and the stick value.
+    static DWORD s_wheelStatMs;
+    static int s_wheelPosted, s_wheelCalls;
+    static float s_wheelMinY = 1.f, s_wheelMaxY = -1.f;
+    if (fabsf(turnY) > 0.1f || s_wheelPosted)
+    {
+        ++s_wheelCalls;
+        s_wheelMinY = (std::min)(s_wheelMinY, turnY);
+        s_wheelMaxY = (std::max)(s_wheelMaxY, turnY);
+        if (s_wheelStatMs == 0)
+            s_wheelStatMs = nowMs;
+        if (nowMs - s_wheelStatMs >= 1000u)
+        {
+            Game::logMsg("Menu wheel 1s: posted=%d calls=%d stickY %.2f..%.2f cursor %d,%d valid=%d live=%d",
+                s_wheelPosted, s_wheelCalls, s_wheelMinY, s_wheelMaxY, m_MenuCursorX, m_MenuCursorY,
+                m_MenuCursorValid ? 1 : 0, MenuPointerLive() ? 1 : 0);
+            s_wheelStatMs = nowMs;
+            s_wheelPosted = s_wheelCalls = 0;
+            s_wheelMinY = 1.f;
+            s_wheelMaxY = -1.f;
+        }
+    }
+    else
+        s_wheelStatMs = 0;
     if (fabsf(turnY) > 0.35f && nowMs - s_wheelMs >= 70u)
     {
         short wheel = (turnY > 0.f) ? WHEEL_DELTA : -WHEEL_DELTA;
         if (fabsf(turnY) > 0.85f)
             wheel = static_cast<short>(wheel * 2);
-        const int cx = m_MenuCursorValid ? m_MenuCursorX : 640;
-        const int cy = m_MenuCursorValid ? m_MenuCursorY : 360;
+        // Fallback: window centre (was 640,360 = a 1280x720 window's centre).
+        const int cx = m_MenuCursorValid ? m_MenuCursorX : static_cast<int>(KnownWindowWidth() / 2);
+        const int cy = m_MenuCursorValid ? m_MenuCursorY : static_cast<int>(KnownWindowHeight() / 2);
         PostMessageA(hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, wheel), MAKELPARAM(cx, cy));
         s_wheelMs = nowMs;
+        ++s_wheelPosted;
         static int s_wheelLog;
         if (s_wheelLog < 8)
         {
