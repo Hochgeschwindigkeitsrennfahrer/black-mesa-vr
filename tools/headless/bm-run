@@ -59,7 +59,24 @@ mkdir -p "$upper" "$out/overlay/work"
 put() { mkdir -p "$upper/$(dirname "$2")"; cp -p "$1" "$upper/$2"; }
 
 # Files for the run go straight into the upper layer; removals are done inside the namespace.
-remove=(bms/console.log)
+# -game <mod> (Black Mesa: Blue Shift, Azure Sheep): the mod folder holds its own console.log, videoconfig.cfg and
+# cfg/config.cfg; the profile goes there too (black-mesa-launch gives a mod Black Mesa's VR settings on its first VR
+# launch). bmvr.cfg / bmvr_local.cfg stay in bms/cfg (the mod runs them from there; bms is on the mods' search path).
+GAMEDIR=bms
+args=("$@")
+for ((i = 0; i + 1 < ${#args[@]}; i++)); do [[ ${args[i]} == -game ]] && GAMEDIR=${args[i + 1]}; done
+[[ $GAMEDIR =~ ^[A-Za-z0-9_.-]+$ && -d $GAME/$GAMEDIR ]] || { echo "unknown -game folder '$GAMEDIR'" >&2; exit 1; }
+# A workshop mod is usually a symlink (Black Mesa/bshift -> workshop/content/362890/<id>/bshift), outside the game
+# overlay: writes through it would reach the real workshop folder, and a put would replace the link in the upper
+# layer. Such a mod folder gets its own overlay (mod-upper), mounted on the link target in the namespace.
+modreal='' modupper=''
+if [[ -L $GAME/$GAMEDIR ]]; then
+	modreal=$(readlink -f "$GAME/$GAMEDIR"); modupper=$out/overlay/mod-upper
+	mkdir -p "$modupper" "$out/overlay/mod-work"
+fi
+putmod() { if [[ -n $modreal ]]; then mkdir -p "$modupper/$(dirname "$2")"; cp -p "$1" "$modupper/$2"; else put "$1" "$GAMEDIR/$2"; fi; }
+modfile() { if [[ -n $modreal ]]; then echo "$modupper/$1"; else echo "$upper/$GAMEDIR/$1"; fi; }
+remove=("$GAMEDIR/console.log")
 if [[ -n ${BMVR_FLAT:-} ]]; then
 	stock=$GAME/.bmvr-backup/bin/thirdparty/dxvk-windows-x86/d3d9.dll
 	[[ -f $stock ]] || { echo "stock DXVK missing: $stock" >&2; exit 1; }
@@ -78,6 +95,10 @@ if [[ $profile != live ]]; then
 	[[ -f $pdir/config.cfg && -f $pdir/videoconfig.cfg ]] || { echo "no settings profile $pdir" >&2; exit 1; }
 	put "$pdir/videoconfig.cfg" bms/videoconfig.cfg
 	put "$pdir/config.cfg" bms/cfg/config.cfg
+	if [[ $GAMEDIR != bms && -z ${BMVR_FLAT:-} ]]; then
+		putmod "$pdir/videoconfig.cfg" videoconfig.cfg
+		putmod "$pdir/config.cfg" cfg/config.cfg
+	fi
 	# The game gets config.cfg from Steam Cloud through the Steam client, which is outside the namespace, so it would
 	# run with the live mode's settings (2026-11-05: CSM on in "VR" runs). With the mod in place, have the mod's
 	# bmvr_local.cfg exec the profile's values after that. A flat run sees the live cloud copy: check the live mode.
@@ -104,7 +125,7 @@ cleanup() {
 	for p in $(pgrep -x bms.exe); do kill -9 "$p" 2>/dev/null || true; done
 	[[ -n ${xvfb_pid:-} ]] && kill "$xvfb_pid" 2>/dev/null || true
 	# keep the run's console output, then drop the layer (work/ has a mode 000 dir)
-	cp "$upper/bms/console.log" "$out/console.log" 2>/dev/null || true
+	cp "$(modfile console.log)" "$out/console.log" 2>/dev/null || true
 	(cd "$upper" && find . -type f | sort) > "$out/overlay-files.txt" 2>/dev/null || true
 	if [[ -z ${BMVR_KEEP_UPPER:-} ]]; then chmod -R u+rwx "$out/overlay" 2>/dev/null || true; rm -rf "${out:?}/overlay"; fi
 	local f saved
@@ -116,6 +137,9 @@ cleanup() {
 			echo "Steam Cloud config.cfg was changed by the game: restored (changed copy in $out/cloud-config-changed-by-run.cfg)" | tee -a "$out/run.log" >&2
 		fi
 	done
+	if [[ -n $modreal ]] && [[ -n $(find "$modreal" -newer "$out/live-state.sha" -print -quit 2>/dev/null) ]]; then
+		echo "REAL MOD FOLDER CHANGED: $modreal has files newer than the run start" | tee -a "$out/run.log" >&2
+	fi
 	if cmp -s <(live_state) "$out/live-state.sha"; then
 		echo "real game folder + cloud config unchanged (verified)" >> "$out/run.log"
 	else
@@ -207,13 +231,16 @@ fi
 # Inside the namespace (uid 0 there): mount the overlay and make the removals, then a nested namespace maps back to
 # the real uid, because Wine and Steam refuse to run as root.
 ns_setup='
-	game=$1 upper=$2 work=$3 uid=$4 gid=$5 nrm=$6; shift 6
+	game=$1 upper=$2 work=$3 uid=$4 gid=$5 modreal=$6 modupper=$7 nrm=$8; shift 8
 	mount -t overlay overlay -o "lowerdir=$game,upperdir=$upper,workdir=$work,userxattr" "$game" || exit 90
+	if [ -n "$modreal" ]; then
+		mount -t overlay overlay -o "lowerdir=$modreal,upperdir=$modupper,workdir=$modupper/../mod-work,userxattr" "$modreal" || exit 91
+	fi
 	for ((i = 0; i < nrm; i++)); do rm -f "${game:?}/${1:?}"; shift; done
 	cd "$game"
 	exec unshare -U --map-user="$uid" --map-group="$gid" "$@"
 '
-unshare -Urm --propagation private bash -c "$ns_setup" ns "$GAME" "$upper" "$out/overlay/work" "$(id -u)" "$(id -g)" "${#remove[@]}" "${remove[@]}" \
+unshare -Urm --propagation private bash -c "$ns_setup" ns "$GAME" "$upper" "$out/overlay/work" "$(id -u)" "$(id -g)" "$modreal" "$modupper" "${#remove[@]}" "${remove[@]}" \
 	"$SLR/_v2-entry-point" --verb=waitforexitandrun -- "$PROTON/proton" waitforexitandrun \
 	"$GAME/bms.exe" "${launch_args[@]}" "${profile_args[@]}" "$@" >"$out/game.log" 2>&1 &
 game_pid=$!

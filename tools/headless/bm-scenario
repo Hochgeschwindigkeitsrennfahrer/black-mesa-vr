@@ -28,7 +28,11 @@ out=$(realpath -m "$2")
 shift 2
 [[ -e $out ]] && { echo "$out exists; use a fresh dir" >&2; exit 1; }
 mkdir -p "$out/VR"
-CONSOLE=$out/overlay/upper/bms/console.log   # the game's console.log lands in the overlay; bm-run starts it empty
+gamedir=bms   # -game <mod>: its console.log is in the mod folder
+args=("$@")
+for ((i = 0; i + 1 < ${#args[@]}; i++)); do [[ ${args[i]} == -game ]] && gamedir=${args[i + 1]}; done
+CONSOLE=$out/overlay/upper/$gamedir/console.log   # the game's console.log lands in the overlay; bm-run starts it empty
+[[ -L ~/.local/share/Steam/steamapps/common/"Black Mesa"/$gamedir ]] && CONSOLE=$out/overlay/mod-upper/console.log  # mod's own overlay (bm-run)
 "$here/bm-test" "$out" -condebug "$@" >"$out/bm-test.out" 2>&1 &
 runner=$!
 trap 'kill $runner 2>/dev/null || true; wait $runner 2>/dev/null || true' EXIT
