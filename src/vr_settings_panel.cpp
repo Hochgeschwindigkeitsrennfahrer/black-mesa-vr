@@ -373,6 +373,7 @@ namespace
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Guns skip draw animation", RowKind::Toggle, nullptr, &bmvr::g_SkipDrawAnim, nullptr, 0, 0, 0, nullptr },
             { "Tau/crossbow switch fix", RowKind::Toggle, nullptr, &bmvr::g_DeltaSeqIdle, nullptr, 0, 0, 0, nullptr },
+            { "Crowbar hits along drawn bar", RowKind::Toggle, nullptr, &bmvr::g_CrowbarHitDrawnBar, nullptr, 0, 0, 0, nullptr },
             { "Two-hand: gun not lowered", RowKind::Toggle, nullptr, &bmvr::g_TwoHandNoLower, nullptr, 0, 0, 0, nullptr },
             { "Support hand follows lowered gun", RowKind::Toggle, nullptr, &bmvr::g_TwoHandLoweredFollow, nullptr, 0, 0, 0, nullptr },
             { "No crossbow scope animation", RowKind::Toggle, nullptr, &bmvr::g_ScopeClipIdle, nullptr, 0, 0, 0, nullptr },

@@ -233,7 +233,43 @@ bool VR::ComputePhysicalCrowbarPose(Vector& origin, QAngle& angles, Vector& topP
     topFwd = Vector(weapon.m[0][0], weapon.m[1][0], weapon.m[2][0]);
     if (VectorNormalize(topFwd) <= 0.01f)
         QAngle::AngleVectors(angles, &topFwd, nullptr, nullptr);
+    // The crowbar on screen is v_crowbar posed by the viewmodel table, not
+    // this HL2VR grip frame; since its hand moved down (76be190) the sweep
+    // ran ~9 cm above the drawn bar and wall hits landed high (user,
+    // 2026-11-18). Sweep along the bar as last drawn, carried by the
+    // controller now.
+    Vector startLocal{}, tipLocal{};
+    DWORD drawnMs = 0;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        startLocal = m_DrawnCrowbarStartLocal;
+        tipLocal = m_DrawnCrowbarTipLocal;
+        drawnMs = m_DrawnCrowbarMs;
+    }
+    if (bmvr::g_CrowbarHitDrawnBar && drawnMs != 0 && GetTickCount() - drawnMs < 1000)
+    {
+        const Vector ctrl = GetRightControllerAbsPos(body);
+        Vector cf, cr, cu;
+        QAngle::AngleVectors(GetRightControllerAbsAngle(), &cf, &cr, &cu);
+        const Vector s = ctrl + cf * startLocal.x + cr * startLocal.y + cu * startLocal.z;
+        const Vector t = ctrl + cf * tipLocal.x + cr * tipLocal.y + cu * tipLocal.z;
+        Vector along = t - s;
+        if (VectorNormalize(along) > 1.f)
+        {
+            shaftStart = s;
+            topPos = t;
+            topFwd = along;
+        }
+    }
     return origin.LengthSqr() > 1.f;
+}
+
+void VR::NoteDrawnCrowbarBar(const Vector& startLocal, const Vector& tipLocal)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    m_DrawnCrowbarStartLocal = startLocal;
+    m_DrawnCrowbarTipLocal = tipLocal;
+    m_DrawnCrowbarMs = GetTickCount();
 }
 
 bool VR::DrawPhysicalCrowbar(void* modelRender, const ModelRenderInfo_t& vmInfo)

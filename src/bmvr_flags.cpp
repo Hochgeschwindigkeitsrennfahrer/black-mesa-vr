@@ -177,6 +177,7 @@ namespace bmvr
     bool g_DeltaSeqIdle = true;
     bool g_ScopeClipIdle = true;
     bool g_TwoHandNoLower = true;
+    bool g_CrowbarHitDrawnBar = true;
     bool g_TwoHandLoweredFollow = true;
     bool g_ThrowStroke = false;
     bool g_MuteFidgetSounds = true;
@@ -906,6 +907,8 @@ namespace bmvr
                 g_SkipDrawAnim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "DeltaSeqIdle") == 0)
                 g_DeltaSeqIdle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "CrowbarHitDrawnBar") == 0)
+                g_CrowbarHitDrawnBar = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandNoLower") == 0)
                 g_TwoHandNoLower = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandLoweredFollow") == 0)

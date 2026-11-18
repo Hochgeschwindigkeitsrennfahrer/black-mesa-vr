@@ -4028,6 +4028,54 @@ namespace
             d.Dot(f), d.Dot(r), d.Dot(u), modelName ? modelName : "?");
     }
 
+    // The drawn crowbar bar (bone crowbar_new, one rigid 845-vertex mesh)
+    // for VR::ComputePhysicalCrowbarPose: the shaft from the hand to the far
+    // end, in the right controller's forward/right/up. Bar centreline in the
+    // bone frame measured from v_crowbar (VVD through poseToBone): z -13.5 ..
+    // 13.5 at y ~1.5.
+    void NoteDrawnCrowbarBar(VR* vr, unsigned char* hdr, const float* bones, int nBones, const Vector& ctrl)
+    {
+        static unsigned char* s_hdr = nullptr;
+        static int s_bar = -1;
+        if (!vr || !hdr || !bones)
+            return;
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_bar = FindStudioBoneIndex(hdr, "crowbar_new");
+            Game::logMsg("Crowbar hit bar: bone crowbar_new %d", s_bar);
+        }
+        if (s_bar < 0 || s_bar >= nBones)
+            return;
+        const float* m = bones + s_bar * 12;
+        auto pt = [&](float x, float y, float z) {
+            return Vector(m[0] * x + m[1] * y + m[2] * z + m[3],
+                m[4] * x + m[5] * y + m[6] * z + m[7],
+                m[8] * x + m[9] * y + m[10] * z + m[11]);
+        };
+        const Vector a = pt(0.f, 1.5f, -13.5f);
+        const Vector b = pt(0.f, 1.5f, 13.5f);
+        // Hand end = the end nearer the controller; the sweep starts at the
+        // controller projected on the bar so it does not run through the hand.
+        const bool aNear = (a - ctrl).LengthSqr() < (b - ctrl).LengthSqr();
+        const Vector nearEnd = aNear ? a : b;
+        const Vector farEnd = aNear ? b : a;
+        Vector along = farEnd - nearEnd;
+        const float len = VectorNormalize(along);
+        if (len < 1.f)
+            return;
+        const float t = std::clamp((ctrl - nearEnd).Dot(along), 0.f, len);
+        const Vector start = nearEnd + along * t;
+        Vector f, r, u;
+        QAngle::AngleVectors(vr->GetRightControllerAbsAngle(), &f, &r, &u);
+        const Vector ds = start - ctrl, dt = farEnd - ctrl;
+        vr->NoteDrawnCrowbarBar(Vector(ds.Dot(f), ds.Dot(r), ds.Dot(u)), Vector(dt.Dot(f), dt.Dot(r), dt.Dot(u)));
+        static int s_log = 0;
+        if (s_log < 3 && ++s_log)
+            Game::logMsg("Crowbar hit bar: start %.1f/%.1f/%.1f tip %.1f/%.1f/%.1f (controller fwd/right/up, units)",
+                ds.Dot(f), ds.Dot(r), ds.Dot(u), dt.Dot(f), dt.Dot(r), dt.Dot(u));
+    }
+
     bool CollapseViewmodelArmBones(unsigned char* hdr, float* bones, int nBones)
     {
         struct Cache
@@ -4318,6 +4366,153 @@ namespace
     void ApplyMagReloadBonesInner(VR* vr, unsigned char* hdr, float* bones, int nBones,
         const Vector& gunOrigin, const QAngle& gunAng, float vmScale);
 
+    // .357 extras after the loader is placed (user, 2026-11-18):
+    // - the speed loader (bind pose ~11 units under the gun) is hidden unless
+    //   it is in the hand, falling, or going in (stock clip, cycle >= 0.6):
+    //   the idle pose left an empty loader hanging under the revolver;
+    // - the bullets ride in the cylinder while it swings out, then fall out
+    //   of it once it is open (the frozen stock clip had them where the
+    //   stock left hand was), and are gone until the loader brings new ones;
+    // - in the hand / falling, the loader carries bullets (their place in the
+    //   loader is sampled from the stock clip the first time it goes in).
+    void Apply357Extras(unsigned char* hdr, float* bones, int nBones, const QAngle& gunAng, float vmScale)
+    {
+        if (MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeapon357 || !hdr || !bones)
+            return;
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_loader = -1, s_chamber = -1, s_bullet[6]{};
+        static thread_local bool s_ok = false;
+        static thread_local float s_inCyl[6][3][4]{};   // bullet relative to Chamber, idle
+        static thread_local bool s_inCylValid = false;
+        static thread_local float s_inLoader[6][3][4]{}; // bullet relative to speed_loader, stock insert
+        static thread_local bool s_inLoaderValid = false;
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_loader = FindStudioBoneIndex(hdr, "speed_loader");
+            s_chamber = FindStudioBoneIndex(hdr, "Chamber");
+            s_ok = s_loader >= 0 && s_loader < nBones && s_chamber >= 0 && s_chamber < nBones;
+            for (int i = 0; i < 6; ++i)
+            {
+                char n[16];
+                std::snprintf(n, sizeof(n), "Bullet%d", i + 1);
+                s_bullet[i] = FindStudioBoneIndex(hdr, n);
+                s_ok = s_ok && s_bullet[i] >= 0 && s_bullet[i] < nBones;
+            }
+            s_inCylValid = false;
+            Game::logMsg("Mag reload: 357 extras loader %d chamber %d bullets %d..%d ok=%d",
+                s_loader, s_chamber, s_bullet[0], s_bullet[5], s_ok ? 1 : 0);
+        }
+        if (!s_ok)
+            return;
+        float (*all)[3][4] = reinterpret_cast<float (*)[3][4]>(bones);
+        auto hide = [&](int b) {
+            for (int r = 0; r < 3; ++r)
+                all[b][r][0] = all[b][r][1] = all[b][r][2] = 0.f;
+        };
+        auto relTo = [&](int parent, int child, float out[3][4]) {
+            float inv[3][4];
+            if (!InvertMatrix3x4General(all[parent], inv))
+                return false;
+            MulMatrix3x4(inv, all[child], out);
+            return true;
+        };
+        const DWORD now = GetTickCount();
+        const int st = MagReload::g_State.load(std::memory_order_relaxed);
+        const bool scrubbing = MagReload::g_ScrubSeq.load(std::memory_order_relaxed) != nullptr;
+        const float cycle = MagReload::g_ScrubCycle.load(std::memory_order_relaxed);
+        const bool inserting = scrubbing && cycle >= 0.6f;
+        const unsigned dropTick = MagReload::g_DropTick.load(std::memory_order_relaxed);
+        const bool loaderFalling = MagReload::g_DropFrom.load() == 1 && dropTick && now - dropTick < 1200;
+        const bool loaderOurs = st == MagReload::kInHand || (st == MagReload::kEmpty && !inserting && loaderFalling);
+
+        if (!scrubbing && (st == MagReload::kLoaded || st == MagReload::kDry))
+        {
+            // Idle: bullets in the cylinder as the gun shows them.
+            bool ok = true;
+            for (int i = 0; i < 6 && ok; ++i)
+                ok = relTo(s_chamber, s_bullet[i], s_inCyl[i]);
+            s_inCylValid = ok;
+            hide(s_loader);
+            return;
+        }
+        if (inserting)
+        {
+            // The stock clip's loader carries the new bullets in.
+            if (!s_inLoaderValid && cycle < 0.66f)
+            {
+                bool ok = true;
+                for (int i = 0; i < 6 && ok; ++i)
+                    ok = relTo(s_loader, s_bullet[i], s_inLoader[i]);
+                s_inLoaderValid = ok;
+                Game::logMsg("Mag reload: 357 bullets in the loader sampled (%d)", ok ? 1 : 0);
+            }
+            return;
+        }
+        if (!loaderOurs)
+            hide(s_loader);
+
+        // Bullets: in the loader while it is in the hand or falling.
+        if (loaderOurs)
+        {
+            for (int i = 0; i < 6; ++i)
+            {
+                if (s_inLoaderValid)
+                    MulMatrix3x4(all[s_loader], s_inLoader[i], all[s_bullet[i]]);
+                else
+                    hide(s_bullet[i]);
+            }
+            return;
+        }
+        // Cylinder opening / open: the old bullets.
+        const unsigned eject = MagReload::g_357EjectTick.load(std::memory_order_relaxed);
+        static thread_local unsigned s_ejectSeen = 0;
+        static thread_local float s_ejectStart[6][3][4]{};
+        if (!scrubbing || !s_inCylValid)
+        {
+            for (int i = 0; i < 6; ++i)
+                hide(s_bullet[i]);
+            return;
+        }
+        float seated[6][3][4];
+        for (int i = 0; i < 6; ++i)
+            MulMatrix3x4(all[s_chamber], s_inCyl[i], seated[i]);
+        // Opening (cycle 0.02 -> 0.5): still in the cylinder. Open (held at
+        // 0.5): out for 1.2 s from the eject, then gone (also when back from
+        // a weapon switch with the cylinder open).
+        const float te = eject ? (now - eject) * 0.001f : 99.f;
+        if (cycle < 0.499f)
+        {
+            for (int i = 0; i < 6; ++i)
+                std::memcpy(all[s_bullet[i]], seated[i], sizeof(seated[i]));
+            return;
+        }
+        if (s_ejectSeen != eject)
+        {
+            s_ejectSeen = eject;
+            std::memcpy(s_ejectStart, seated, sizeof(seated));
+        }
+        if (te >= 1.2f)
+        {
+            for (int i = 0; i < 6; ++i)
+                hide(s_bullet[i]);
+            return;
+        }
+        // Pushed out of the back of the cylinder, then falling.
+        Vector f, r, u;
+        QAngle::AngleVectors(gunAng, &f, &r, &u);
+        for (int i = 0; i < 6; ++i)
+        {
+            const float push = (std::min)(te, 0.08f) * 60.f * vmScale;
+            const Vector spread = (r * ((i % 3) - 1.f) + u * ((i / 3) - 0.5f)) * (6.f * vmScale * te);
+            const Vector d = f * -push + spread - Vector(0.f, 0.f, (std::min)(0.5f * 386.f * te * te, 48.f));
+            std::memcpy(all[s_bullet[i]], s_ejectStart[i], sizeof(s_ejectStart[i]));
+            all[s_bullet[i]][0][3] += d.x;
+            all[s_bullet[i]][1][3] += d.y;
+            all[s_bullet[i]][2][3] += d.z;
+        }
+    }
+
     void ApplyMagReloadBones(VR* vr, unsigned char* hdr, float* bones, int nBones,
         const Vector& gunOrigin, const QAngle& gunAng, float vmScale)
     {
@@ -4337,6 +4532,7 @@ namespace
         if (track)
             std::memcpy(before, bones + s_mag * 12, sizeof(before));
         ApplyMagReloadBonesInner(vr, hdr, bones, nBones, gunOrigin, gunAng, vmScale);
+        Apply357Extras(hdr, bones, nBones, gunAng, vmScale);
         if (!track)
             return;
         float* m = bones + s_mag * 12;
@@ -4704,7 +4900,9 @@ namespace
                     m[11] += ax.z * depth;
                 }
                 MagReload::g_RpgInsert.store(s_engaged ? std::clamp(1.f - along / (0.95f * len), 0.f, 1.f) : -1.f);
-                MagReload::g_NearWell.store(s_engaged && along <= 1.5f * vmScale);
+                // Seats by itself 70 % in (user, 2026-11-18: had to push
+                // further than expected; was along <= 1.5 units = all the way).
+                MagReload::g_NearWell.store(s_engaged && along <= 0.3f * 0.95f * len);
                 static thread_local DWORD s_rpgLogMs = 0;
                 if (now - s_rpgLogMs > 1000)
                 {
@@ -9524,6 +9722,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     LogGunFistVsController(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot,
                         modelName);
                 }
+                if (m_VR->m_VmClass.crowbar)
+                    NoteDrawnCrowbarBar(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot);
                 ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, targetAng,
                     needScale ? scale : 1.f);
                 ApplyGrenadePinBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,

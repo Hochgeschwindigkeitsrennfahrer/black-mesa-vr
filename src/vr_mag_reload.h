@@ -62,6 +62,7 @@ namespace MagReload
     extern std::atomic<bool> g_NeedRack;    // chamber empty: the bolt/slide is grabbable
     extern std::atomic<unsigned> g_DropTick; // a magazine left the gun/hand at this GetTickCount
     extern std::atomic<int> g_DropFrom;     // 0 = from the gun, 1 = from the hand
+    extern std::atomic<unsigned> g_357EjectTick; // .357 cylinder open: old bullets fall out from here
     extern std::atomic<int> g_DisplayClip;  // ammo HUD count while on (-1 = the game's)
 
     // Stock clip scrubbed by the hands: sequence label + cycle, frozen (the

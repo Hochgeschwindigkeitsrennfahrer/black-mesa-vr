@@ -20988,6 +20988,7 @@ std::atomic<float> MagReload::g_RpgInsert{ -1.f };
 std::atomic<float> MagReload::g_LeftPalmLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
+std::atomic<unsigned> MagReload::g_357EjectTick{ 0 };
 std::atomic<bool> MagReload::g_PinWeapon{ false };
 std::atomic<int> MagReload::g_PinState{ MagReload::kPinIn };
 std::atomic<unsigned> MagReload::g_PinDropTick{ 0 };
@@ -21185,6 +21186,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         int lastClip = -1;
         int shells = -1;      // shotgun: shells the hands put in the tube
         bool needPump = false;
+        bool spentHull = false; // shotgun: a fired hull waits for the back stroke
     };
     static WeaponState s_w[kWeaponCount];
     static bool s_reloadWas = false, s_gripWas = false, s_attackWas = false;
@@ -21376,9 +21378,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
                 Game::logMsg("Mag reload: rpg rocket seated (needReload %d, game reload %d)", need, s_pulseReload ? 1 : 0);
             }
-            else if (released && in >= 0.5f)
+            else if (released && in >= 0.35f)
             {
-                // Let go at least half in: it slides home by itself (user:
+                // Let go at least a third in: it slides home by itself (user:
                 // fun beats finicky; a half-pushed rocket must not leave the
                 // gun empty in a fight).
                 w.mag = kLoaded;
@@ -21395,7 +21397,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 s_wasEngaged = false;
                 g_DropFrom.store(1);
                 g_DropTick.store(now ? now : 1);
-                Game::logMsg("Mag reload: rpg rocket dropped (%s)", engaged ? "less than half in" : "not at the tube");
+                Game::logMsg("Mag reload: rpg rocket dropped (%s)", engaged ? "less than a third in" : "not at the tube");
             }
         }
         else
@@ -21439,6 +21441,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         {
             w.shells = (std::max)(0, w.shells - (w.lastClip - clip));
             w.needPump = true;
+            w.spentHull = true;
         }
         // The pump only moves when it needs working (after a shot); else it
         // stays locked forward, so a hand resting on it never pulls it back,
@@ -21500,8 +21503,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 const char* back = m_Game ? m_Game->PumpHalfSound(false) : nullptr;
                 sound(back ? back : def.boltSound);
                 PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2000, 0.7f);
-                // Back stroke: the spent hull flies out of the port.
-                g_EjectTick.store(now ? now : 1);
+                // Back stroke: the spent hull flies out of the port, once
+                // per shot (pumping an empty gun ejected a hull each time,
+                // user 2026-11-18).
+                if (w.spentHull)
+                {
+                    w.spentHull = false;
+                    g_EjectTick.store(now ? now : 1);
+                }
             }
             // Forward stroke counts from halfway (user: a pump that did not
             // come all the way forward was still "needs pump"); the pump
@@ -21595,7 +21604,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
             Game::logMsg("Mag reload: 357 cylinder open (clip %d, game reload %d)", clip, s_pulseReload ? 1 : 0);
         }
         if (s_phase == 1 && scrub(0.02f, 0.5f, 0.7f))
+        {
             s_phase = 2;
+            g_357EjectTick.store(now ? now : 1);
+        }
         else if (s_phase == 2)
             scrub(0.5f, 0.5f, 1.f);
         if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip() && gameRounds == 0)

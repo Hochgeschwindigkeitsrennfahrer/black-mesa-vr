@@ -413,6 +413,7 @@ namespace bmvr
     extern bool g_SkipDrawAnim;          // draw/holster/pickup animations show the idle pose
     extern bool g_ThrowStroke;           // frag throw velocity from the throwing stroke (far point of the hold -> release)
     extern bool g_DeltaSeqIdle;          // a delta layer as the main viewmodel sequence shows idle (tau/crossbow)
+    extern bool g_CrowbarHitDrawnBar;    // crowbar hit sweep along the drawn v_crowbar bar (not the old HL2VR grip frame)
     extern bool g_TwoHandNoLower;        // both hands on the gun: no lowered clip at friendlies, laser stays on
     extern bool g_TwoHandLoweredFollow;  // two-hand support glove follows the gun's lowered clip (aimed at a friendly)
     extern bool g_ScopeClipIdle;         // crossbow to/from-scope clips show idle (the clip moves the gun to the eye)

@@ -1456,6 +1456,9 @@ public:
     bool IsPerformingMelee() const { return m_PerformingMelee; }
     bool TryGetMeleeBladeViewAngles(QAngle& out) const;
     bool TryGetMeleeTraceOrigin(Vector& origin) const;
+    // Drawn v_crowbar bar (hand end projected on the bar, far end), in the
+    // right controller's forward/right/up, noted by the viewmodel draw.
+    void NoteDrawnCrowbarBar(const Vector& startLocal, const Vector& tipLocal);
     // Visible crowbar strike point and blade axis while a VR swing is live, so
     // the engine's melee trace runs along the bar the player can see.
     bool TryGetMeleeAim(Vector& origin, QAngle& angles) const;
@@ -1698,6 +1701,9 @@ private:
     bool m_MeleeNewSwing = true;
     void* m_MeleeHitEntity = nullptr;
     Vector m_MeleeTraceOrigin{};
+    Vector m_DrawnCrowbarStartLocal{};
+    Vector m_DrawnCrowbarTipLocal{};
+    DWORD m_DrawnCrowbarMs = 0;
     QAngle m_MeleeBladeAngles{};
     bool m_MeleeBladeAnglesValid = false;
     Vector m_CrowbarPrevTipLocal{};
