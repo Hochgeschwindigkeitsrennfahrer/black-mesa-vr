@@ -9445,8 +9445,50 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     passThrough();
 }
 
+namespace
+{
+    // Thrown snark flight log (2.5 s after a hand throw): where it goes and
+    // whether its velocity is still the one set (snarks hop and hunt on
+    // their own). Server entity, same process (listen server); reads are
+    // SEH-guarded since it may die meanwhile.
+    void* g_SnarkTraceEnt = nullptr;
+    int g_SnarkTraceOrgOff = -1;
+    DWORD g_SnarkTraceUntil = 0;
+    DWORD g_SnarkTraceStart = 0;
+    void TraceThrownSnark()
+    {
+        if (!g_SnarkTraceEnt || g_SnarkTraceOrgOff < 0)
+            return;
+        const DWORD now = GetTickCount();
+        if (now > g_SnarkTraceUntil)
+        {
+            g_SnarkTraceEnt = nullptr;
+            return;
+        }
+        static DWORD s_last;
+        if (now - s_last < 100)
+            return;
+        s_last = now;
+        Vector org{}, vel{};
+        BMVR_TRY
+        {
+            const char* e = static_cast<const char*>(g_SnarkTraceEnt);
+            org = *reinterpret_cast<const Vector*>(e + g_SnarkTraceOrgOff);
+            vel = *reinterpret_cast<const Vector*>(e + 0x218);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_SnarkTraceEnt = nullptr;
+            return;
+        }
+        Game::logMsg("Snark flight +%lums: pos (%.0f,%.0f,%.0f) vel (%.0f,%.0f,%.0f) %.0f u/s",
+            static_cast<unsigned long>(now - g_SnarkTraceStart), org.x, org.y, org.z, vel.x, vel.y, vel.z, vel.Length());
+    }
+}
+
 bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime, CUserCmd* cmd)
 {
+    TraceThrownSnark();
     BMVR_PROF("hook CreateMove");
     (void)edx;
     if (!hkCreateMove.fOriginal)
@@ -14789,7 +14831,11 @@ void __fastcall Hooks::dSnarkThrow(void* weapon, void* edx, void* owner, float f
     g_VrGrenadeSpawn = true;
     g_VrSnarkThrow = true;
     g_VrSnarkEntity = nullptr;
-    hkSnarkThrow.fOriginal(weapon, edx, owner, fspeed, uspeed);
+    // Zero speeds: the game's forward/up speeds reach the snark after this
+    // call returns (headless flight log 2026-11-19: the hand velocity set
+    // below came back with ~+780 u/s forward, so even a 0.1 scale flew at
+    // ~820 u/s). Only the hand's velocity should move it.
+    hkSnarkThrow.fOriginal(weapon, edx, owner, 0.f, 0.f);
     g_VrGrenadeSpawn = false;
     g_VrSnarkThrow = false;
     void* snark = g_VrSnarkEntity;
@@ -14817,6 +14863,25 @@ void __fastcall Hooks::dSnarkThrow(void* weapon, void* edx, void* owner, float f
     {
         BMVR_TRY { s_setVel(snark, &vel); }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+    // Flight log: find the abs origin as the vector at the placed point.
+    static int s_flightLogs;
+    if (snark && s_flightLogs < 6)
+    {
+        ++s_flightLogs;
+        g_SnarkTraceOrgOff = -1;
+        BMVR_TRY
+        {
+            const char* e = static_cast<const char*>(snark);
+            for (int off = 0x100; off < 0x400 && g_SnarkTraceOrgOff < 0; off += 4)
+                if ((*reinterpret_cast<const Vector*>(e + off) - g_VrSpawnPoint).LengthSqr() < 16.f * 16.f)
+                    g_SnarkTraceOrgOff = off;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        g_SnarkTraceEnt = g_SnarkTraceOrgOff >= 0 ? snark : nullptr;
+        g_SnarkTraceStart = GetTickCount();
+        g_SnarkTraceUntil = g_SnarkTraceStart + 2500;
+        Game::logMsg("Snark flight log: origin at +0x%X", g_SnarkTraceOrgOff);
     }
     Game::logMsg("Snark throw: hand %.0f u/s x %.2f -> (%.0f,%.0f,%.0f) (game fspeed %.0f uspeed %.0f), snark %s",
         hand.Length(), bmvr::g_SnarkThrowScale, vel.x, vel.y, vel.z, fspeed, uspeed,
