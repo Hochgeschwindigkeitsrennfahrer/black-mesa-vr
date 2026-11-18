@@ -233,6 +233,14 @@ public:
     // fspeed + up x uspeed + a share of the owner's velocity, then Create
     // ("npc_snark") -> placement cdecl (ent, pos*, ang*, owner) -> bool,
     // then SetAbsVelocity (thiscall ent, const Vector*).
+    // Server weapon m_iClip1 (datamap FIELD_INTEGER "m_iClip1", .data
+    // 0x7B2778 in beta 26713286: type 5, offset 0x4E0). Reached through
+    // engine VEngineServer021 vtable slot 19 = PEntityOfEntIndex (index
+    // bounds check, EDICT_NUM, FL_EDICT_FREE; disassembled 2026-11-18) and
+    // edict_t +0xC (m_pUnk = the CBaseEntity).
+    static constexpr int kServerWeapon_Clip1 = 0x4E0;
+    static constexpr int kEngineServer_PEntityOfEntIndexVt = 19;
+    static constexpr int kEdict_Unknown = 0xC;
     static constexpr int kSnarkThrow_Server = 0x48D730;
     static constexpr int kSnarkPlace_Server = 0x483BF0;
     static constexpr int kSetAbsVelocity_Server = 0x11DC90;

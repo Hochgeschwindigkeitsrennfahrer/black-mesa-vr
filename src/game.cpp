@@ -260,6 +260,57 @@ C_BaseEntity* Game::ResolveEntityFromHandle(uint32_t handle)
     return idx > 0 ? static_cast<C_BaseEntity*>(entity) : nullptr;
 }
 
+bool Game::SetServerActiveWeaponClip(int expectClip, int newClip)
+{
+    void* player = GetLocalPlayerEntity();
+    // Black Mesa is single player: the server runs in this process.
+    if (!player)
+        return false;
+    static void* s_engineServer = nullptr;
+    static bool s_tried = false;
+    if (!s_tried)
+    {
+        s_tried = true;
+        s_engineServer = GetInterfaceAny("engine.dll", { "VEngineServer021" });
+        Game::logMsg("Mag discard: VEngineServer021 %s", s_engineServer ? "found" : "missing");
+    }
+    if (!s_engineServer)
+        return false;
+    using tPEntityOfEntIndex = void*(__thiscall*)(void*, int);
+    bool ok = false;
+    int serverClip = -1;
+    BMVR_TRY
+    {
+        constexpr int kActiveWeapon = 0xFA4;
+        const uint32_t h = *reinterpret_cast<const uint32_t*>(reinterpret_cast<uintptr_t>(player) + kActiveWeapon);
+        const int index = static_cast<int>(h & 0xFFF);
+        if (index > 0 && index < 0xFFF)
+        {
+            void** vt = *reinterpret_cast<void***>(s_engineServer);
+            auto pEnt = reinterpret_cast<tPEntityOfEntIndex>(vt[Offsets::kEngineServer_PEntityOfEntIndexVt]);
+            void* edict = pEnt(s_engineServer, index);
+            void* entity = edict ? *reinterpret_cast<void**>(static_cast<char*>(edict) + Offsets::kEdict_Unknown) : nullptr;
+            if (entity)
+            {
+                int* clip = reinterpret_cast<int*>(static_cast<char*>(entity) + Offsets::kServerWeapon_Clip1);
+                serverClip = *clip;
+                if (serverClip == expectClip && newClip >= 0 && newClip <= serverClip)
+                {
+                    *clip = newClip;
+                    ok = true;
+                }
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        ok = false;
+    }
+    Game::logMsg("Mag discard: server clip %d (expected %d) -> %s", serverClip, expectClip,
+        ok ? std::to_string(newClip).c_str() : "not changed");
+    return ok;
+}
+
 C_BaseEntity* Game::GetActiveWeaponEntity()
 {
     void* player = GetLocalPlayerEntity();

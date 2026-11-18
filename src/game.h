@@ -138,6 +138,10 @@ public:
     int ReadWeaponClip(C_BaseEntity* weapon);
     // The local player's reserve of the weapon's primary ammo (-1 = unknown).
     int ReadWeaponReserve(C_BaseEntity* weapon);
+    // Single player: set the active weapon's clip on the server (the game's
+    // own count). Only when the server clip equals expectClip. Returns false
+    // (nothing written) when the server weapon cannot be reached safely.
+    bool SetServerActiveWeaponClip(int expectClip, int newClip);
     bool WeaponHasNoAmmo(C_BaseEntity* weapon);
     // m_nBody (bodygroups) of a client entity; -1 if unknown.
     int ReadEntityBody(void* entity);

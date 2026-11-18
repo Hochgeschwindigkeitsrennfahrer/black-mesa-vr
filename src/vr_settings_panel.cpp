@@ -206,6 +206,7 @@ namespace
             { "Black Mesa hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
             { "Manual reloads (mags, shells, RPG)", RowKind::Toggle, "VrMagReload", &bmvr::g_VrMagReload, nullptr, 0, 0, 0, nullptr },
             { "Grenade pin by hand (with manual magazines)", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
+            { "Ejected rounds are lost (manual reloads)", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
             { "Reload hints (pump / charging handle)", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
             { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
             { "Support hand: gun's finger pose + pinch", RowKind::Toggle, "VrStockHandPose", &bmvr::g_VrStockHandPose, nullptr, 0, 0, 0, nullptr },

@@ -762,6 +762,10 @@ namespace bmvr
     // Small "PUMP IT" / "PULL THE CHARGING HANDLE" toasts on a dead trigger
     // (twice each per game start). On by default.
     extern bool g_VrReloadHints;
+    // Manual reloads: rounds left in an ejected magazine / an opened .357
+    // cylinder are lost (not topped up again); a chambered MP5/glock round
+    // stays. Only while there is reserve ammo (user, 2026-11-18).
+    extern bool g_VrMagDiscard;
     // Eye near clip plane, game units (BM's own is 7, ~18 cm at the VR
     // scale). Lower = guns/hands held at the face clip later (sights), at
     // some depth precision far away. Only ever lowers the game's value.

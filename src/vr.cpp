@@ -21392,7 +21392,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // The reload button only ejects; the game's reload runs when a magazine
     // is seated (it keeps the ammo count and the reserve the game's own).
     buttons &= ~IN_RELOAD;
-    const int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
+    int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
     const int reserve = m_Game ? m_Game->ReadWeaponReserve(m_Game->GetActiveWeaponEntity()) : -1;
     // Rounds the game still holds for this gun (its own magazine count, kept
     // through the hands' swaps, plus the reserve): a new magazine/shell only
@@ -21754,6 +21754,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_phase = 2; // back from a weapon switch with the cylinder open
         if ((w.mag == kLoaded || w.mag == kDry) && reload && !s_reloadWas)
         {
+            // Opening the cylinder dumps every round (VrMagDiscard): the
+            // loader then brings six from the reserve.
+            if (bmvr::g_VrMagDiscard && m_Game && clip > 0 && reserve > 0
+                && m_Game->SetServerActiveWeaponClip(clip, 0))
+            {
+                Game::logMsg("Mag reload: 357 cylinder dumped %d live rounds, lost", clip);
+                clip = 0;
+            }
             w.mag = kEmpty;
             s_phase = 1;
             s_phaseMs = now;
@@ -21912,6 +21920,19 @@ void VR::UpdateMagReload(uint32_t& buttons)
     if ((w.mag == kLoaded || w.mag == kDry) && reload && !s_reloadWas)
     {
         g_EjectedEmpty.store(w.mag == kDry || clip <= 0);
+        // Rounds left in the magazine go with it (VrMagDiscard); a round in
+        // the MP5/glock chamber stays. The game's reload below then takes a
+        // full magazine from the reserve.
+        if (bmvr::g_VrMagDiscard && m_Game && clip > 0 && reserve > 0)
+        {
+            const int keep = (weapon != kWeaponCrossbow && w.mag == kLoaded && w.chambered) ? 1 : 0;
+            if (clip > keep && m_Game->SetServerActiveWeaponClip(clip, keep))
+            {
+                Game::logMsg("Mag reload: %s magazine ejected with %d rounds, lost (%d stays in the chamber, reserve %d)",
+                    def.name, clip - keep, keep, reserve);
+                clip = keep;
+            }
+        }
         w.mag = kEmpty;
         g_DropFrom.store(0);
         g_DropTick.store(now ? now : 1);
@@ -22030,7 +22051,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     g_DisplayClip.store((w.mag == kLoaded) ? clip : 0);
     g_State.store(w.mag);
     if (clip > w.lastClip && w.lastClip >= 0)
-        Game::logMsg("Mag reload: %s clip %d -> %d (mag %d)", def.name, w.lastClip, clip, w.mag);
+        Game::logMsg("Mag reload: %s clip %d -> %d (mag %d, reserve %d)", def.name, w.lastClip, clip, w.mag, reserve);
     w.lastClip = clip;
     s_reloadWas = reload;
     s_gripWas = gripDown;

@@ -146,6 +146,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrStockHandPose, nullptr },
             { "bmvr_support_hand_lock", "VR: support hand on the gun = the gun's own stock left hand (left glove hidden; needs Gun's own right hand)",
               Kind::Bool, 0.f, 1.f, &g_VrSupportHandLock, nullptr },
+            { "bmvr_mag_discard", "VR: manual reloads: rounds left in an ejected magazine / opened .357 cylinder are lost",
+              Kind::Bool, 0.f, 1.f, &g_VrMagDiscard, nullptr },
             { "bmvr_hud_health_on_gun", "VR: holding the gun with both hands, the health panel sits above the ammo panel on the gun",
               Kind::Bool, 0.f, 1.f, &g_HudHealthOnGun, nullptr },
             { "bmvr_support_hand_force", "VR test: show the gun's own left hand as if the left hand held the gun",

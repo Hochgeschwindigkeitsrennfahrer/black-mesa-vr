@@ -336,6 +336,7 @@ namespace bmvr
     bool g_VrMagReload = false;
     bool g_VrGrenadePin = true;
     bool g_VrReloadHints = true;
+    bool g_VrMagDiscard = true;
     float g_VrNearZ = 7.f;
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = true;
@@ -1181,6 +1182,8 @@ namespace bmvr
                 g_VrGrenadePin = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrNearZ") == 0)
                 g_VrNearZ = static_cast<float>(std::atof(val));
+            else if (std::strcmp(n, "VrMagDiscard") == 0)
+                g_VrMagDiscard = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrReloadHints") == 0)
                 g_VrReloadHints = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGunRightHand") == 0)
