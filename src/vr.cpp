@@ -21582,6 +21582,25 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // The reload button only ejects; the game's reload runs when a magazine
     // is seated (it keeps the ammo count and the reserve the game's own).
     buttons &= ~IN_RELOAD;
+    // Mid weapon switch the viewmodel can name this gun while the active
+    // weapon (whose clip is read) is still the previous one; a lower clip was
+    // then counted as shots (user 2026-11-18: shotgun tube showed 0 after a
+    // switch). Skip the frame until both agree.
+    if (m_Game)
+    {
+        const char* activeModel = m_Game->GetActiveWeaponModelName();
+        if (!activeModel || !std::strstr(activeModel, Def(weapon).name))
+        {
+            static DWORD s_mismatchLogMs = 0;
+            if (now - s_mismatchLogMs > 2000)
+            {
+                s_mismatchLogMs = now;
+                Game::logMsg("Mag reload: active weapon '%s' is not the %s yet, frame skipped",
+                    activeModel ? activeModel : "?", Def(weapon).name);
+            }
+            return;
+        }
+    }
     int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
     const int reserve = m_Game ? m_Game->ReadWeaponReserve(m_Game->GetActiveWeaponEntity()) : -1;
     // Rounds the game still holds for this gun (its own magazine count, kept
