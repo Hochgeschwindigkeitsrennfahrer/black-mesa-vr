@@ -322,8 +322,8 @@ namespace bmvr
     float g_VrHandsRightGripRotY = 0.f;
     float g_VrHandsRightGripRotZ = -180.f;
     bool g_VrHandsUseHevGloves = true;
-    bool g_VrHandsBlackMesa = false;
-    bool g_VrGunRightHand = false;
+    bool g_VrHandsBlackMesa = true;
+    bool g_VrGunRightHand = true;
     bool g_VrStockHandPose = true;
     bool g_VrSupportHandLock = true;
     bool g_VrSatchelHands = true;
@@ -337,17 +337,18 @@ namespace bmvr
     float g_VrPinchThumb = 0.50f;
     float g_VrPinchIndex = 0.30f;
     bool g_VrPinchForce = false;
-    bool g_VrMagReload = false;
+    bool g_PhysicalWeapons = false;
+    bool g_VrMagReload = true;
     bool g_VrGrenadePin = true;
     bool g_VrReloadHints = true;
     bool g_VrMagDiscard = true;
-    float g_VrNearZ = 7.f;
+    float g_VrNearZ = 4.f;
     bool g_VrRecoil = false;
-    bool g_PhysicalLadders = true;
+    bool g_PhysicalLadders = false;
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
     bool g_PhysicalLadderSmooth = true;
     bool g_LadderBodyFollowsArms = true;
-    float g_LadderGunHand = 0.f;
+    float g_LadderGunHand = 1.f;
     bool g_LadderStickClimb = false;
     float g_LadderHandBack = 3.f;
     float g_VrRecoilScale = 1.f;
@@ -1180,6 +1181,8 @@ namespace bmvr
                 if (v >= 0.25f && v <= 3.f)
                     g_VrRecoilScale = v;
             }
+            else if (std::strcmp(n, "PhysicalWeapons") == 0)
+                g_PhysicalWeapons = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrMagReload") == 0)
                 g_VrMagReload = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGrenadePin") == 0)
@@ -1198,8 +1201,6 @@ namespace bmvr
                 g_VrSatchelHands = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSupportHandLock") == 0)
                 g_VrSupportHandLock = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "VrHandsBlackMesa") == 0)
-                g_VrHandsBlackMesa = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesaScale") == 0)
                 g_VrHandsBlackMesaScale = static_cast<float>(std::atof(val));
             else if (std::strcmp(n, "CompositorPostPresentHandoff") == 0)

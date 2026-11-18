@@ -3913,7 +3913,7 @@ namespace
     // brings its hand to the gun hands' size.
     bool GunRightHandForModel(const char* modelName)
     {
-        if (!bmvr::g_VrGunRightHand || bmvr::g_LeftHanded || !modelName)
+        if (!bmvr::PhysicalWeapon(bmvr::g_VrGunRightHand) || bmvr::g_LeftHanded || !modelName)
             return false;
         // Not the gluon (v_egon): its idle pose holds the right hand a hand's
         // width beside the top grip, floating off the gun (headless dump
@@ -4227,7 +4227,7 @@ namespace
     // the Y fix act on every bone alike, so they cancel in wrist^-1 * bone.
     void SampleStockOffhandFingers(unsigned char* hdr, const float* bones12, int nBones)
     {
-        if (!bmvr::g_VrStockHandPose || !bmvr::g_VrHandsBlackMesa || bmvr::g_LeftHanded || !Hooks::m_VR
+        if (!bmvr::PhysicalWeapon(bmvr::g_VrStockHandPose) || !bmvr::g_VrHandsBlackMesa || bmvr::g_LeftHanded || !Hooks::m_VR
             || !Hooks::m_VR->m_VmClass.twoHand || !hdr || !bones12)
             return;
         if (MagReload::g_ScrubActive.load(std::memory_order_relaxed)
@@ -5591,7 +5591,7 @@ namespace
 
     void Apply357BrassMute(unsigned char* hdr)
     {
-        const bool mute = bmvr::g_VrMagReload;
+        const bool mute = bmvr::PhysicalWeapon(bmvr::g_VrMagReload);
         if (!hdr)
             return;
         BrassHdrState* slot = nullptr;
@@ -9935,7 +9935,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     // hands viewmodel take turns here. Models outside GunRightHandForModel
     // get hideArms and are zeroed again on their next draw.
     static bool s_gunRightHand = false;
-    const bool gunRightHandSetting = bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded;
+    const bool gunRightHandSetting = bmvr::PhysicalWeapon(bmvr::g_VrGunRightHand) && !bmvr::g_LeftHanded;
     if (isViewmodel && gunRightHandSetting != s_gunRightHand)
     {
         s_gunRightHand = gunRightHandSetting;
@@ -10093,7 +10093,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     // the grip; the shotgun pump keeps it (it rides the pump).
                     const bool otherGrab = MagReload::g_BoltGrab.load(std::memory_order_relaxed)
                         && MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponShotgun;
-                    t_KeepLeftHand = bmvr::g_VrSupportHandLock && !bmvr::g_LeftHanded
+                    t_KeepLeftHand = bmvr::PhysicalWeapon(bmvr::g_VrSupportHandLock) && !bmvr::g_LeftHanded
                         && SupportHandFromGunModel(modelName)
                         && m_VR->m_VmClass.twoHand && (m_VR->TwoHandGripActive() || bmvr::g_VrSupportHandForce)
                         && !MagReload::g_ScrubActive.load(std::memory_order_relaxed)

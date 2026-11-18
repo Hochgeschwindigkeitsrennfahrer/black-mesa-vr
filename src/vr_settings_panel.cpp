@@ -118,7 +118,9 @@ namespace
             { "Smooth turn speed", RowKind::Number, "TurnSpeed", nullptr, &bmvr::g_TurnSpeed, 0.05f, 0.05f, 1.f, "%.2f" },
             { "MOVEMENT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
-            { "Climb ladders with grip (hands)", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
+            // Off = stick ladders as in the stable release; the rows below only act while it is on.
+            { "LADDERS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Physical ladders (beta)", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
             { "Smooth hand climbing", RowKind::Toggle, "PhysicalLadderSmooth", &bmvr::g_PhysicalLadderSmooth, nullptr, 0, 0, 0, nullptr },
             { "Ladder distance follows arms", RowKind::Toggle, "LadderBodyFollowsArms", &bmvr::g_LadderBodyFollowsArms, nullptr, 0, 0, 0, nullptr },
             { "Gun hand on ladders", RowKind::Choice, "LadderGunHand", nullptr, &bmvr::g_LadderGunHand, 1.f, 0.f, 1.f, "Holster weapon|Needs empty hand" },
@@ -137,7 +139,7 @@ namespace
             { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
-            { "Near clip (lower = gun at the face clips later, 7 = game)", RowKind::Number, "VrNearZ", nullptr, &bmvr::g_VrNearZ, 0.5f, 1.f, 7.f, "%.1f" },
+            { "Near clip (7 = game)", RowKind::Number, "VrNearZ", nullptr, &bmvr::g_VrNearZ, 0.5f, 1.f, 7.f, "%.1f" },
             { "MENUS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Weapon menu faces the eye", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
             { "Game menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
@@ -200,25 +202,27 @@ namespace
             { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
             { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Gloves are always built from the installed game's own first-person arms.
+            { "Hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
             // The original release's look: flat gloves, HUD on the back of the hand.
-            // Built from the installed game's own first-person arms; nothing shipped.
-            { "Black Mesa hands", RowKind::Toggle, "VrHandsBlackMesa", &bmvr::g_VrHandsBlackMesa, nullptr, 0, 0, 0, nullptr },
-            { "Black Mesa hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
-            { "Manual reloads (mags, shells, RPG)", RowKind::Toggle, "VrMagReload", &bmvr::g_VrMagReload, nullptr, 0, 0, 0, nullptr },
-            { "Grenade pin by hand (with manual magazines)", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
-            { "Ejected rounds are lost (manual reloads)", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
-            { "Reload hints (pump / charging handle)", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
-            { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
-            { "Support hand: gun's finger pose + pinch", RowKind::Toggle, "VrStockHandPose", &bmvr::g_VrStockHandPose, nullptr, 0, 0, 0, nullptr },
-            { "Support hand locks to the gun", RowKind::Toggle, "VrSupportHandLock", &bmvr::g_VrSupportHandLock, nullptr, 0, 0, 0, nullptr },
-            { "Satchel: detonator in left hand", RowKind::Toggle, "VrSatchelHands", &bmvr::g_VrSatchelHands, nullptr, 0, 0, 0, nullptr },
             { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
             { "Hand on gun: right", RowKind::Number, "VrHandsGunGripRight", nullptr, &bmvr::g_VrHandsGunGripRight, 0.25f, -8.f, 8.f, "%+.2f" },
             { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
             { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
             { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
-            { "WEAPONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Off = the stable release's gun handling; the rows below only act while it is on
+            // (snarks thrown from the hand too).
+            { "PHYSICAL WEAPONS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Physical weapons (beta)", RowKind::Toggle, "PhysicalWeapons", &bmvr::g_PhysicalWeapons, nullptr, 0, 0, 0, nullptr },
+            { "Manual reloads (mags, shells, RPG)", RowKind::Toggle, "VrMagReload", &bmvr::g_VrMagReload, nullptr, 0, 0, 0, nullptr },
+            { "Grenade pin by hand", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
+            { "Ejected rounds are lost", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
+            { "Reload hints", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
+            { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
+            { "Support hand finger pose", RowKind::Toggle, "VrStockHandPose", &bmvr::g_VrStockHandPose, nullptr, 0, 0, 0, nullptr },
+            { "Support hand locks to the gun", RowKind::Toggle, "VrSupportHandLock", &bmvr::g_VrSupportHandLock, nullptr, 0, 0, 0, nullptr },
+            { "Satchel: detonator in left hand", RowKind::Toggle, "VrSatchelHands", &bmvr::g_VrSatchelHands, nullptr, 0, 0, 0, nullptr },
             { "Recoil (less with two hands)", RowKind::Toggle, "VrRecoil", &bmvr::g_VrRecoil, nullptr, 0, 0, 0, nullptr },
             { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
             { "HUD POSITION", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -667,7 +671,7 @@ namespace
             if (hand == 0 && bmvr::g_ShoulderGestures)
                 fixedLine("Shoulder", "Quick save");
             // Manual reloads: the left grip takes ammo at the left hip and works the bolt / slide / pump.
-            if (hand == 0 && bmvr::g_VrMagReload)
+            if (hand == 0 && bmvr::PhysicalWeapon(bmvr::g_VrMagReload))
                 fixedLine("Left hip", "Magazine, shells, rocket");
             if (hand == 1)
             {

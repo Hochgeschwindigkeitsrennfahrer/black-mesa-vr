@@ -733,7 +733,9 @@ namespace bmvr
     extern float g_VrHandsRightGripRotZ;
     // Prefer ripped HEV GLBs in VR/hands when present.
     extern bool g_VrHandsUseHevGloves;
-    // Gloves built from Black Mesa's own viewmodel arms (installed VPKs) instead of the glove files.
+    // Gloves built from Black Mesa's own viewmodel arms (installed VPKs). Always on
+    // (no config key since 2026-11-18); the glove files are only the fallback
+    // when building them fails. Cvar bmvr_hands_blackmesa stays for A/B tests.
     extern bool g_VrHandsBlackMesa;
     extern float g_VrHandsBlackMesaScale;
     // The weapon's own right hand (viewmodel arms, left arm + forearms collapsed) on the gun.
@@ -763,6 +765,13 @@ namespace bmvr
     extern float g_VrPinchThumb;
     extern float g_VrPinchIndex;
     extern bool g_VrPinchForce;
+    // "Physical weapons (beta)" master switch (VR panel HANDS & WEAPONS, off by
+    // default = the stable release's gun handling). The rows under it
+    // (manual reloads, grenade pin, gun's own right hand, support hand pose and
+    // lock, satchel detonator in the hand, snark hand throw, recoil) only act
+    // while it is on; read them through PhysicalWeapon().
+    extern bool g_PhysicalWeapons;
+    inline bool PhysicalWeapon(bool sub) { return g_PhysicalWeapons && sub; }
     // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
     extern bool g_VrMagReload;
     // Frag grenade: pull the pin with the left hand before it can be thrown

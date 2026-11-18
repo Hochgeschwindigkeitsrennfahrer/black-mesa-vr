@@ -116,6 +116,8 @@ namespace bmvr
               Kind::Float, -135.f, 135.f, nullptr, &g_VrHandsRollDeg },
             { "bmvr_hands_blackmesa", "VR: hands built from Black Mesa's own first-person arms (game files) instead of the glove files",
               Kind::Bool, 0.f, 1.f, &g_VrHandsBlackMesa, nullptr },
+            { "bmvr_physical_weapons", "VR: physical weapons (beta) master switch: manual reloads, grenade pin, gun's own hand, support hand pose/lock, satchel/snark hand throw, recoil",
+              Kind::Bool, 0.f, 1.f, &g_PhysicalWeapons, nullptr },
             { "bmvr_mag_reload", "VR: manual magazines, MP5 + glock (reload ejects, left grip at the left hip takes one, seat it, pull the bolt/slide)",
               Kind::Bool, 0.f, 1.f, &g_VrMagReload, nullptr },
             { "bmvr_mag_hand_forward", "VR: magazine centre ahead of the drawn left fist (game units, hand frame)",

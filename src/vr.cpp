@@ -6693,7 +6693,7 @@ void VR::UpdateVrRecoil()
     float kick = m_RecoilKickDeg.load(std::memory_order_relaxed) * expf(-dt / 0.12f);
     if (kick < 0.01f)
         kick = 0.f;
-    if (!bmvr::g_VrRecoil || !m_Game || m_EmptyHands)
+    if (!bmvr::PhysicalWeapon(bmvr::g_VrRecoil) || !m_Game || m_EmptyHands)
     {
         m_RecoilKickDeg.store(0.f, std::memory_order_relaxed);
         m_RecoilWeapon = nullptr;
@@ -21205,7 +21205,7 @@ void VR::ReloadHaptic(ReloadFeel feel)
 
 bool VR::SatchelHandsActive() const
 {
-    return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
+    return bmvr::PhysicalWeapon(bmvr::g_VrSatchelHands) && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
 }
 
 void VR::UpdateSnarkThrow(uint32_t& buttons)
@@ -21218,8 +21218,9 @@ void VR::UpdateSnarkThrow(uint32_t& buttons)
     static DWORD s_pulseUntil = 0;
     const DWORD now = GetTickCount();
     // Satchel too (VrSatchelHands): thrown from the right hand on the release.
+    // Snarks from the hand only with "Physical weapons (beta)" on.
     const bool snark = bmvr::g_VrHandThrow && !bmvr::g_LeftHanded && m_GameplayEligible
-        && (ViewmodelIsSnark() || SatchelHandsActive());
+        && ((bmvr::g_PhysicalWeapons && ViewmodelIsSnark()) || SatchelHandsActive());
     if (!snark)
     {
         s_held = false;
@@ -21263,7 +21264,7 @@ void VR::UpdateGrenadePin(uint32_t& buttons)
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
         isGrenade = m_VmClass.numpadKey == "grenade";
     }
-    const bool on = bmvr::g_VrGrenadePin && bmvr::g_VrMagReload && !bmvr::g_LeftHanded
+    const bool on = bmvr::g_VrGrenadePin && bmvr::PhysicalWeapon(bmvr::g_VrMagReload) && !bmvr::g_LeftHanded
         && isGrenade && m_HasHeldWeapon && !m_EmptyHands && m_GameplayEligible;
     static int s_state = kPinIn;
     static bool s_gripWas = false, s_trigSeen = false;
@@ -21412,7 +21413,7 @@ bool VR::OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const
 
 int VR::MagReloadWeaponNow() const
 {
-    if (!bmvr::g_VrMagReload || bmvr::g_LeftHanded || !m_HasHeldWeapon || m_EmptyHands || !m_GameplayEligible)
+    if (!bmvr::PhysicalWeapon(bmvr::g_VrMagReload) || bmvr::g_LeftHanded || !m_HasHeldWeapon || m_EmptyHands || !m_GameplayEligible)
         return MagReload::kWeaponNone;
     if (ViewmodelIsMp5())
         return MagReload::kWeaponMp5;
