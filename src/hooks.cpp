@@ -3474,6 +3474,19 @@ namespace
             ForceViewmodelIdlePose(viewmodel, hdr);
             return;
         }
+        // MP5 grenade launch (user 2026-11-18): the stock 'grenade' clip
+        // moves the left hand to the trigger on the stock after the grenade
+        // has already left; the player's own hands hold the gun in VR, so the
+        // gun stays in its idle pose (the clip has no sound events).
+        if (label && _stricmp(label, "grenade") == 0 && Hooks::m_Game
+            && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()) && Hooks::m_VR->ViewmodelIsMp5())
+        {
+            static int s_log;
+            if (s_log++ < 5)
+                Game::logMsg("MP5 grenade clip not shown (idle pose)");
+            ForceViewmodelIdlePose(viewmodel, hdr);
+            return;
+        }
         // Manual magazines: the hands do the reload, so the stock reload clip
         // (also the game's own refill after firing dry) is not shown.
         if (label && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
