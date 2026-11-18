@@ -14316,7 +14316,6 @@ void VR::NoteViewmodelModel(const char* modelName)
         if (m_VmClass.glock) flags |= kVmFlagGlock;
         if (m_VmClass.crossbow) flags |= kVmFlagCrossbow;
         if (m_VmClass.revolver) flags |= kVmFlag357;
-        if (m_VmClass.xenGun) flags |= kVmFlagXenGun;
         m_VmClassFlags.store(flags, std::memory_order_relaxed);
         Game::logMsg("Viewmodel model %s", modelName);
     }
@@ -14396,7 +14395,6 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     out.scoped = has("crossbow");
     out.rpg = has("rpg") || has("rocket");
     out.gluon = has("egon") || has("gluon");
-    out.xenGun = out.gluon || has("gauss") || has("tau") || has("hgun") || has("hive") || has("hornet");
     // Former hooks.cpp IsMp5Viewmodel (mp5 / MP5 / smg / mp5k) on the
     // lowercased path; dCalcViewModelView / SuppressViewmodelMovementAnims
     // now read kVmFlagMp5 / kVmFlagCrowbar instead.
@@ -14427,14 +14425,12 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
         setTwoHand(0.24f, 0.00f, 0.02f, true, false, 0.25f, 0.08f);
     else if (out.rpg)
         setTwoHand(0.22f, 0.00f, 0.025f);
-    else if (has("gauss") || has("tau") || out.gluon)
-        // The handle on the gun's left side (body bone + measured point, see
-        // SampleViewmodelOffhandGrip). Snap mode like the pistols (glove on
-        // the handle, aim stays on the gun hand): a handle beside the gun
-        // hand gives no usable aim line. The fixed point is only a fallback.
-        setTwoHand(0.20f, 0.03f, 0.02f, true, true, 0.f, 0.07f);
-    else if (has("hgun") || has("hive") || has("hornet"))
-        setTwoHand(0.16f, 0.02f, 0.02f);
+    // Tau, gluon and hivehand: one hand only. Their fire / charge clips
+    // shake the whole gun away from a support glove on the controller grip,
+    // and holding them in idle lost the tau's cylinder spin and the
+    // hivehand's muzzle flash (user 2026-11-18). The handle point was
+    // setTwoHand(0.20f, 0.03f, 0.02f, true, true, 0.f, 0.07f) for tau/gluon
+    // (snap mode, SampleViewmodelOffhandGrip), (0.16f, 0.02f, 0.02f) hivehand.
     else if (has("glock") || has("pistol") || has("9mm") || has("beretta")
         || has("357") || has("python") || has("revolver"))
         // Beside the gun hand, on the grip — not the monitor two-hand pose.

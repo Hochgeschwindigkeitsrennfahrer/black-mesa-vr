@@ -415,7 +415,6 @@ namespace bmvr
     extern bool g_DeltaSeqIdle;          // a delta layer as the main viewmodel sequence shows idle (tau/crossbow)
     extern bool g_TwoHandNoLower;        // both hands on the gun: no lowered clip at friendlies, laser stays on
     extern bool g_TwoHandLoweredFollow;  // two-hand support glove follows the gun's lowered clip (aimed at a friendly)
-    extern bool g_XenFireIdle;           // tau/gluon/hivehand fire + charge clips show idle (they swing the gun off both hands)
     extern bool g_ScopeClipIdle;         // crossbow to/from-scope clips show idle (the clip moves the gun to the eye)
     extern bool g_MuteFidgetSounds;      // weapon fidget clips play no sound (the pose is frozen in VR)
     // Optional features, default off:
