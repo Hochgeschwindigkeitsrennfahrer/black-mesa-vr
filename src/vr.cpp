@@ -14350,7 +14350,11 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
         // ox 12.5 is half an inch back from the 12 / Touch 17.5 pose.
         // oy 8 is half an inch left of 7.5; 9 was too far left.
         // Positive ox pulls back. Positive oy subtracts along controller right.
-        out.ox = 12.5f; out.oy = 8.f; out.oz = -12.f; out.ax = -24.5f; out.ay = -6.5f; out.az = -6.f; out.numpadKey = "crowbar"; out.crowbar = true;
+        // oz -12 -> -8.5 (2026-11-18): with the crowbar's own right hand the
+        // fist sat ~8 cm above the controller, the gun fists ~2 cm below
+        // (log "fist vs controller", same pose: glock fwd -9.9 up -0.3, MP5
+        // -10.5/-2.2, crowbar was -6.1/+5.9, now -9.9/-2.2).
+        out.ox = 12.5f; out.oy = 8.f; out.oz = -8.5f; out.ax = -24.5f; out.ay = -6.5f; out.az = -6.f; out.numpadKey = "crowbar"; out.crowbar = true;
     }
     else if (has("glock") || has("pistol") || has("9mm") || has("beretta"))
     { out.ox = 16.5f; out.oy = 4.f; out.oz = -7.f; out.ax = 0.f; out.numpadKey = "glock"; out.glock = true; }

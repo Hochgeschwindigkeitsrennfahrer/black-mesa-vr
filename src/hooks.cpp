@@ -3976,6 +3976,49 @@ namespace
         }
     }
 
+    // Diagnostic: the drawn own right fist (R_Wrist + R_Middle1-3 average, as
+    // ShrinkViewmodelRightHand) relative to the right controller, in the
+    // controller's forward/right/up, cm. Once per viewmodel header, so the
+    // guns and the crowbar can be compared at one controller pose.
+    void LogGunFistVsController(VR* vr, unsigned char* hdr, const float* bones, int nBones, const Vector& ctrl,
+        const char* modelName)
+    {
+        static unsigned char* s_hdrs[16]{};
+        static int s_n = 0;
+        static unsigned char* s_cur = nullptr;
+        static int s_draws = 0;
+        if (!vr || !hdr || !bones || s_n >= 16)
+            return;
+        for (int i = 0; i < s_n; ++i)
+            if (s_hdrs[i] == hdr)
+                return;
+        // Settled pose only: skip the switch frames (old pose / draw clip).
+        if (hdr != s_cur)
+        {
+            s_cur = hdr;
+            s_draws = 0;
+        }
+        if (++s_draws < 120)
+            return;
+        const char* kCentre[4] = { "R_Wrist", "R_Middle1", "R_Middle2", "R_Middle3" };
+        Vector c(0.f, 0.f, 0.f);
+        for (const char* n : kCentre)
+        {
+            const int b = FindStudioBoneIndex(hdr, n);
+            if (b < 0 || b >= nBones)
+                return;
+            const float* m = bones + b * 12;
+            c += Vector(m[3], m[7], m[11]) * 0.25f;
+        }
+        s_hdrs[s_n++] = hdr;
+        Vector f, r, u;
+        QAngle::AngleVectors(vr->GetRightControllerAbsAngle(), &f, &r, &u);
+        const float scale = vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f;
+        const Vector d = (c - ctrl) * (100.f / scale);
+        Game::logMsg("Gun right hand: fist vs controller fwd %.1f right %.1f up %.1f cm (%s)",
+            d.Dot(f), d.Dot(r), d.Dot(u), modelName ? modelName : "?");
+    }
+
     bool CollapseViewmodelArmBones(unsigned char* hdr, float* bones, int nBones)
     {
         struct Cache
@@ -9328,6 +9371,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     if (m_VR->m_VmClass.crowbar)
                         ShrinkViewmodelRightHand(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                             bmvr::g_ViewmodelScale / scale);
+                    LogGunFistVsController(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot,
+                        modelName);
                 }
                 ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, targetAng,
                     needScale ? scale : 1.f);
