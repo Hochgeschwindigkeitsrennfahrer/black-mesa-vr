@@ -5600,6 +5600,11 @@ namespace
     // dumps them. The drawn bullets already fall out of the cylinder
     // (Apply357Extras), so the event moves past the clip end (same one-time
     // header patch as the fidget sounds) while VrMagReload is on.
+    // Same for its AE_CL_PLAYSOUND weapon_357.Reload at cycle 0 (user,
+    // 2026-11-18): reload.wav is the whole stock reload ending in the
+    // cylinder spin; it refired (CHAN_ITEM, restarting) while the cylinder
+    // waited open for the flick, and the last one played the spin after the
+    // close. The hands' own open/insert/close sounds come from UpdateMagReload.
     struct BrassHdrState { unsigned char* hdr; bool muted; };
     BrassHdrState g_BrassHdrs[4]{};
     unsigned g_BrassHdrNext = 0;
@@ -5663,8 +5668,10 @@ namespace
                     cycle = *reinterpret_cast<float*>(ev);
                     const int type = *reinterpret_cast<int*>(ev + 8);
                     const int nameOff = *reinterpret_cast<int*>(ev + kStudioEventNameIndex);
+                    const char* evName = reinterpret_cast<const char*>(ev + nameOff);
                     brass = (type & kStudioEventNewStyle) && nameOff > 0
-                        && std::strncmp(reinterpret_cast<const char*>(ev + nameOff), "AE_CLIENT_EJECT_BRASS", 22) == 0;
+                        && (std::strncmp(evName, "AE_CLIENT_EJECT_BRASS", 22) == 0
+                            || std::strncmp(evName, "AE_CL_PLAYSOUND", 16) == 0);
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
@@ -5694,7 +5701,7 @@ namespace
                 }
             }
         }
-        Game::logMsg("Mag reload: 357 gun_reload1 brass event %s (%d)", mute ? "off (bullets drawn from the cylinder)" : "restored", changed);
+        Game::logMsg("Mag reload: 357 gun_reload1 brass + reload sound events %s (%d)", mute ? "off (bullets drawn from the cylinder)" : "restored", changed);
     }
 
     int WeaponRootScore(const char* n)
