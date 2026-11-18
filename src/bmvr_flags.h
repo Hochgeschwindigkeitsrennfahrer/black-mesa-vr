@@ -324,6 +324,7 @@ namespace bmvr
     // Fixes, default on (a config key can turn each off):
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
     extern bool g_TwoHandGripToggle;     // support grip latches: squeeze on the gun = on, squeeze again = off
+    extern unsigned long g_ScreenshotAt;     // VR panel "Screenshot": GetTickCount when to dump the eyes (0 = none)
     extern unsigned long g_DebugCaptureAt;   // VR panel "Capture debug frame": GetTickCount when to capture (0 = none)
     extern bool g_FlareLog;              // VR panel DEBUG "Flare position log" / bmvr_flare_log / env BMVR_FLARE_LOG=1: log lens flare positions + visibility; each switch-on starts fresh line caps (not saved)
     extern bool g_FreezeHead;            // VR panel debug row / bmvr_freeze_head: game view keeps the head pose of the moment it was switched on (not saved)
@@ -766,6 +767,7 @@ namespace bmvr
     // Fist centre target in the controller frame (cm: forward, right, up;
     // right is mirrored for the left hand).
     extern bool g_VrSatchelHands;
+    extern bool g_VrGrenadeWristAlign; // grenade own hand turned to the gun hands' wrist pose
     extern float g_VrSatchelFist[3];
     // Two-handed: health panel above the ammo panel on the gun (not on the support wrist).
     extern bool g_HudHealthOnGun;

@@ -5407,7 +5407,7 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
     // are consumed.
     static int s_capturePolls = 0;
     if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime && !bmvr::g_DebugDumps
-        && !bmvr::g_DebugCaptureAt && s_capturePolls <= 0)
+        && !bmvr::g_DebugCaptureAt && !bmvr::g_ScreenshotAt && s_capturePolls <= 0)
         return;
     static DWORD s_lastCheck = 0;
     const DWORD now = GetTickCount();
@@ -5447,6 +5447,23 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
             std::fclose(df);
         }
         Game::logMsg("debug capture %s: eyes + audit of one frame, files VR/%s*", name, name);
+        s_capturePolls = 40;
+        return;
+    }
+    if (bmvr::g_ScreenshotAt && static_cast<LONG>(now - bmvr::g_ScreenshotAt) >= 0)
+    {
+        bmvr::g_ScreenshotAt = 0;
+        SYSTEMTIME st{};
+        GetLocalTime(&st);
+        char name[64];
+        std::snprintf(name, sizeof(name), "screenshot-%04u%02u%02u-%02u%02u%02u", st.wYear, st.wMonth, st.wDay,
+            st.wHour, st.wMinute, st.wSecond);
+        if (FILE* df = std::fopen(bmvr::VrFilePath("dump.txt").c_str(), "wb"))
+        {
+            std::fprintf(df, "%s 3", name);
+            std::fclose(df);
+        }
+        Game::logMsg("screenshot %s: both eyes at 1/3 size, VR/%s-left/right.bmp", name, name);
         s_capturePolls = 40;
         return;
     }
@@ -14550,10 +14567,8 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     else if (has("hgun") || has("hive") || has("hornet"))
     { out.ox = 19.5f; out.oy = 11.34f; out.oz = -17.69f; out.ax = -1.5f; out.ay = -2.f; out.numpadKey = "hgun"; }
     else if (has("grenade") || has("frag"))
-        // az 90: with its own right hand shown the hand + grenade sat 90 deg
-        // counter-clockwise (user 2026-11-18); positive az = clockwise as seen
-        // from behind the hand.
-    { out.ox = 15.f; out.oy = 6.5f; out.oz = -8.f; out.az = 90.f; out.numpadKey = "grenade"; }
+        // Turned by AlignWristToReference (hooks.cpp) when its own hand shows.
+    { out.ox = 15.f; out.oy = 6.5f; out.oz = -8.f; out.numpadKey = "grenade"; }
     else if (has("satchel"))
     { out.ox = 19.f; out.oy = -10.f; out.oz = -12.f; out.numpadKey = "satchel"; }
     else if (has("tripmine") || has("trip"))

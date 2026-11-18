@@ -141,6 +141,7 @@ namespace bmvr
     float g_PauseMenuAlphaPasses = 3.f;
     bool g_PauseMenuColourFromFrame = true;
     unsigned long g_DebugCaptureAt = 0;
+    unsigned long g_ScreenshotAt = 0;
     float g_DebugBlankEye = 0.f;
     float g_DebugHideXog = 0.f;
     bool g_FlareLog = false;
@@ -329,6 +330,7 @@ namespace bmvr
     bool g_VrSupportHandLock = true;
     bool g_VrHandLightRaw = false;
     bool g_VrSatchelHands = true;
+    bool g_VrGrenadeWristAlign = true;
     // Gun fists sit ~10 cm behind the controller origin, a little low ("fist vs controller" log).
     float g_VrSatchelFist[3] = { -10.f, 0.5f, -1.5f };
     bool g_HudHealthOnGun = true;

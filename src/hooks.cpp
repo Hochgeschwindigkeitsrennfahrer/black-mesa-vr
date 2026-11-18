@@ -4016,6 +4016,118 @@ namespace
         }
     }
 
+    // Own right hand turned like the gun hands (user 2026-11-18: the
+    // grenade's stock hand held it like a torch, forearm down, pitched and
+    // rolled ~90 deg from a hand on a controller). The pistol-grip guns
+    // (glock, .357, MP5) look right, so their R_Wrist orientation in the
+    // right controller's frame is the reference; the grenade model turns
+    // about its fist so its R_Wrist matches. Reference sampled from the last
+    // such gun drawn (logged once for baking in).
+    struct WristRef { float m[3][3]; bool valid; };
+    WristRef g_WristRef{};
+
+    bool WristAxesInController(VR* vr, unsigned char* hdr, const float* bones, int nBones, float out[3][3],
+        float world[3][3], Vector* fist)
+    {
+        const int w = FindStudioBoneIndex(hdr, "R_Wrist");
+        if (w < 0 || w >= nBones)
+            return false;
+        const float* m = bones + w * 12;
+        Vector col[3];
+        for (int c = 0; c < 3; ++c)
+        {
+            col[c] = Vector(m[c], m[4 + c], m[8 + c]);
+            if (VectorNormalize(col[c]) < 1e-4f)
+                return false;
+        }
+        Vector f, r, u;
+        QAngle::AngleVectors(vr->GetRightControllerAbsAngle(), &f, &r, &u);
+        for (int c = 0; c < 3; ++c)
+        {
+            out[0][c] = col[c].Dot(f);
+            out[1][c] = col[c].Dot(r);
+            out[2][c] = col[c].Dot(u);
+            world[0][c] = col[c].x;
+            world[1][c] = col[c].y;
+            world[2][c] = col[c].z;
+        }
+        if (fist)
+        {
+            const char* kCentre[4] = { "R_Wrist", "R_Middle1", "R_Middle2", "R_Middle3" };
+            Vector c(0.f, 0.f, 0.f);
+            for (const char* n : kCentre)
+            {
+                const int b = FindStudioBoneIndex(hdr, n);
+                if (b < 0 || b >= nBones)
+                    return false;
+                const float* bm = bones + b * 12;
+                c += Vector(bm[3], bm[7], bm[11]) * 0.25f;
+            }
+            *fist = c;
+        }
+        return true;
+    }
+
+    void NoteGunWristReference(VR* vr, unsigned char* hdr, const float* bones, int nBones, const char* modelName)
+    {
+        float local[3][3], world[3][3];
+        if (!vr || !WristAxesInController(vr, hdr, bones, nBones, local, world, nullptr))
+            return;
+        std::memcpy(g_WristRef.m, local, sizeof(local));
+        g_WristRef.valid = true;
+        static int s_log;
+        if (s_log++ < 3)
+            Game::logMsg("Wrist reference from %s: x=(%.3f,%.3f,%.3f) y=(%.3f,%.3f,%.3f) z=(%.3f,%.3f,%.3f) (controller fwd/right/up)",
+                modelName ? modelName : "?", local[0][0], local[1][0], local[2][0], local[0][1], local[1][1], local[2][1],
+                local[0][2], local[1][2], local[2][2]);
+    }
+
+    void AlignWristToReference(VR* vr, unsigned char* hdr, float* bones, int nBones)
+    {
+        if (!vr || !g_WristRef.valid || !bmvr::g_VrGrenadeWristAlign)
+            return;
+        float local[3][3], world[3][3];
+        Vector c;
+        if (!WristAxesInController(vr, hdr, bones, nBones, local, world, &c))
+            return;
+        // Wanted wrist axes in the world = controller axes * reference.
+        Vector f, r, u;
+        QAngle::AngleVectors(vr->GetRightControllerAbsAngle(), &f, &r, &u);
+        float want[3][3];
+        for (int c2 = 0; c2 < 3; ++c2)
+        {
+            const Vector v = f * g_WristRef.m[0][c2] + r * g_WristRef.m[1][c2] + u * g_WristRef.m[2][c2];
+            want[0][c2] = v.x;
+            want[1][c2] = v.y;
+            want[2][c2] = v.z;
+        }
+        // Q = want * world^T (world is orthonormal).
+        float Q[3][3];
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                Q[i][j] = want[i][0] * world[j][0] + want[i][1] * world[j][1] + want[i][2] * world[j][2];
+        static int s_log;
+        if (s_log++ < 3)
+            Game::logMsg("Grenade wrist aligned to the gun hands (Q diag %.2f %.2f %.2f)", Q[0][0], Q[1][1], Q[2][2]);
+        BMVR_TRY
+        {
+            for (int b = 0; b < nBones; ++b)
+            {
+                float* m = bones + b * 12;
+                float out[12];
+                for (int rr = 0; rr < 3; ++rr)
+                    for (int col = 0; col < 3; ++col)
+                        out[rr * 4 + col] = Q[rr][0] * m[col] + Q[rr][1] * m[4 + col] + Q[rr][2] * m[8 + col];
+                const float p[3] = { m[3] - c.x, m[7] - c.y, m[11] - c.z };
+                const float t[3] = { c.x, c.y, c.z };
+                for (int rr = 0; rr < 3; ++rr)
+                    out[rr * 4 + 3] = t[rr] + Q[rr][0] * p[0] + Q[rr][1] * p[1] + Q[rr][2] * p[2];
+                std::memcpy(m, out, sizeof(out));
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+
     // Satchel (VrSatchelHands, user 2026-11-18): Black Mesa's two satchel
     // viewmodels are posed for the flat camera: v_satchel = left arm holding
     // the bag, v_satchel_radio = right arm holding the detonator, both placed
@@ -10287,6 +10399,10 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     if (m_VR->m_VmClass.crowbar || std::strstr(modelName, "v_grenade"))
                         ShrinkViewmodelRightHand(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                             bmvr::g_ViewmodelScale / scale);
+                    if (std::strstr(modelName, "v_glock") || std::strstr(modelName, "v_357") || std::strstr(modelName, "v_mp5"))
+                        NoteGunWristReference(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, modelName);
+                    else if (std::strstr(modelName, "v_grenade"))
+                        AlignWristToReference(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                     if (std::strstr(modelName, "v_satchel") && m_VR->SatchelHandsActive())
                         SatchelPinHand(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot,
                             !std::strstr(modelName, "v_satchel_radio"));

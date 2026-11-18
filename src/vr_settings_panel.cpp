@@ -317,6 +317,7 @@ namespace
             // OF DATE" toast, debug-only ones (PerfLog stats, profiling) only show here.
             { "Missing hooks", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "missing_hooks" },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
+            { "Screenshot (eyes only)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "screenshot" },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
             // Eye GPU ms every ~5 s (timestamp queries); with the always-on "Frame budget" CPU line it shows
             // whether a scene is CPU- or GPU-limited.
@@ -2552,6 +2553,17 @@ void VR::UpdateSettingsPanel()
                 bmvr::g_DebugCaptureAt = 1;
             Game::logMsg("debug capture: armed, in 2 s");
             CloseSettingsPanel("debug capture");
+            return;
+        }
+        // Lightweight share (user 2026-11-18): closes the panel, 2 s later the
+        // two eye images at 1/3 size, no save / audit (VR/screenshot-*).
+        if (r.fmt && std::strcmp(r.fmt, "screenshot") == 0)
+        {
+            bmvr::g_ScreenshotAt = GetTickCount() + 2000;
+            if (!bmvr::g_ScreenshotAt)
+                bmvr::g_ScreenshotAt = 1;
+            Game::logMsg("screenshot: armed, in 2 s");
+            CloseSettingsPanel("screenshot");
             return;
         }
         // Closes the panel and records 20 s of glow brightness + frame timing
