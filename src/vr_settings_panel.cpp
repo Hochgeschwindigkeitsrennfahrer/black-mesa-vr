@@ -124,8 +124,6 @@ namespace
             { "Snap turning", RowKind::Toggle, "SnapTurning", &bmvr::g_SnapTurning, nullptr, 0, 0, 0, nullptr },
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
             { "Smooth turn speed", RowKind::Number, "TurnSpeed", nullptr, &bmvr::g_TurnSpeed, 0.05f, 0.05f, 1.f, "%.2f" },
-            { "MOVEMENT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
             // Off = stick ladders as in the stable release; the rows below only act while it is on.
             { "LADDERS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Physical ladders (beta)", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
@@ -286,6 +284,13 @@ namespace
             { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
             { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
             { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
+            // Cubemap reflection strength: less = less shimmer on shiny floors/walls and props.
+            { "REFLECTIONS (SHIMMER)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "envmap" },
+            { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
+            { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
+            // Left column: performance, anti-aliasing, reflections (user 2026-11-19).
+            { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "IMAGE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
             // Mip LOD bias in the 3D views (experimental): + = softer textures;
@@ -305,11 +310,6 @@ namespace
             { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
             { "Dark when hidden after", RowKind::Number, "GlowHideMs", nullptr, &bmvr::g_GlowHideMs, 10.f, 0.f, 500.f, "%.0f ms" },
             { "Reset glow values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_default" },
-            // Cubemap reflection strength: less = less shimmer on shiny floors/walls and props.
-            { "REFLECTIONS (SHIMMER)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "envmap" },
-            { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
-            { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
             { "DEBUG", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // One section, so "Show developer rows" keeps its spot (left column) when the rows below appear.
             { "DIAGNOSTICS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -849,8 +849,8 @@ namespace
     }
 
     // "Reset this tab" (one at the end of every tab): every row of tab `tab` back to its
-    // built-in default (CapturePanelDefaults, taken before config.txt), except "Show developer
-    // rows"; a tab with button rows also gets the default buttons for this controller. Engine
+    // built-in default (CapturePanelDefaults, taken before config.txt), "Show developer rows"
+    // too (user 2026-11-19: a reset left it as the one changed row); a tab with button rows also gets the default buttons for this controller. Engine
     // rows get console commands: god/noclip/notarget (toggles) are switched off before the
     // cvars, so sv_cheats 0 comes last. Returns the number of rows changed; each one is logged.
     int ResetTabRows(int tab)
@@ -871,8 +871,6 @@ namespace
             Row& r = rows[i];
             if (r.kind == RowKind::Bind)
                 binds = true;
-            if (r.b == &bmvr::g_PanelDevRows)
-                continue;
             char cmd[96]{};
             if (r.kind == RowKind::Toggle && r.b && *r.b != r.defB)
             {
@@ -2512,7 +2510,19 @@ void VR::UpdateSettingsPanel()
                 return;
             }
             g_TabResetArmed = -1;
+            const bool devRowsBefore = bmvr::g_PanelDevRows;
             ResetTabRows(g_Tab);
+            if (bmvr::g_PanelDevRows != devRowsBefore)
+            {
+                // Developer rows hidden again: the panel changes height (as
+                // for the row's own click below).
+                const float d = PanelDistanceHu();
+                m_SettingsLatchDelta = m_SettingsLatchDelta + m_SettingsLatchFwd * (d - g_LatchDistHu);
+                g_LatchDistHu = d;
+                m_SettingsHover = -1;
+                m_SettingsHoverZone = -1;
+                s_repeatRow = -1;
+            }
             if (bmvr::g_VrSettingsPause != m_SettingsPausedGame)
             {
                 m_SettingsPausedGame = bmvr::g_VrSettingsPause;

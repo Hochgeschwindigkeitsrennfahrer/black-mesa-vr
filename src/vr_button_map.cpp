@@ -33,7 +33,8 @@ namespace bmvr
             { "CrouchToggle", "Crouch toggle" },
             { "CrouchHold", "Crouch (hold)" },
             { "Use", "Use" },
-            { "Sprint", "Sprint" },
+            { "Sprint", "Sprint (hold)" },
+            { "SprintToggle", "Sprint toggle" },
             { "Flashlight", "Flashlight" },
             { "WeaponMenu", "Weapon menu" },
             { "NextWeapon", "Next weapon" },
@@ -192,7 +193,7 @@ namespace bmvr
                     s.hold = pauseHold;
                 }
                 break;
-            case BindInput::StickClick: s.press = BindAction::Sprint; break;
+            case BindInput::StickClick: s.press = BindAction::SprintToggle; break;
             default: break;
             }
         }
@@ -290,7 +291,7 @@ namespace bmvr
         }
     }
 
-    void MigrateLegacyBindSettings(bool flashlightOnSquare, bool triangleHold, bool crouchStickHold,
+    void MigrateLegacyBindSettings(bool flashlightOnSquare, bool triangleHold, bool crouchStickHold, bool sprintToggle,
         std::vector<std::pair<std::string, std::string>>& set)
     {
         // Each old switch at its non-default value becomes the mapping it
@@ -304,6 +305,8 @@ namespace bmvr
             wants.push_back({ 0, BindInput::Face2, true, BindAction::Nothing, "SettingsTriangleHold" });
         if (!crouchStickHold)
             wants.push_back({ 1, BindInput::StickDown, false, BindAction::CrouchToggle, "CrouchStickHold" });
+        if (!sprintToggle)
+            wants.push_back({ 0, BindInput::StickClick, false, BindAction::Sprint, "SprintToggle" });
         std::lock_guard<std::mutex> lock(g_BindMutex);
         for (uint32_t f : { L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH, L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2,
                  L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES, L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE })
@@ -316,6 +319,7 @@ namespace bmvr
                 // Previous weapon only on Touch-style controllers).
                 const bool applies = w.input == BindInput::Face1 ? defA == BindAction::PrevWeapon
                     : w.input == BindInput::Face2 ? defA == BindAction::VrSettings
+                    : w.input == BindInput::StickClick ? defA == BindAction::SprintToggle
                     : defA == BindAction::CrouchHold;
                 if (!applies || defA == w.a)
                     continue;

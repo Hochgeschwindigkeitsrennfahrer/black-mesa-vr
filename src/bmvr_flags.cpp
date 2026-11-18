@@ -831,7 +831,10 @@ namespace bmvr
             else if (std::strcmp(n, "TurnBlocksJumpCrouch") == 0)
                 g_TurnBlocksJumpCrouch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "SprintToggle") == 0)
+            {
                 g_SprintToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_LegacyBindKeysSeen = true;
+            }
             else if (std::strcmp(n, "VrSettingsPause") == 0)
                 g_VrSettingsPause = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrShootFromMuzzle") == 0)
@@ -2061,8 +2064,8 @@ namespace bmvr
         if (g_LegacyBindKeysSeen && g_ButtonMapping)
         {
             std::vector<std::pair<std::string, std::string>> set;
-            MigrateLegacyBindSettings(g_FlashlightOnSquare, g_SettingsTriangleHold, g_CrouchStickHold, set);
-            const std::vector<std::string> drop = { "FlashlightOnSquare", "SettingsTriangleHold", "CrouchStickHold" };
+            MigrateLegacyBindSettings(g_FlashlightOnSquare, g_SettingsTriangleHold, g_CrouchStickHold, g_SprintToggle, set);
+            const std::vector<std::string> drop = { "FlashlightOnSquare", "SettingsTriangleHold", "CrouchStickHold", "SprintToggle" };
             const bool ok = WriteVrConfigValues(set, drop);
             Log("Button map: old button switches migrated (%zu mapping%s), removed from config.txt: %s",
                 set.size(), set.size() == 1 ? "" : "s", ok ? "ok" : "FAILED");

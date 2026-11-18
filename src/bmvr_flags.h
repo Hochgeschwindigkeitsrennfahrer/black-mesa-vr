@@ -458,9 +458,11 @@ namespace bmvr
     // model) with a label per button, and label the controllers in your hands.
     // false (or no model found) = the plain list.
     extern bool g_ControlsPicture;
-    // SprintToggle=true: one sprint click (left stick click) keeps sprinting
-    // until the left stick returns to centre or sprint is clicked again
-    // (default false = hold the click).
+    // SprintToggle=true (default): one sprint click (left stick click) keeps
+    // sprinting until the left stick returns to centre or sprint is clicked
+    // again; false = hold the click. Fixed button layout only (ButtonMapping
+    // off): with mapping, the "Sprint toggle" / "Sprint (hold)" actions pick
+    // it, and an old SprintToggle=false becomes a Sprint (hold) mapping.
     extern bool g_SprintToggle;
     // VR settings panel pauses the game while open (setpause / unpause).
     extern bool g_VrSettingsPause;

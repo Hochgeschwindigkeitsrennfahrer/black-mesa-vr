@@ -6775,7 +6775,6 @@ void VR::UpdateButtonMap()
         { BindAction::CrouchToggle, Id::CustomAction2 },
         { BindAction::CrouchHold, Id::Crouch },
         { BindAction::Use, Id::Use },
-        { BindAction::Sprint, Id::CustomAction1 },
         { BindAction::Flashlight, Id::Flashlight },
         { BindAction::WeaponMenu, Id::InventoryQuickSwitch },
         { BindAction::NextWeapon, Id::NextItem },
@@ -6820,6 +6819,23 @@ void VR::UpdateButtonMap()
         const uint32_t i = static_cast<uint32_t>(id);
         L4D2VROpenXrDigitalActionDesc& d = m_MappedDigital[i];
         const uint32_t held = m_ButtonMapper.Held(action) ? 1u : 0u;
+        d.active = 1;
+        d.changed = held != d.state ? 1u : 0u;
+        d.state = held;
+        m_MappedOverride[i] = true;
+    }
+    // Sprint: hold and toggle share the sprint slot; the one pressed last
+    // picks the mode (sprint latch in ProcessInput).
+    {
+        const bool hold = m_ButtonMapper.Held(BindAction::Sprint);
+        const bool toggle = m_ButtonMapper.Held(BindAction::SprintToggle);
+        if (toggle)
+            m_SprintMapToggle = true;
+        else if (hold)
+            m_SprintMapToggle = false;
+        const uint32_t i = static_cast<uint32_t>(Id::CustomAction1);
+        L4D2VROpenXrDigitalActionDesc& d = m_MappedDigital[i];
+        const uint32_t held = (hold || toggle) ? 1u : 0u;
         d.active = 1;
         d.changed = held != d.state ? 1u : 0u;
         d.state = held;
@@ -7201,7 +7217,7 @@ void VR::ProcessInput()
             s_crouchAxis = false;
         if (m_CrouchToggled)
             buttons |= IN_DUCK;
-        if (bmvr::g_SprintToggle)
+        if (m_ButtonMapActive ? m_SprintMapToggle : bmvr::g_SprintToggle)
         {
             // Click latches; letting the move stick back to centre (or a
             // second click) ends the sprint. The first 600 ms after the

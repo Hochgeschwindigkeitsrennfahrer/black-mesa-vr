@@ -28,6 +28,7 @@ namespace bmvr
         CrouchHold,
         Use,
         Sprint,
+        SprintToggle,
         Flashlight,
         WeaponMenu,
         NextWeapon,
@@ -81,9 +82,9 @@ namespace bmvr
     // Built-in default for a slot (fixed; see MigrateLegacyBindSettings).
     BindSlot DefaultBind(uint32_t family, int hand, BindInput input);
     // Startup, after config.txt: the old FlashlightOnSquare / SettingsTriangleHold /
-    // CrouchStickHold switches (non-default values) become Bind.* mappings where
-    // the player has none. `set` gets the config lines to write.
-    void MigrateLegacyBindSettings(bool flashlightOnSquare, bool triangleHold, bool crouchStickHold,
+    // CrouchStickHold / SprintToggle switches (non-default values) become Bind.*
+    // mappings where the player has none. `set` gets the config lines to write.
+    void MigrateLegacyBindSettings(bool flashlightOnSquare, bool triangleHold, bool crouchStickHold, bool sprintToggle,
         std::vector<std::pair<std::string, std::string>>& set);
     // Some button (press or hold) opens the VR settings panel.
     bool VrSettingsMapped(uint32_t family);
