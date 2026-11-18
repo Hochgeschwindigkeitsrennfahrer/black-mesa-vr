@@ -1604,6 +1604,12 @@ private:
     void ReclaimCompositorFocus(const char* reason);
     void PulseAimHaptic(unsigned short durationUs = 2500);
     void PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short durationUs, float amplitude = 0.6f);
+    // Reload feel (user, 2026-11-18: "doable by touch"): distinct patterns,
+    // felt in both hands where the gun takes something in. The second tick
+    // of a pattern is queued and sent by PumpHapticQueue (game thread).
+    enum class ReloadFeel { Seat, ShellIn, Chamber, PinTaken, PinPulled, Grab };
+    void ReloadHaptic(ReloadFeel feel);
+    void PumpHapticQueue();
     void UpdateViewmodelNumpadAdjust(bool paused);
     void SyncHeldWeaponAngleRows();
     void ResolveWeaponViewmodelPose(float& ox, float& oy, float& oz, float& ax, float& ay, float& az) const;

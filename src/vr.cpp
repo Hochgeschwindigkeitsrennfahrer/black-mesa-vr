@@ -21130,6 +21130,79 @@ std::atomic<bool> MagReload::g_PinThrown{ false };
 // arm winds up; press and let go of the trigger to throw (hand velocity as
 // before). Alt-fire (roll) is left to the game. A thrown grenade's successor
 // comes with its pin (dGrenadeCreate sets g_PinThrown).
+namespace
+{
+    struct QueuedHaptic { DWORD at; vr::ETrackedControllerRole hand; unsigned short us; float amp; };
+    QueuedHaptic g_HapticQueue[8]{};
+}
+
+void VR::PumpHapticQueue()
+{
+    const DWORD now = GetTickCount();
+    for (auto& q : g_HapticQueue)
+    {
+        if (q.at != 0 && static_cast<int>(now - q.at) >= 0)
+        {
+            PulseHandHaptic(q.hand, q.us, q.amp);
+            q.at = 0;
+            static int s_qLog;
+            if (s_qLog++ < 20)
+                Game::logMsg("Reload haptic: second tick (%s hand)", q.hand == vr::TrackedControllerRole_LeftHand ? "left" : "right");
+        }
+    }
+}
+
+void VR::ReloadHaptic(ReloadFeel feel)
+{
+    const auto L = vr::TrackedControllerRole_LeftHand;
+    const auto R = vr::TrackedControllerRole_RightHand;
+    auto later = [&](DWORD ms, vr::ETrackedControllerRole hand, unsigned short us, float amp) {
+        for (auto& q : g_HapticQueue)
+        {
+            if (q.at == 0)
+            {
+                const DWORD at = GetTickCount() + ms;
+                q = { at ? at : 1, hand, us, amp };
+                return;
+            }
+        }
+    };
+    static const char* kFeel[] = { "seat", "shell in", "chamber", "pin taken", "pin pulled", "grab" };
+    Game::logMsg("Reload haptic: %s", kFeel[static_cast<int>(feel)]);
+    switch (feel)
+    {
+    case ReloadFeel::Seat:
+        // Click-clack: the hand pushing it home, the gun taking it, then the
+        // catch.
+        PulseHandHaptic(L, 3999, 1.f);
+        PulseHandHaptic(R, 2500, 0.65f);
+        later(70, L, 1200, 0.55f);
+        later(70, R, 800, 0.35f);
+        break;
+    case ReloadFeel::ShellIn:
+        PulseHandHaptic(L, 2800, 0.85f);
+        PulseHandHaptic(R, 1000, 0.35f);
+        later(55, L, 600, 0.3f);
+        break;
+    case ReloadFeel::Chamber:
+        PulseHandHaptic(L, 2500, 0.8f);
+        PulseHandHaptic(R, 2500, 0.75f);
+        later(60, R, 900, 0.4f);
+        break;
+    case ReloadFeel::PinTaken:
+        PulseHandHaptic(L, 1800, 0.6f);
+        break;
+    case ReloadFeel::PinPulled:
+        PulseHandHaptic(L, 3999, 1.f);
+        PulseHandHaptic(R, 900, 0.3f);
+        later(80, L, 900, 0.45f);
+        break;
+    case ReloadFeel::Grab:
+        PulseHandHaptic(L, 2500, 0.7f);
+        break;
+    }
+}
+
 bool VR::SatchelHandsActive() const
 {
     return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
@@ -21229,7 +21302,7 @@ void VR::UpdateGrenadePin(uint32_t& buttons)
         if (gripEdge && g_PinNear.load())
         {
             s_state = kPinHeld;
-            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 1500, 0.5f);
+            ReloadHaptic(ReloadFeel::PinTaken);
             Game::logMsg("Grenade pin: ring taken");
         }
         break;
@@ -21242,7 +21315,7 @@ void VR::UpdateGrenadePin(uint32_t& buttons)
             s_trigSeen = false;
             if (m_Game)
                 m_Game->PlayUiSound("weapons/grenade/special1.wav");
-            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+            ReloadHaptic(ReloadFeel::PinPulled);
             Game::logMsg("Grenade pin: pulled");
         }
         break;
@@ -21358,6 +21431,7 @@ int VR::MagReloadWeaponNow() const
 
 void VR::UpdateMagReload(uint32_t& buttons)
 {
+    PumpHapticQueue();
     using namespace MagReload;
     // Per weapon, so a gun put away with its magazine out is still empty
     // when it comes back. Reset on a new map / load.
@@ -21557,7 +21631,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 s_pulseReload = need != 0;
                 s_pulseUntil = now + 200;
                 sound("weapons/ar2/ar2_reload_push.wav");
-                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+                ReloadHaptic(ReloadFeel::Seat);
                 Game::logMsg("Mag reload: rpg rocket seated (needReload %d, game reload %d)", need, s_pulseReload ? 1 : 0);
             }
             else if (released && in >= 0.35f)
@@ -21570,7 +21644,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 s_pulseReload = need != 0;
                 s_pulseUntil = now + 200;
                 sound("weapons/ar2/ar2_reload_push.wav");
-                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+                ReloadHaptic(ReloadFeel::Seat);
                 Game::logMsg("Mag reload: rpg rocket let go %.0f%% in, seated (needReload %d)", in * 100.f, need);
             }
             else if (released)
@@ -21656,7 +21730,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 ++w.shells;
                 static const char* kInsert[3] = { "weapons/shotgun/reload1.wav", "weapons/shotgun/reload2.wav", "weapons/shotgun/reload3.wav" };
                 sound(kInsert[now % 3]);
-                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
+                ReloadHaptic(ReloadFeel::ShellIn);
                 // The game tops the tube up when it is behind the hands.
                 if (clip >= 0 && clip < w.shells)
                 {
@@ -21704,7 +21778,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 // knows the pump landed (user, 2026-11-18).
                 if (const char* fwd = m_Game ? m_Game->PumpHalfSound(true) : nullptr)
                     sound(fwd);
-                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.8f);
+                ReloadHaptic(ReloadFeel::Chamber);
                 // An empty tube chambers nothing: still needs a pump once
                 // shells are in (user).
                 w.needPump = w.shells <= 0;
@@ -21820,7 +21894,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 s_phase = 3;
                 s_phaseMs = now;
                 sound("weapons/357/357_reload3.wav");
-                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+                ReloadHaptic(ReloadFeel::Seat);
                 Game::logMsg("Mag reload: 357 speed loader in");
             }
             else if (released)
@@ -22005,7 +22079,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_pulseReload = clip >= 0 && clip < def.maxClip;
             s_pulseUntil = now + 200;
             sound("weapons/ar2/ar2_reload_push.wav");
-            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+            ReloadHaptic(ReloadFeel::Seat);
             Game::logMsg("Mag reload: %s seated (clip %d, game reload %d, chambered %d)",
                 def.name, clip, s_pulseReload ? 1 : 0, w.chambered ? 1 : 0);
         }
@@ -22040,7 +22114,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_boltFull = false;
             w.chambered = (w.mag == kLoaded) && clip > 0;
             sound(def.boltSound);
-            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.8f);
+            ReloadHaptic(ReloadFeel::Chamber);
             Game::logMsg("Mag reload: %s bolt pulled back, chambered %d", def.name, w.chambered ? 1 : 0);
         }
         else if (released && !bmvr::g_TwoHandGripToggle)
