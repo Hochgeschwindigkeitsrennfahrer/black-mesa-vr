@@ -1023,6 +1023,13 @@ bool BmVrGloves::DrawForEye(
             continue;
         if (!valid[i])
             continue;
+        // The gun's own left hand is the support hand this frame.
+        if (!rightHand)
+        {
+            const unsigned fromGun = MagReload::g_SupportHandFromGunMs.load(std::memory_order_relaxed);
+            if (fromGun != 0 && GetTickCount() - fromGun < 150)
+                continue;
+        }
 
         Impl::Hand& hand = pair[i];
         vr::VRSkeletalSummaryData_t summary{};

@@ -91,6 +91,9 @@ namespace MagReload
     // frame as g_LeftPalmLocal: where a pinched shotgun shell is held.
     extern std::atomic<float> g_LeftPinchLocal[3];
     extern std::atomic<unsigned> g_LeftPinchMs;
+    // GetTickCount of the last viewmodel draw that showed the gun's own
+    // left hand as the support hand (VrSupportHandLock): the glove skips it.
+    extern std::atomic<unsigned> g_SupportHandFromGunMs;
     // Shotgun pump back stroke: a spent hull flies out of the ejection port
     // (GetTickCount, 0 = none).
     extern std::atomic<unsigned> g_EjectTick;

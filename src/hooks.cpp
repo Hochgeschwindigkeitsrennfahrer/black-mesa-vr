@@ -4076,14 +4076,41 @@ namespace
                 ds.Dot(f), ds.Dot(r), ds.Dot(u), dt.Dot(f), dt.Dot(r), dt.Dot(u));
     }
 
-    bool CollapseViewmodelArmBones(unsigned char* hdr, float* bones, int nBones)
+    // Support hand from the gun (VrSupportHandLock): set by the draw before
+    // the arm collapse, read by the pump code in the same draw.
+    thread_local bool t_KeepLeftHand = false;
+    thread_local int t_LeftHandBones[24]{};
+    thread_local int t_LeftHandCount = 0;
+
+    // Guns whose stock idle holds the left hand on the gun (headless dumps
+    // 2026-11-18: MP5 magazine, shotgun pump, crossbow forestock, RPG front
+    // grip, glock/.357 cupping the grip). The tau shows no stock left hand.
+    bool SupportHandFromGunModel(const char* modelName)
+    {
+        if (!modelName)
+            return false;
+        static const char* kGuns[] = { "v_mp5", "v_shotgun", "v_crossbow", "v_rpg", "v_glock", "v_357" };
+        char buf[128]{};
+        strncpy_s(buf, modelName, _TRUNCATE);
+        for (char* c = buf; *c; ++c)
+            *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
+        for (const char* g : kGuns)
+            if (std::strstr(buf, g))
+                return true;
+        return false;
+    }
+
+    bool CollapseViewmodelArmBones(unsigned char* hdr, float* bones, int nBones, bool keepLeftHand = false)
     {
         struct Cache
         {
             unsigned char* hdr = nullptr;
             int wrist = -1;
+            int lwrist = -1;
             int count = 0;
             int idx[48]{};
+            bool leftHand[48]{}; // L_Wrist + fingers (kept with keepLeftHand)
+            bool leftArm[48]{};  // other left bones (folded into L_Wrist then)
         };
         static thread_local Cache c;
         if (!hdr || !bones || nBones <= 0)
@@ -4093,6 +4120,7 @@ namespace
             c = Cache{};
             c.hdr = hdr;
             c.wrist = FindStudioBoneIndex(hdr, "R_Wrist");
+            c.lwrist = FindStudioBoneIndex(hdr, "L_Wrist");
             int length = 0, numbones = 0, boneindex = 0;
             BMVR_TRY
             {
@@ -4119,7 +4147,14 @@ namespace
                     const bool rightArm = _stricmp(n, "R_Arm") == 0 || _stricmp(n, "R_Forearm") == 0
                         || _stricmp(n, "SCI_Hand_Forearm_R") == 0 || _stricmp(n, "gman_arms_r") == 0;
                     if (left || rightArm)
+                    {
+                        const bool hand = _stricmp(n, "L_Wrist") == 0 || _strnicmp(n, "L_Thumb", 7) == 0
+                            || _strnicmp(n, "L_Index", 7) == 0 || _strnicmp(n, "L_Middle", 8) == 0
+                            || _strnicmp(n, "L_Ring", 6) == 0 || _strnicmp(n, "L_Pinky", 7) == 0;
+                        c.leftHand[c.count] = left && hand;
+                        c.leftArm[c.count] = left && !hand;
                         c.idx[c.count++] = i;
+                    }
                 }
             }
             static int s_log;
@@ -4131,19 +4166,32 @@ namespace
         }
         if (c.wrist < 0 || c.wrist >= nBones || c.count == 0)
             return false;
+        const bool keepLeft = keepLeftHand && c.lwrist >= 0 && c.lwrist < nBones;
+        t_LeftHandCount = 0;
         BMVR_TRY
         {
             const float* w = bones + c.wrist * 12;
             const float t[3] = { w[3], w[7], w[11] };
+            const float* lw = keepLeft ? bones + c.lwrist * 12 : w;
+            const float lt[3] = { lw[3], lw[7], lw[11] };
             for (int k = 0; k < c.count; ++k)
             {
                 if (c.idx[k] >= nBones)
                     continue;
+                if (keepLeft && c.leftHand[k])
+                {
+                    if (t_LeftHandCount < 24)
+                        t_LeftHandBones[t_LeftHandCount++] = c.idx[k];
+                    continue;
+                }
+                // Left forearm folds into the kept left wrist (as the right
+                // forearm folds into the right one).
+                const float* to = (keepLeft && c.leftArm[k]) ? lt : t;
                 float* m = bones + c.idx[k] * 12;
                 for (int r = 0; r < 3; ++r)
                 {
                     m[r * 4 + 0] = m[r * 4 + 1] = m[r * 4 + 2] = 0.f;
-                    m[r * 4 + 3] = t[r];
+                    m[r * 4 + 3] = to[r];
                 }
             }
         }
@@ -4809,6 +4857,19 @@ namespace
             b[3] -= f.x * back;
             b[7] -= f.y * back;
             b[11] -= f.z * back;
+            // The gun's own left hand on the pump rides it.
+            if (def.tube && t_KeepLeftHand && back > 0.f)
+            {
+                for (int k = 0; k < t_LeftHandCount; ++k)
+                {
+                    if (t_LeftHandBones[k] >= nBones)
+                        continue;
+                    float* lh = bones + t_LeftHandBones[k] * 12;
+                    lh[3] -= f.x * back;
+                    lh[7] -= f.y * back;
+                    lh[11] -= f.z * back;
+                }
+            }
         }
         else
             MagReload::g_NearBolt.store(false);
@@ -10019,7 +10080,27 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
                 if (gunRightHand)
                 {
-                    CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
+                {
+                    // Support hand locks to the gun: the stock left hand stays
+                    // while the left hand holds the gun (not mid-reload, not
+                    // while a stock clip is scrubbed by the hands).
+                    const int magSt = MagReload::g_State.load(std::memory_order_relaxed);
+                    // The MP5 handle / glock slide take the left hand off
+                    // the grip; the shotgun pump keeps it (it rides the pump).
+                    const bool otherGrab = MagReload::g_BoltGrab.load(std::memory_order_relaxed)
+                        && MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponShotgun;
+                    t_KeepLeftHand = bmvr::g_VrSupportHandLock && !bmvr::g_LeftHanded
+                        && SupportHandFromGunModel(modelName)
+                        && m_VR->m_VmClass.twoHand && (m_VR->TwoHandGripActive() || bmvr::g_VrSupportHandForce)
+                        && !MagReload::g_ScrubActive.load(std::memory_order_relaxed)
+                        && magSt != MagReload::kInHand && !otherGrab;
+                    CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_KeepLeftHand);
+                    if (t_KeepLeftHand && t_LeftHandCount > 0)
+                    {
+                        const DWORD nowMs = GetTickCount();
+                        MagReload::g_SupportHandFromGunMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
+                    }
+                }
                     if (m_VR->m_VmClass.crowbar)
                         ShrinkViewmodelRightHand(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                             bmvr::g_ViewmodelScale / scale);
