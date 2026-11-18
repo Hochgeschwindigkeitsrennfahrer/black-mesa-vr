@@ -120,6 +120,7 @@ namespace
             { "Sprint click toggles", RowKind::Toggle, "SprintToggle", &bmvr::g_SprintToggle, nullptr, 0, 0, 0, nullptr },
             { "Climb ladders with grip (hands)", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
             { "Smooth hand climbing", RowKind::Toggle, "PhysicalLadderSmooth", &bmvr::g_PhysicalLadderSmooth, nullptr, 0, 0, 0, nullptr },
+            { "Ladder distance follows arms", RowKind::Toggle, "LadderBodyFollowsArms", &bmvr::g_LadderBodyFollowsArms, nullptr, 0, 0, 0, nullptr },
             { "Gun hand on ladders", RowKind::Choice, "LadderGunHand", nullptr, &bmvr::g_LadderGunHand, 1.f, 0.f, 1.f, "Holster weapon|Needs empty hand" },
             { "Hand distance from rung", RowKind::Number, "LadderHandBack", nullptr, &bmvr::g_LadderHandBack, 0.5f, 0.f, 10.f, "%.1f" },
             { "Stick climbs ladders too", RowKind::Toggle, "LadderStickClimb", &bmvr::g_LadderStickClimb, nullptr, 0, 0, 0, nullptr },
@@ -1241,6 +1242,7 @@ namespace
         IDirect3DTexture9* toastGpu = nullptr;
         char toastText[32]{};
         char toastDetail[64]{};
+        int toastW = 512; // texture width: wider than 512 for a long one-line message
         int w = 0, h = 0;
     };
     PanelGfx g_Gfx;
@@ -2442,8 +2444,12 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
             if (s_dumpPanel == 1)
             {
                 GdiFlush();
-                char name[64]{};
-                _snprintf(name, sizeof(name) - 1, "panel-tab%d%s.bmp", g_Tab, g_PickerRow >= 0 ? "-picker" : "");
+                // With controller pictures: one file per controller model
+                // (panel-tab<N>-<right model>.bmp), for the per-controller shots.
+                char name[160]{};
+                const bmvr::ctlmodel::Models* pm = wing ? PanelModels() : nullptr;
+                const std::string model = pm && pm->hand[1].ok ? "-" + pm->hand[1].name : std::string();
+                _snprintf(name, sizeof(name) - 1, "panel-tab%d%s%s.bmp", g_Tab, model.c_str(), g_PickerRow >= 0 ? "-picker" : "");
                 if (FILE* f = std::fopen(bmvr::VrFilePath(name).c_str(), "wb"))
                 {
                     BITMAPFILEHEADER fh{};
@@ -2596,6 +2602,22 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up)
 {
     // Short head-locked message (quick save), slightly below the view centre.
+    {
+        // Test only: BMVR_TEST_TOAST=<text> shows it as a small reload hint
+        // for 10 min from the first frame (headless size checks).
+        static int s_testToast = -1;
+        if (s_testToast < 0)
+        {
+            char v[64]{};
+            s_testToast = GetEnvironmentVariableA("BMVR_TEST_TOAST", v, sizeof(v)) && v[0] ? 1 : 0;
+            if (s_testToast)
+            {
+                ShowToast(v, 600000);
+                m_ToastSmall = true;
+                Game::logMsg("Test toast: \"%s\"", v);
+            }
+        }
+    }
     if (!device || !ToastVisible())
         return;
     if (g_Gfx.device && g_Gfx.device != device)
@@ -2607,12 +2629,28 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         || std::strcmp(g_Gfx.toastDetail, m_ToastDetail) != 0)
     {
         if (g_Gfx.toastGpu) { g_Gfx.toastGpu->Release(); g_Gfx.toastGpu = nullptr; }
-        Canvas c(512, texH);
+        // A long message ("PULL THE CHARGING HANDLE") was cut off at 512 px:
+        // widen the texture (and the quad, below) so the letters keep their
+        // size, up to 1024 px; past that the font shrinks.
+        int texW = 512;
+        int titlePx = detail ? 46 : 54;
+        {
+            Canvas probe(16, 16);
+            if (!probe.ok())
+                return;
+            const int need = probe.textWidth(m_ToastText, titlePx, true) + 32;
+            if (need > texW)
+                texW = (std::min)(1024, (need + 15) & ~15);
+            while (titlePx > 24 && probe.textWidth(m_ToastText, titlePx, true) + 32 > texW)
+                titlePx -= 2;
+        }
+        g_Gfx.toastW = texW;
+        Canvas c(texW, texH);
         if (!c.ok())
             return;
         c.fill(0, 0, c.w, c.h, kBg);
         c.fill(0, 0, c.w, 5, kAmber);
-        c.text(m_ToastText, 0, 5, c.w, 96, kAmber, detail ? 46 : 54, true, DT_CENTER);
+        c.text(m_ToastText, 0, 5, c.w, 96, kAmber, titlePx, true, DT_CENTER);
         if (detail)
             c.text(m_ToastDetail, 8, 92, c.w - 8, c.h - 8, kText, 24, false, DT_CENTER);
         c.setAlpha(225);
@@ -2655,7 +2693,11 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     const Vector head = GetViewOrigin(body);
     const Vector po = head + fwd * 30.f - up * 5.f;
-    const float hw = m_ToastSmall ? 3.5f : detail ? 10.f : 6.f, hh = hw * static_cast<float>(texH) / 512.f;  // warnings: larger, readable
+    // Small (reload hints): 4.2 (3.5 was hard to read, user 2026-11-18).
+    // hw is per 512 texels, so a wider texture keeps the letter size.
+    const float texScale = static_cast<float>(g_Gfx.toastW) / 512.f;
+    const float hw0 = m_ToastSmall ? 4.2f : detail ? 10.f : 6.f;  // warnings: larger, readable
+    const float hw = hw0 * texScale, hh = hw0 * static_cast<float>(texH) / 512.f;
     const Vector corners[4] = { po - right * hw + up * hh, po + right * hw + up * hh, po - right * hw - up * hh, po + right * hw - up * hh };
     const int left = static_cast<int>(m_ToastUntilMs - GetTickCount());
     const int alpha = (std::min)(255, (std::max)(0, left * 255 / 400));

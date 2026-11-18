@@ -962,6 +962,10 @@ public:
     // the body moves in bursts; the view instead follows the climb hand
     // every frame, at most a few units ahead of / behind the body.
     float PhysicalLadderViewOffset(float renderZ);
+    // RenderView: horizontal view shift towards / away from the ladder so the
+    // real hands reach the rungs they hold (arms pulled in = closer to the
+    // ladder, stretched = further). LadderBodyFollowsArms; +-8 units.
+    Vector PhysicalLadderViewShift(const Vector& body);
     struct LadderViewState
     {
         bool active = false;     // climbing by hand (set by PhysicalLadderStep)
@@ -970,6 +974,7 @@ public:
         float anchorHandZ = 0.f; // tracking z of the climb hand at its grab
         float visAnchorZ = 0.f;  // view z belonging to anchorHandZ
         float offset = 0.f;      // last offset sent
+        Vector shift{};          // last horizontal shift sent (PhysicalLadderViewShift)
         float limit = 8.f;
         ULONGLONG lastMs = 0;
     } m_LadderView;

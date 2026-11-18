@@ -338,6 +338,7 @@ namespace bmvr
     bool g_PhysicalLadders = true;
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
     bool g_PhysicalLadderSmooth = true;
+    bool g_LadderBodyFollowsArms = true;
     float g_LadderGunHand = 0.f;
     bool g_LadderStickClimb = false;
     float g_LadderHandBack = 3.f;
@@ -1128,6 +1129,8 @@ namespace bmvr
                 g_RpgRocketShown = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PhysicalLadders") == 0)
                 g_PhysicalLadders = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "LadderBodyFollowsArms") == 0)
+                g_LadderBodyFollowsArms = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PhysicalLadderSmooth") == 0)
                 g_PhysicalLadderSmooth = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LadderStickClimb") == 0)

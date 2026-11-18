@@ -286,12 +286,15 @@ namespace
     const std::vector<const char*>& PartNames(int part, int hand)
     {
         static const std::vector<const char*> trig = { "trigger" };
-        static const std::vector<const char*> gripL = { "button_grip", "squeeze", "rgrip", "lgrip" };
-        static const std::vector<const char*> gripR = { "button_grip", "squeeze", "lgrip", "rgrip" };
-        static const std::vector<const char*> f1 = { "button_a", "button_x" };
-        static const std::vector<const char*> f2 = { "button_b", "button_y" };
+        // Rift CV1 names its parts a_button / x_button / grip / enter_button;
+        // "grip" last: the other Touch models also have a "grip" (the whole
+        // handle), after their button_grip.
+        static const std::vector<const char*> gripL = { "button_grip", "squeeze", "rgrip", "lgrip", "grip" };
+        static const std::vector<const char*> gripR = { "button_grip", "squeeze", "lgrip", "rgrip", "grip" };
+        static const std::vector<const char*> f1 = { "button_a", "button_x", "a_button", "x_button" };
+        static const std::vector<const char*> f2 = { "button_b", "button_y", "b_button", "y_button" };
         static const std::vector<const char*> stick = { "thumbstick", "trackpad" };
-        static const std::vector<const char*> menu = { "button_option", "button_enter", "button", "button_menu" };
+        static const std::vector<const char*> menu = { "button_option", "button_enter", "button", "button_menu", "enter_button" };
         static const std::vector<const char*> none;
         switch (part)
         {

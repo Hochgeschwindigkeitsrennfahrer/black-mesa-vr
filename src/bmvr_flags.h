@@ -774,6 +774,7 @@ namespace bmvr
     // Physical ladders: the view follows the climb hand every frame instead
     // of LadderMove's per-tick bursts (render offset only). On by default.
     extern bool g_PhysicalLadderSmooth;
+    extern bool g_LadderBodyFollowsArms; // hand climbing: view closer/further from the ladder with the arms
     // Physical ladders, the gun hand: 0 = grabbing holsters the weapon (back
     // when off the ladder), 1 = only an empty hand grabs a ladder.
     extern float g_LadderGunHand;

@@ -8077,8 +8077,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
     if (m_VR && m_VR->m_IsVREnabled && mainView && inGame && originOk)
     {
         const float off = m_VR->PhysicalLadderViewOffset(setup.origin.z);
+        const Vector shift = m_VR->PhysicalLadderViewShift(setup.origin);
         if (off != 0.f)
             setup.origin.z += off;
+        setup.origin.x += shift.x;
+        setup.origin.y += shift.y;
     }
     if (m_VR && mainView)
         m_VR->m_SetupOrigin = setup.origin;
@@ -9181,6 +9184,8 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
         // frame's value): the gun hand moves with it.
         Vector ladderEye = eyePosition;
         ladderEye.z += m_VR->m_LadderView.offset;
+        ladderEye.x += m_VR->m_LadderView.shift.x;
+        ladderEye.y += m_VR->m_LadderView.shift.y;
         // Uncoupled viewmodel: same world pose both eyes (sd805 / Portal 2).
         // Do not IPD the gun — that drew two weapons (2026-08-17).
         if (m_VR->m_ControllerPoseValid)

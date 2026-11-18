@@ -8582,6 +8582,90 @@ float VR::PhysicalLadderViewOffset(float renderZ)
     return off;
 }
 
+Vector VR::PhysicalLadderViewShift(const Vector& body)
+{
+    // The body hangs at LadderMove's fixed distance from the ladder; the
+    // gloves are drawn on the rungs they hold (TryGetLadderPinDrawPos). Move
+    // the view along the horizontal line to the held rung by what the real
+    // hand is short of / past that rung, so pulling the arms in brings the
+    // player closer and stretching them pushes away (user idea, 2026-11-18).
+    // Capped at 8 units (~20 cm) each way: LadderMove keeps the hull ~16
+    // units off the ladder, so the eye never reaches the ladder or a shaft
+    // wall behind.
+    LadderViewState& v = m_LadderView;
+    static ULONGLONG s_lastMs = 0;
+    const ULONGLONG now = GetTickCount64();
+    float dt = s_lastMs ? (now - s_lastMs) * 0.001f : 0.f;
+    s_lastMs = now;
+    if (dt > 0.1f)
+        dt = 0.1f;
+    Vector want(0.f, 0.f, 0.f);
+    int n = 0;
+    if (v.active && bmvr::g_PhysicalLadders && bmvr::g_LadderBodyFollowsArms && body.LengthSqr() > 1.f)
+    {
+        Vector eye{};
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            eye = ControllerTrackingToWorld(body, m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs);
+        }
+        for (int h = 0; h < 2; ++h)
+        {
+            if (!m_LadderPin[h].valid || !m_LadderGrip[h].load(std::memory_order_relaxed))
+                continue;
+            Vector tracking{};
+            bool ok = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+                if (h == 0 && m_LeftControllerTrackingValid)
+                {
+                    tracking = m_LeftControllerPosAbs;
+                    ok = true;
+                }
+                else if (h == 1 && m_PhysicalRightTrackingValid)
+                {
+                    tracking = m_PhysicalRightPosAbs;
+                    ok = true;
+                }
+            }
+            if (!ok)
+                continue;
+            const Vector hand = ControllerTrackingToWorld(body, tracking);
+            Vector dir = m_LadderPin[h].world - eye;
+            dir.z = 0.f;
+            if (VectorNormalize(dir) < 1.f)
+                continue;
+            const float gap = (m_LadderPin[h].world - hand).Dot(dir);
+            want += dir * gap;
+            ++n;
+        }
+    }
+    if (n > 0)
+    {
+        want = want * (1.f / static_cast<float>(n));
+        want.z = 0.f;
+        const float len = want.Length();
+        constexpr float kMax = 8.f;
+        if (len > kMax)
+            want = want * (kMax / len);
+    }
+    // Follows in ~60 ms; eases back onto the body in ~150 ms when let go.
+    const float tau = n > 0 ? 0.06f : 0.15f;
+    const float a = dt > 0.f ? 1.f - expf(-dt / tau) : 0.f;
+    v.shift = v.shift + (want - v.shift) * a;
+    if (n == 0 && v.shift.LengthSqr() < 0.0001f)
+        v.shift = Vector(0.f, 0.f, 0.f);
+    static int s_log = 0;
+    static ULONGLONG s_logMs = 0;
+    if (n > 0 && s_log < 40 && now - s_logMs > 1000)
+    {
+        s_logMs = now;
+        ++s_log;
+        Game::logMsg("Ladder arms: view shift %.1f units (want %.1f, %d hand%s)",
+            v.shift.Length(), want.Length(), n, n == 1 ? "" : "s");
+    }
+    return v.shift;
+}
+
 QAngle VR::GetUseAimAnglesFromEye() const
 {
     const QAngle handAim = GetUseAimAngles();
@@ -13324,8 +13408,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 DrawRpgLockRing(device, lx, ly, h);
             device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         }
-        if (ToastVisible())
-            DrawToast(device, stereoEye, w, h, eyeOrig, fwd, right, up);
+        DrawToast(device, stereoEye, w, h, eyeOrig, fwd, right, up); // returns when no toast
 
         static int s_handLog;
         if (s_handLog < 4)

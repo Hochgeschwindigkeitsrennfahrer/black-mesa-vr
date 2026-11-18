@@ -26,6 +26,8 @@
 //                                so older scripts using `buttons` keep working.
 //                                Sticks: move = left, turn = right.
 //   system <name>                XrSystemProperties.systemName (default "PlayStation VR2")
+//   family <n>                   controller family (L4D2VR_OPENXR_CONTROLLER_FAMILY_*:
+//                                0 unknown, 1 Touch (default), 2 HP G2, 3 Index, 4 Vive)
 //   move <x> <y> / turn <x> <y>  sticks
 //   poserate <hz>                pose updates per second (default 120; ~45 = game at half rate)
 //   throw <id> <dx> <dy> <dz> <seconds> <release>  right hand moves from its pose by
@@ -102,6 +104,7 @@ namespace
         uint32_t rawButtons[2] = {};
         float rawTrigger[2] = {}, rawGrip[2] = {};
         std::string systemName = "PlayStation VR2";
+        uint32_t family = L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH;
         float moveX = 0, moveY = 0, turnX = 0, turnY = 0;
         int throwId = 0;
         float throwD[3] = {};
@@ -326,6 +329,12 @@ namespace
                     else if (input == "menu") fresh.rawButtons[h] |= L4D2VR_RAW_BUTTON_MENU;
                 }
             }
+            else if (key == "family")
+            {
+                uint32_t f = 1;
+                if (ss >> f)
+                    fresh.family = f;
+            }
             else if (key == "system")
             {
                 std::string rest;
@@ -519,7 +528,7 @@ namespace
             in.valid = 1;
             in.featureFlags = L4D2VR_OPENXR_INPUT_FEATURE_CONTROLLERS;
             in.actionCount = L4D2VR_OPENXR_ACTION_COUNT;
-            in.reserved0 = L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH; // PS VR2 Sense on SteamVR = Touch emulation
+            in.reserved0 = script.family; // default Touch: PS VR2 Sense on SteamVR = Touch emulation
             FakePose right = script.right;
             bool throwAttack = false, throwActive = false;
             if (script.throwId != 0 && script.throwId != activeThrowId)
