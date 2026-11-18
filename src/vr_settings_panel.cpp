@@ -92,6 +92,8 @@ namespace
     enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection, Preset,
         Bind, ColumnBreak, BindPreset, BindPicture };
     bool IsHeading(RowKind k) { return k == RowKind::Section || k == RowKind::DevSection; }
+    struct Row;
+    bool r_IsTabReset(const Row& r);
 
     struct Row
     {
@@ -106,6 +108,12 @@ namespace
         float defF = 0.f;
     };
     bool g_DefaultsCaptured = false;
+    bool r_IsTabReset(const Row& r) { return r.fmt && std::strcmp(r.fmt, "tab_default") == 0; }
+    constexpr int kTabResetX0 = 40, kTabResetX1 = 560;   // bottom bar, left of Close
+    int TabChangedCount(int tab);
+    // "Reset this tab" needs a second click within 3 s (armed = that tab's index).
+    int g_TabResetArmed = -1;
+    DWORD g_TabResetArmedAt = 0;
 
     std::vector<Row>& Rows()
     {
@@ -163,7 +171,6 @@ namespace
             // mapping, for support if a mapping ever blocks a button.
             // Off (or no SteamVR model found): the button list below.
             { "Controller pictures", RowKind::Toggle, "ControlsPicture", &bmvr::g_ControlsPicture, nullptr, 0, 0, 0, nullptr },
-            { "Reset buttons to defaults", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "binds_default" },
             { "LEFT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_left" },
             { "", RowKind::BindPicture, nullptr, nullptr, nullptr, 0, 0, 0, "L" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.trigger" },
@@ -318,7 +325,6 @@ namespace
             { "Show developer rows", RowKind::Toggle, "VrPanelDevRows", &bmvr::g_PanelDevRows, nullptr, 0, 0, 0, nullptr },
             // Every row of this tab back to its built-in default (logs, A/B fixes, tests, engine rows;
             // god/noclip/notarget off). "Show developer rows" stays as it is.
-            { "Reset dev rows", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "dev_default" },
             // CPU/GPU work removed without changing the image; off = the stock path, for A/B.
             { "SAVINGS (SAME IMAGE)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Post copies: swap, no copy", RowKind::Toggle, "PostCopySwap", &bmvr::g_PostCopySwap, nullptr, 0, 0, 0, nullptr },
@@ -403,6 +409,8 @@ namespace
             { "Thumb swing", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanThumbSwing, 0.1f, 0.f, 1.5f, "%.1f" },
             // Drawn at the bottom of every tab.
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // In the bottom bar, far left: resets the tab shown (second click confirms).
+            { "Reset tab", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "tab_default" },
         };
         return rows;
     }
@@ -837,21 +845,29 @@ namespace
         return idx < PickerCount() ? idx : -1;
     }
 
-    // "Reset dev rows": every row of the DEBUG tab back to its built-in default (CapturePanelDefaults,
-    // taken before config.txt), except "Show developer rows". Engine rows get console commands:
-    // god/noclip/notarget (toggles) are switched off before the cvars, so sv_cheats 0 comes last.
-    // Returns the number of rows changed; each one is logged.
-    int ResetDevRows()
+    // "Reset this tab" (one at the end of every tab): every row of tab `tab` back to its
+    // built-in default (CapturePanelDefaults, taken before config.txt), except "Show developer
+    // rows"; a tab with button rows also gets the default buttons for this controller. Engine
+    // rows get console commands: god/noclip/notarget (toggles) are switched off before the
+    // cvars, so sv_cheats 0 comes last. Returns the number of rows changed; each one is logged.
+    int ResetTabRows(int tab)
     {
         std::vector<Row>& rows = Rows();
         size_t i = 0;
-        while (i < rows.size() && !(rows[i].kind == RowKind::Tab && std::strcmp(rows[i].label, "DEBUG") == 0))
-            ++i;
+        for (int t = -1; i < rows.size(); ++i)
+            if (rows[i].kind == RowKind::Tab && ++t == tab)
+                break;
+        if (i >= rows.size())
+            return 0;
+        const char* tabName = rows[i].label;
         std::vector<std::string> toggles, cvars;
         int changed = 0;
+        bool binds = false;
         for (++i; i < rows.size() && rows[i].kind != RowKind::Tab && rows[i].kind != RowKind::Close; ++i)
         {
             Row& r = rows[i];
+            if (r.kind == RowKind::Bind)
+                binds = true;
             if (r.b == &bmvr::g_PanelDevRows)
                 continue;
             char cmd[96]{};
@@ -885,7 +901,13 @@ namespace
             g_EngCmds.push_back(std::move(c));
         for (std::string& c : cvars)
             g_EngCmds.push_back(std::move(c));
-        Game::logMsg("VR settings reset: developer rows back to defaults, %d changed", changed);
+        if (binds)
+        {
+            bmvr::ResetBinds(g_PanelFamily);
+            g_BindsChanged = true;
+        }
+        Game::logMsg("VR settings reset: tab %s back to defaults, %d rows changed%s", tabName, changed,
+            binds ? " + buttons" : "");
         return changed;
     }
 
@@ -1110,6 +1132,13 @@ namespace
         out.bottom = out.closeTop + kRowPx;
         for (int i = 0; i < n; ++i)
         {
+            if (r_IsTabReset(rows[i]))
+            {
+                out.top[i] = out.closeTop;
+                out.x0[i] = kTabResetX0;
+                out.x1[i] = kTabResetX1;
+                continue;
+            }
             if (rows[i].kind != RowKind::Close)
                 continue;
             out.top[i] = out.closeTop;
@@ -1149,7 +1178,7 @@ namespace
             l.bottom = l.closeTop + kRowPx;
             const auto& rows = Rows();
             for (int i = 0; i < static_cast<int>(rows.size()); ++i)
-                if (rows[i].kind == RowKind::Close)
+                if (rows[i].kind == RowKind::Close || r_IsTabReset(rows[i]))
                     l.top[i] = l.closeTop;
         }
         return l;
@@ -1225,6 +1254,14 @@ namespace
         const auto& rows = Rows();
         const Layout& l = GetLayout();
         const int c = px < kColW ? 0 : 1;
+        // Bottom bar, far left: "Reset tab" (only while something on the tab is changed).
+        for (int i = static_cast<int>(rows.size()) - 1; i >= 0; --i)
+            if (r_IsTabReset(rows[i]))
+            {
+                if (px >= l.x0[i] && px < l.x1[i] && py >= l.top[i] && py < l.top[i] + kRowPx)
+                    return TabChangedCount(g_Tab) > 0 ? i : -1;
+                break;
+            }
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
         {
             const RowKind k = rows[i].kind;
@@ -1272,6 +1309,36 @@ namespace
         if (r.kind == RowKind::Toggle)
             return r.b && *r.b == r.defB;
         return r.f && std::fabs(*r.f - r.defF) <= 1e-4f * (std::max)(1.f, std::fabs(r.defF));
+    }
+    // Set away from its built-in default (= what config.txt keeps): label (and value) amber.
+    // Same colour as the changed buttons on the CONTROLS tab.
+    bool RowChanged(const Row& r)
+    {
+        if (r.kind == RowKind::Bind)
+            return BindRowAction(r) != BindRowAction(r, true);
+        if (r.kind != RowKind::Toggle && r.kind != RowKind::Number && r.kind != RowKind::Choice)
+            return false;
+        return r.key && !IsEngineKey(r.key) && !IsDefault(r);
+    }
+    // Changed rows of tab `tab` (its tab button gets a dot, "Reset this tab" the count).
+    int TabChangedCount(int tab)
+    {
+        const auto& rows = Rows();
+        int t = -1, n = 0;
+        for (const Row& r : rows)
+        {
+            if (r.kind == RowKind::Close)
+                break;
+            if (r.kind == RowKind::Tab)
+            {
+                if (++t > tab)
+                    break;
+                continue;
+            }
+            if (t == tab && RowChanged(r))
+                ++n;
+        }
+        return n;
     }
 
     // Replace `Key=...` (first non-comment line) or append it; `Key=` lines of
@@ -1658,6 +1725,27 @@ namespace
                 c.fill(l.x0[i], y0 + 4, l.x1[i], y1, active ? kAmber : hover ? kRowHover : kBtn);
                 c.text(alert ? "!   DEBUG   !" : r.label, l.x0[i], y0 + 4, l.x1[i], y1, active ? RGB(0, 0, 0) : kText,
                     32, true, DT_CENTER);
+                // Something on this tab differs from the defaults: a dot in the corner.
+                if (TabChangedCount(tabIndex - 1) > 0)
+                    c.fill(l.x1[i] - 22, y0 + 12, l.x1[i] - 10, y0 + 24, active ? RGB(0, 0, 0) : kAmber);
+                continue;
+            }
+            if (r_IsTabReset(r))
+            {
+                // Danger red; dark grey + dim while the tab is all default (not clickable then).
+                const int n = TabChangedCount(g_Tab);
+                const bool armed = n > 0 && g_TabResetArmed == g_Tab;
+                char label[64]{};
+                if (armed)
+                    _snprintf(label, sizeof(label) - 1, "Click again: reset %d", n);
+                else if (n > 0)
+                    _snprintf(label, sizeof(label) - 1, "Reset tab (%d changed)", n);
+                else
+                    _snprintf(label, sizeof(label) - 1, "Reset tab (all default)");
+                const COLORREF fill = n == 0 ? kDisabledBtn : armed ? kAlert : hover ? RGB(170, 50, 40) : RGB(115, 35, 30);
+                const int y0 = l.top[i] + 8, y1 = l.top[i] + kRowPx - 8;
+                c.fill(l.x0[i], y0, l.x1[i], y1, fill);
+                c.text(label, l.x0[i], l.top[i], l.x1[i], l.top[i] + kRowPx, n == 0 ? kDim : RGB(255, 255, 255), 30, true, DT_CENTER);
                 continue;
             }
             if (!RowVisible(i))
@@ -1689,11 +1777,11 @@ namespace
                 COLORREF ink = kText;
                 if (r.kind == RowKind::Bind)
                 {
-                    c.text(BindRowLabel(r).c_str(), x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
                     const bmvr::BindAction a = BindRowAction(r);
                     name = bmvr::BindActionLabel(a);
                     if (a != BindRowAction(r, true))
                         ink = kAmber;
+                    c.text(BindRowLabel(r).c_str(), x + 40, y0, x + kMinusX0 - 10, y1, ink, 34, false, DT_LEFT);
                 }
                 else
                 {
@@ -1743,7 +1831,8 @@ namespace
             }
             // Depends on a setting that is off: everything in kDim, dark buttons.
             const bool dis = RowDisabled(r);
-            const COLORREF ink = dis ? kDim : kText;
+            const bool changed = RowChanged(r);
+            const COLORREF ink = dis ? kDim : changed ? kAmber : kText;
             const COLORREF btn = dis ? kDisabledBtn : kBtn;
             c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, ink, 34, false, DT_LEFT);
             if (r.kind == RowKind::Choice || r.kind == RowKind::Preset)
@@ -2100,6 +2189,12 @@ void VR::UpdateSettingsPanel()
 {
     if (!m_SettingsOpen)
         return;
+    // "Click again to reset this tab" goes back to normal after 3 s or on another tab.
+    if (g_TabResetArmed >= 0 && (g_TabResetArmed != g_Tab || GetTickCount() - g_TabResetArmedAt > 3000))
+    {
+        g_TabResetArmed = -1;
+        m_SettingsDirty = true;
+    }
     if (!m_GameplayEligible || PauseUiActive())
     {
         CloseSettingsPanel("pause");
@@ -2401,15 +2496,25 @@ void VR::UpdateSettingsPanel()
             bmvr::g_HandHudRoll = 14.f;
             break;
         }
-        if (r.fmt && std::strcmp(r.fmt, "binds_default") == 0)
+        // First click arms, a second one within 3 s resets the tab (nothing is lost by a stray click).
+        if (r_IsTabReset(r))
         {
-            bmvr::ResetBinds(g_PanelFamily);
-            g_BindsChanged = true;
-            break;
-        }
-        if (r.fmt && std::strcmp(r.fmt, "dev_default") == 0)
-        {
-            ResetDevRows();
+            if (g_TabResetArmed != g_Tab)
+            {
+                g_TabResetArmed = g_Tab;
+                g_TabResetArmedAt = GetTickCount();
+                m_SettingsDirty = true;
+                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
+                Game::logMsg("VR settings: Reset this tab armed (tab %d)", g_Tab);
+                return;
+            }
+            g_TabResetArmed = -1;
+            ResetTabRows(g_Tab);
+            if (bmvr::g_VrSettingsPause != m_SettingsPausedGame)
+            {
+                m_SettingsPausedGame = bmvr::g_VrSettingsPause;
+                m_PendingPauseCmd.store(m_SettingsPausedGame ? 1 : 2, std::memory_order_release);
+            }
             break;
         }
         if (r.fmt && std::strcmp(r.fmt, "impulse101") == 0)
