@@ -94,6 +94,9 @@ namespace MagReload
     // GetTickCount of the last viewmodel draw that showed the gun's own
     // left hand as the support hand (VrSupportHandLock): the glove skips it.
     extern std::atomic<unsigned> g_SupportHandFromGunMs;
+    // GetTickCount of the last satchel radio (detonator) draw: until it
+    // exists (first charge out) the right glove shows instead.
+    extern std::atomic<unsigned> g_SatchelRadioMs;
     // Shotgun pump back stroke: a spent hull flies out of the ejection port
     // (GetTickCount, 0 = none).
     extern std::atomic<unsigned> g_EjectTick;

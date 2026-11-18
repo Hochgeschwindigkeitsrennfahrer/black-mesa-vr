@@ -5538,6 +5538,9 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         Game::logMsg("debug dump: no publish slot (%u)", slot);
     DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud.bmp", 2);
     DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud-alpha.bmp", 2, true);
+    // Panel "Screenshot": a short note once the eyes are on disk (user).
+    if (std::strncmp(name, "screenshot-", 11) == 0)
+        ShowToast("Screenshot saved", 1500);
     if (m_PhaseDumpBackbuffer)
     {
         m_PhaseDumpBackbuffer = false;
@@ -15285,6 +15288,13 @@ bool VR::WantsRightGloveVisible() const
         return true;
     if (bmvr::g_LeftHanded && m_TwoHandActive)
         return true;
+    // Satchel before its first charge: no detonator viewmodel yet, so the
+    // right hand would be missing (user 2026-11-18).
+    if (SatchelHandsActive())
+    {
+        const unsigned radio = MagReload::g_SatchelRadioMs.load(std::memory_order_relaxed);
+        return radio == 0 || GetTickCount() - radio > 300;
+    }
     return false;
 }
 
@@ -21189,6 +21199,7 @@ std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
 std::atomic<float> MagReload::g_LeftPinchLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPinchMs{ 0 };
 std::atomic<unsigned> MagReload::g_SupportHandFromGunMs{ 0 };
+std::atomic<unsigned> MagReload::g_SatchelRadioMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
 std::atomic<unsigned> MagReload::g_357EjectTick{ 0 };
 std::atomic<bool> MagReload::g_EjectedEmpty{ false };
