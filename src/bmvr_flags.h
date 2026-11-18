@@ -746,6 +746,14 @@ namespace bmvr
     // in its grip pose (follows the shotgun pump) and the left glove is
     // hidden. Needs VrGunRightHand (the viewmodel's arms drawn).
     extern bool g_VrSupportHandLock;
+    // Satchel (user, 2026-11-18): detonator always in the left hand while
+    // the satchel is drawn, left trigger detonates (alt-fire), left grip is
+    // Use meanwhile; the satchel is thrown from the right hand on the
+    // trigger release. Detonator pose in the left controller frame
+    // (metres / degrees, BuildControllerWorld: x right, y up, z back).
+    extern bool g_VrSatchelHands;
+    extern float g_VrDetPos[3];
+    extern float g_VrDetRot[3];
     // Two-handed: health panel above the ammo panel on the gun (not on the support wrist).
     extern bool g_HudHealthOnGun;
     extern bool g_VrSupportHandForce; // test: lock as if the left hand held the gun

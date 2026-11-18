@@ -9869,6 +9869,10 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         isViewmodel = false;
         Game::logMsg("DME info SEH - passthrough original");
     }
+    // Satchel (VrSatchelHands): the detonator is drawn in the left hand
+    // (vr_hands.cpp); the game's right-hand radio viewmodel is not drawn.
+    if (isViewmodel && modelName && m_VR && m_VR->SatchelHandsActive() && std::strstr(modelName, "v_satchel_radio"))
+        return;
 
     if (g_Cost.active)
     {
@@ -14322,6 +14326,39 @@ void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse
     // Frag thrown by the local player: the next grenade comes with its pin.
     if (type == kGrenadeTypeFrag && ShouldRewriteShootAngles(owner))
         MagReload::g_PinThrown.store(true);
+    // Satchel (CWeapon_Satchel anim event 0xBBD -> type 3, mode 0) thrown
+    // from the right hand on the trigger release (VrSatchelHands).
+    constexpr int kGrenadeTypeSatchel = 3;
+    if (type == kGrenadeTypeSatchel && velocity && m_VR && bmvr::g_VrHandThrow && ShouldRewriteShootAngles(owner))
+    {
+        Vector satHand{}, satFrom{};
+        const unsigned until = m_VR->m_SnarkHandThrowUntil.load(std::memory_order_relaxed);
+        if (until != 0 && GetTickCount() < until && m_VR->TryGetThrowVelocity(satHand) && m_VR->TryGetThrowOrigin(satFrom))
+        {
+            m_VR->m_SnarkHandThrowUntil.store(0, std::memory_order_relaxed);
+            Vector playerVel{};
+            BMVR_TRY
+            {
+                constexpr int kAbsVelocity = 0x218;
+                playerVel = *reinterpret_cast<const Vector*>(static_cast<const char*>(owner) + kAbsVelocity);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            const Vector before = *velocity;
+            *velocity = satHand + playerVel;
+            Game::logMsg("VR satchel throw: hand %.0f u/s -> (%.0f,%.0f,%.0f) (game %.0f u/s)",
+                satHand.Length(), velocity->x, velocity->y, velocity->z, before.Length());
+            g_VrSpawnPoint = satFrom;
+            g_VrSpawnWhat = "VR satchel throw";
+            g_VrSpawnLogBudget = -1;
+            g_VrSpawnMaxDist = 60.f;
+            g_VrGrenadeSpawn = true;
+            void* satchel = hkGrenadeCreate.fOriginal(type, velocity, angImpulse, owner, thrower, kSpawnAtThrowPosition);
+            g_VrGrenadeSpawn = false;
+            return satchel;
+        }
+    }
     Vector hand{};
     if (type != kGrenadeTypeFrag || !bmvr::g_VrHandThrow || !velocity || !m_VR
         || !ShouldRewriteShootAngles(owner) || !m_VR->TryGetThrowVelocity(hand))

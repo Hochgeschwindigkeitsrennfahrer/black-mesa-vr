@@ -562,6 +562,28 @@ struct BmVrGloves::Impl
 
     Hand hev[2];
     Hand bare[2];
+    // Satchel detonator (renderer slot 4), built on first need.
+    VrHandMeshAsset detonator;
+    std::vector<VrHandMatrixRows3x4> detonatorPalette;
+    bool detonatorTried = false;
+    bool detonatorOk = false;
+    bool EnsureDetonator()
+    {
+        if (detonatorTried)
+            return detonatorOk;
+        detonatorTried = true;
+        std::string error;
+        detonatorOk = BmHands::BuildDetonator(1.f, detonator, error);
+        Game::logMsg("Satchel detonator mesh: %s%s (%zu verts)", detonatorOk ? "built" : "failed: ",
+            detonatorOk ? "" : error.c_str(), detonator.vertices.size());
+        if (detonatorOk)
+        {
+            VrHandMatrixRows3x4 idRow;
+            idRow.v = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+            detonatorPalette = { idRow };
+        }
+        return detonatorOk;
+    }
     VrHandRendererD3D9 renderer;
     bool assetAttempted = false;
     bool assetsLoaded = false;
@@ -860,6 +882,16 @@ bool BmVrGloves::WarmupGpu(IDirect3DDevice9* device)
     {
         ok |= warmup(2, m_Impl->bare[0], "bare-left");
         warmup(3, m_Impl->bare[1], "bare-right");
+    }
+    if (g_Game && g_Game->m_VR && g_Game->m_VR->SatchelHandsActive() && m_Impl->EnsureDetonator())
+    {
+        std::string error;
+        if (!m_Impl->renderer.EnsureHandMesh(device, 4, m_Impl->detonator, error) && !error.empty())
+        {
+            static int s_detWarmLog;
+            if (s_detWarmLog++ < 4)
+                Game::logMsg("Satchel detonator upload: %s", error.c_str());
+        }
     }
     return ok;
 }
@@ -1188,6 +1220,31 @@ bool BmVrGloves::DrawForEye(
             continue;
         }
         drew = true;
+    }
+
+    // Satchel detonator in the left hand (VrSatchelHands), from the left
+    // controller pose at viewmodel size, lit like the left glove.
+    if (valid[0] && g_Game && g_Game->m_VR && g_Game->m_VR->SatchelHandsActive() && m_Impl->detonatorOk)
+    {
+        const VrHandMatrix4 world = VrHandMath::BuildControllerWorld(*origins[0], *angles[0], sourceUnitsPerMeter,
+            std::clamp(bmvr::g_ViewmodelScale, 0.2f, 2.f),
+            Vector(bmvr::g_VrDetPos[0], bmvr::g_VrDetPos[1], bmvr::g_VrDetPos[2]),
+            Vector(bmvr::g_VrDetRot[0], bmvr::g_VrDetRot[1], bmvr::g_VrDetRot[2]));
+        const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
+        Impl::Hand& light = pair[0];
+        std::string error;
+        if (m_Impl->renderer.Draw(device, 4, m_Impl->detonator, m_Impl->detonatorPalette, world, wvp,
+                (overlayNoDepth || stereoEye == 0) ? VrHandDrawPass::OverlayNoDepth : VrHandDrawPass::WorldDepth,
+                light.lightValid ? light.lightRgb : Vector(1.f, 1.f, 1.f), eyeOrigin,
+                light.lightValid ? light.lightExposure : 0.45f,
+                g_Game->m_VR->SceneCubemap(), error))
+            drew = true;
+        else if (!error.empty())
+        {
+            static int s_detLog;
+            if (s_detLog++ < 4)
+                Game::logMsg("Satchel detonator draw: %s", error.c_str());
+        }
     }
 
     if (drew && !m_Impl->loggedReady)

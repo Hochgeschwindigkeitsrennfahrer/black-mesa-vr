@@ -7043,7 +7043,15 @@ void VR::ProcessInput()
         // hands: the right-stick tap cannot holster then, so R2 stayed fire
         // with nothing to fire and only L2 could use.
         const bool emptyHands = m_EmptyHands || !m_HasHeldWeapon;
-        const bool leftUse = PressedDigitalAction(m_ActionUse);
+        bool leftUse = PressedDigitalAction(m_ActionUse);
+        // Satchel (VrSatchelHands): the Use press (left trigger) works the
+        // detonator in the left hand = alt-fire; the left grip is Use.
+        bool satchelDetonate = false;
+        if (SatchelHandsActive())
+        {
+            satchelDetonate = leftUse;
+            leftUse = LeftSupportGripValue() > 0.6f;
+        }
         // The settings panel takes trigger, Cross and Circle (reload / alt-fire).
         // They stay blocked after it (or the weapon menu) closes until they
         // are released: the trigger/Circle press that closed the panel used
@@ -7141,6 +7149,16 @@ void VR::ProcessInput()
         UpdateUseGrab(buttons, leftUse, rightUse);
         if (!menuOwnsButtons && PressedDigitalAction(m_ActionReload))
             buttons |= IN_RELOAD;
+        {
+            static bool s_detWas = false;
+            if (!menuOwnsButtons && satchelDetonate)
+            {
+                buttons |= IN_ATTACK2;
+                if (!s_detWas)
+                    Game::logMsg("Satchel: left trigger -> detonate");
+            }
+            s_detWas = satchelDetonate;
+        }
         if (PressedDigitalAction(m_ActionCrouch))
             buttons |= IN_DUCK;
         if (m_ButtonMapActive || !haveTurnY || turnY > -0.4f)
@@ -14452,6 +14470,7 @@ void VR::NoteViewmodelModel(const char* modelName)
         if (m_VmClass.crossbow) flags |= kVmFlagCrossbow;
         if (m_VmClass.revolver) flags |= kVmFlag357;
         if (m_VmClass.numpadKey == "snark") flags |= kVmFlagSnark;
+        if (m_VmClass.numpadKey == "satchel") flags |= kVmFlagSatchel;
         m_VmClassFlags.store(flags, std::memory_order_relaxed);
         Game::logMsg("Viewmodel model %s", modelName);
     }
@@ -21111,6 +21130,11 @@ std::atomic<bool> MagReload::g_PinThrown{ false };
 // arm winds up; press and let go of the trigger to throw (hand velocity as
 // before). Alt-fire (roll) is left to the game. A thrown grenade's successor
 // comes with its pin (dGrenadeCreate sets g_PinThrown).
+bool VR::SatchelHandsActive() const
+{
+    return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
+}
+
 void VR::UpdateSnarkThrow(uint32_t& buttons)
 {
     // User, 2026-11-18: snarks left from the centre of the view. Black Mesa
@@ -21120,7 +21144,9 @@ void VR::UpdateSnarkThrow(uint32_t& buttons)
     static bool s_held = false;
     static DWORD s_pulseUntil = 0;
     const DWORD now = GetTickCount();
-    const bool snark = bmvr::g_VrHandThrow && !bmvr::g_LeftHanded && m_GameplayEligible && ViewmodelIsSnark();
+    // Satchel too (VrSatchelHands): thrown from the right hand on the release.
+    const bool snark = bmvr::g_VrHandThrow && !bmvr::g_LeftHanded && m_GameplayEligible
+        && (ViewmodelIsSnark() || SatchelHandsActive());
     if (!snark)
     {
         s_held = false;
@@ -21150,7 +21176,7 @@ void VR::UpdateSnarkThrow(uint32_t& buttons)
             m_ThrowReleaseOffset = hand - body;
             m_ThrowReleaseLockUntil = t + 1.0;
         }
-        Game::logMsg("Snark throw: trigger let go, throwing from the hand");
+        Game::logMsg("%s throw: trigger let go, throwing from the hand", ViewmodelIsSnark() ? "Snark" : "Satchel");
     }
     if (now < s_pulseUntil)
         buttons |= IN_ATTACK;

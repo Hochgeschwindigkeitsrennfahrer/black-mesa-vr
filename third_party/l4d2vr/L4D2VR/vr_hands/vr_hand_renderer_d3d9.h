@@ -83,5 +83,6 @@ private:
     IDirect3DVertexDeclaration9* m_VertexDeclaration = nullptr;
     IDirect3DVertexShader9* m_VertexShader = nullptr;
     IDirect3DPixelShader9* m_PixelShader = nullptr;
-    std::array<MeshResources, 4> m_Meshes{};
+    // 0-3 gloves (hev/bare x left/right), 4 the satchel detonator (BMVR).
+    std::array<MeshResources, 5> m_Meshes{};
 };

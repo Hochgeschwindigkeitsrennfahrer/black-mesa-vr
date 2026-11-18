@@ -19,4 +19,7 @@ namespace BmHands
 
     // hand: 0 left, 1 right. scale: 1 = Black Mesa's viewmodel size.
     bool Build(Variant variant, int hand, float scale, VrHandMeshAsset& out, std::string& error);
+    // The satchel detonator (v_satchel_radio "body" part), rigid, centred,
+    // metres x scale (1 = Black Mesa's viewmodel size).
+    bool BuildDetonator(float scale, VrHandMeshAsset& out, std::string& error);
 }

@@ -326,6 +326,9 @@ namespace bmvr
     bool g_VrGunRightHand = false;
     bool g_VrStockHandPose = true;
     bool g_VrSupportHandLock = true;
+    bool g_VrSatchelHands = true;
+    float g_VrDetPos[3] = { 0.f, -0.01f, 0.02f };
+    float g_VrDetRot[3] = { -15.f, 0.f, 90.f }; // antenna up, leaning forward (headless 2026-11-18)
     bool g_HudHealthOnGun = true;
     bool g_VrSupportHandForce = false;
     // Side (key) pinch: thumb pad on the half-bent index (headless, bare
@@ -1190,6 +1193,8 @@ namespace bmvr
                 g_VrGunRightHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrStockHandPose") == 0)
                 g_VrStockHandPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrSatchelHands") == 0)
+                g_VrSatchelHands = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSupportHandLock") == 0)
                 g_VrSupportHandLock = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesa") == 0)

@@ -301,7 +301,7 @@ namespace
     };
 
     bool ParseModel(const Bytes& mdl, const Bytes& vvd, const Bytes& vtx, const char* variantSmd,
-        const char* skinMaterial, Model& out, std::string& err)
+        const char* skinMaterial, Model& out, std::string& err, const char* bodyPartName = "arms")
     {
         auto I = [&](const Bytes& d, size_t o) { std::int32_t v = 0; Rd(d, o, v); return v; };
         // bones
@@ -359,14 +359,14 @@ namespace
                 return false;
             }
         }
-        // body part "arms", model by smd name
+        // body part ("arms" for the hands), model by smd name
         const int nbp = I(mdl, 232), bpi = I(mdl, 236);
         int armsBp = -1, variant = -1;
         size_t modelOff = 0;
         for (int p = 0; p < nbp && armsBp < 0; ++p)
         {
             const size_t o = bpi + static_cast<size_t>(p) * 16;
-            if (CStr(mdl, o + I(mdl, o)) != "arms")
+            if (CStr(mdl, o + I(mdl, o)) != bodyPartName)
                 continue;
             armsBp = p;
             const int nm = I(mdl, o + 4), mi = I(mdl, o + 12);
@@ -383,7 +383,7 @@ namespace
         }
         if (armsBp < 0 || variant < 0)
         {
-            err = std::string("arms model not found: ") + variantSmd;
+            err = std::string(bodyPartName) + " model not found: " + variantSmd;
             return false;
         }
         const int nmesh = I(mdl, modelOff + 72), meshi = I(mdl, modelOff + 76), vidx = I(mdl, modelOff + 84);
@@ -865,6 +865,102 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
     if (!out.IsValid())
     {
         error = "built asset invalid";
+        return false;
+    }
+    return true;
+}
+
+bool BmHands::BuildDetonator(float scale, VrHandMeshAsset& out, std::string& error)
+{
+    // Satchel detonator (user, 2026-11-18): the radio from
+    // models/weapons/v_satchel_radio.mdl ("body" part, material
+    // v_satchel_radio), rigid, in its DetonatorRoot frame, centred on its
+    // mesh, metres x scale. One joint; drawn at the left controller.
+    std::lock_guard<std::mutex> lock(g_Mutex);
+    const auto dir = GameDir();
+    Vpk models, textures;
+    if (!models.Open(dir / "bms_models_dir.vpk") || !textures.Open(dir / "bms_textures_dir.vpk"))
+    {
+        error = "cannot open Black Mesa VPKs";
+        return false;
+    }
+    Bytes mdlB, vvd, vtx, vtf, bmp;
+    if (!models.Get("models/weapons/v_satchel_radio.mdl", mdlB) || !models.Get("models/weapons/v_satchel_radio.vvd", vvd)
+        || !models.Get("models/weapons/v_satchel_radio.dx90.vtx", vtx))
+    {
+        error = "v_satchel_radio model files missing";
+        return false;
+    }
+    Model mdl;
+    if (!ParseModel(mdlB, vvd, vtx, "reference", "v_satchel_radio", mdl, error, "body"))
+        return false;
+    if (!textures.Get("materials/models/weapons/v_satchel/v_satchel_radio.vtf", vtf) || !VtfToBmp(vtf, bmp, error))
+    {
+        if (error.empty())
+            error = "v_satchel_radio texture missing";
+        return false;
+    }
+    int root = -1;
+    for (size_t b = 0; b < mdl.bones.size(); ++b)
+        if (mdl.bones[b].name == "DetonatorRoot")
+            root = static_cast<int>(b);
+    if (root < 0)
+    {
+        error = "DetonatorRoot bone missing";
+        return false;
+    }
+    const M4 toLocal = Inv(mdl.bones[root].world);
+    std::set<int> used;
+    for (const auto& t : mdl.tris)
+        used.insert(t.begin(), t.end());
+    if (used.empty() || used.size() > 65535)
+    {
+        error = "detonator vertex count " + std::to_string(used.size());
+        return false;
+    }
+    out = VrHandMeshAsset{};
+    std::unordered_map<int, std::uint16_t> remap;
+    V3 sum{ 0, 0, 0 };
+    for (const int vi : used)
+    {
+        const SrcVert& v = mdl.verts[vi];
+        VrHandVertex o{};
+        const V3 p = XformP(toLocal, v.pos) * (scale / kUnitsPerMeter);
+        const V3 n = Norm(XformN(toLocal, v.nrm));
+        o.position[0] = p.x; o.position[1] = p.y; o.position[2] = p.z;
+        o.normal[0] = n.x; o.normal[1] = n.y; o.normal[2] = n.z;
+        o.uv[0] = v.u;
+        o.uv[1] = v.v;
+        o.joints[0] = 0;
+        o.weights[0] = 1.f;
+        sum = sum + p;
+        remap[vi] = static_cast<std::uint16_t>(out.vertices.size());
+        out.vertices.push_back(o);
+    }
+    const V3 c = sum * (1.f / static_cast<float>(out.vertices.size()));
+    for (auto& v : out.vertices)
+    {
+        v.position[0] -= c.x;
+        v.position[1] -= c.y;
+        v.position[2] -= c.z;
+    }
+    for (const auto& t : mdl.tris)
+    {
+        out.indices.push_back(remap[t[0]]);
+        out.indices.push_back(remap[t[1]]);
+        out.indices.push_back(remap[t[2]]);
+    }
+    out.jointNames = { "root" };
+    out.jointParents = { -1 };
+    VrHandMatrix4 id;
+    id.m = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    out.bindMatrices = { id };
+    out.inverseBindMatrices = { id };
+    out.baseColorTextureBytes = std::move(bmp);
+    out.sourcePath = "bm:satchel_detonator";
+    if (!out.IsValid())
+    {
+        error = "detonator asset invalid";
         return false;
     }
     return true;

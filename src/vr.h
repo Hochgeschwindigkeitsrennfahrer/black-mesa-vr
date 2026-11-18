@@ -375,6 +375,7 @@ public:
         kVmFlagCrossbow = 1u << 7,
         kVmFlag357 = 1u << 8,
         kVmFlagSnark = 1u << 9,
+        kVmFlagSatchel = 1u << 10,
     };
     // Manual MP5 magazine (VrMagReload): eject / hip grab / seat, game thread.
     void UpdateMagReload(uint32_t& buttons);
@@ -392,6 +393,9 @@ public:
     bool ViewmodelIsCrossbow() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagCrossbow) != 0; }
     bool ViewmodelIs357() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlag357) != 0; }
     bool ViewmodelIsSnark() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagSnark) != 0; }
+    bool ViewmodelIsSatchel() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagSatchel) != 0; }
+    // Satchel drawn with VrSatchelHands: detonator in the left hand.
+    bool SatchelHandsActive() const;
     bool ViewmodelIsGlock() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGlock) != 0; }
     bool ViewmodelIsMp5() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagMp5) != 0; }
     // Viewmodel sequence is a reload/draw/holster/pump-style action: the
