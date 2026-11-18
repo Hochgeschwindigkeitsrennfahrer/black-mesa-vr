@@ -1463,10 +1463,13 @@ namespace
             g_FovGpu.store(bmvr::FoveationAvailable(device) ? 1 : 0, std::memory_order_relaxed);
         FoveationGazeState& g = g_FovGaze;
         int eye = 0;
-        // Full rate while the VR settings panel or the game's menus are up: the panel floats in
-        // the scene and its text was the one place the coarse rings showed (2026-11-16 headset).
+        // Full rate while the VR settings panel, the VR weapon menu or the game's menus are up: the
+        // panel floats in the scene and its text was the one place the coarse rings showed
+        // (2026-11-16 headset). The weapon menu is opened looking ahead and then read with
+        // glances, so its icons sat in the coarser rings (2026-11-18).
         if (vr && bmvr::g_Foveated > 0.f && vr->StereoWorldPassActive() && !vr->HudPaintActive()
-            && !vr->m_CaptureReentry && !vr->SettingsPanelOpen() && !vr->m_GameUiVisible)
+            && !vr->m_CaptureReentry && !vr->SettingsPanelOpen() && !vr->WeaponMenuOpen()
+            && !vr->m_GameUiVisible)
             eye = GpuTimerEye(vr);
         if (eye == 1 && eye != g.lastEye)
         {
