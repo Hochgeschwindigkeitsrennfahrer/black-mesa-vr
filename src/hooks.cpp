@@ -3572,6 +3572,35 @@ namespace
             return;
         }
 
+        // Tau / gluon / hivehand fire and charge clips (tau fire1-3,
+        // fire_charged, fire_overcharge, spin, spin_weak; gluon fire1, fire2,
+        // fire_end, vibrate; hivehand fire11-23) shake and kick the whole gun,
+        // so it left the support hand, which sits on the controller-derived
+        // grip (user 2026-11-18). The gun is in the hands: hold the idle pose.
+        if (bmvr::g_XenFireIdle && label && Hooks::m_VR->ViewmodelIsXenGun() && Hooks::m_Game
+            && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
+        {
+            char lb[32]{};
+            for (int i = 0; i < 31 && label[i]; ++i)
+                lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+            const bool fireClip = std::strncmp(lb, "fire", 4) == 0 || std::strncmp(lb, "spin", 4) == 0
+                || std::strcmp(lb, "vibrate") == 0;
+            if (fireClip && StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))
+            {
+                static unsigned char* s_loggedXenHdr;
+                static int s_loggedXenSeq = -1;
+                static int s_xenLogs;
+                if ((s_loggedXenHdr != hdr || s_loggedXenSeq != seq) && s_xenLogs++ < 20)
+                {
+                    s_loggedXenHdr = hdr;
+                    s_loggedXenSeq = seq;
+                    Game::logMsg("Viewmodel xen fire clip seq %d '%s' -> idle", seq, label);
+                }
+                ForceViewmodelIdlePose(viewmodel, hdr);
+                return;
+            }
+        }
+
         if (bmvr::g_SkipDrawAnim && s_lc.equip && Hooks::m_Game
             && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
             && StudioHdrMatchesModel(hdr, Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel))))

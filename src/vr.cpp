@@ -14316,6 +14316,7 @@ void VR::NoteViewmodelModel(const char* modelName)
         if (m_VmClass.glock) flags |= kVmFlagGlock;
         if (m_VmClass.crossbow) flags |= kVmFlagCrossbow;
         if (m_VmClass.revolver) flags |= kVmFlag357;
+        if (m_VmClass.xenGun) flags |= kVmFlagXenGun;
         m_VmClassFlags.store(flags, std::memory_order_relaxed);
         Game::logMsg("Viewmodel model %s", modelName);
     }
@@ -14395,6 +14396,7 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     out.scoped = has("crossbow");
     out.rpg = has("rpg") || has("rocket");
     out.gluon = has("egon") || has("gluon");
+    out.xenGun = out.gluon || has("gauss") || has("tau") || has("hgun") || has("hive") || has("hornet");
     // Former hooks.cpp IsMp5Viewmodel (mp5 / MP5 / smg / mp5k) on the
     // lowercased path; dCalcViewModelView / SuppressViewmodelMovementAnims
     // now read kVmFlagMp5 / kVmFlagCrowbar instead.

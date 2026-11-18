@@ -343,6 +343,7 @@ public:
         bool glock = false;
         bool crossbow = false;
         bool revolver = false;
+        bool xenGun = false;        // tau, gluon, hivehand: fire clips swing the gun
         // Long guns / pistols: off-hand can wrap the model. Table is meters
         // from the rear grip along F/R/U. L_Wrist is used only when
         // offhandUseBone is set (MP5 magwell / pistol monitor pose are wrong).
@@ -374,6 +375,7 @@ public:
         kVmFlagGlock = 1u << 6,
         kVmFlagCrossbow = 1u << 7,
         kVmFlag357 = 1u << 8,
+        kVmFlagXenGun = 1u << 9,
     };
     // Manual MP5 magazine (VrMagReload): eject / hip grab / seat, game thread.
     void UpdateMagReload(uint32_t& buttons);
@@ -405,6 +407,7 @@ public:
     bool ViewmodelIsRpg() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagRpg) != 0; }
     bool ViewmodelIsGluon() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGluon) != 0; }
     bool ViewmodelIsScoped() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagScoped) != 0; }
+    bool ViewmodelIsXenGun() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagXenGun) != 0; }
     bool ViewmodelIsCrowbar() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagCrowbar) != 0; }
     bool m_HasViewmodelBake = false;
     float m_ViewmodelBakeOx = 0.f;
