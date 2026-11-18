@@ -1526,6 +1526,7 @@ private:
     void UpdateVrPhase(bool inGame);
     VrPhase m_VrPhase = VrPhase::Unknown;
     DWORD m_VrPhaseSinceMs = 0;
+    bool m_PauseFromLoading = false;   // this pause phase came straight from loading (load end)
     // In-game load without the game's loading dialog (trigger changelevel,
     // reload after death): a LOADING card painted onto the held eye pair,
     // as flat Black Mesa shows its small LOADING box. Painted on the eyes

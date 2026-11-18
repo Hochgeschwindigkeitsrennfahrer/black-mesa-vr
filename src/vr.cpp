@@ -3969,6 +3969,7 @@ void VR::UpdateVrPhase(bool inGame)
     }
     if (prev == VrPhase::Loading && phase != VrPhase::Loading)
         m_PoseDiagUntilMs = now + 30000;   // pose diagnostic after every load
+    m_PauseFromLoading = prev == VrPhase::Loading && phase == VrPhase::Pause;
     m_VrPhase = phase;
     m_VrPhaseSinceMs = now;
     // Test aid (BMVR_PHASE_DUMP=1, headless): dump what the next publish shows
@@ -19107,6 +19108,23 @@ bool VR::TakeHudPaintFor(int kind)
 {
     if (m_HudPublishedKind != kind)
         m_HudOverlayHasImage = false;
+    // Load end (menu / pause-menu load): the loading phase ends in a pause
+    // phase of 5-40 ms while GameUI closes; its pause-menu paint flashed the
+    // menu over the loading frame. In-game loads (LOADING card) go straight
+    // to gameplay. Hold the menu layer for the first 300 ms of such a pause.
+    if (kind == 0 && m_PauseFromLoading && m_VrPhase == VrPhase::Pause
+        && GetTickCount() - m_VrPhaseSinceMs < 300u)
+    {
+        m_HudOverlayHasImage = false;
+        if (m_HudPaintedThisFrame.exchange(false, std::memory_order_acq_rel))
+        {
+            static int s_log;
+            if (s_log++ < 8)
+                Game::logMsg("HUD layer: held a pause-menu paint at the load end (%lu ms into the pause)",
+                    static_cast<unsigned long>(GetTickCount() - m_VrPhaseSinceMs));
+        }
+        return false;
+    }
     if (!m_HudPaintedThisFrame.load(std::memory_order_acquire))
         return false;
     m_HudPaintedThisFrame.store(false, std::memory_order_release);
