@@ -17,6 +17,8 @@ namespace
     // func_useableladder in the 78 campaign maps). Cage pieces, the curved
     // metalladder002b top and other frames have no rungs of their own (the
     // ladder inside the cage is a metalladder prop).
+    // Sewer staples (props_sewer/*rung*) leave the wall, bend down ~4 u and
+    // only then run across: z is the cross bar, not the wall entry.
     struct RungModel
     {
         const char* name;   // path below models/, lower case
@@ -30,9 +32,9 @@ namespace
         { "props_c17/metalladder001.mdl", false, 0.0f, 10.5f, 8.f, 16.f, 8 },
         { "props_c17/metalladder002.mdl", false, 8.0f, 10.8f, 8.f, 16.f, 8 },
         { "props_c17/metalladder003.mdl", false, 8.0f, 10.8f, 8.f, 16.f, 73 },
-        { "props_sewer/ladderrung.mdl", true, 7.4f, 9.4f, -52.3f, 15.87f, 8 },
-        { "props_sewer/single_rung01.mdl", true, 8.9f, 9.4f, 0.f, 0.f, 1 },
-        { "props_sewer/single_rung02.mdl", true, 8.9f, 9.4f, 0.f, 0.f, 1 },
+        { "props_sewer/ladderrung.mdl", true, 7.4f, 9.4f, -54.6f, 15.88f, 8 },
+        { "props_sewer/single_rung01.mdl", true, 8.9f, 9.4f, -2.5f, 0.f, 1 },
+        { "props_sewer/single_rung02.mdl", true, 8.9f, 9.4f, -2.1f, 0.f, 1 },
         { "props_lambda/pool_ladder_section.mdl", false, 9.8f, 18.f, -14.6f, 14.f, 4 },
         { "props_lambda/pool_ladder_top.mdl", false, 9.8f, 18.f, -30.6f, 14.f, 3 },
         { "props_lambda/pool_ladder_bottom.mdl", false, 9.8f, 18.f, 3.4f, 0.f, 1 },
