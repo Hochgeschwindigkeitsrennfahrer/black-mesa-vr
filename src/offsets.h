@@ -227,6 +227,15 @@ public:
     // kGrenadeThrowPosition_Server (eye + an EyeAngles offset, i.e. head
     // frame), then sets velocity = normalize(target - origin) * speed.
     // Bytes: 55 8B EC 83 EC 3C 53 8B 5D 08 83 FB 15.
+    // server.dll snark throw (beta 26713286, 26234270 + 0x9D0; disassembled
+    // 2026-11-18): thiscall weapon (owner, fspeed, uspeed), called from the
+    // snark anim-event handler (throw 0xBBD / lob 0xBC5). velocity = fwd x
+    // fspeed + up x uspeed + a share of the owner's velocity, then Create
+    // ("npc_snark") -> placement cdecl (ent, pos*, ang*, owner) -> bool,
+    // then SetAbsVelocity (thiscall ent, const Vector*).
+    static constexpr int kSnarkThrow_Server = 0x48D730;
+    static constexpr int kSnarkPlace_Server = 0x483BF0;
+    static constexpr int kSetAbsVelocity_Server = 0x11DC90;
     static constexpr int kProjectileCreate_Server = 0x37A4B0; // beta 26627981 (26234270: 0x379D20)
     static constexpr int kBlackMesaPlayer_RecoilPunchAngles_Server = 0x14BC;
 

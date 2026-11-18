@@ -639,7 +639,7 @@ void VR::SampleThrowHand()
     const bool attack = (m_HeldButtons.load(std::memory_order_acquire) & IN_ATTACK) != 0;
     if (!m_ThrowAttackHeld && attack)
         m_ThrowPressT = now;   // pin pulled
-    if (m_ThrowAttackHeld && !attack)
+    if (m_ThrowAttackHeld && !attack && now >= m_ThrowReleaseLockUntil)
     {
         m_ThrowReleaseT = now;
         m_ThrowReleaseOffset = hand - body;

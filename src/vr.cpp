@@ -7203,6 +7203,7 @@ void VR::ProcessInput()
     }
     UpdateMagReload(buttons);
     UpdateGrenadePin(buttons);
+    UpdateSnarkThrow(buttons);
     m_HeldButtons.store(buttons, std::memory_order_release);
 
     if ((buttons & IN_ATTACK) && !m_FirstAttackLogged)
@@ -14450,6 +14451,7 @@ void VR::NoteViewmodelModel(const char* modelName)
         if (m_VmClass.glock) flags |= kVmFlagGlock;
         if (m_VmClass.crossbow) flags |= kVmFlagCrossbow;
         if (m_VmClass.revolver) flags |= kVmFlag357;
+        if (m_VmClass.numpadKey == "snark") flags |= kVmFlagSnark;
         m_VmClassFlags.store(flags, std::memory_order_relaxed);
         Game::logMsg("Viewmodel model %s", modelName);
     }
@@ -21109,6 +21111,51 @@ std::atomic<bool> MagReload::g_PinThrown{ false };
 // arm winds up; press and let go of the trigger to throw (hand velocity as
 // before). Alt-fire (roll) is left to the game. A thrown grenade's successor
 // comes with its pin (dGrenadeCreate sets g_PinThrown).
+void VR::UpdateSnarkThrow(uint32_t& buttons)
+{
+    // User, 2026-11-18: snarks left from the centre of the view. Black Mesa
+    // throws on the trigger press (anim event); here holding the trigger
+    // does nothing and letting go throws, from the hand at its speed like a
+    // frag (Hooks::dSnarkThrow / dSnarkPlace). Alt-fire (lob) stays stock.
+    static bool s_held = false;
+    static DWORD s_pulseUntil = 0;
+    const DWORD now = GetTickCount();
+    const bool snark = bmvr::g_VrHandThrow && !bmvr::g_LeftHanded && m_GameplayEligible && ViewmodelIsSnark();
+    if (!snark)
+    {
+        s_held = false;
+        s_pulseUntil = 0;
+        return;
+    }
+    const bool attack = (buttons & IN_ATTACK) != 0;
+    if (attack && now >= s_pulseUntil)
+    {
+        s_held = true;
+        buttons &= ~IN_ATTACK;
+    }
+    else if (!attack && s_held)
+    {
+        s_held = false;
+        s_pulseUntil = now + 120;
+        m_SnarkHandThrowUntil.store(now + 1500, std::memory_order_relaxed);
+        // The release the throw speed is measured around: now, not when the
+        // pulse below ends.
+        Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+        if (m_ControllerPoseValid && body.LengthSqr() > 1.f)
+        {
+            const Vector hand = GetRightControllerAbsPos(body);
+            const double t = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            m_ThrowReleaseT = t;
+            m_ThrowReleaseOffset = hand - body;
+            m_ThrowReleaseLockUntil = t + 1.0;
+        }
+        Game::logMsg("Snark throw: trigger let go, throwing from the hand");
+    }
+    if (now < s_pulseUntil)
+        buttons |= IN_ATTACK;
+}
+
 void VR::UpdateGrenadePin(uint32_t& buttons)
 {
     using namespace MagReload;

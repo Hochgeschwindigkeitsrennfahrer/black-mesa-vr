@@ -374,16 +374,24 @@ public:
         kVmFlagGlock = 1u << 6,
         kVmFlagCrossbow = 1u << 7,
         kVmFlag357 = 1u << 8,
+        kVmFlagSnark = 1u << 9,
     };
     // Manual MP5 magazine (VrMagReload): eject / hip grab / seat, game thread.
     void UpdateMagReload(uint32_t& buttons);
     void UpdateGrenadePin(uint32_t& buttons);
+    // Snark hand throw (VrHandThrow): trigger held = nothing, let go = the
+    // game's throw (pulsed), from the hand at the hand's speed (server hooks).
+    void UpdateSnarkThrow(uint32_t& buttons);
+    // GetTickCount until which a snark throw of the local player is a hand
+    // throw (set at the trigger release).
+    std::atomic<unsigned> m_SnarkHandThrowUntil{ 0 };
     int MagReloadWeaponNow() const;
     // Left controller world pose for the viewmodel draw (render thread).
     bool OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const;
     bool ViewmodelIsShotgun() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagShotgun) != 0; }
     bool ViewmodelIsCrossbow() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagCrossbow) != 0; }
     bool ViewmodelIs357() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlag357) != 0; }
+    bool ViewmodelIsSnark() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagSnark) != 0; }
     bool ViewmodelIsGlock() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGlock) != 0; }
     bool ViewmodelIsMp5() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagMp5) != 0; }
     // Viewmodel sequence is a reload/draw/holster/pump-style action: the
@@ -1722,6 +1730,9 @@ private:
     // 90-120 poses/s: 512 is over 4 s.
     static constexpr int kThrowSamples = 512;
     double m_ThrowReleaseT = 0.0;               // trigger let go (IN_ATTACK 1 -> 0)
+    // Snark: the real trigger release, set by UpdateSnarkThrow; the pulsed
+    // IN_ATTACK that follows must not move it (until this steady-clock time).
+    double m_ThrowReleaseLockUntil = 0.0;
     double m_ThrowPressT = 0.0;                 // pin pulled (IN_ATTACK 0 -> 1)
     bool m_ThrowAttackHeld = false;
     ThrowSample m_ThrowSamples[kThrowSamples]{};

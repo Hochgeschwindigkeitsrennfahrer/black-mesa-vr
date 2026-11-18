@@ -12002,6 +12002,10 @@ void Hooks::EnsureWeaponShootOriginHooks()
         &dGrenadeThrowPosition, "server grenade throw position");
     hookServerFn(hkProjectileCreate, Offsets::kProjectileCreate_Server, "558BEC83EC3C538B5D0883FB15",
         &dProjectileCreate, "server projectile create");
+    hookServerFn(hkSnarkThrow, Offsets::kSnarkThrow_Server, "558BEC83EC3C53578B7D088BD9",
+        &dSnarkThrow, "server snark throw");
+    hookServerFn(hkSnarkPlace, Offsets::kSnarkPlace_Server, "558BEC83EC18538B5D1485DB",
+        &dSnarkPlace, "server snark placement");
     if (client && !hkClientGetShootAngles.pTarget)
     {
         // C_BlackMesaPlayer::GetShootAngles (vtable slot 0x9D): EyeAngles (client vtable +0x26C, not the
@@ -14282,6 +14286,10 @@ namespace
     // is kept (stale pose guard). Hornets: the game's point is ahead of the
     // eye, the muzzle is at arm's length, ~56 units apart headless.
     float g_VrSpawnMaxDist = 60.f;
+    // Snark hand throw: set while the server throws a snark of the local
+    // player from the hand; the placement hook notes the new snark.
+    bool g_VrSnarkThrow = false;
+    void* g_VrSnarkEntity = nullptr;
 }
 
 void* __cdecl Hooks::dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode)
@@ -14373,6 +14381,82 @@ void* __cdecl Hooks::dProjectileCreate(int type, Vector* target, float speed, vo
         return proj;
     }
     return hkProjectileCreate.fOriginal(type, target, speed, owner, thrower);
+}
+
+void __fastcall Hooks::dSnarkThrow(void* weapon, void* edx, void* owner, float fspeed, float uspeed)
+{
+    if (!hkSnarkThrow.fOriginal)
+        return;
+    Vector hand{}, from{};
+    const unsigned until = m_VR ? m_VR->m_SnarkHandThrowUntil.load(std::memory_order_relaxed) : 0;
+    const bool handThrow = m_VR && bmvr::g_VrHandThrow && until != 0 && GetTickCount() < until
+        && ShouldRewriteShootAngles(owner) && m_VR->TryGetThrowVelocity(hand) && m_VR->TryGetThrowOrigin(from);
+    if (!handThrow)
+    {
+        hkSnarkThrow.fOriginal(weapon, edx, owner, fspeed, uspeed);
+        return;
+    }
+    m_VR->m_SnarkHandThrowUntil.store(0, std::memory_order_relaxed);
+    Vector playerVel{};
+    BMVR_TRY
+    {
+        constexpr int kAbsVelocity = 0x218;   // as in dGrenadeCreate (the throw reads +0x218..0x220 too)
+        playerVel = *reinterpret_cast<const Vector*>(static_cast<const char*>(owner) + kAbsVelocity);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+    g_VrSpawnPoint = from;
+    g_VrSpawnWhat = "VR snark throw";
+    g_VrSpawnLogBudget = -1;
+    g_VrSpawnMaxDist = 60.f;
+    g_VrGrenadeSpawn = true;
+    g_VrSnarkThrow = true;
+    g_VrSnarkEntity = nullptr;
+    hkSnarkThrow.fOriginal(weapon, edx, owner, fspeed, uspeed);
+    g_VrGrenadeSpawn = false;
+    g_VrSnarkThrow = false;
+    void* snark = g_VrSnarkEntity;
+    g_VrSnarkEntity = nullptr;
+    const Vector vel = hand + playerVel;
+    static tSetAbsVelocity s_setVel = nullptr;
+    static bool s_checked = false;
+    if (!s_checked)
+    {
+        s_checked = true;
+        if (HMODULE server = GetModuleHandleA("server.dll"))
+        {
+            auto* p = reinterpret_cast<unsigned char*>(server) + Offsets::kSetAbsVelocity_Server;
+            static const unsigned char kSig[] = { 0x55, 0x8B, 0xEC, 0xF3, 0x0F, 0x10, 0x05 };
+            bool ok = false;
+            BMVR_TRY { ok = std::memcmp(p, kSig, sizeof(kSig)) == 0; }
+            __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+            s_setVel = ok ? reinterpret_cast<tSetAbsVelocity>(p) : nullptr;
+            Game::logMsg("Snark throw: SetAbsVelocity %s", ok ? "found" : "bytes differ, game speed kept");
+        }
+    }
+    if (snark && s_setVel)
+    {
+        BMVR_TRY { s_setVel(snark, &vel); }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+    Game::logMsg("Snark throw: hand %.0f u/s -> (%.0f,%.0f,%.0f), snark %s", hand.Length(), vel.x, vel.y, vel.z,
+        snark ? "placed at the hand" : "not seen (game point and speed)");
+}
+
+bool __cdecl Hooks::dSnarkPlace(void* snark, Vector* pos, QAngle* ang, void* owner)
+{
+    if (!hkSnarkPlace.fOriginal)
+        return false;
+    if (!g_VrSnarkThrow)
+        return hkSnarkPlace.fOriginal(snark, pos, ang, owner);
+    g_VrSnarkEntity = snark;
+    // Same hand point + wall check as the frag (dGrenadeThrowPosition).
+    const auto original = hkGrenadeThrowPosition.fOriginal;
+    hkGrenadeThrowPosition.fOriginal = hkSnarkPlace.fOriginal;
+    const bool ok = dGrenadeThrowPosition(snark, pos, ang, owner);
+    hkGrenadeThrowPosition.fOriginal = original;
+    return ok;
 }
 
 bool __cdecl Hooks::dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* ang, void* owner)
