@@ -6300,6 +6300,10 @@ namespace
         // compressed 0..0.1 depth range so they draw over the world. In VR the
         // gun is a world-space mesh; keep Z (and therefore size vs world
         // geometry) on the same projection as the eye scene.
+        // Near clip (VrNearZ): BM's 7 units cut a gun held at the face for the
+        // sights (user). Only lowers it; the gun shares this projection.
+        if (bmvr::g_VrNearZ >= 1.f && bmvr::g_VrNearZ < view.zNear)
+            view.zNear = bmvr::g_VrNearZ;
         if (view.zNear > 0.01f)
             view.zNearViewmodel = view.zNear;
         if (view.zFar > view.zNear)
