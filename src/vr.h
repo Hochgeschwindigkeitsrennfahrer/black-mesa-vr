@@ -1386,6 +1386,9 @@ public:
     // True only while a scoped weapon is actually zoomed. Aim then comes from
     // the headset, because the scope picture is centred on the view.
     bool ScopeZoomActive() const { return m_ScopeZoomActive; }
+    // Half the render IPD in world units (eye = head centre +- this along
+    // right); 0 while ScopeMonoZoom holds both eyes at the head centre.
+    float RenderHalfIpd() const;
     static bool IsScopedWeaponModel(const char* model);
     static bool IsRpgWeaponModel(const char* model);
     static bool IsGluonWeaponModel(const char* model);

@@ -7843,18 +7843,25 @@ Vector VR::GetViewOrigin(const Vector& setupOrigin) const
     return GetViewOriginUnshifted(setupOrigin) + (fwd * (-(m_EyeZ * m_VRScale)));
 }
 
+float VR::RenderHalfIpd() const
+{
+    if (m_ScopeZoomActive && bmvr::g_ScopeMonoZoom)
+        return 0.f;
+    return m_Ipd * m_IpdScale * m_VRScale * 0.5f;
+}
+
 Vector VR::GetViewOriginLeft(const Vector& setupOrigin) const
 {
     Vector fwd, right, up;
     GetViewBasis(&fwd, &right, &up);
-    return GetViewOrigin(setupOrigin) - (right * ((m_Ipd * m_IpdScale * m_VRScale) * 0.5f));
+    return GetViewOrigin(setupOrigin) - (right * RenderHalfIpd());
 }
 
 Vector VR::GetViewOriginRight(const Vector& setupOrigin) const
 {
     Vector fwd, right, up;
     GetViewBasis(&fwd, &right, &up);
-    return GetViewOrigin(setupOrigin) + (right * ((m_Ipd * m_IpdScale * m_VRScale) * 0.5f));
+    return GetViewOrigin(setupOrigin) + (right * RenderHalfIpd());
 }
 
 Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& trackingPos) const
@@ -9042,7 +9049,15 @@ bool VR::TryGetRawMuzzleWorld(Vector& origin) const
 // scoped eyes are centred on straight ahead, see EyeRenderRect).
 bool VR::TryGetScopeShootOrigin(Vector& origin) const
 {
-    if (!m_ScopeZoomActive || bmvr::g_ScopeEye == 0)
+    if (!m_ScopeZoomActive)
+        return false;
+    if (bmvr::g_ScopeMonoZoom)
+    {
+        // Both eyes sit at the head centre: start the bolt there (= on the reticle in both eyes).
+        origin = GetViewOrigin(m_SetupOrigin);
+        return std::isfinite(origin.x) && std::isfinite(origin.y) && std::isfinite(origin.z);
+    }
+    if (bmvr::g_ScopeEye == 0)
         return false;
     origin = bmvr::g_ScopeEye == 1 ? GetViewOriginLeft(m_SetupOrigin) : GetViewOriginRight(m_SetupOrigin);
     return std::isfinite(origin.x) && std::isfinite(origin.y) && std::isfinite(origin.z);

@@ -493,6 +493,13 @@ namespace bmvr
     // 0 = between the eyes). A scope is one-eyed: from the head centre the
     // bolt hit half an IPD beside the reticle in both eyes (2026-11-03).
     extern int g_ScopeEye;
+    // ScopeMonoZoom (default on, user 2026-11-18): while the crossbow is
+    // zoomed both eyes render from the head centre (zero IPD) and the bolt
+    // starts there, so both eyes see the same picture and reticle. Stereo
+    // zoomed 3.5x magnified the eyes' disparity: the target showed doubled
+    // and only ScopeEye's copy matched the bolt (users closed the left eye).
+    // ScopeEye then does nothing. Debug-tab A/B row, off = the old stereo zoom.
+    extern bool g_ScopeMonoZoom;
     // LeftEyeCullPad (default 0 = off since 2026-10-30, max 0.25): the left eye's right
     // edge is pushed out by this fraction of the half-FOV tangent (off-centre
     // CViewSetup) and submitted at that FOV (OpenXR explicit tangents, OpenVR

@@ -234,6 +234,7 @@ namespace bmvr
     bool g_ScopeRaiseToZoom = true;
     float g_ScopeRaiseMeters = 0.30f;
     int g_ScopeEye = 2;
+    bool g_ScopeMonoZoom = true;
     float g_LeftEyeCullPad = 0.f;
     bool g_MenuCursorHook = true;
     bool g_DebugDumps = false;
@@ -974,6 +975,8 @@ namespace bmvr
                 g_ScopeZoomFovScale = static_cast<float>(atof(val));
             else if (std::strcmp(n, "ScopeEye") == 0)
                 g_ScopeEye = std::strcmp(val, "left") == 0 ? 1 : (std::strcmp(val, "center") == 0 ? 0 : 2);
+            else if (std::strcmp(n, "ScopeMonoZoom") == 0)
+                g_ScopeMonoZoom = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MenuCursorHook") == 0)
                 g_MenuCursorHook = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "OcclusionTrackerPerEye") == 0)

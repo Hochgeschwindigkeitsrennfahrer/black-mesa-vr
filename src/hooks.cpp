@@ -768,7 +768,7 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
             const float depth = -(view[8] * world[0] + view[9] * world[1] + view[10] * world[2] + view[11]);
             if (depth > 1.f)
             {
-                const float halfIpd = Hooks::m_VR->m_Ipd * Hooks::m_VR->m_IpdScale * Hooks::m_VR->m_VRScale * 0.5f;
+                const float halfIpd = Hooks::m_VR->RenderHalfIpd();
                 const float parallax = proj[0] * halfIpd / depth * size[0] * 0.5f;
                 g_FlareAxisShiftX += eye == 1 ? parallax : -parallax;
             }
@@ -8495,7 +8495,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         Vector camRight;
         if (m_VR->ScriptedCameraActive() && m_VR->ScriptedCameraView(view.angles, camRight))
         {
-            const float halfIpd = (m_VR->m_Ipd * m_VR->m_IpdScale * m_VR->m_VRScale) * 0.5f;
+            const float halfIpd = m_VR->RenderHalfIpd();
             view.origin = setup.origin;
             if (stereo)
                 view.origin += camRight * (leftEye ? -halfIpd : halfIpd);

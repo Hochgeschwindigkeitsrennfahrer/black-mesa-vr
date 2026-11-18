@@ -76,6 +76,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_TurnBlocksJumpCrouch, nullptr },
             { "bmvr_sprint_toggle", "VR: a sprint click keeps sprinting until the move stick is released (0 = hold the click)",
               Kind::Bool, 0.f, 1.f, &g_SprintToggle, nullptr },
+            { "bmvr_scope_mono_zoom", "VR: A/B: zoomed crossbow renders both eyes from the head centre (same picture in both eyes)",
+              Kind::Bool, 0.f, 1.f, &g_ScopeMonoZoom, nullptr },
             { "bmvr_scope_follows_gun", "VR: zoomed crossbow view follows the gun's aim instead of the head",
               Kind::Bool, 0.f, 1.f, &g_ScopeFollowsGun, nullptr },
             { "bmvr_scope_gun_smooth", "VR: smoothing time in seconds for the gun-driven scope view (0 = raw aim)",

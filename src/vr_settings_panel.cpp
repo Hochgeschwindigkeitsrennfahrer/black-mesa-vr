@@ -343,6 +343,7 @@ namespace
             { "Blank eye", RowKind::Choice, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "Off|Left|Right" },
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Zoom: same image in both eyes", RowKind::Toggle, "ScopeMonoZoom", &bmvr::g_ScopeMonoZoom, nullptr, 0, 0, 0, nullptr },
             { "Hands: raw palm light (no lift)", RowKind::Toggle, "VrHandLightRaw", &bmvr::g_VrHandLightRaw, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
             { "Head hold: angle", RowKind::Number, "PoseHoldDeg", nullptr, &bmvr::g_PoseHoldDeg, 0.02f, 0.f, 1.f, "%.2f\xB0" },
