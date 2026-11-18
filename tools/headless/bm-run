@@ -150,10 +150,11 @@ trap cleanup EXIT
 
 # A locked or blanked desktop stalled GPU runs on :0 and spoiled window shots. Not yet tested on the private Xvfb
 # since the overlay rewrite, so keep unlocking in every mode until a locked run has passed. Logged in run.log.
+# No `loginctl unlock-sessions`: it needs polkit auth, Cinnamon cannot show the dialog while locked, and each
+# dismissed request leaked a polkit-agent-helper connection; at 64 the socket failed and broke every auth
+# prompt, including the screen unlock (2026-11-18).
 if command -v cinnamon-screensaver-command >/dev/null && cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active'; then
-	loginctl unlock-sessions 2>/dev/null || true
-	sleep 1
-	cinnamon-screensaver-command -q 2>/dev/null | grep -q 'is active' && cinnamon-screensaver-command -d 2>/dev/null
+	cinnamon-screensaver-command -d 2>/dev/null
 	sleep 1
 	DISPLAY=:0 xset dpms force on 2>/dev/null || true
 	echo "desktop was locked: unlocked $(date +%T)" >> "$out/run.log"
