@@ -1092,6 +1092,19 @@ bool BmVrGloves::DrawForEye(
                 }
             }
             const bool pinch = !rightHand && LeftGlovePinch();
+            // Satchel detonator in the left hand (VrSatchelHands): a fixed
+            // hold around the box, thumb over the button, so the fingers no
+            // longer close through it with the controller grip (user).
+            const bool detonatorHold = !rightHand && !pinch && g_Game && g_Game->m_VR
+                && g_Game->m_VR->SatchelHandsActive();
+            if (detonatorHold)
+            {
+                summary.flFingerCurl[0] = bmvr::g_VrDetCurl[0];
+                summary.flFingerCurl[1] = bmvr::g_VrDetCurl[1];
+                for (int f = 2; f < 5; ++f)
+                    summary.flFingerCurl[f] = bmvr::g_VrDetCurl[2];
+                gmanThumb = 0.f;
+            }
             if (pinch)
             {
                 summary.flFingerCurl[0] = bmvr::g_VrPinchThumb;

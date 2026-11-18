@@ -327,7 +327,8 @@ namespace bmvr
     bool g_VrStockHandPose = true;
     bool g_VrSupportHandLock = true;
     bool g_VrSatchelHands = true;
-    float g_VrDetPos[3] = { 0.f, -0.01f, 0.02f };
+    float g_VrDetPos[3] = { -0.03f, 0.04f, 0.02f }; // box in the fist, button + antenna on top (headless sweep 2026-11-18)
+    float g_VrDetCurl[3] = { 0.35f, 0.55f, 0.6f };
     float g_VrDetRot[3] = { -15.f, 0.f, 90.f }; // antenna up, leaning forward (headless 2026-11-18)
     bool g_HudHealthOnGun = true;
     bool g_VrSupportHandForce = false;

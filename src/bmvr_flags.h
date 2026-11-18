@@ -754,6 +754,7 @@ namespace bmvr
     extern bool g_VrSatchelHands;
     extern float g_VrDetPos[3];
     extern float g_VrDetRot[3];
+    extern float g_VrDetCurl[3]; // left glove hold around the detonator: thumb, index, other fingers
     // Two-handed: health panel above the ammo panel on the gun (not on the support wrist).
     extern bool g_HudHealthOnGun;
     extern bool g_VrSupportHandForce; // test: lock as if the left hand held the gun
