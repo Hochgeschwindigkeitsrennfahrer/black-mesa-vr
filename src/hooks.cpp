@@ -5873,7 +5873,14 @@ namespace
             const char* bpName = StudioRelString(bp, szname);
             if (bi == 0)
                 strncpy_s(r.gunName, bpName, _TRUNCATE);
-            if (_stricmp(bpName, "arms") != 0)
+            // Black Mesa names the arms part "arms". Black Mesa: Blue Shift's satchel
+            // splits it into "l_arm" (the hand holding the bag) + "r_arm" (detonator
+            // hand), and its grenade / RPG add "r_arm_clavicle" / "l_arm_clavicle";
+            // left drawn, the satchel showed a second left hand on the right
+            // controller (headless bs_c3m1b, 2026-11-18). No Black Mesa viewmodel
+            // uses these names.
+            if (_stricmp(bpName, "arms") != 0 && _stricmp(bpName, "l_arm") != 0 && _stricmp(bpName, "r_arm") != 0
+                && _stricmp(bpName, "l_arm_clavicle") != 0 && _stricmp(bpName, "r_arm_clavicle") != 0)
                 continue;
             r.armsPart = bi;
             r.armsModels = nummodels;
