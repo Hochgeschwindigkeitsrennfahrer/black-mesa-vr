@@ -301,7 +301,8 @@ namespace
     };
 
     bool ParseModel(const Bytes& mdl, const Bytes& vvd, const Bytes& vtx, const char* variantSmd,
-        const char* skinMaterial, Model& out, std::string& err, const char* bodyPartName = "arms")
+        const char* skinMaterial, Model& out, std::string& err, const char* bodyPartName = "arms",
+        const char* extraMaterial = nullptr)
     {
         auto I = [&](const Bytes& d, size_t o) { std::int32_t v = 0; Rd(d, o, v); return v; };
         // bones
@@ -402,7 +403,8 @@ namespace
         const size_t meshBase = lh + I(vtx, lh + 4);
         for (int mi = 0; mi < nm && mi < static_cast<int>(meshes.size()); ++mi)
         {
-            if (_stricmp(meshes[mi].first.c_str(), skinMaterial) != 0)
+            if (_stricmp(meshes[mi].first.c_str(), skinMaterial) != 0
+                && (!extraMaterial || _stricmp(meshes[mi].first.c_str(), extraMaterial) != 0))
                 continue;
             const int voff = meshes[mi].second;
             const size_t moff = meshBase + static_cast<size_t>(mi) * 9;
@@ -633,7 +635,10 @@ namespace
         }
         for (int v = 0; v < 2; ++v)
         {
-            if (!ParseModel(mdl, vvd, vtx, kVariantSmd[v], kSkin[v], g_Src.model[v], g_Src.error))
+            // HEV: the left glove's orange plates and fingertip pads are a second
+            // material, v_hand_m (same v_hand base texture, metal shader).
+            if (!ParseModel(mdl, vvd, vtx, kVariantSmd[v], kSkin[v], g_Src.model[v], g_Src.error, "arms",
+                    v == 0 ? "v_hand_m" : nullptr))
             {
                 err = g_Src.error;
                 return false;
