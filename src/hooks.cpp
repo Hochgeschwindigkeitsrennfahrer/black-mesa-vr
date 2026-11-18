@@ -3938,6 +3938,10 @@ namespace
         strncpy_s(buf, modelName, _TRUNCATE);
         for (char* c = buf; *c; ++c)
             *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
+        // Satchel hands: the bag's own left hand and the radio's own right
+        // hand are drawn (SatchelPinHand moves them onto the controllers).
+        if (std::strstr(buf, "v_satchel") && Hooks::m_VR && Hooks::m_VR->SatchelHandsActive())
+            return true;
         for (const char* g : kGuns)
             if (std::strstr(buf, g))
                 return true;
@@ -3997,6 +4001,136 @@ namespace
                 m[r * 4 + 3] = c[r] + (m[r * 4 + 3] - c[r]) * k;
             }
         }
+    }
+
+    // Satchel (VrSatchelHands, user 2026-11-18): Black Mesa's two satchel
+    // viewmodels are posed for the flat camera: v_satchel = left arm holding
+    // the bag, v_satchel_radio = right arm holding the detonator, both placed
+    // on the right controller here. Each draw: the arm folds into the wrist
+    // (the radio's already did in CollapseViewmodelArmBones) and the whole
+    // model moves rigidly so the fist (wrist + middle finger average) sits
+    // where a glove fist sits on its controller. The bag also turns from the
+    // right controller's frame to the left one's, so it keeps its stock hold
+    // relative to the hand. The left glove is skipped while the bag's own
+    // hand is drawn. Fist targets: bmvr_satchel_fist_fwd/right/up (cm,
+    // controller frame; right mirrored for the left hand).
+    void SatchelPinHand(VR* vr, unsigned char* hdr, float* bones, int nBones, const Vector& rightCtrl, bool left)
+    {
+        struct Rig { unsigned char* hdr = nullptr; int centre[4]{ -1, -1, -1, -1 }; int arm[8]{}; int nArm = 0; };
+        static thread_local Rig s_rig[2];
+        Rig& rig = s_rig[left ? 1 : 0];
+        if (!vr || !hdr || !bones || nBones <= 0)
+            return;
+        if (rig.hdr != hdr)
+        {
+            rig = Rig{};
+            rig.hdr = hdr;
+            const char* kL[4] = { "L_Wrist", "L_Middle1", "L_Middle2", "L_Middle3" };
+            const char* kR[4] = { "R_Wrist", "R_Middle1", "R_Middle2", "R_Middle3" };
+            for (int i = 0; i < 4; ++i)
+                rig.centre[i] = FindStudioBoneIndex(hdr, left ? kL[i] : kR[i]);
+            if (left)
+            {
+                const char* kArm[] = { "L_Arm", "L_Forearm", "SCI_Hand_Forearm_L", "gman_arms_l" };
+                for (const char* n : kArm)
+                {
+                    const int b = FindStudioBoneIndex(hdr, n);
+                    if (b >= 0 && rig.nArm < 8)
+                        rig.arm[rig.nArm++] = b;
+                }
+            }
+            Game::logMsg("Satchel %s hand: centre bones %d %d %d %d, arm bones %d", left ? "bag (left)" : "radio (right)",
+                rig.centre[0], rig.centre[1], rig.centre[2], rig.centre[3], rig.nArm);
+        }
+        for (int i = 0; i < 4; ++i)
+            if (rig.centre[i] < 0 || rig.centre[i] >= nBones)
+                return;
+        Vector ctrl = rightCtrl;
+        QAngle ctrlAng = vr->GetRightControllerAbsAngle();
+        if (left && !vr->OffhandWorldPoseForDraw(ctrl, ctrlAng))
+            return;
+        Vector cf, cr, cu;
+        QAngle::AngleVectors(ctrlAng, &cf, &cr, &cu);
+        BMVR_TRY
+        {
+            // Fold the left arm into the wrist (as the right arm's collapse).
+            const float* w = bones + rig.centre[0] * 12;
+            const float wt[3] = { w[3], w[7], w[11] };
+            for (int k = 0; k < rig.nArm; ++k)
+            {
+                if (rig.arm[k] >= nBones)
+                    continue;
+                float* m = bones + rig.arm[k] * 12;
+                for (int r = 0; r < 3; ++r)
+                {
+                    m[r * 4 + 0] = m[r * 4 + 1] = m[r * 4 + 2] = 0.f;
+                    m[r * 4 + 3] = wt[r];
+                }
+            }
+            Vector c(0.f, 0.f, 0.f);
+            for (int i = 0; i < 4; ++i)
+            {
+                const float* m = bones + rig.centre[i] * 12;
+                c += Vector(m[3], m[7], m[11]) * 0.25f;
+            }
+            // Rotation: identity for the radio; right controller frame ->
+            // left controller frame for the bag.
+            float Q[3][3] = { { 1.f, 0.f, 0.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, 1.f } };
+            if (left)
+            {
+                Vector rf, rr, ru;
+                QAngle::AngleVectors(vr->GetRightControllerAbsAngle(), &rf, &rr, &ru);
+                const float L[3][3] = { { cf.x, cr.x, cu.x }, { cf.y, cr.y, cu.y }, { cf.z, cr.z, cu.z } };
+                const float R[3][3] = { { rf.x, rr.x, ru.x }, { rf.y, rr.y, ru.y }, { rf.z, rr.z, ru.z } };
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        Q[i][j] = L[i][0] * R[j][0] + L[i][1] * R[j][1] + L[i][2] * R[j][2];
+            }
+            const float u = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f; // units per cm
+            const Vector target = ctrl + cf * (bmvr::g_VrSatchelFist[0] * u)
+                + cr * (bmvr::g_VrSatchelFist[1] * u * (left ? -1.f : 1.f)) + cu * (bmvr::g_VrSatchelFist[2] * u);
+            for (int b = 0; b < nBones; ++b)
+            {
+                float* m = bones + b * 12;
+                float out[12];
+                for (int r = 0; r < 3; ++r)
+                {
+                    for (int col = 0; col < 3; ++col)
+                        out[r * 4 + col] = Q[r][0] * m[0 * 4 + col] + Q[r][1] * m[1 * 4 + col] + Q[r][2] * m[2 * 4 + col];
+                }
+                const float p[3] = { m[3] - c.x, m[7] - c.y, m[11] - c.z };
+                const float t[3] = { target.x, target.y, target.z };
+                for (int r = 0; r < 3; ++r)
+                    out[r * 4 + 3] = t[r] + Q[r][0] * p[0] + Q[r][1] * p[1] + Q[r][2] * p[2];
+                std::memcpy(m, out, sizeof(out));
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        if (left)
+        {
+            const DWORD nowMs = GetTickCount();
+            MagReload::g_SupportHandFromGunMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
+        }
+    }
+
+    // Satchel bag viewmodel playing its stock 'throw' clip (VrSatchelHands:
+    // the left hand throws, the clip is not shown).
+    bool SatchelThrowClipShowing(void* state)
+    {
+        if (!Hooks::m_Game)
+            return false;
+        unsigned char* hdr = ResolveStudioHdr(state);
+        void* vm = Hooks::m_Game->GetViewModelEntity();
+        if (!hdr || !vm)
+            return false;
+        int seq = -1;
+        BMVR_TRY { seq = *reinterpret_cast<int*>(static_cast<char*>(vm) + kViewmodelSequence); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        const char* label = seq >= 0 ? StudioSequenceLabel(hdr, seq) : nullptr;
+        return label && _stricmp(label, "throw") == 0;
     }
 
     // Diagnostic: the drawn own right fist (R_Wrist + R_Middle1-3 average, as
@@ -9898,9 +10032,10 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         isViewmodel = false;
         Game::logMsg("DME info SEH - passthrough original");
     }
-    // Satchel (VrSatchelHands): the detonator is drawn in the left hand
-    // (vr_hands.cpp); the game's right-hand radio viewmodel is not drawn.
-    if (isViewmodel && modelName && m_VR && m_VR->SatchelHandsActive() && std::strstr(modelName, "v_satchel_radio"))
+    // Satchel (VrSatchelHands): the bag is thrown by the left hand, so the
+    // stock throw clip (and the bag in it) is not drawn.
+    if (isViewmodel && modelName && m_VR && m_VR->SatchelHandsActive() && std::strstr(modelName, "v_satchel")
+        && !std::strstr(modelName, "v_satchel_radio") && SatchelThrowClipShowing(state))
         return;
 
     if (g_Cost.active)
@@ -10134,9 +10269,14 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                         MagReload::g_SupportHandFromGunMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
                     }
                 }
-                    if (m_VR->m_VmClass.crowbar)
+                    // Crowbar (scale 1) and grenade (x1.25): hand back to the
+                    // gun hands' size (user 2026-11-18: grenade hand too big).
+                    if (m_VR->m_VmClass.crowbar || std::strstr(modelName, "v_grenade"))
                         ShrinkViewmodelRightHand(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                             bmvr::g_ViewmodelScale / scale);
+                    if (std::strstr(modelName, "v_satchel") && m_VR->SatchelHandsActive())
+                        SatchelPinHand(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot,
+                            !std::strstr(modelName, "v_satchel_radio"));
                     LogGunFistVsController(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot,
                         modelName);
                 }

@@ -7044,12 +7044,15 @@ void VR::ProcessInput()
         // with nothing to fire and only L2 could use.
         const bool emptyHands = m_EmptyHands || !m_HasHeldWeapon;
         bool leftUse = PressedDigitalAction(m_ActionUse);
-        // Satchel (VrSatchelHands): the Use press (left trigger) works the
-        // detonator in the left hand = alt-fire; the left grip is Use.
-        bool satchelDetonate = false;
-        if (SatchelHandsActive())
+        // Satchel (VrSatchelHands, user 2026-11-18): bag in the left hand,
+        // detonator in the right. Left trigger = throw (IN_ATTACK, thrown
+        // from the left hand on the release), right trigger = detonate
+        // (alt-fire); the left grip is Use.
+        bool satchelThrow = false;
+        const bool satchelHands = SatchelHandsActive();
+        if (satchelHands)
         {
-            satchelDetonate = leftUse;
+            satchelThrow = leftUse;
             leftUse = LeftSupportGripValue() > 0.6f;
         }
         // The settings panel takes trigger, Cross and Circle (reload / alt-fire).
@@ -7072,7 +7075,7 @@ void VR::ProcessInput()
         UpdateMountedGun();
         const bool gunGripRight = m_OnGun || m_GunRightNear;
         if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped() && !gunGripRight)
-            buttons |= IN_ATTACK;
+            buttons |= satchelHands ? IN_ATTACK2 : IN_ATTACK;
         if (!menuOwnsButtons && m_OnGun)
         {
             if (PressedDigitalAction(m_ActionSecondaryAttack))
@@ -7150,14 +7153,14 @@ void VR::ProcessInput()
         if (!menuOwnsButtons && PressedDigitalAction(m_ActionReload))
             buttons |= IN_RELOAD;
         {
-            static bool s_detWas = false;
-            if (!menuOwnsButtons && satchelDetonate)
+            static bool s_throwWas = false;
+            if (!menuOwnsButtons && satchelThrow)
             {
-                buttons |= IN_ATTACK2;
-                if (!s_detWas)
-                    Game::logMsg("Satchel: left trigger -> detonate");
+                buttons |= IN_ATTACK;
+                if (!s_throwWas)
+                    Game::logMsg("Satchel: left trigger held (throw on release)");
             }
-            s_detWas = satchelDetonate;
+            s_throwWas = satchelThrow;
         }
         if (PressedDigitalAction(m_ActionCrouch))
             buttons |= IN_DUCK;
@@ -12518,7 +12521,9 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
     {
         // Throw samples: the weapon hand's grip (where the grenade sits),
         // stamped with the runtime's pose time.
-        const bool aimLeftHand = AimControllerRole() == vr::TrackedControllerRole_LeftHand;
+        // Satchel (VrSatchelHands): thrown from the left hand.
+        const bool aimLeftHand = AimControllerRole() == vr::TrackedControllerRole_LeftHand
+            || m_ThrowFromLeft.load(std::memory_order_relaxed);
         const Sample& throwHand = aimLeftHand ? physLeft : physRight;
         if (throwHand.valid)
         {
@@ -14545,7 +14550,10 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
     else if (has("hgun") || has("hive") || has("hornet"))
     { out.ox = 19.5f; out.oy = 11.34f; out.oz = -17.69f; out.ax = -1.5f; out.ay = -2.f; out.numpadKey = "hgun"; }
     else if (has("grenade") || has("frag"))
-    { out.ox = 15.f; out.oy = 6.5f; out.oz = -8.f; out.numpadKey = "grenade"; }
+        // az 90: with its own right hand shown the hand + grenade sat 90 deg
+        // counter-clockwise (user 2026-11-18); positive az = clockwise as seen
+        // from behind the hand.
+    { out.ox = 15.f; out.oy = 6.5f; out.oz = -8.f; out.az = 90.f; out.numpadKey = "grenade"; }
     else if (has("satchel"))
     { out.ox = 19.f; out.oy = -10.f; out.oz = -12.f; out.numpadKey = "satchel"; }
     else if (has("tripmine") || has("trip"))
@@ -14818,13 +14826,14 @@ void VR::ApplyTwoHandWeaponAim()
             : (lat < enterR && along >= alongMin && along <= alongMax);
         if (pistol)
         {
-            // Under the grip: left controller ~9 cm below the gun controller,
-            // a little ahead and left (cupping hand). Tune from the miss log.
-            const float ux = 0.02f * scale + (gx - m_VmClass.offhandMetersX * scale);
-            const float uy = -0.01f * scale, uz = -0.09f * scale;
+            // Under the grip (cupping hand). From the live miss log (user
+            // 2026-11-18, "a tad too far forward"): the left controller sat at
+            // ~(-3.6, -0.4, -5.4) units (fwd, right, up) from the gun hand.
+            const float ux = -0.071f * scale + (gx - m_VmClass.offhandMetersX * scale);
+            const float uy = -0.01f * scale, uz = -0.127f * scale;
             const Vector under = F0 * ux + R0 * uy + U0 * uz;
             const float distUnder = (d - under).Length();
-            if (distUnder < enterR && (!onPoint || distUnder < distToGrip))
+            if (distUnder < 0.08f * scale && (!onPoint || distUnder < distToGrip))
             {
                 onPoint = true;
                 gx = ux;
@@ -21268,7 +21277,8 @@ void VR::UpdateSnarkThrow(uint32_t& buttons)
     static bool s_held = false;
     static DWORD s_pulseUntil = 0;
     const DWORD now = GetTickCount();
-    // Satchel too (VrSatchelHands): thrown from the right hand on the release.
+    m_ThrowFromLeft.store(SatchelHandsActive(), std::memory_order_relaxed);
+    // Satchel too (VrSatchelHands): thrown from the left hand on the release.
     // Snarks from the hand only with "Physical weapons (beta)" on.
     const bool snark = bmvr::g_VrHandThrow && !bmvr::g_LeftHanded && m_GameplayEligible
         && ((bmvr::g_PhysicalWeapons && ViewmodelIsSnark()) || SatchelHandsActive());
@@ -21294,7 +21304,7 @@ void VR::UpdateSnarkThrow(uint32_t& buttons)
         Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
         if (m_ControllerPoseValid && body.LengthSqr() > 1.f)
         {
-            const Vector hand = GetRightControllerAbsPos(body);
+            const Vector hand = SatchelHandsActive() ? GetLeftControllerAbsPos(body) : GetRightControllerAbsPos(body);
             const double t = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
             std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
             m_ThrowReleaseT = t;

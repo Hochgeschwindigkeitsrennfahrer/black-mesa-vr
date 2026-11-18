@@ -329,9 +329,8 @@ namespace bmvr
     bool g_VrSupportHandLock = true;
     bool g_VrHandLightRaw = false;
     bool g_VrSatchelHands = true;
-    float g_VrDetPos[3] = { -0.03f, 0.04f, 0.02f }; // box in the fist, button + antenna on top (headless sweep 2026-11-18)
-    float g_VrDetCurl[3] = { 0.35f, 0.55f, 0.6f };
-    float g_VrDetRot[3] = { -15.f, 0.f, 90.f }; // antenna up, leaning forward (headless 2026-11-18)
+    // Gun fists sit ~10 cm behind the controller origin, a little low ("fist vs controller" log).
+    float g_VrSatchelFist[3] = { -10.f, 0.5f, -1.5f };
     bool g_HudHealthOnGun = true;
     bool g_VrSupportHandForce = false;
     // Side (key) pinch: thumb pad on the half-bent index (headless, bare

@@ -229,7 +229,7 @@ namespace
             { "Reload hints", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
             { "Support hand finger pose", RowKind::Toggle, "VrStockHandPose", &bmvr::g_VrStockHandPose, nullptr, 0, 0, 0, nullptr },
             { "Support hand locks to the gun", RowKind::Toggle, "VrSupportHandLock", &bmvr::g_VrSupportHandLock, nullptr, 0, 0, 0, nullptr },
-            { "Satchel: detonator in left hand", RowKind::Toggle, "VrSatchelHands", &bmvr::g_VrSatchelHands, nullptr, 0, 0, 0, nullptr },
+            { "Satchel: bag left, detonator right", RowKind::Toggle, "VrSatchelHands", &bmvr::g_VrSatchelHands, nullptr, 0, 0, 0, nullptr },
             { "Recoil (less with two hands)", RowKind::Toggle, "VrRecoil", &bmvr::g_VrRecoil, nullptr, 0, 0, 0, nullptr },
             { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
             { "HUD POSITION", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },

@@ -633,7 +633,9 @@ void VR::SampleThrowHand()
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     if (body.LengthSqr() <= 1.f)
         return;
-    const Vector hand = GetRightControllerAbsPos(body);
+    // Satchel (VrSatchelHands): the left hand throws.
+    const Vector hand = m_ThrowFromLeft.load(std::memory_order_relaxed)
+        ? GetLeftControllerAbsPos(body) : GetRightControllerAbsPos(body);
     const double now = ThrowNowSec();
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     const bool attack = (m_HeldButtons.load(std::memory_order_acquire) & IN_ATTACK) != 0;

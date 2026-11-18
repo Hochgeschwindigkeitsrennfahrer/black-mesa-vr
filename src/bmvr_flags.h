@@ -759,15 +759,14 @@ namespace bmvr
     // (GetLightForPoint + flashlight) instead of the lifted/tinted value with
     // a floor ("indoor gloves stay readable", Aug 2026). Off = the old look.
     extern bool g_VrHandLightRaw;
-    // Satchel (user, 2026-11-18): detonator always in the left hand while
-    // the satchel is drawn, left trigger detonates (alt-fire), left grip is
-    // Use meanwhile; the satchel is thrown from the right hand on the
-    // trigger release. Detonator pose in the left controller frame
-    // (metres / degrees, BuildControllerWorld: x right, y up, z back).
+    // Satchel (user, 2026-11-18): bag in the left hand (v_satchel's own left
+    // hand), detonator in the right (v_satchel_radio's own right hand), both
+    // pinned to the controllers by SatchelPinHand; left trigger throws from
+    // the left hand on the release, right trigger detonates, left grip = Use.
+    // Fist centre target in the controller frame (cm: forward, right, up;
+    // right is mirrored for the left hand).
     extern bool g_VrSatchelHands;
-    extern float g_VrDetPos[3];
-    extern float g_VrDetRot[3];
-    extern float g_VrDetCurl[3]; // left glove hold around the detonator: thumb, index, other fingers
+    extern float g_VrSatchelFist[3];
     // Two-handed: health panel above the ammo panel on the gun (not on the support wrist).
     extern bool g_HudHealthOnGun;
     extern bool g_VrSupportHandForce; // test: lock as if the left hand held the gun

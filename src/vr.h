@@ -386,6 +386,7 @@ public:
     // GetTickCount until which a snark throw of the local player is a hand
     // throw (set at the trigger release).
     std::atomic<unsigned> m_SnarkHandThrowUntil{ 0 };
+    std::atomic<bool> m_ThrowFromLeft{ false }; // satchel: throw samples from the left hand
     int MagReloadWeaponNow() const;
     // Left controller world pose for the viewmodel draw (render thread).
     bool OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const;
@@ -394,7 +395,7 @@ public:
     bool ViewmodelIs357() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlag357) != 0; }
     bool ViewmodelIsSnark() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagSnark) != 0; }
     bool ViewmodelIsSatchel() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagSatchel) != 0; }
-    // Satchel drawn with VrSatchelHands: detonator in the left hand.
+    // Satchel drawn with VrSatchelHands: bag in the left hand, detonator in the right.
     bool SatchelHandsActive() const;
     bool ViewmodelIsGlock() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagGlock) != 0; }
     bool ViewmodelIsMp5() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagMp5) != 0; }
