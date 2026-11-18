@@ -4478,8 +4478,10 @@ namespace
         for (int i = 0; i < 6; ++i)
             MulMatrix3x4(all[s_chamber], s_inCyl[i], seated[i]);
         // Opening (cycle 0.02 -> 0.5): still in the cylinder. Open (held at
-        // 0.5): out for 1.2 s from the eject, then gone (also when back from
-        // a weapon switch with the cylinder open).
+        // 0.5): the empties drop out of the gun to the floor and lie there,
+        // gone 2.5 s after the eject (also when back from a weapon switch
+        // with the cylinder open). Only six bullet bones: a loader taken
+        // from the hip takes them over (it carries the new rounds).
         const float te = eject ? (now - eject) * 0.001f : 99.f;
         if (cycle < 0.499f)
         {
@@ -4487,29 +4489,70 @@ namespace
                 std::memcpy(all[s_bullet[i]], seated[i], sizeof(seated[i]));
             return;
         }
+        static thread_local float s_floorZ = 0.f;
         if (s_ejectSeen != eject)
         {
             s_ejectSeen = eject;
             std::memcpy(s_ejectStart, seated, sizeof(seated));
+            // Floor = the player's feet (origin), else 48 units under the gun.
+            Vector feet;
+            const bool haveFeet = Hooks::m_Game && Hooks::m_Game->LocalPlayerAbsOrigin(feet)
+                && feet.z < seated[0][2][3];
+            s_floorZ = haveFeet ? feet.z + 0.6f : seated[0][2][3] - 48.f;
+            Game::logMsg("Mag reload: 357 empties out, %.1f units above the floor%s",
+                seated[0][2][3] - s_floorZ, haveFeet ? "" : " (floor guessed)");
         }
-        if (te >= 1.2f)
+        if (te >= 2.5f)
         {
             for (int i = 0; i < 6; ++i)
                 hide(s_bullet[i]);
             return;
         }
-        // Pushed out of the back of the cylinder, then falling.
+        // User, 2026-11-18: the empties fall out of the gun itself to the
+        // floor. Pushed out of the back of the cylinder, then nearly straight
+        // down with a slight drift to the gun's left (clear of the gun hand;
+        // a strong push put them next to the left hand), tumbling until
+        // they land.
         Vector f, r, u;
         QAngle::AngleVectors(gunAng, &f, &r, &u);
+        constexpr float kGravity = 386.f; // units/s^2 (1 unit ~ 1 inch)
         for (int i = 0; i < 6; ++i)
         {
             const float push = (std::min)(te, 0.08f) * 60.f * vmScale;
-            const Vector spread = (r * ((i % 3) - 1.f) + u * ((i / 3) - 0.5f)) * (6.f * vmScale * te);
-            const Vector d = f * -push + spread - Vector(0.f, 0.f, (std::min)(0.5f * 386.f * te * te, 48.f));
-            std::memcpy(all[s_bullet[i]], s_ejectStart[i], sizeof(s_ejectStart[i]));
-            all[s_bullet[i]][0][3] += d.x;
-            all[s_bullet[i]][1][3] += d.y;
-            all[s_bullet[i]][2][3] += d.z;
+            const float tf = (std::max)(0.f, te - 0.05f); // falling time after the push
+            const float vary = 0.75f + 0.1f * static_cast<float>(i);
+            Vector side = r * -1.f;
+            side.z = 0.f;
+            VectorNormalize(side);
+            Vector back = f * -1.f;
+            back.z = 0.f;
+            VectorNormalize(back);
+            const float startZ = s_ejectStart[i][2][3];
+            float drop = 0.5f * kGravity * tf * tf;
+            float tAir = tf;
+            if (startZ - drop < s_floorZ)
+            {
+                drop = (std::max)(0.f, startZ - s_floorZ);
+                tAir = std::sqrt(2.f * drop / kGravity);
+            }
+            const Vector d = f * -push + (side * 7.f + back * 3.f + r * ((i % 3) - 1.f) * 2.f) * (vary * tAir)
+                - Vector(0.f, 0.f, drop);
+            // Tumble about the gun's forward axis while in the air.
+            const float ang = tAir * (9.f + 1.5f * static_cast<float>(i)) * (i % 2 ? 1.f : -1.f);
+            const float c = std::cos(ang), sn = std::sin(ang), t1 = 1.f - c;
+            const Vector a = f;
+            const float R[3][3] = {
+                { c + a.x * a.x * t1, a.x * a.y * t1 - a.z * sn, a.x * a.z * t1 + a.y * sn },
+                { a.y * a.x * t1 + a.z * sn, c + a.y * a.y * t1, a.y * a.z * t1 - a.x * sn },
+                { a.z * a.x * t1 - a.y * sn, a.z * a.y * t1 + a.x * sn, c + a.z * a.z * t1 } };
+            float* out = &all[s_bullet[i]][0][0];
+            for (int row = 0; row < 3; ++row)
+                for (int col = 0; col < 3; ++col)
+                    out[row * 4 + col] = R[row][0] * s_ejectStart[i][0][col] + R[row][1] * s_ejectStart[i][1][col]
+                        + R[row][2] * s_ejectStart[i][2][col];
+            all[s_bullet[i]][0][3] = s_ejectStart[i][0][3] + d.x;
+            all[s_bullet[i]][1][3] = s_ejectStart[i][1][3] + d.y;
+            all[s_bullet[i]][2][3] = s_ejectStart[i][2][3] + d.z;
         }
     }
 
@@ -4734,8 +4777,13 @@ namespace
             }
             static thread_local bool s_grabbing = false;
             static thread_local float s_startAlong = 0.f;
-            float pull = 0.f;
+            float pull = 0.f, handBack = 0.f;
             const float travel = def.boltTravel * vmScale;
+            // The hand has to move at least ~6 cm (2.4 units) for a full
+            // stroke: the glock slide travels 1.8 x vmScale (~3 cm), so a
+            // touch plus a little drift racked it (user, 2026-11-18). The
+            // slide follows the hand up to its own travel.
+            const float handStroke = (std::max)(travel, 2.4f);
             if (MagReload::g_BoltGrab.load() && handOk)
             {
                 const float along = (anchor - gunOrigin).Dot(f);
@@ -4746,12 +4794,13 @@ namespace
                     s_grabbing = true;
                     s_startAlong = along;
                 }
-                pull = std::clamp((s_startAlong - along) / (travel > 0.01f ? travel : 1.f), 0.f, 1.f);
+                handBack = std::clamp(s_startAlong - along, 0.f, handStroke);
+                pull = handBack / (handStroke > 0.01f ? handStroke : 1.f);
             }
             else
                 s_grabbing = false;
             MagReload::g_BoltPull.store(pull);
-            const float back = (std::max)(pull, MagReload::g_SlideLocked.load() ? 1.f : 0.f) * travel;
+            const float back = MagReload::g_SlideLocked.load() ? travel : (std::min)(handBack, travel);
             b[3] -= f.x * back;
             b[7] -= f.y * back;
             b[11] -= f.z * back;

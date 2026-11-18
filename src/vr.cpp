@@ -21188,7 +21188,9 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
         { "mp5", "Clip_New", "Bolt_New", 30, 4.0f, false,
           "weapons/mp5/empty.wav", "weapons/smg1/switch_single.wav",
           { 0.00f, -8.93f, -8.32f }, { 1.04f, -14.23f, 1.49f }, false, nullptr, { 0, 0, 0 }, nullptr },
-        { "glock", "bone_clip", "Bone01", 17, 1.8f, true,
+        // Slide forward when empty (user, 2026-11-18: rack it to chamber,
+        // not a slide already back that a touch closes).
+        { "glock", "bone_clip", "Bone01", 17, 1.8f, false,
           "weapons/pistol/pistol_empty.wav", "weapons/glock/reload_roundchambered.wav",
           { 3.90f, -0.12f, 0.04f }, { 2.56f, -0.09f, 0.04f }, false, nullptr, { 0, 0, 0 }, nullptr },
         { "shotgun", "bone_shell", "bone_pump", 8, 4.5f, false,
