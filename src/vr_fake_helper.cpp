@@ -38,6 +38,8 @@
 //                                Optional 7th value <arc>: extra up-and-down bump of
 //                                <arc> metres (sin over the move), so the direction
 //                                changes along the swing like an overhand arc.
+//                                Optional 8th value <roll>: the hand also rolls by
+//                                <roll> degrees over the move (wrist flick).
 //   raw <hmd|gripl|gripr|aiml|aimr> <px> <py> <pz> <qx> <qy> <qz> <qw>
 //                                exact OpenXR pose (metres, x right, y up, -z forward) for that
 //                                slot, as a capture recorded it (VR/capture-*-state.txt); replaces
@@ -111,6 +113,7 @@ namespace
         float throwSec = 0.2f, throwRelease = 0.5f;
         float poseRate = 120.f;   // poses per second (game at half rate: ~45)
         float throwArc = 0.f;
+        float throwRoll = 0.f;
         int poseLagEvery = 0;
         float poseLagMs = 0.f;
         RawPose raw[kRawCount];
@@ -214,6 +217,7 @@ namespace
         fresh.throwId = 0;   // a throw lasts while its line is in the file
         fresh.poseRate = 120.f;
         fresh.throwArc = 0.f;
+        fresh.throwRoll = 0.f;
         fresh.poseLagEvery = 0;
         fresh.poseLagMs = 0.f;
         fresh.gazeSet = false;
@@ -284,6 +288,8 @@ namespace
                    >> fresh.throwSec >> fresh.throwRelease;
                 if (!(ss >> fresh.throwArc))
                     fresh.throwArc = 0.f;
+                else if (!(ss >> fresh.throwRoll))
+                    fresh.throwRoll = 0.f;
             }
             else if (key == "raw")
             {
@@ -554,6 +560,7 @@ namespace
                 right.x += script.throwD[0] * k;
                 right.y += script.throwD[1] * k;
                 right.z += script.throwD[2] * k + script.throwArc * sinf(kPi * uh);
+                right.roll += script.throwRoll * k;
                 throwActive = u < 1.0f;
                 throwAttack = u < script.throwRelease;
             }

@@ -400,6 +400,11 @@ namespace
             if (w == MagReload::kWeaponMp5 || w == MagReload::kWeaponGlock)
                 return true;
         }
+        // A shotgun shell in the hand, held by its base like the stock
+        // shell reload (user, 2026-11-18).
+        if (MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponShotgun
+            && MagReload::g_State.load(std::memory_order_relaxed) == MagReload::kInHand)
+            return true;
         if (MagReload::g_PinWeapon.load(std::memory_order_relaxed))
         {
             const int s = MagReload::g_PinState.load(std::memory_order_relaxed);
@@ -870,36 +875,52 @@ namespace
         const VrHandMatrix4& world, const Vector& controller, const QAngle& controllerAng)
     {
         static const VrHandMeshAsset* s_asset = nullptr;
-        static int s_joints[4] = { -1, -1, -1, -1 };
+        static int s_joints[6] = { -1, -1, -1, -1, -1, -1 };
         if (s_asset != &asset)
         {
             s_asset = &asset;
-            const char* names[4] = { "wrist_l", "finger_middle_0_l", "finger_middle_1_l", "finger_middle_2_l" };
-            for (int k = 0; k < 4; ++k)
+            const char* names[6] = { "wrist_l", "finger_middle_0_l", "finger_middle_1_l", "finger_middle_2_l",
+                "finger_thumb_2_l", "finger_index_2_l" };
+            for (int k = 0; k < 6; ++k)
                 s_joints[k] = FindNameIndex(asset.jointNames, names[k]);
         }
-        Vector sum(0.f, 0.f, 0.f);
-        for (int k = 0; k < 4; ++k)
-        {
-            const int j = s_joints[k];
+        auto jointWorld = [&](int j, Vector& out) {
             if (j < 0 || static_cast<size_t>(j) >= palette.size() || static_cast<size_t>(j) >= asset.bindMatrices.size())
-                return;
+                return false;
             const VrHandMatrix4& bind = asset.bindMatrices[static_cast<size_t>(j)];
             const float b[3] = { VrHandMath::Get(bind, 0, 3), VrHandMath::Get(bind, 1, 3), VrHandMath::Get(bind, 2, 3) };
             const auto& r = palette[static_cast<size_t>(j)].v;
             float m[3];
             for (int row = 0; row < 3; ++row)
                 m[row] = r[row * 4 + 0] * b[0] + r[row * 4 + 1] * b[1] + r[row * 4 + 2] * b[2] + r[row * 4 + 3];
+            float w[3];
             for (int row = 0; row < 3; ++row)
-            {
-                const float wv = VrHandMath::Get(world, row, 0) * m[0] + VrHandMath::Get(world, row, 1) * m[1]
+                w[row] = VrHandMath::Get(world, row, 0) * m[0] + VrHandMath::Get(world, row, 1) * m[1]
                     + VrHandMath::Get(world, row, 2) * m[2] + VrHandMath::Get(world, row, 3);
-                (row == 0 ? sum.x : row == 1 ? sum.y : sum.z) += wv;
-            }
+            out = Vector(w[0], w[1], w[2]);
+            return true;
+        };
+        Vector sum(0.f, 0.f, 0.f);
+        for (int k = 0; k < 4; ++k)
+        {
+            Vector p;
+            if (!jointWorld(s_joints[k], p))
+                return;
+            sum = sum + p;
         }
         const Vector centre = sum * 0.25f;
         Vector f, r, u;
         QAngle::AngleVectors(controllerAng, &f, &r, &u);
+        Vector thumbP, indexP;
+        if (jointWorld(s_joints[4], thumbP) && jointWorld(s_joints[5], indexP))
+        {
+            const Vector dp = (thumbP + indexP) * 0.5f - controller;
+            MagReload::g_LeftPinchLocal[0].store(dp.Dot(f), std::memory_order_relaxed);
+            MagReload::g_LeftPinchLocal[1].store(dp.Dot(r), std::memory_order_relaxed);
+            MagReload::g_LeftPinchLocal[2].store(dp.Dot(u), std::memory_order_relaxed);
+            const DWORD t = GetTickCount();
+            MagReload::g_LeftPinchMs.store(t ? t : 1, std::memory_order_relaxed);
+        }
         const Vector d = centre - controller;
         MagReload::g_LeftPalmLocal[0].store(d.Dot(f), std::memory_order_relaxed);
         MagReload::g_LeftPalmLocal[1].store(d.Dot(r), std::memory_order_relaxed);

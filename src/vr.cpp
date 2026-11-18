@@ -21070,6 +21070,8 @@ std::atomic<float> MagReload::g_BoltPull{ 0.f };
 std::atomic<float> MagReload::g_RpgInsert{ -1.f };
 std::atomic<float> MagReload::g_LeftPalmLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
+std::atomic<float> MagReload::g_LeftPinchLocal[3]{};
+std::atomic<unsigned> MagReload::g_LeftPinchMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
 std::atomic<unsigned> MagReload::g_357EjectTick{ 0 };
 std::atomic<bool> MagReload::g_EjectedEmpty{ false };
@@ -21661,11 +21663,16 @@ void VR::UpdateMagReload(uint32_t& buttons)
 
     if (weapon == kWeapon357)
     {
-        // .357: the cylinder is the stock gun_reload1 clip, scrubbed in two
-        // timed parts: open + eject (cycle 0.02 -> 0.5), then insert + close
-        // (0.62 -> 0.97) once the speed loader reaches the open cylinder.
+        // .357: the cylinder is the stock gun_reload1 clip, scrubbed in
+        // timed parts: open + eject (cycle 0.02 -> 0.5), then insert
+        // (0.62 -> 0.76, new rounds in the open cylinder) once the speed
+        // loader reaches it, then close (0.76 -> 0.97). With bmvr_357_flick
+        // (user, 2026-11-18) the cylinder stays open after the insert until
+        // a flick of the gun wrist (raw tracking rotation faster than
+        // bmvr_357_flick_speed deg/s for two updates) or the reload button
+        // snaps it shut; without it the close follows the insert.
         // The clip's whole-reload sound sits at cycle 0, so it starts after.
-        static int s_phase = 0; // 0 none, 1 opening, 2 open, 3 closing
+        static int s_phase = 0; // 0 none, 1 opening, 2 open, 3 inserting, 4 waiting for the flick, 5 closing
         static DWORD s_phaseMs = 0;
         auto scrub = [&](float a, float b, float secs) {
             const float t = std::clamp((now - s_phaseMs) * 0.001f / secs, 0.f, 1.f);
@@ -21722,7 +21729,40 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 Game::logMsg("Mag reload: 357 speed loader dropped");
             }
         }
-        if (s_phase == 3 && scrub(0.62f, 0.97f, 0.8f))
+        // Gun wrist rotation speed from the raw tracking pose (smooth/snap
+        // turning does not count).
+        float flickRate = 0.f;
+        {
+            static float s_prevR[3][3]{};
+            static DWORD s_prevMs = 0;
+            static bool s_prevValid = false;
+            if (m_RightControllerTrackingValid)
+            {
+                float R[3][3];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        R[i][j] = m_RightControllerTracking.m[i][j];
+                const DWORD dtMs = now - s_prevMs;
+                if (s_prevValid && dtMs >= 4 && dtMs < 100)
+                {
+                    float tr = 0.f;
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                            tr += s_prevR[i][j] * R[i][j];
+                    const float ang = std::acos(std::clamp((tr - 1.f) * 0.5f, -1.f, 1.f));
+                    flickRate = ang * 57.2958f * 1000.f / static_cast<float>(dtMs);
+                }
+                if (!s_prevValid || dtMs >= 4)
+                {
+                    std::memcpy(s_prevR, R, sizeof(R));
+                    s_prevMs = now;
+                    s_prevValid = true;
+                }
+            }
+            else
+                s_prevValid = false;
+        }
+        if (s_phase == 3 && !bmvr::g_Vr357Flick && scrub(0.62f, 0.97f, 0.8f))
         {
             s_phase = 0;
             w.mag = kLoaded;
@@ -21730,10 +21770,51 @@ void VR::UpdateMagReload(uint32_t& buttons)
             sound("weapons/357/357_reload4.wav");
             Game::logMsg("Mag reload: 357 cylinder closed (clip %d)", clip);
         }
+        else if (s_phase == 3 && bmvr::g_Vr357Flick && scrub(0.62f, 0.76f, 0.45f))
+        {
+            s_phase = 4;
+            s_phaseMs = now;
+            ShowReloadHint(3, "FLICK TO CLOSE");
+            Game::logMsg("Mag reload: 357 rounds in, cylinder open until a flick");
+        }
+        else if (s_phase == 4)
+        {
+            scrub(0.76f, 0.76f, 1.f);
+            static int s_fastUpdates = 0;
+            static float s_peak = 0.f;
+            static DWORD s_peakLogMs = 0;
+            s_fastUpdates = flickRate > bmvr::g_Vr357FlickSpeed ? s_fastUpdates + 1 : 0;
+            s_peak = (std::max)(s_peak, flickRate);
+            if (now - s_peakLogMs > 1000)
+            {
+                s_peakLogMs = now;
+                Game::logMsg("Mag reload: 357 waiting for the flick, fastest wrist turn %.0f deg/s (need %.0f)",
+                    s_peak, bmvr::g_Vr357FlickSpeed);
+                s_peak = 0.f;
+            }
+            const bool byButton = reload && !s_reloadWas;
+            if (s_fastUpdates >= 2 || byButton)
+            {
+                s_phase = 5;
+                s_phaseMs = now;
+                s_fastUpdates = 0;
+                sound("weapons/357/357_reload4.wav");
+                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 2500, 0.8f);
+                Game::logMsg("Mag reload: 357 cylinder flicked shut (%s, %.0f deg/s)",
+                    byButton ? "reload button" : "wrist", flickRate);
+            }
+        }
+        else if (s_phase == 5 && scrub(0.76f, 0.97f, 0.22f))
+        {
+            s_phase = 0;
+            w.mag = kLoaded;
+            w.chambered = true;
+            Game::logMsg("Mag reload: 357 cylinder closed (clip %d)", clip);
+        }
         if (s_phase == 0)
             g_ScrubSeq.store(nullptr);
         // While the loader goes in, it is the clip's own loader, not the hand's.
-        g_State.store(s_phase == 3 ? kEmpty : w.mag);
+        g_State.store(s_phase >= 3 ? kEmpty : w.mag);
         const bool canFire = w.mag == kLoaded && s_phase == 0;
         if (!canFire)
         {

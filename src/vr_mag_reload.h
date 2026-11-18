@@ -87,6 +87,10 @@ namespace MagReload
     // hand sits there, so it follows the glove's own pose offsets and size.
     extern std::atomic<float> g_LeftPalmLocal[3];
     extern std::atomic<unsigned> g_LeftPalmMs;
+    // Point between the drawn left thumb and index (distal joints), same
+    // frame as g_LeftPalmLocal: where a pinched shotgun shell is held.
+    extern std::atomic<float> g_LeftPinchLocal[3];
+    extern std::atomic<unsigned> g_LeftPinchMs;
     // Shotgun pump back stroke: a spent hull flies out of the ejection port
     // (GetTickCount, 0 = none).
     extern std::atomic<unsigned> g_EjectTick;

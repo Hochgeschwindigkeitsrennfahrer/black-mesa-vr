@@ -788,6 +788,10 @@ namespace bmvr
     extern bool g_RpgRocketShown;
     extern float g_DebugVmSeq, g_DebugVmCycle; // debug: hold the viewmodel on a sequence/cycle (-1 = off)
     extern float g_VrMagHandForward, g_VrMagHandUp, g_VrMagSeatDistance; // game units
+    extern float g_VrShellOut; // shotgun shell centre beyond the pinch, fraction of its length
+    extern bool g_VrShellFlip; // test: the other shell end in the fingers
+    extern bool g_Vr357Flick;     // .357 cylinder closes on a wrist flick (or the reload button)
+    extern float g_Vr357FlickSpeed; // deg/s
     extern float g_VrBoltGrabRadius; // game units (before the viewmodel scale)
     // True for this process when launched with -game bshift (or a bs_* map).
     // Calhoun never wears the HEV suit — use bare-hand GLBs the whole session.

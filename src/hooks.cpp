@@ -4447,6 +4447,11 @@ namespace
                 s_inLoaderValid = ok;
                 Game::logMsg("Mag reload: 357 bullets in the loader sampled (%d)", ok ? 1 : 0);
             }
+            // Rounds in by 0.68; the stock loader then leaves with the stock
+            // left hand, which would hang there while the cylinder waits
+            // open for the flick.
+            if (cycle >= 0.70f)
+                hide(s_loader);
             return;
         }
         if (!loaderOurs)
@@ -4969,6 +4974,56 @@ namespace
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
                 m[i * 4 + j] = R[i][j];
+        // Shotgun shell: held by its base in the left glove's pinch (thumb
+        // and index, VrStockHandPose), pointing out of the hand away from
+        // the palm, about a fifth in the fingers (user, 2026-11-18: centred
+        // in the fist along its grip tunnel it was "basically invisible").
+        // bmvr_shell_out = shell centre beyond the pinch point, fraction of
+        // its length (0.3 = a fifth held). The well check uses the moved
+        // centre. Without a drawn glove pinch: slid out of the fist instead.
+        if (def.tube)
+        {
+            Vector axis(m[0], m[4], m[8]);
+            const float axisLen = VectorNormalize(axis);
+            const unsigned pinchMs = MagReload::g_LeftPinchMs.load(std::memory_order_relaxed);
+            Vector out;
+            Vector base = fistCentre;
+            if (pinchMs != 0 && now - pinchMs < 500)
+            {
+                base = hand + hf * MagReload::g_LeftPinchLocal[0].load(std::memory_order_relaxed)
+                    + hr * MagReload::g_LeftPinchLocal[1].load(std::memory_order_relaxed)
+                    + hu * MagReload::g_LeftPinchLocal[2].load(std::memory_order_relaxed);
+                out = base - fistCentre;
+            }
+            else
+                out = hu - hf * 0.5f;
+            if (axisLen > 0.01f && VectorNormalize(out) > 0.01f)
+            {
+                // Turn the shell so its axis (bone x, the sign that makes the
+                // turn smallest) points along "out".
+                Vector cur = axis.Dot(out) >= 0.f ? axis : axis * -1.f;
+                if (bmvr::g_VrShellFlip)
+                    cur = cur * -1.f;
+                const Vector v = CrossProduct(cur, out);
+                const float c = cur.Dot(out);
+                if (c > -0.999f)
+                {
+                    const float k = 1.f / (1.f + c);
+                    const float R[3][3] = {
+                        { 1.f - (v.y * v.y + v.z * v.z) * k, -v.z + v.x * v.y * k, v.y + v.x * v.z * k },
+                        { v.z + v.x * v.y * k, 1.f - (v.x * v.x + v.z * v.z) * k, -v.x + v.y * v.z * k },
+                        { -v.y + v.x * v.z * k, v.x + v.y * v.z * k, 1.f - (v.x * v.x + v.y * v.y) * k } };
+                    float rot[3][3];
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                            rot[i][j] = R[i][0] * m[0 * 4 + j] + R[i][1] * m[1 * 4 + j] + R[i][2] * m[2 * 4 + j];
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                            m[i * 4 + j] = rot[i][j];
+                }
+                magAnchor = base + out * (bmvr::g_VrShellOut * 4.27f * vmScale);
+            }
+        }
         // Magazine centre in the palm.
         m[3] = m[7] = m[11] = 0.f;
         const Vector c0 = local(m, def.magCenter);
