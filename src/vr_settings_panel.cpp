@@ -978,8 +978,10 @@ namespace
     {
         std::vector<int> tab, col, top, x0, x1;   // tab -1 = shown on every tab, -2 = hidden
         int tabCount = 0;
-        int closeTop = 0;
+        int closeTop = 0;   // of the tab shown (GetLayout sets it per tab)
         int bottom = 0;
+        std::vector<int> tabContent;  // content bottom per tab
+        int contentMax = 0;           // tallest tab
     };
     Layout BuildLayout(bool devRows)
     {
@@ -1064,8 +1066,11 @@ namespace
                 out.top[i] = y[c];
                 y[c] += RowHeight(rows[i]);
             }
-            contentBottom = (std::max)({ contentBottom, y[0], y[1] });
+            const int tabBottom = (std::max)({ kContentTop, y[0], y[1] });
+            out.tabContent.push_back(tabBottom);
+            contentBottom = (std::max)(contentBottom, tabBottom);
         }
+        out.contentMax = contentBottom;
         out.closeTop = contentBottom + 16;
         out.bottom = out.closeTop + kRowPx;
         for (int i = 0; i < n; ++i)
@@ -1078,10 +1083,16 @@ namespace
         }
         return out;
     }
+    // Content bottom every tab shares: the tallest tab without developer rows.
+    // With developer rows on, only a tab that grows past it (DEBUG) makes the
+    // panel taller while it is shown; the other tabs keep their normal size
+    // and distance (user, 2026-11-18: dev rows made every tab small).
+    int g_BaseContent = 0;
     const Layout& GetLayout()
     {
         static Layout l;
         static int s_builtFor = -1;
+        static int s_tabFor = -1;
         // Rebuilt when developer rows or the detected controller (its buttons) change.
         const int want = (bmvr::g_PanelDevRows ? 1 : 0) | static_cast<int>(g_PanelFamily << 1)
             | static_cast<int>(((g_PanelRaw[0] >> 16) & 0xF) << 8) | static_cast<int>(((g_PanelRaw[1] >> 16) & 0xF) << 12)
@@ -1091,7 +1102,20 @@ namespace
             // Bit 0 only: the other bits are the controller (was want != 0, so
             // developer rows showed once a controller was detected).
             l = BuildLayout((want & 1) != 0);
+            g_BaseContent = (want & 1) != 0 ? BuildLayout(false).contentMax : l.contentMax;
             s_builtFor = want;
+            s_tabFor = -1;
+        }
+        if (s_tabFor != g_Tab)
+        {
+            s_tabFor = g_Tab;
+            const int own = g_Tab >= 0 && g_Tab < static_cast<int>(l.tabContent.size()) ? l.tabContent[g_Tab] : l.contentMax;
+            l.closeTop = (std::max)(g_BaseContent, own) + 16;
+            l.bottom = l.closeTop + kRowPx;
+            const auto& rows = Rows();
+            for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+                if (rows[i].kind == RowKind::Close)
+                    l.top[i] = l.closeTop;
         }
         return l;
     }
@@ -1510,7 +1534,6 @@ namespace
         c.fill(0, 0, c.w, c.h, kBg);
         c.fill(0, 0, c.w, 6, kAmber);
         c.text("VR SETTINGS", 40, 10, c.w - 40, kHeaderPx - 10, kAmber, 46, true, DT_LEFT);
-        c.text("trigger: change   circle: close", 40, 10, c.w - 40, kHeaderPx - 10, kDim, 24, false, DT_RIGHT);
         const Layout& l = GetLayout();
         // Tab bar: active tab amber, the others like buttons.
         c.fill(40, kHeaderPx + kTabPx + 4, c.w - 40, kHeaderPx + kTabPx + 8, kAmber);
@@ -2233,8 +2256,22 @@ void VR::UpdateSettingsPanel()
             t += Rows()[i].kind == RowKind::Tab ? 1 : 0;
         if (t != g_Tab)
         {
+            const int hBefore = TexH();
             g_Tab = t;
             m_SettingsDirty = true;
+            // A taller tab (DEBUG with developer rows) moves the panel back to
+            // fit, the others come forward again (in the latched frame, like
+            // the developer-rows switch).
+            if (TexH() != hBefore)
+            {
+                const float d = PanelDistanceHu();
+                m_SettingsLatchDelta = m_SettingsLatchDelta + m_SettingsLatchFwd * (d - g_LatchDistHu);
+                Game::logMsg("VR settings panel: tab %d is %d px tall (was %d), distance %.1f -> %.1f",
+                    t, TexH(), hBefore, g_LatchDistHu, d);
+                g_LatchDistHu = d;
+                m_SettingsHover = -1;
+                m_SettingsHoverZone = -1;
+            }
             PulseHandHaptic(vr::TrackedControllerRole_RightHand, 500, 0.25f);
             Game::logMsg("VR settings tab: %s", r.label);
         }
