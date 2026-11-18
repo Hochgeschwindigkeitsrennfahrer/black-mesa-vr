@@ -774,7 +774,42 @@ namespace
     int PickerX0() { return (kTexW - (kPickerCols * kPickerCellW + (kPickerCols - 1) * kPickerGap)) / 2; }
     int PickerTitleY() { return kContentTop + 8; }
     int PickerGridY() { return PickerTitleY() + 80; }
-    int PickerRows() { return (bmvr::kBindActionCount + kPickerCols - 1) / kPickerCols; }
+    // The picker also serves Choice rows with many options (the shoulder/hip
+    // weapon rows: 11 weapons, cycling forward only was slow; user 2026-11-18).
+    std::vector<std::string> ChoiceOptions(const Row& r)
+    {
+        std::vector<std::string> out;
+        if (!r.fmt)
+            return out;
+        std::string cur;
+        for (const char* q = r.fmt; ; ++q)
+        {
+            if (*q == '|' || *q == 0)
+            {
+                out.push_back(cur);
+                cur.clear();
+                if (*q == 0)
+                    break;
+            }
+            else
+                cur += *q;
+        }
+        return out;
+    }
+    bool ChoiceUsesPicker(const Row& r)
+    {
+        return r.kind == RowKind::Choice && r.f && r.step > 0.f && ChoiceOptions(r).size() > 4;
+    }
+    bool PickerIsChoice()
+    {
+        return g_PickerRow >= 0 && g_PickerRow < static_cast<int>(Rows().size()) && Rows()[g_PickerRow].kind == RowKind::Choice;
+    }
+    int PickerCount()
+    {
+        return PickerIsChoice() ? static_cast<int>(ChoiceOptions(Rows()[g_PickerRow]).size()) : bmvr::kBindActionCount;
+    }
+    int PickerCountFor(const Row& r) { return static_cast<int>(ChoiceOptions(r).size()); }
+    int PickerRows() { return (PickerCount() + kPickerCols - 1) / kPickerCols; }
     int PickerCancelY() { return PickerGridY() + PickerRows() * (kPickerCellH + kPickerGap) + 16; }
     int PickerCellAt(int px, int py)
     {
@@ -787,7 +822,7 @@ namespace
         if (col >= kPickerCols || gx % (kPickerCellW + kPickerGap) >= kPickerCellW || gy % (kPickerCellH + kPickerGap) >= kPickerCellH)
             return -1;
         const int idx = row * kPickerCols + col;
-        return idx < bmvr::kBindActionCount ? idx : -1;
+        return idx < PickerCount() ? idx : -1;
     }
 
     // "Reset dev rows": every row of the DEBUG tab back to its built-in default (CapturePanelDefaults,
@@ -1622,23 +1657,37 @@ namespace
         if (g_PickerRow >= 0 && g_PickerRow < static_cast<int>(rows.size()))
         {
             const Row& pr = rows[g_PickerRow];
-            const bmvr::BindAction cur = BindRowAction(pr), def = BindRowAction(pr, true);
+            const bool choice = pr.kind == RowKind::Choice;
+            const std::vector<std::string> opts = choice ? ChoiceOptions(pr) : std::vector<std::string>{};
+            int curIdx = -1, defIdx = -1;
+            if (choice)
+            {
+                curIdx = static_cast<int>(std::lround((*pr.f - pr.lo) / pr.step));
+                defIdx = static_cast<int>(std::lround((pr.defF - pr.lo) / pr.step));
+            }
+            else
+            {
+                curIdx = static_cast<int>(BindRowAction(pr));
+                defIdx = static_cast<int>(BindRowAction(pr, true));
+            }
             c.fill(24, kContentTop - 8, c.w - 24, l.closeTop - 8, RGB(10, 12, 15));
             c.fill(24, kContentTop - 8, c.w - 24, kContentTop - 4, kAmber);
-            const std::string title = std::string(pr.fmt[0] == 'L' ? "Left " : "Right ") + BindRowLabel(pr) + ":  pick an action";
+            const std::string title = choice ? std::string(pr.label) + ":  pick one"
+                : std::string(pr.fmt[0] == 'L' ? "Left " : "Right ") + BindRowLabel(pr) + ":  pick an action";
             c.text(title.c_str(), PickerX0(), PickerTitleY(), c.w - PickerX0(), PickerTitleY() + 64, kAmber, 40, true, DT_LEFT);
-            for (int a = 0; a < bmvr::kBindActionCount; ++a)
+            const int count = choice ? static_cast<int>(opts.size()) : bmvr::kBindActionCount;
+            for (int a = 0; a < count; ++a)
             {
                 const int col = a % kPickerCols, row = a / kPickerCols;
                 const int cx0 = PickerX0() + col * (kPickerCellW + kPickerGap);
                 const int cy0 = PickerGridY() + row * (kPickerCellH + kPickerGap);
                 const bool hv = hoverRow == 1000 + a;
-                const bool isCur = static_cast<int>(cur) == a;
+                const bool isCur = curIdx == a;
                 if (isCur)
                     c.fill(cx0 - 4, cy0 - 4, cx0 + kPickerCellW + 4, cy0 + kPickerCellH + 4, kAmber);
                 c.fill(cx0, cy0, cx0 + kPickerCellW, cy0 + kPickerCellH, hv ? kBtnHover : kBtn);
-                std::string label = bmvr::BindActionLabel(static_cast<bmvr::BindAction>(a));
-                if (static_cast<int>(def) == a)
+                std::string label = choice ? opts[a] : std::string(bmvr::BindActionLabel(static_cast<bmvr::BindAction>(a)));
+                if (defIdx == a)
                     label += " (default)";
                 c.text(label.c_str(), cx0, cy0, cx0 + kPickerCellW, cy0 + kPickerCellH, hv ? RGB(0, 0, 0) : kText, 32, true, DT_CENTER);
             }
@@ -2031,7 +2080,26 @@ void VR::UpdateSettingsPanel()
         CloseSettingsPanel("circle");
         return;
     }
-    if (g_PickerRow >= 0)
+    bool choicePicked = false;
+    if (g_PickerRow >= 0 && PickerIsChoice())
+    {
+        if (!clickEdge)
+            return;
+        const int cell = row >= 1000 ? row - 1000 : -1;
+        const int pickedRow = g_PickerRow;
+        g_PickerRow = -1;
+        m_SettingsHover = -1;
+        m_SettingsDirty = true;
+        Row& pr = Rows()[pickedRow];
+        if (cell < 0 || cell >= PickerCountFor(pr))
+            return;
+        // Set the value, then the usual Choice-row path below saves it.
+        *pr.f = std::clamp(pr.lo + pr.step * static_cast<float>(cell), pr.lo, pr.hi);
+        PulseHandHaptic(vr::TrackedControllerRole_RightHand, 700, 0.3f);
+        row = pickedRow;
+        choicePicked = true;
+    }
+    else if (g_PickerRow >= 0)
     {
         if (!clickEdge)
             return;
@@ -2139,6 +2207,17 @@ void VR::UpdateSettingsPanel()
     case RowKind::Choice:
         if (!r.f || r.step <= 0.f)
             return;
+        if (choicePicked)
+            break;
+        if (ChoiceUsesPicker(r))
+        {
+            g_PickerRow = row;
+            m_SettingsHover = -1;
+            m_SettingsDirty = true;
+            PulseHandHaptic(vr::TrackedControllerRole_RightHand, 500, 0.25f);
+            Game::logMsg("VR settings: picker for %s", r.label);
+            return;
+        }
         {
             float v = std::round((*r.f - r.lo) / r.step) * r.step + r.lo + r.step;
             *r.f = v > r.hi + r.step * 0.5f ? r.lo : std::clamp(v, r.lo, r.hi);
