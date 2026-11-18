@@ -8392,6 +8392,37 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     }
     if (s_climbHand >= 0 || !onLadder)
         s_dropAt = 0;
+    // Top end: stick forward steps off onto the ledge (user, 2026-11-18).
+    // HL2's auto-dismount at the ends needs a forward move, which hands-only
+    // mode zeroes on the ladder, and climbing past the top is refused
+    // without +use. So: one IN_USE with the level head view; LadderMove's
+    // use-dismount then takes the info_ladder_dismount the player faces
+    // (60 degrees, 100 u) or else the nearest one. Letting go up there does
+    // the same instead of dropping.
+    constexpr float kTopExitHu = 40.f;   // feet this far under the top mount point
+    static ULONGLONG s_topExitNext = 0;
+    bool nearTop = false;
+    if (onLadder)
+    {
+        float d = 0.f, yaw = 0.f;
+        const int ti = nearestLadder(origin, d, yaw);
+        if (ti >= 0)
+        {
+            const float topZ = tops[ti].z > bottoms[ti].z ? tops[ti].z : bottoms[ti].z;
+            nearTop = topZ - origin.z < kTopExitHu;
+        }
+    }
+    const bool stickForward = m_WalkForward.load(std::memory_order_acquire) > 0.5f;
+    if (nearTop && (stickForward || (s_dropAt && now >= s_dropAt)) && now >= s_topExitNext)
+    {
+        s_topExitNext = now + 400;   // retry while the stick stays forward
+        s_dropAt = 0;
+        s_climbHand = -1;
+        m_LadderPin[0].valid = m_LadderPin[1].valid = false;
+        out.topExit = true;
+        Game::logMsg("Ladder: %s at the top -> step off", stickForward ? "stick forward" : "let go");
+        return true;
+    }
     if (s_dropAt)
     {
         if (now < s_dropAt)

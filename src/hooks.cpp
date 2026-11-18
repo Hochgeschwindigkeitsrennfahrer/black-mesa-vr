@@ -8436,7 +8436,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     {
         onLadder = physLadder.onLadder;
         ladderBits = physLadder.dir > 0 ? IN_FORWARD : (physLadder.dir < 0 ? IN_BACK : 0);
-        if (physLadder.drop)
+        if (physLadder.drop || physLadder.topExit)
             ladderBits = IN_USE;   // +use on a ladder = get off (HL2 LadderMove)
         if (!onLadder)
         {
@@ -8545,6 +8545,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
                 pitch = -30.f;   // looking down at the feet would climb down
             else if (physLadderOn && physLadder.drop)
                 pitch = 89.f;    // the use-dismount pushes along the view: straight down = just fall
+            else if (physLadderOn && physLadder.topExit)
+                pitch = 0.f;     // level head view: the dismount faced, or forward over the edge
             else if (ladderMountAssist)
                 yaw = ladderMountYaw;
             static int s_ladderLog;
