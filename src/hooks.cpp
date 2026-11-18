@@ -4680,14 +4680,16 @@ namespace
                 // Rocket length 28.3 units; seated, ~5 stick out of the
                 // muzzle, so its tail reaches the muzzle at along ~0.8 L.
                 const float len = 28.3f * vmScale;
-                const float tol = 3.5f * vmScale;
-                if (!s_engaged && along > 0.5f * len && along < 0.95f * len && radial < tol && align > 0.8f)
+                // Lenient on purpose (user: realistic but never finicky in a
+                // fight): wide entry depth, 5 units off the axis, ~45 deg off.
+                const float tol = 5.f * vmScale;
+                if (!s_engaged && along > 0.3f * len && along < 1.0f * len && radial < tol && align > 0.7f)
                 {
                     s_engaged = true;
                     Game::logMsg("Mag reload: rpg rocket engaged at the muzzle (along %.1f radial %.1f align %.2f)",
                         along / vmScale, radial / vmScale, align);
                 }
-                else if (s_engaged && (radial > 2.f * tol || along > 1.1f * len || align < 0.6f))
+                else if (s_engaged && (radial > 2.f * tol || along > 1.1f * len || align < 0.5f))
                 {
                     s_engaged = false;
                     Game::logMsg("Mag reload: rpg rocket off the tube (along %.1f radial %.1f align %.2f)",
@@ -4701,7 +4703,7 @@ namespace
                     m[7] += ax.y * depth;
                     m[11] += ax.z * depth;
                 }
-                MagReload::g_RpgInsert.store(s_engaged ? 1.f - along / (0.95f * len) : -1.f);
+                MagReload::g_RpgInsert.store(s_engaged ? std::clamp(1.f - along / (0.95f * len), 0.f, 1.f) : -1.f);
                 MagReload::g_NearWell.store(s_engaged && along <= 1.5f * vmScale);
                 static thread_local DWORD s_rpgLogMs = 0;
                 if (now - s_rpgLogMs > 1000)

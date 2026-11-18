@@ -21376,13 +21376,26 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
                 Game::logMsg("Mag reload: rpg rocket seated (needReload %d, game reload %d)", need, s_pulseReload ? 1 : 0);
             }
+            else if (released && in >= 0.5f)
+            {
+                // Let go at least half in: it slides home by itself (user:
+                // fun beats finicky; a half-pushed rocket must not leave the
+                // gun empty in a fight).
+                w.mag = kLoaded;
+                s_wasEngaged = false;
+                s_pulseReload = need != 0;
+                s_pulseUntil = now + 200;
+                sound("weapons/ar2/ar2_reload_push.wav");
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+                Game::logMsg("Mag reload: rpg rocket let go %.0f%% in, seated (needReload %d)", in * 100.f, need);
+            }
             else if (released)
             {
                 w.mag = kEmpty;
                 s_wasEngaged = false;
                 g_DropFrom.store(1);
                 g_DropTick.store(now ? now : 1);
-                Game::logMsg("Mag reload: rpg rocket dropped");
+                Game::logMsg("Mag reload: rpg rocket dropped (%s)", engaged ? "less than half in" : "not at the tube");
             }
         }
         else
