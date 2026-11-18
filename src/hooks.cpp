@@ -3913,7 +3913,7 @@ namespace
     // brings its hand to the gun hands' size.
     bool GunRightHandForModel(const char* modelName)
     {
-        if (!bmvr::PhysicalWeapon(bmvr::g_VrGunRightHand) || bmvr::g_LeftHanded || !modelName)
+        if (!bmvr::g_VrGunRightHand || bmvr::g_LeftHanded || !modelName)
             return false;
         // Not the gluon (v_egon): its idle pose holds the right hand a hand's
         // width beside the top grip, floating off the gun (headless dump
@@ -9935,7 +9935,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
     // hands viewmodel take turns here. Models outside GunRightHandForModel
     // get hideArms and are zeroed again on their next draw.
     static bool s_gunRightHand = false;
-    const bool gunRightHandSetting = bmvr::PhysicalWeapon(bmvr::g_VrGunRightHand) && !bmvr::g_LeftHanded;
+    const bool gunRightHandSetting = bmvr::g_VrGunRightHand && !bmvr::g_LeftHanded;
     if (isViewmodel && gunRightHandSetting != s_gunRightHand)
     {
         s_gunRightHand = gunRightHandSetting;

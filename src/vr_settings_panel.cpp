@@ -204,6 +204,7 @@ namespace
             { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Gloves are always built from the installed game's own first-person arms.
             { "Hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
+            { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
             // The original release's look: flat gloves, HUD on the back of the hand.
             { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
@@ -211,7 +212,7 @@ namespace
             { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
             { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
             { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
-            // Off = the stable release's gun handling; the rows below only act while it is on
+            // Off = the stable release's reloads and hand poses; the rows below only act while it is on
             // (snarks thrown from the hand too).
             { "PHYSICAL WEAPONS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Physical weapons (beta)", RowKind::Toggle, "PhysicalWeapons", &bmvr::g_PhysicalWeapons, nullptr, 0, 0, 0, nullptr },
@@ -219,7 +220,6 @@ namespace
             { "Grenade pin by hand", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
             { "Ejected rounds are lost", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
             { "Reload hints", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
-            { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
             { "Support hand finger pose", RowKind::Toggle, "VrStockHandPose", &bmvr::g_VrStockHandPose, nullptr, 0, 0, 0, nullptr },
             { "Support hand locks to the gun", RowKind::Toggle, "VrSupportHandLock", &bmvr::g_VrSupportHandLock, nullptr, 0, 0, 0, nullptr },
             { "Satchel: detonator in left hand", RowKind::Toggle, "VrSatchelHands", &bmvr::g_VrSatchelHands, nullptr, 0, 0, 0, nullptr },

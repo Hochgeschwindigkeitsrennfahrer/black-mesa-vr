@@ -767,7 +767,7 @@ namespace bmvr
     extern bool g_VrPinchForce;
     // "Physical weapons (beta)" master switch (VR panel HANDS & WEAPONS, off by
     // default = the stable release's gun handling). The rows under it
-    // (manual reloads, grenade pin, gun's own right hand, support hand pose and
+    // (manual reloads, grenade pin, support hand pose and
     // lock, satchel detonator in the hand, snark hand throw, recoil) only act
     // while it is on; read them through PhysicalWeapon().
     extern bool g_PhysicalWeapons;
