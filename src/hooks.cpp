@@ -4185,7 +4185,84 @@ namespace
     // dropped, or placed at the left hand (same orientation to the left
     // controller as it has to the gun); the bolt/slide bone slides back along
     // the gun while the left hand pulls it, or stays back when locked open.
+    // Bones parented to the magazine (the crossbow's bolts in it) go where it
+    // goes: they were left floating under the gun when it was ejected (user).
+    int FindMagChildBones(unsigned char* hdr, int mag, int* out, int maxOut)
+    {
+        int n = 0, length = 0, numbones = 0, boneindex = 0;
+        BMVR_TRY
+        {
+            length = *reinterpret_cast<int*>(hdr + kStudioHdrLength);
+            numbones = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
+            boneindex = *reinterpret_cast<int*>(hdr + kStudioHdrBoneIndex);
+            if (numbones <= 0 || numbones > kMaxStudioBones || boneindex < 0
+                || boneindex + numbones * kStudioBoneSize > length)
+                return 0;
+            for (int i = 0; i < numbones && n < maxOut; ++i)
+            {
+                int p = i, guard = 0;
+                while (p >= 0 && p != mag && guard++ < 64)
+                    p = *reinterpret_cast<int*>(hdr + boneindex + p * kStudioBoneSize + 4);
+                if (p == mag && i != mag)
+                    out[n++] = i;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+        return n;
+    }
+
+    void ApplyMagReloadBonesInner(VR* vr, unsigned char* hdr, float* bones, int nBones,
+        const Vector& gunOrigin, const QAngle& gunAng, float vmScale);
+
     void ApplyMagReloadBones(VR* vr, unsigned char* hdr, float* bones, int nBones,
+        const Vector& gunOrigin, const QAngle& gunAng, float vmScale)
+    {
+        const int weapon = MagReload::g_Weapon.load(std::memory_order_relaxed);
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_w = -1, s_mag = -1, s_kids[16]{}, s_kidCount = 0;
+        if (weapon != MagReload::kWeaponNone && hdr && (s_hdr != hdr || s_w != weapon))
+        {
+            s_hdr = hdr;
+            s_w = weapon;
+            s_mag = FindStudioBoneIndex(hdr, MagReload::Def(weapon).magBone);
+            s_kidCount = s_mag >= 0 ? FindMagChildBones(hdr, s_mag, s_kids, 16) : 0;
+            Game::logMsg("Mag reload: %s magazine carries %d child bones", MagReload::Def(weapon).name, s_kidCount);
+        }
+        const bool track = weapon != MagReload::kWeaponNone && s_kidCount > 0 && s_mag >= 0 && s_mag < nBones && bones;
+        float before[3][4]{};
+        if (track)
+            std::memcpy(before, bones + s_mag * 12, sizeof(before));
+        ApplyMagReloadBonesInner(vr, hdr, bones, nBones, gunOrigin, gunAng, vmScale);
+        if (!track)
+            return;
+        float* m = bones + s_mag * 12;
+        if (std::memcmp(before, m, sizeof(before)) == 0)
+            return;
+        float inv[3][4], delta[3][4];
+        const bool ok = InvertMatrix3x4General(before, inv);
+        MulMatrix3x4(reinterpret_cast<const float(*)[4]>(m), inv, delta);
+        const bool hidden = m[0] == 0.f && m[1] == 0.f && m[2] == 0.f;
+        for (int k = 0; k < s_kidCount; ++k)
+        {
+            if (s_kids[k] >= nBones)
+                continue;
+            float* c = bones + s_kids[k] * 12;
+            if (hidden || !ok)
+            {
+                for (int r = 0; r < 3; ++r)
+                    c[r * 4 + 0] = c[r * 4 + 1] = c[r * 4 + 2] = 0.f;
+                continue;
+            }
+            float out[3][4];
+            MulMatrix3x4(delta, reinterpret_cast<const float(*)[4]>(c), out);
+            std::memcpy(c, out, sizeof(out));
+        }
+    }
+
+    void ApplyMagReloadBonesInner(VR* vr, unsigned char* hdr, float* bones, int nBones,
         const Vector& gunOrigin, const QAngle& gunAng, float vmScale)
     {
         const int weapon = MagReload::g_Weapon.load(std::memory_order_relaxed);
@@ -4238,6 +4315,7 @@ namespace
         static const float kMagBelowCentre[MagReload::kWeaponCount] = { 0.f, 5.26f, 3.93f, 0.f, 6.21f, 0.f };
         const float fistHalf = 0.04f * (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f);
         const float lift = (std::max)(0.f, kMagBelowCentre[weapon] * vmScale - fistHalf);
+        const Vector fistCentre = magAnchor;
         magAnchor = magAnchor + hf * bmvr::g_VrMagHandForward + hu * (bmvr::g_VrMagHandUp + lift);
         auto local = [](const float* mm, const float* p) {
             return Vector(mm[0] * p[0] + mm[1] * p[1] + mm[2] * p[2] + mm[3],
@@ -4250,7 +4328,17 @@ namespace
         {
             float* b = bones + s_bolt * 12;
             const Vector boltPos = local(b, def.boltCenter);
-            const bool atBolt = handOk && (anchor - boltPos).Length() < bmvr::g_VrBoltGrabRadius * vmScale;
+            // Lenient (user: the MP5 handle and glock slide were hard to
+            // catch): the fist centre or the old controller spot, against a
+            // short segment along the gun (the glock slide is long), 1.5x
+            // the grab radius.
+            auto segDist = [&](const Vector& p) {
+                const float half = 3.f * vmScale;
+                const float t = std::clamp((p - boltPos).Dot(f), -half, half);
+                return (p - (boltPos + f * t)).Length();
+            };
+            const float boltDist = (std::min)(segDist(anchor), segDist(fistCentre));
+            const bool atBolt = handOk && boltDist < 1.5f * bmvr::g_VrBoltGrabRadius * vmScale;
             MagReload::g_NearBolt.store(atBolt);
             static thread_local DWORD s_boltLogMs = 0;
             if (handOk && MagReload::g_NeedRack.load() && GetTickCount() - s_boltLogMs > 1000)

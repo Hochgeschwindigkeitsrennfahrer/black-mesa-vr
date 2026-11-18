@@ -204,6 +204,7 @@ namespace
             { "Black Mesa hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
             { "Manual magazines (MP5, glock)", RowKind::Toggle, "VrMagReload", &bmvr::g_VrMagReload, nullptr, 0, 0, 0, nullptr },
             { "Grenade pin by hand (with manual magazines)", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
+            { "Reload hints (pump / charging handle)", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
             { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
             { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
             { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
@@ -2485,8 +2486,19 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
+void VR::ShowReloadHint(int id, const char* text)
+{
+    static int s_shown[8]{};
+    if (!bmvr::g_VrReloadHints || id < 0 || id >= 8 || s_shown[id] >= 2)
+        return;
+    ++s_shown[id];
+    ShowToast(text, 1800);
+    m_ToastSmall = true;
+}
+
 void VR::ShowToast(const char* text, DWORD ms, const char* detail)
 {
+    m_ToastSmall = false;
     strncpy_s(m_ToastText, text ? text : "", _TRUNCATE);
     strncpy_s(m_ToastDetail, detail ? detail : "", _TRUNCATE);
     m_ToastUntilMs = GetTickCount() + ms;
@@ -2560,7 +2572,7 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     const Vector head = GetViewOrigin(body);
     const Vector po = head + fwd * 30.f - up * 5.f;
-    const float hw = detail ? 10.f : 6.f, hh = hw * static_cast<float>(texH) / 512.f;  // warnings: larger, readable
+    const float hw = m_ToastSmall ? 3.5f : detail ? 10.f : 6.f, hh = hw * static_cast<float>(texH) / 512.f;  // warnings: larger, readable
     const Vector corners[4] = { po - right * hw + up * hh, po + right * hw + up * hh, po - right * hw - up * hh, po + right * hw - up * hh };
     const int left = static_cast<int>(m_ToastUntilMs - GetTickCount());
     const int alpha = (std::min)(255, (std::max)(0, left * 255 / 400));

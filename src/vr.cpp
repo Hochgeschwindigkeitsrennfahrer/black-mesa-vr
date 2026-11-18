@@ -21230,7 +21230,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 // Back stroke: the spent hull flies out of the port.
                 g_EjectTick.store(now ? now : 1);
             }
-            if (s_boltFull && pull <= 0.15f)
+            // Forward stroke counts from halfway (user: a pump that did not
+            // come all the way forward was still "needs pump"); the pump
+            // then snaps forward.
+            if (s_boltFull && pull <= 0.5f)
             {
                 s_boltFull = false;
                 // An empty tube chambers nothing: still needs a pump once
@@ -21256,7 +21259,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             {
                 sound(def.emptyClick);
                 if (w.shells > 0 && w.needPump)
-                    ShowToast("PUMP IT", 2000, "back and forward with the left hand");
+                    ShowReloadHint(2, "PUMP IT");
             }
             buttons &= ~(IN_ATTACK | IN_ATTACK2);
         }
@@ -21386,6 +21389,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
         w.mag = kEmpty;
         g_DropFrom.store(0);
         g_DropTick.store(now ? now : 1);
+        // The game's own (hidden) reload starts now and runs while the hands
+        // swap (the trigger is blocked meanwhile). Started at the seat, a
+        // shot right after cancelled it and the old count stayed (user).
+        if (clip >= 0 && clip < def.maxClip && reserve != 0)
+        {
+            s_pulseReload = true;
+            s_pulseUntil = now + 200;
+        }
         sound("weapons/ar2/ar2_reload_rotate.wav");
         PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.5f);
         Game::logMsg("Mag reload: %s ejected (clip %d, chambered %d)", def.name, clip, w.chambered ? 1 : 0);
@@ -21434,6 +21445,16 @@ void VR::UpdateMagReload(uint32_t& buttons)
         }
     }
 
+    // Light buzz while the hand is over a bolt/slide that needs working.
+    if (!boltGrab && !w.chambered && w.mag != kInHand && g_NearBolt.load())
+    {
+        static DWORD s_hoverMs = 0;
+        if (now - s_hoverMs > 150)
+        {
+            s_hoverMs = now;
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 400, 0.25f);
+        }
+    }
     if (boltGrab)
     {
         const float pull = g_BoltPull.load();
@@ -21465,8 +21486,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
             sound(def.emptyClick);
             // Loaded but nothing chambered: the step people miss.
             if (w.mag == kLoaded && !w.chambered && clip > 0)
-                ShowToast(weapon == kWeaponGlock ? "RACK THE SLIDE" : "PULL THE CHARGING HANDLE", 2000,
-                    "left grip on it, pull back");
+                ShowReloadHint(weapon == kWeaponGlock ? 1 : 0,
+                    weapon == kWeaponGlock ? "RACK THE SLIDE" : "PULL THE CHARGING HANDLE");
         }
         buttons &= ~IN_ATTACK;
     }

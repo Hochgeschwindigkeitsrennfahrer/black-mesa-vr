@@ -742,6 +742,9 @@ namespace bmvr
     // Frag grenade: pull the pin with the left hand before it can be thrown
     // (only with VrMagReload on). On by default.
     extern bool g_VrGrenadePin;
+    // Small "PUMP IT" / "PULL THE CHARGING HANDLE" toasts on a dead trigger
+    // (twice each per game start). On by default.
+    extern bool g_VrReloadHints;
     // VR recoil: each shot kicks the gun + aim up (per-weapon amount, back in
     // ~0.15 s); both hands on the gun cut it to 30 % (pistol grip 50 %).
     // Off by default (user A/B). Strength scales every weapon's kick.

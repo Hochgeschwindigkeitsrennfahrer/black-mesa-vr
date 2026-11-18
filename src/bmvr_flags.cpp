@@ -325,6 +325,7 @@ namespace bmvr
     bool g_VrGunRightHand = false;
     bool g_VrMagReload = false;
     bool g_VrGrenadePin = true;
+    bool g_VrReloadHints = true;
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = true;
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f;
@@ -1145,6 +1146,8 @@ namespace bmvr
                 g_VrMagReload = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGrenadePin") == 0)
                 g_VrGrenadePin = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrReloadHints") == 0)
+                g_VrReloadHints = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGunRightHand") == 0)
                 g_VrGunRightHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesa") == 0)

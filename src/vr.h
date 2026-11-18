@@ -1390,6 +1390,10 @@ public:
     void CloseSettingsPanel(const char* why);
     // Short head-locked message (quick save); detail = optional smaller second line.
     void ShowToast(const char* text, DWORD ms = kToastMs, const char* detail = nullptr);
+    // Manual-reload hint (small toast), each id at most twice per game start;
+    // VrReloadHints off = never.
+    void ShowReloadHint(int id, const char* text);
+    bool m_ToastSmall = false;
     bool ToastVisible() const;
     void DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
