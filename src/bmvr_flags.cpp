@@ -150,6 +150,7 @@ namespace bmvr
     bool g_VrHandThrow = true;
     float g_MountedGunGain = 1.75f;
     float g_ThrowScale = 5.5f;
+    float g_SnarkThrowScale = 0.5f;
     bool g_VrSkipMotionBlur = true;
     bool g_VrSkipScreenEffects = true;
     float g_EnvmapScaleWorld = 0.4f;

@@ -3946,7 +3946,7 @@ namespace
         // width beside the top grip, floating off the gun (headless dump
         // 2026-11-18); without it the gluon has no right hand, as the Hivehand.
         static const char* kGuns[] = { "v_glock", "v_357", "v_mp5", "v_shotgun", "v_crossbow", "v_rpg",
-            "v_gauss", "v_tau", "v_crowbar", "v_grenade" };
+            "v_gauss", "v_tau", "v_crowbar", "v_grenade", "v_squeak" };
         char buf[128]{};
         strncpy_s(buf, modelName, _TRUNCATE);
         for (char* c = buf; *c; ++c)
@@ -4108,7 +4108,7 @@ namespace
                 Q[i][j] = want[i][0] * world[j][0] + want[i][1] * world[j][1] + want[i][2] * world[j][2];
         static int s_log;
         if (s_log++ < 3)
-            Game::logMsg("Grenade wrist aligned to the gun hands (Q diag %.2f %.2f %.2f)", Q[0][0], Q[1][1], Q[2][2]);
+            Game::logMsg("Grenade/snark wrist aligned to the gun hands (Q diag %.2f %.2f %.2f)", Q[0][0], Q[1][1], Q[2][2]);
         BMVR_TRY
         {
             for (int b = 0; b < nBones; ++b)
@@ -10401,7 +10401,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                             bmvr::g_ViewmodelScale / scale);
                     if (std::strstr(modelName, "v_glock") || std::strstr(modelName, "v_357") || std::strstr(modelName, "v_mp5"))
                         NoteGunWristReference(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, modelName);
-                    else if (std::strstr(modelName, "v_grenade"))
+                    else if (std::strstr(modelName, "v_grenade") || std::strstr(modelName, "v_squeak"))
                         AlignWristToReference(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                     if (std::strstr(modelName, "v_satchel") && m_VR->SatchelHandsActive())
                         SatchelPinHand(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot,
@@ -14753,7 +14753,9 @@ void __fastcall Hooks::dSnarkThrow(void* weapon, void* edx, void* owner, float f
     g_VrSnarkThrow = false;
     void* snark = g_VrSnarkEntity;
     g_VrSnarkEntity = nullptr;
-    const Vector vel = hand + playerVel;
+    // Same hand speed as the frag felt far too strong on a snark (user
+    // 2026-11-18: "almost into orbit"; its own movement carries it further).
+    const Vector vel = hand * bmvr::g_SnarkThrowScale + playerVel;
     static tSetAbsVelocity s_setVel = nullptr;
     static bool s_checked = false;
     if (!s_checked)
@@ -14775,7 +14777,8 @@ void __fastcall Hooks::dSnarkThrow(void* weapon, void* edx, void* owner, float f
         BMVR_TRY { s_setVel(snark, &vel); }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
-    Game::logMsg("Snark throw: hand %.0f u/s -> (%.0f,%.0f,%.0f), snark %s", hand.Length(), vel.x, vel.y, vel.z,
+    Game::logMsg("Snark throw: hand %.0f u/s x %.2f -> (%.0f,%.0f,%.0f) (game fspeed %.0f uspeed %.0f), snark %s",
+        hand.Length(), bmvr::g_SnarkThrowScale, vel.x, vel.y, vel.z, fspeed, uspeed,
         snark ? "placed at the hand" : "not seen (game point and speed)");
 }
 

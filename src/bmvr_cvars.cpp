@@ -160,6 +160,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrHandLightRaw, nullptr },
             { "bmvr_satchel_hands", "VR: satchel: bag in the left hand (left trigger throws from it), detonator in the right (right trigger detonates), left grip = Use",
               Kind::Bool, 0.f, 1.f, &g_VrSatchelHands, nullptr },
+            { "bmvr_snark_throw_scale", "VR: snark hand throw speed relative to a frag throw (0.5 = half)",
+              Kind::Float, 0.1f, 1.5f, nullptr, &g_SnarkThrowScale },
             { "bmvr_grenade_wrist_align", "VR: grenade's own right hand turned to the gun hands' wrist pose (needs a glock/.357/MP5 drawn once)",
               Kind::Bool, 0.f, 1.f, &g_VrGrenadeWristAlign, nullptr },
             { "bmvr_satchel_fist_fwd", "VR: satchel hands: fist centre ahead of the controller (cm)", Kind::Float, -25.f, 25.f, nullptr, &g_VrSatchelFist[0] },
