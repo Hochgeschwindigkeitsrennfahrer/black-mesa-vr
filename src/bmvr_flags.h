@@ -833,6 +833,9 @@ namespace bmvr
     extern bool g_VrShellFlip; // test: the other shell end in the fingers
     extern bool g_Vr357Flick;     // .357 cylinder closes on a wrist flick (or the reload button)
     extern float g_Vr357FlickSpeed; // deg/s
+    extern bool g_Vr357Tilt;        // .357 empties stay in the open cylinder until the muzzle is tilted up
+    extern float g_Vr357TiltPitch;  // muzzle-up degrees that dump them
+    extern bool g_Vr357FireBeamHide; // laser beam off during the .357 fire clip (big kick)
     extern float g_VrBoltGrabRadius; // game units (before the viewmodel scale)
     // True for this process when launched with -game bshift (or a bs_* map).
     // Calhoun never wears the HEV suit — use bare-hand GLBs the whole session.

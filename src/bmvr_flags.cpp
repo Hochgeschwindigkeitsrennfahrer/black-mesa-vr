@@ -364,6 +364,9 @@ namespace bmvr
     bool g_VrShellFlip = false;
     bool g_Vr357Flick = true;
     float g_Vr357FlickSpeed = 400.f;
+    bool g_Vr357Tilt = true;
+    float g_Vr357TiltPitch = 30.f;
+    bool g_Vr357FireBeamHide = true;
     float g_VrBoltGrabRadius = 7.f;
     float g_VrHandsBlackMesaScale = 0.8f;
     bool g_IsBlueShift = false;

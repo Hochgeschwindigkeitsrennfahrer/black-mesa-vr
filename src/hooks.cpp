@@ -3374,7 +3374,7 @@ namespace
         // Classify once per sequence change instead of three lowercase passes
         // + ~30 strstr on every CalcViewModelView. The label is a copy, so the
         // header + sequence index identify it.
-        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; bool lowered; bool delta; bool scope; };
+        struct LabelClass { unsigned char* hdr; int seq; char text[16]; bool action; bool loco; bool equip; bool beamHide; bool lowered; bool delta; bool scope; bool fireKick; };
         static LabelClass s_lc{ nullptr, -1 };
         if (!label || hdr != s_lc.hdr || seq != s_lc.seq
             || std::strncmp(s_lc.text, label, sizeof(s_lc.text) - 1) != 0)
@@ -3396,6 +3396,7 @@ namespace
             s_lc.beamHide = false;
             s_lc.lowered = false;
             s_lc.scope = false;
+            s_lc.fireKick = false;
             if (label)
             {
                 char lb[96]{};
@@ -3404,6 +3405,10 @@ namespace
                 if (s_lc.action || std::strstr(lb, "shell"))
                     s_lc.beamHide = !(std::strstr(lb, "fire") || std::strstr(lb, "shoot") || std::strstr(lb, "attack")
                         || std::strstr(lb, "pump"));
+                // .357 fire clip kicks the barrel far up (user 2026-11-18):
+                // beam off for the first half of it (bmvr_357_fire_beam_hide).
+                s_lc.fireKick = s_lc.action && !s_lc.beamHide
+                    && StudioHdrMatchesModel(hdr, "models/weapons/v_357.mdl");
                 // Weapon held down while aiming at a friendly: idletolow, lowidle,
                 // lowtoidle. Tested as names since their activities differ per model.
                 if (std::strstr(lb, "idletolow") || std::strstr(lb, "lowidle") || std::strstr(lb, "lowtoidle"))
@@ -3439,7 +3444,16 @@ namespace
                 s_loweredUntil = now + 300;
             else if (noLower)
                 s_loweredUntil = 0;
-            const bool beamHide = noLower ? false : s_lc.beamHide;
+            bool kick = false;
+            if (s_lc.fireKick && bmvr::g_Vr357FireBeamHide)
+            {
+                BMVR_TRY
+                {
+                    kick = *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelCycle) < 0.5f;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {}
+            }
+            const bool beamHide = noLower ? false : (s_lc.beamHide || kick);
             Hooks::m_VR->NoteViewmodelBeamHidden(beamHide || now < s_loweredUntil);
             // Same 300 ms tail for the support glove: idle blends in from the
             // lowered pose, and the glove follows the wrist back up.
@@ -4536,7 +4550,8 @@ namespace
         // with the cylinder open). Only six bullet bones: a loader taken
         // from the hip takes them over (it carries the new rounds).
         const float te = eject ? (now - eject) * 0.001f : 99.f;
-        if (cycle < 0.499f)
+        // eject == 0: the open cylinder still holds them (bmvr_357_tilt).
+        if (cycle < 0.499f || eject == 0)
         {
             for (int i = 0; i < 6; ++i)
                 std::memcpy(all[s_bullet[i]], seated[i], sizeof(seated[i]));

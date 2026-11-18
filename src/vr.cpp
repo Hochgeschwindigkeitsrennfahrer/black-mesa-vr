@@ -21881,6 +21881,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
             w.mag = kEmpty;
             s_phase = 1;
             s_phaseMs = now;
+            // Empties stay in the open cylinder until they fall out (tilt or at once).
+            g_357EjectTick.store(0);
             // The game's reload runs while the hands work (ammo stays the
             // game's); its own clip is not shown.
             s_pulseReload = clip >= 0 && clip < def.maxClip;
@@ -21888,14 +21890,52 @@ void VR::UpdateMagReload(uint32_t& buttons)
             sound("weapons/357/357_reload1.wav");
             Game::logMsg("Mag reload: 357 cylinder open (clip %d, game reload %d)", clip, s_pulseReload ? 1 : 0);
         }
+        // With bmvr_357_tilt (user, 2026-11-18) the empties stay in the open
+        // cylinder until the muzzle points up by bmvr_357_tilt_pitch degrees
+        // (gun tipped back towards the player, raw tracking); the speed
+        // loader cannot be taken from the hip before that. Back from a
+        // weapon switch with the cylinder open, the old tick stays (empties gone).
+        const bool emptiesIn = s_phase == 2 && g_357EjectTick.load() == 0;
         if (s_phase == 1 && scrub(0.02f, 0.5f, 0.7f))
         {
             s_phase = 2;
-            g_357EjectTick.store(now ? now : 1);
+            if (!bmvr::g_Vr357Tilt)
+                g_357EjectTick.store(now ? now : 1);
+            else
+                ShowReloadHint(4, "TILT UP TO DUMP");
         }
         else if (s_phase == 2)
             scrub(0.5f, 0.5f, 1.f);
-        if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip() && gameRounds == 0)
+        if (emptiesIn)
+        {
+            // Muzzle direction = controller -Z; tracking space up = +Y.
+            float pitch = 0.f;
+            if (m_RightControllerTrackingValid)
+                pitch = std::asin(std::clamp(-m_RightControllerTracking.m[1][2], -1.f, 1.f)) * 57.2958f;
+            static float s_peak = -90.f;
+            static DWORD s_peakLogMs = 0;
+            s_peak = (std::max)(s_peak, pitch);
+            if (now - s_peakLogMs > 1000)
+            {
+                s_peakLogMs = now;
+                Game::logMsg("Mag reload: 357 empties in, highest muzzle pitch %.0f deg (need %.0f)",
+                    s_peak, bmvr::g_Vr357TiltPitch);
+                s_peak = -90.f;
+            }
+            if (m_RightControllerTrackingValid && pitch >= bmvr::g_Vr357TiltPitch)
+            {
+                g_357EjectTick.store(now ? now : 1);
+                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.5f);
+                Game::logMsg("Mag reload: 357 tilted %.0f deg, empties out", pitch);
+            }
+        }
+        if (emptiesIn && gripEdge && atLeftHip())
+        {
+            static int s_log;
+            if (s_log++ < 10)
+                Game::logMsg("Mag reload: 357 speed loader not taken, empties still in the cylinder");
+        }
+        else if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip() && gameRounds == 0)
             outOfAmmo("speed loader");
         else if (w.mag == kEmpty && s_phase == 2 && gripEdge && atLeftHip())
         {
