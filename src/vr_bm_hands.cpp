@@ -649,6 +649,37 @@ namespace
             }
         }
         g_Src.ok = true;
+        // Black Mesa: Blue Shift (user, 2026-11-18): the gun's own right hand is
+        // the guard's (v_glock "arms" = guard_newrig_rework, skin hand_diffuse_1),
+        // so the bare VR hands next to it looked like a second person (Black Mesa's
+        // scientist). Take the bare hands from Blue Shift's own files; any failure
+        // keeps the scientist hands.
+        if (bmvr::IsBlueShift())
+        {
+            const auto bsDir = dir.parent_path() / "bshift";
+            Vpk bsModels, bsMaterials;
+            Bytes bsMdl, bsVvd, bsVtx, bsVtf, bsBmp;
+            Model bsModel;
+            std::string bsErr;
+            if (!bsModels.Open(bsDir / "bshift_models_dir.vpk") || !bsMaterials.Open(bsDir / "bshift_materials_dir.vpk"))
+                bsErr = "cannot open Blue Shift VPKs in " + bsDir.string();
+            else if (!bsModels.Get("models/weapons/v_glock.mdl", bsMdl) || !bsModels.Get("models/weapons/v_glock.vvd", bsVvd)
+                || !bsModels.Get("models/weapons/v_glock.dx90.vtx", bsVtx))
+                bsErr = "Blue Shift v_glock model files missing";
+            else if (!ParseModel(bsMdl, bsVvd, bsVtx, "guard_newrig_rework", "hand_diffuse_1", bsModel, bsErr))
+                ;
+            else if (!bsMaterials.Get("materials/models/weapons/v_hand/hand_diffuse_1.vtf", bsVtf))
+                bsErr = "Blue Shift hand_diffuse_1.vtf missing";
+            else if (!VtfToBmp(bsVtf, bsBmp, bsErr))
+                ;
+            else
+            {
+                g_Src.model[1] = std::move(bsModel);
+                g_Src.bmp[1] = std::move(bsBmp);
+            }
+            Game::logMsg("BM hands: Blue Shift guard bare hands %s%s", bsErr.empty() ? "loaded" : "NOT loaded, scientist hands: ",
+                bsErr.c_str());
+        }
         return true;
     }
 
