@@ -663,6 +663,9 @@ namespace
                 fixedLine("Grab", grab);
             if (hand == 0 && bmvr::g_ShoulderGestures)
                 fixedLine("Shoulder", "Quick save");
+            // Manual reloads: the left grip takes ammo at the left hip and works the bolt / slide / pump.
+            if (hand == 0 && bmvr::g_VrMagReload)
+                fixedLine("Left hip", "Magazine, shells, rocket");
             if (hand == 1)
             {
                 std::string zones;
