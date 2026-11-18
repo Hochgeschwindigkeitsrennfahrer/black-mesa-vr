@@ -145,8 +145,7 @@ namespace
             { "Game menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
             { "Menu pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
             { "THIS PANEL", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Hold Triangle/Y for this panel", RowKind::Toggle, "SettingsTriangleHold", &bmvr::g_SettingsTriangleHold, nullptr, 0, 0, 0, nullptr },
-            // The gear only hides while the Triangle hold can open this panel.
+            // The gear only hides while some button opens this panel (VR settings mapped).
             { "VR gear in weapon menu", RowKind::Toggle, "WeaponMenuSettingsGear", &bmvr::g_WeaponMenuSettingsGear, nullptr, 0, 0, 0, nullptr },
             // Glow fades and other effects run on game time: with the game
             // paused a change only shows after the panel closes.
@@ -158,8 +157,8 @@ namespace
             { "Preset", RowKind::BindPreset, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Hold this long for a button's hold action; let go earlier for its press action.
             { "Hold time", RowKind::Number, "ButtonHoldMs", nullptr, &bmvr::g_ButtonHoldMs, 50.f, 200.f, 1500.f, "%.0f ms" },
-            // Off: the fixed layout from before mapping (if a mapping ever blocks a button).
-            { "Button mapping", RowKind::Toggle, "ButtonMapping", &bmvr::g_ButtonMapping, nullptr, 0, 0, 0, nullptr },
+            // ButtonMapping=false in config.txt (no row): the fixed layout from before
+            // mapping, for support if a mapping ever blocks a button.
             // Off (or no SteamVR model found): the button list below.
             { "Controller pictures", RowKind::Toggle, "ControlsPicture", &bmvr::g_ControlsPicture, nullptr, 0, 0, 0, nullptr },
             { "Reset buttons to defaults", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "binds_default" },
@@ -176,11 +175,12 @@ namespace
             { "Stick", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixedL:Move" },
             { "Menu button", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixedL:Pause" },
             { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "STICK UP / DOWN", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Stick distance", RowKind::Number, "StickJumpCrouchThreshold", nullptr, &bmvr::g_StickJumpCrouchThreshold, 0.05f, 0.3f, 0.95f, "%.2f" },
-            { "Stick angle", RowKind::Number, "StickJumpCrouchAngle", nullptr, &bmvr::g_StickJumpCrouchAngle, 5.f, 10.f, 45.f, "%.0f\xB0" },
-            { "Turning blocks up/down", RowKind::Toggle, "TurnBlocksJumpCrouch", &bmvr::g_TurnBlocksJumpCrouch, nullptr, 0, 0, 0, nullptr },
-            { "Stick down: crouch while held", RowKind::Toggle, "CrouchStickHold", &bmvr::g_CrouchStickHold, nullptr, 0, 0, 0, nullptr },
+            // Right stick pushed up / down = the Stick up / Stick down actions below.
+            // Crouch hold vs toggle is the Stick down mapping (was CrouchStickHold).
+            { "RIGHT STICK: JUMP / CROUCH", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "How far to push", RowKind::Number, "StickJumpCrouchThreshold", nullptr, &bmvr::g_StickJumpCrouchThreshold, 0.05f, 0.3f, 0.95f, "%.2f" },
+            { "Max sideways angle", RowKind::Number, "StickJumpCrouchAngle", nullptr, &bmvr::g_StickJumpCrouchAngle, 5.f, 10.f, 45.f, "%.0f\xB0" },
+            { "No jump/crouch while turning", RowKind::Toggle, "TurnBlocksJumpCrouch", &bmvr::g_TurnBlocksJumpCrouch, nullptr, 0, 0, 0, nullptr },
             { "RIGHT CONTROLLER", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, "bind_head_right" },
             { "", RowKind::BindPicture, nullptr, nullptr, nullptr, 0, 0, 0, "R" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.trigger" },
@@ -1066,6 +1066,31 @@ namespace
                 out.top[i] = y[c];
                 y[c] += RowHeight(rows[i]);
             }
+            // The two controller headings start level, whatever sits above
+            // them (user: the left controller sat a row lower than the right).
+            {
+                int head[2] = { -1, -1 };
+                for (int i = first; i < last; ++i)
+                    if (out.tab[i] == t && rows[i].fmt)
+                    {
+                        if (std::strcmp(rows[i].fmt, "bind_head_left") == 0)
+                            head[out.col[i]] = i;
+                        else if (std::strcmp(rows[i].fmt, "bind_head_right") == 0)
+                            head[out.col[i]] = i;
+                    }
+                if (head[0] >= 0 && head[1] >= 0)
+                {
+                    const int lowCol = out.top[head[0]] < out.top[head[1]] ? 0 : 1;
+                    const int delta = std::abs(out.top[head[0]] - out.top[head[1]]);
+                    if (delta > 0)
+                    {
+                        for (int i = head[lowCol]; i < last; ++i)
+                            if (out.tab[i] == t && out.col[i] == lowCol)
+                                out.top[i] += delta;
+                        y[lowCol] += delta;
+                    }
+                }
+            }
             const int tabBottom = (std::max)({ kContentTop, y[0], y[1] });
             out.tabContent.push_back(tabBottom);
             contentBottom = (std::max)(contentBottom, tabBottom);
@@ -1736,6 +1761,12 @@ namespace
         float x, y, z, rhw;
         D3DCOLOR color;
     };
+}
+
+bool bmvr::WriteVrConfigValues(const std::vector<std::pair<std::string, std::string>>& kv,
+    const std::vector<std::string>& drop)
+{
+    return WriteConfigValues(kv, drop);
 }
 
 std::string bmvr::CaptureSettingsScenario(Game* game)

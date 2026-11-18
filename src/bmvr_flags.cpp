@@ -596,6 +596,10 @@ namespace bmvr
         return raw;
     }
 
+    // FlashlightOnSquare / SettingsTriangleHold / CrouchStickHold were in
+    // config.txt (turned into Bind.* mappings once, see InitFromDisk).
+    static bool g_LegacyBindKeysSeen = false;
+
     static void ReadUserConfig(const std::wstring& path)
     {
         std::string text = ReadConfigFileText(path);
@@ -788,7 +792,10 @@ namespace bmvr
             else if (std::strcmp(n, "VrShotOriginFix") == 0)
                 g_VrShotOriginFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "CrouchStickHold") == 0)
+            {
                 g_CrouchStickHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_LegacyBindKeysSeen = true;
+            }
             else if (std::strcmp(n, "StickJumpCrouchThreshold") == 0)
             {
                 const float t = static_cast<float>(atof(val));
@@ -822,7 +829,10 @@ namespace bmvr
                         = static_cast<float>(w);
             }
             else if (std::strcmp(n, "SettingsTriangleHold") == 0)
+            {
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_LegacyBindKeysSeen = true;
+            }
             else if (std::strcmp(n, "WeaponMenuSettingsGear") == 0)
                 g_WeaponMenuSettingsGear = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "WeaponMenuTilt") == 0)
@@ -836,7 +846,10 @@ namespace bmvr
             else if (std::strcmp(n, "FlashlightLeftHand") == 0)
                 g_FlashlightLeftHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "FlashlightOnSquare") == 0)
+            {
                 g_FlashlightOnSquare = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_LegacyBindKeysSeen = true;
+            }
             else if (std::strcmp(n, "FrameCap") == 0)
                 g_FrameCapMode = static_cast<float>(atof(val));
             else if (std::strcmp(n, "VrHandThrow") == 0)
@@ -2012,6 +2025,18 @@ namespace bmvr
         DetectCampaignSession();
         CapturePanelDefaults();   // before config.txt: the panel saves only values that differ
         ReadUserConfig(ExeDir() + L"\\VR\\config.txt");
+        // Old switches that picked button defaults become mappings, once
+        // (user, 2026-11-18: one place to change a button). Kept while the
+        // fixed layout is in use (ButtonMapping=false), which still reads them.
+        if (g_LegacyBindKeysSeen && g_ButtonMapping)
+        {
+            std::vector<std::pair<std::string, std::string>> set;
+            MigrateLegacyBindSettings(g_FlashlightOnSquare, g_SettingsTriangleHold, g_CrouchStickHold, set);
+            const std::vector<std::string> drop = { "FlashlightOnSquare", "SettingsTriangleHold", "CrouchStickHold" };
+            const bool ok = WriteVrConfigValues(set, drop);
+            Log("Button map: old button switches migrated (%zu mapping%s), removed from config.txt: %s",
+                set.size(), set.size() == 1 ? "" : "s", ok ? "ok" : "FAILED");
+        }
         g_FoveatedAtStart = g_Foveated > 0.f;
         ClearSkipsOnBuildChange();
         ReadSkipFile(SkipPath());

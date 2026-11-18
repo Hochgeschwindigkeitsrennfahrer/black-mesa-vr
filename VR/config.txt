@@ -144,12 +144,14 @@ ScopeEye=right
 # HipGestures: right hand at the right hip + grip = pistol, right hand a bit
 # above the left hip (cross draw) + grip = MP5. Same panel section.
 
-# Hold Triangle/Y 0.6 s = VR settings panel; a tap pauses on release.
-# false = Triangle/Y pauses on press; open the panel from the weapon menu's gear.
+# Buttons are set in the VR settings panel (CONTROLS) and saved here as
+# Bind.<controller>.<hand>.<button>[.hold]=<action>. The old switches
+# FlashlightOnSquare, SettingsTriangleHold and CrouchStickHold are turned
+# into such lines once on start and then removed.
 
 # Weapon menu: VR gear slot below the crowbar (opens the VR settings panel).
-# false hides it, but only while SettingsTriangleHold=true (else the panel
-# could not be opened at all).
+# false hides it, but only while some button is mapped to VR settings (else
+# the panel could not be opened at all).
 # Weapon menu opened low (hand by the hip) tilts back to face the eye
 # (max 60 degrees); false = always upright.
 # The VR settings panel pauses the game while it is open (VrSettingsPause; in the panel:

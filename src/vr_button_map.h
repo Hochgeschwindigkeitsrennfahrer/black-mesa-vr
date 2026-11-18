@@ -78,9 +78,19 @@ namespace bmvr
     // Returns false for an unknown key or action (logged).
     bool SetBindFromConfig(const char* key, const char* value);
 
-    // Built-in default for a slot (depends on FlashlightOnSquare,
-    // SettingsTriangleHold, CrouchStickHold).
+    // Built-in default for a slot (fixed; see MigrateLegacyBindSettings).
     BindSlot DefaultBind(uint32_t family, int hand, BindInput input);
+    // Startup, after config.txt: the old FlashlightOnSquare / SettingsTriangleHold /
+    // CrouchStickHold switches (non-default values) become Bind.* mappings where
+    // the player has none. `set` gets the config lines to write.
+    void MigrateLegacyBindSettings(bool flashlightOnSquare, bool triangleHold, bool crouchStickHold,
+        std::vector<std::pair<std::string, std::string>>& set);
+    // Some button (press or hold) opens the VR settings panel.
+    bool VrSettingsMapped(uint32_t family);
+    // VR/config.txt: set these keys and remove the `drop` keys, every other
+    // line kept (the VR panel's writer, vr_settings_panel.cpp).
+    bool WriteVrConfigValues(const std::vector<std::pair<std::string, std::string>>& kv,
+        const std::vector<std::string>& drop);
     // Default unless VR/config.txt (or the panel) changed it.
     BindSlot EffectiveBind(uint32_t family, int hand, BindInput input);
     // Panel: change one half of a slot; returns the config key ("Bind.touch.right.face1")

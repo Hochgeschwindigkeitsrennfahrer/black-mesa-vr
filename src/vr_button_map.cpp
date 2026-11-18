@@ -169,7 +169,11 @@ namespace bmvr
         family = StorageFamily(family);
         const bool knuckles = family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES;
         const bool faces = family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH || knuckles;
-        const BindAction pauseHold = g_SettingsTriangleHold ? BindAction::VrSettings : BindAction::Nothing;
+        // Fixed since 2026-11-18. The old switches that changed these defaults
+        // (FlashlightOnSquare, SettingsTriangleHold, CrouchStickHold) are
+        // turned into mappings once (MigrateLegacyBindSettings) and only
+        // still drive the fixed layout (ButtonMapping=false).
+        const BindAction pauseHold = BindAction::VrSettings;
         BindSlot s;
         if (hand == 0)
         {
@@ -179,7 +183,7 @@ namespace bmvr
             case BindInput::Grip: break; // two-hand hold / quick-save gesture read the grip itself
             case BindInput::Face1:
                 if (faces && !knuckles)
-                    s.press = g_FlashlightOnSquare ? BindAction::Flashlight : BindAction::PrevWeapon;
+                    s.press = BindAction::PrevWeapon;
                 break;
             case BindInput::Face2:
                 if (faces)
@@ -203,7 +207,7 @@ namespace bmvr
             case BindInput::StickClick: s.press = BindAction::WeaponMenu; break;
             case BindInput::StickUp: s.press = BindAction::Jump; break;
             case BindInput::StickDown:
-                s.press = g_CrouchStickHold ? BindAction::CrouchHold : BindAction::CrouchToggle;
+                s.press = BindAction::CrouchHold;
                 break;
             default: break;
             }
@@ -284,6 +288,57 @@ namespace bmvr
             g_BindOverrides[key] = a;
             configValue = BindActionToken(a);
         }
+    }
+
+    void MigrateLegacyBindSettings(bool flashlightOnSquare, bool triangleHold, bool crouchStickHold,
+        std::vector<std::pair<std::string, std::string>>& set)
+    {
+        // Each old switch at its non-default value becomes the mapping it
+        // used to stand for, on every controller family where that button
+        // has that default, unless the player already mapped the slot.
+        struct Want { int hand; BindInput input; bool hold; BindAction a; const char* why; };
+        std::vector<Want> wants;
+        if (flashlightOnSquare)
+            wants.push_back({ 0, BindInput::Face1, false, BindAction::Flashlight, "FlashlightOnSquare" });
+        if (!triangleHold)
+            wants.push_back({ 0, BindInput::Face2, true, BindAction::Nothing, "SettingsTriangleHold" });
+        if (!crouchStickHold)
+            wants.push_back({ 1, BindInput::StickDown, false, BindAction::CrouchToggle, "CrouchStickHold" });
+        std::lock_guard<std::mutex> lock(g_BindMutex);
+        for (uint32_t f : { L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH, L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2,
+                 L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES, L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE })
+        {
+            for (const Want& w : wants)
+            {
+                const BindSlot def = DefaultBind(f, w.hand, w.input);
+                const BindAction defA = w.hold ? def.hold : def.press;
+                // Only where the old switch changed something (e.g. Square is
+                // Previous weapon only on Touch-style controllers).
+                const bool applies = w.input == BindInput::Face1 ? defA == BindAction::PrevWeapon
+                    : w.input == BindInput::Face2 ? defA == BindAction::VrSettings
+                    : defA == BindAction::CrouchHold;
+                if (!applies || defA == w.a)
+                    continue;
+                const std::string key = SlotKey(f, w.hand, w.input, w.hold);
+                if (g_BindOverrides.count(key))
+                    continue;   // the player's own mapping wins
+                g_BindOverrides[key] = w.a;
+                set.emplace_back("Bind." + key, BindActionToken(w.a));
+                Game::logMsg("Button map: %s migrated to Bind.%s=%s", w.why, key.c_str(), BindActionToken(w.a));
+            }
+        }
+    }
+
+    bool VrSettingsMapped(uint32_t family)
+    {
+        for (int hand = 0; hand < kBindHands; ++hand)
+            for (int in = 0; in < kBindInputCount; ++in)
+            {
+                const BindSlot s = EffectiveBind(family, hand, static_cast<BindInput>(in));
+                if (s.press == BindAction::VrSettings || s.hold == BindAction::VrSettings)
+                    return true;
+            }
+        return false;
     }
 
     void ResetBinds(uint32_t family)
@@ -533,7 +588,7 @@ namespace bmvr
                     if (hand == 0)
                     {
                         slot.press = BindAction::Pause;
-                        slot.hold = g_SettingsTriangleHold ? BindAction::VrSettings : BindAction::Nothing;
+                        slot.hold = BindAction::VrSettings;
                     }
                 }
                 else

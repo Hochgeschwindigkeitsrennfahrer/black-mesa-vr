@@ -2023,8 +2023,11 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
         };
         packInto(kWeaponHex, static_cast<int>(sizeof(kWeaponHex) / sizeof(kWeaponHex[0])));
         // VR settings: one cell below the crowbar, outside the weapon brick.
-        // Hidden only when the Triangle/Y hold can still open the panel.
-        const bool showGear = bmvr::g_WeaponMenuSettingsGear || !bmvr::g_SettingsTriangleHold;
+        // Hidden only while some button still opens the panel (with mapping:
+        // VR settings mapped anywhere; fixed layout: the Triangle/Y hold).
+        const bool panelButton = m_ButtonMapActive ? bmvr::VrSettingsMapped(m_ControllerFamily)
+                                                   : bmvr::g_SettingsTriangleHold;
+        const bool showGear = bmvr::g_WeaponMenuSettingsGear || !panelButton;
         if (showGear && placed < kMaxMenuSlots && take(0, -2))
         {
             WeaponMenuSlot& gear = m_WeaponMenuSlots[placed];
