@@ -756,6 +756,8 @@ namespace bmvr
     // weapon, on top of the built-in table; live, saved per weapon in
     // VR/viewmodel_offsets.txt (ax ay az), not in config.txt.
     extern float g_VmTunePitch, g_VmTuneYaw, g_VmTuneRoll;
+    // Same rows: support (left) hand point along the held gun, cm (+ = forward).
+    extern float g_VmTuneSupportCm;
     // Physical ladders: the view follows the climb hand every frame instead
     // of LadderMove's per-tick bursts (render offset only). On by default.
     extern bool g_PhysicalLadderSmooth;

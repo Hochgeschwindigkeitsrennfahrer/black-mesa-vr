@@ -380,7 +380,8 @@ namespace
             { "LOADING card", RowKind::Toggle, nullptr, &bmvr::g_LoadingCard, nullptr, 0, 0, 0, nullptr },
             // Live per-weapon angle trim for the weapon in the hand (saved in
             // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows).
-            { "HELD WEAPON ANGLE (SAVED PER WEAPON)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "HELD WEAPON TUNING (SAVED PER WEAPON)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Support hand (+ forward)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSupportCm, 1.f, -20.f, 20.f, "%+.0f cm" },
             { "Pitch", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTunePitch, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Roll", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneRoll, 2.5f, -90.f, 90.f, "%.1f deg" },

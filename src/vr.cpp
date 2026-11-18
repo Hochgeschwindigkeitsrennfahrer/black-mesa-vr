@@ -14881,11 +14881,17 @@ float VR::LeftSupportGripValue() const
     return 0.f;
 }
 
+namespace vm_numpad { float SupportForwardCm(const std::string& key); }
+
 bool VR::ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const
 {
+    // Per-weapon support-hand trim along the gun (VR panel DEBUG row,
+    // VR/viewmodel_offsets.txt); moves the grab zone and the glove with it.
+    const float scaleU = m_VRScale > 1.f ? m_VRScale : 39.37f;
+    const float trim = vm_numpad::SupportForwardCm(m_VmClass.numpadKey) * 0.01f * scaleU;
     if (m_OffhandGripBoneValid && m_VmClass.offhandUseBone)
     {
-        gx = m_OffhandGripGx;
+        gx = m_OffhandGripGx + trim;
         gy = m_OffhandGripGy;
         gz = m_OffhandGripGz;
         return true;
@@ -14903,7 +14909,7 @@ bool VR::ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const
         if (vis > 1.5f)
             vis = 1.5f;
     }
-    gx = m_VmClass.offhandMetersX * scale * vis;
+    gx = m_VmClass.offhandMetersX * scale * vis + trim;
     gy = m_VmClass.offhandMetersY * scale * vis;
     gz = m_VmClass.offhandMetersZ * scale * vis;
     if (m_VmClass.offhandPistol)
@@ -15035,6 +15041,7 @@ namespace vm_numpad
         float ax = 0.f;
         float ay = 0.f;
         float az = 0.f;
+        float sf = 0.f;   // support (left) hand point along the gun, cm (+ = forward)
     };
 
     std::map<std::string, Offsets> g_Off;
@@ -15073,9 +15080,9 @@ namespace vm_numpad
                 continue;
             char key[32]{};
             Offsets o{};
-            const int nread = sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f",
+            const int nread = sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f",
                 key, static_cast<unsigned>(sizeof(key)),
-                &o.ox, &o.oy, &o.oz, &o.ax, &o.ay, &o.az);
+                &o.ox, &o.oy, &o.oz, &o.ax, &o.ay, &o.az, &o.sf);
             if (nread >= 4)
             {
                 g_Off[key] = o;
@@ -15099,12 +15106,13 @@ namespace vm_numpad
         }
         out << "# Numpad (gameplay): 4/6 Y  8/2 Z  7/9 X. Hold Ctrl for angles.\n";
         out << "# Numpad 5 save, 0 reset this weapon, Shift = fine step.\n";
-        out << "# key ox oy oz ax ay az  (added on top of the built-in table)\n";
+        out << "# key ox oy oz ax ay az [support_cm]  (added on top of the built-in table;\n";
+        out << "# support_cm moves the support-hand point along the gun, + = forward)\n";
         for (const auto& kv : g_Off)
         {
             out << kv.first << " "
                 << kv.second.ox << " " << kv.second.oy << " " << kv.second.oz << " "
-                << kv.second.ax << " " << kv.second.ay << " " << kv.second.az << "\n";
+                << kv.second.ax << " " << kv.second.ay << " " << kv.second.az << " " << kv.second.sf << "\n";
         }
         Game::logMsg("Viewmodel numpad saved %d weapons %ls", static_cast<int>(g_Off.size()), path.c_str());
     }
@@ -15123,6 +15131,13 @@ namespace vm_numpad
         ax += it->second.ax;
         ay += it->second.ay;
         az += it->second.az;
+    }
+
+    float SupportForwardCm(const std::string& key)
+    {
+        Load();
+        auto it = key.empty() ? g_Off.end() : g_Off.find(key);
+        return it != g_Off.end() ? it->second.sf : 0.f;
     }
 
     bool KeyHeld(int vk)
@@ -15165,31 +15180,36 @@ void VR::SyncHeldWeaponAngleRows()
         key = m_VmClass.numpadKey;
     }
     static std::string s_key;
-    static float s_p = 0.f, s_y = 0.f, s_r = 0.f;
+    static float s_p = 0.f, s_y = 0.f, s_r = 0.f, s_s = 0.f;
     auto it = key.empty() ? vm_numpad::g_Off.end() : vm_numpad::g_Off.find(key);
-    const float fp = it != vm_numpad::g_Off.end() ? it->second.ax : 0.f;
-    const float fy = it != vm_numpad::g_Off.end() ? it->second.ay : 0.f;
-    const float fr = it != vm_numpad::g_Off.end() ? it->second.az : 0.f;
-    if (key != s_key || fp != s_p || fy != s_y || fr != s_r)
+    const bool have = it != vm_numpad::g_Off.end();
+    const float fp = have ? it->second.ax : 0.f;
+    const float fy = have ? it->second.ay : 0.f;
+    const float fr = have ? it->second.az : 0.f;
+    const float fs = have ? it->second.sf : 0.f;
+    if (key != s_key || fp != s_p || fy != s_y || fr != s_r || fs != s_s)
     {
         // New weapon, or the numpad changed it: the rows show the file.
         s_key = key;
         s_p = bmvr::g_VmTunePitch = fp;
         s_y = bmvr::g_VmTuneYaw = fy;
         s_r = bmvr::g_VmTuneRoll = fr;
+        s_s = bmvr::g_VmTuneSupportCm = fs;
         return;
     }
     if (key.empty())
         return;
-    if (bmvr::g_VmTunePitch != s_p || bmvr::g_VmTuneYaw != s_y || bmvr::g_VmTuneRoll != s_r)
+    if (bmvr::g_VmTunePitch != s_p || bmvr::g_VmTuneYaw != s_y || bmvr::g_VmTuneRoll != s_r
+        || bmvr::g_VmTuneSupportCm != s_s)
     {
         auto& o = vm_numpad::g_Off[key];
         o.ax = s_p = bmvr::g_VmTunePitch;
         o.ay = s_y = bmvr::g_VmTuneYaw;
         o.az = s_r = bmvr::g_VmTuneRoll;
+        o.sf = s_s = bmvr::g_VmTuneSupportCm;
         vm_numpad::Save();
-        Game::logMsg("Held weapon angle %s: pitch %.1f yaw %.1f roll %.1f (extras on top of the table)",
-            key.c_str(), o.ax, o.ay, o.az);
+        Game::logMsg("Held weapon tune %s: pitch %.1f yaw %.1f roll %.1f support %+.1f cm (extras on top of the table)",
+            key.c_str(), o.ax, o.ay, o.az, o.sf);
     }
 }
 
