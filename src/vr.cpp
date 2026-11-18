@@ -14598,7 +14598,10 @@ void VR::ClassifyViewmodel(const char* modelName, ViewmodelClass& out)
         // further along the stock).
         setTwoHand(0.24f, 0.00f, 0.02f, true, false, 0.25f, 0.08f);
     else if (out.rpg)
-        setTwoHand(0.22f, 0.00f, 0.025f);
+        // Fallback point; the stock left hand's L_Wrist (just ahead of the
+        // right hand, flat bottom) is used once sampled. Crossbow-like radius
+        // + a rail forward from it (user: hard to grab, not repeatable).
+        setTwoHand(0.22f, 0.00f, 0.025f, true, false, 0.10f, 0.08f);
     // Tau, gluon and hivehand: one hand only. Their fire / charge clips
     // shake the whole gun away from a support glove on the controller grip,
     // and holding them in idle lost the tau's cylinder spin and the
@@ -14734,6 +14737,14 @@ void VR::ApplyTwoHandWeaponAim()
         clearTwoHand("no grip");
         return;
     }
+    // Pistols latch beside the grip or under it (cupping, user 2026-11-18);
+    // while held, distances are to the point that was taken.
+    if (m_VmClass.offhandPistol && m_TwoHandActive)
+    {
+        gx = m_TwoHandGrabGx;
+        gy = m_TwoHandGrabGy;
+        gz = m_TwoHandGrabGz;
+    }
 
     const Vector F0 = m_ViewmodelForward;
     const Vector R0 = m_ViewmodelRight;
@@ -14805,6 +14816,23 @@ void VR::ApplyTwoHandWeaponAim()
         bool onPoint = pistol
             ? (distToGrip < enterR)
             : (lat < enterR && along >= alongMin && along <= alongMax);
+        if (pistol)
+        {
+            // Under the grip: left controller ~9 cm below the gun controller,
+            // a little ahead and left (cupping hand). Tune from the miss log.
+            const float ux = 0.02f * scale + (gx - m_VmClass.offhandMetersX * scale);
+            const float uy = -0.01f * scale, uz = -0.09f * scale;
+            const Vector under = F0 * ux + R0 * uy + U0 * uz;
+            const float distUnder = (d - under).Length();
+            if (distUnder < enterR && (!onPoint || distUnder < distToGrip))
+            {
+                onPoint = true;
+                gx = ux;
+                gy = uy;
+                gz = uz;
+                Game::logMsg("Two-hand pistol: under the grip (dist %.1f)", distUnder);
+            }
+        }
         if (onPoint)
         {
             m_TwoHandActive = true;
@@ -14819,9 +14847,10 @@ void VR::ApplyTwoHandWeaponAim()
         else if (squeezeEdge)
         {
             static int s_missLog;
-            if (s_missLog < 20)
+            if (s_missLog < 200)
             {
-                Game::logMsg("Two-hand miss dist=%.1f lat=%.1f (enter %.1f) along=%.1f (%.1f..%.1f) d=%.1f,%.1f,%.1f grip=%.1f,%.1f,%.1f",
+                Game::logMsg("Two-hand miss (%s) local=%.1f,%.1f,%.1f dist=%.1f lat=%.1f (enter %.1f) along=%.1f (%.1f..%.1f) d=%.1f,%.1f,%.1f grip=%.1f,%.1f,%.1f",
+                    m_VmClass.numpadKey.c_str(), d.Dot(F0), d.Dot(R0), d.Dot(U0),
                     distToGrip, lat, enterR, along, alongMin, alongMax, d.x, d.y, d.z, grip.x, grip.y, grip.z);
                 ++s_missLog;
             }
@@ -15153,18 +15182,24 @@ void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin, bool sideHandle)
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
     // A side handle (gluon) sits beside the gun hand, not ahead of it: only
     // a sanity distance applies.
+    // RPG (user 2026-11-18): its stock left hand holds the flat bottom just
+    // in front of the right hand, closer than 8 cm, so it was always
+    // rejected and the latch used the fixed point 15 cm out on the tube.
+    const float minFwd = (m_VmClass.rpg ? 0.02f : 0.08f) * scale;
     const bool outside = sideHandle
         ? (gx * gx + gy * gy + gz * gz > (0.45f * scale) * (0.45f * scale))
-        : (gx < 0.08f * scale || gx > 0.55f * scale
+        : (gx < minFwd || gx > 0.55f * scale
             || std::fabs(gy) > 0.18f * scale || std::fabs(gz) > 0.18f * scale);
     if (outside)
     {
-        static int s_rejectLog;
-        if (s_rejectLog < 8)
+        // Rate-limited, not capped: a cap of 8 was used up by one weapon.
+        static DWORD s_rejectLogMs;
+        const DWORD nowMs = GetTickCount();
+        if (nowMs - s_rejectLogMs > 5000)
         {
-            ++s_rejectLog;
-            Game::logMsg("Off-hand grip bone rejected gx,gy,gz=(%.2f,%.2f,%.2f) m (fwd 0.08..0.55, side/up within 0.18)",
-                gx / scale, gy / scale, gz / scale);
+            s_rejectLogMs = nowMs;
+            Game::logMsg("Off-hand grip bone rejected (%s) gx,gy,gz=(%.2f,%.2f,%.2f) m (fwd %.2f..0.55, side/up within 0.18)",
+                m_VmClass.numpadKey.c_str(), gx / scale, gy / scale, gz / scale, minFwd / scale);
         }
         return;
     }
@@ -15176,11 +15211,12 @@ void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin, bool sideHandle)
     m_OffhandGripGy = gy;
     m_OffhandGripGz = gz;
     m_OffhandGripBoneValid = true;
-    static int s_offhandLog;
-    if (changed && s_offhandLog < 8)
+    static DWORD s_offhandLogMs;
+    if (changed && GetTickCount() - s_offhandLogMs > 2000)
     {
-        Game::logMsg("Off-hand grip from %s gx,gy,gz=(%.2f,%.2f,%.2f) hu", sideHandle ? "side handle" : "L_Wrist", gx, gy, gz);
-        ++s_offhandLog;
+        s_offhandLogMs = GetTickCount();
+        Game::logMsg("Off-hand grip from %s (%s) gx,gy,gz=(%.2f,%.2f,%.2f) hu", sideHandle ? "side handle" : "L_Wrist",
+            m_VmClass.numpadKey.c_str(), gx, gy, gz);
     }
 }
 
