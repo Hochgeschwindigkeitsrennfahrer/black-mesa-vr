@@ -20918,6 +20918,16 @@ void VR::UpdateGrenadePin(uint32_t& buttons)
     switch (s_state)
     {
     case kPinIn:
+        // Light buzz while the hand is at the ring.
+        if (g_PinNear.load() && !gripDown)
+        {
+            static DWORD s_hoverMs = 0;
+            if (now - s_hoverMs > 150)
+            {
+                s_hoverMs = now;
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 400, 0.25f);
+            }
+        }
         if (gripEdge && g_PinNear.load())
         {
             s_state = kPinHeld;

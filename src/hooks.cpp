@@ -4585,7 +4585,8 @@ namespace
             return;
         Vector hf, hr, hu;
         QAngle::AngleVectors(handAng, &hf, &hr, &hu);
-        Vector fist = hand + hf * -3.f + hu * 3.f;
+        const Vector ctrlSpot = hand + hf * -3.f + hu * 3.f;
+        Vector fist = ctrlSpot;
         const DWORD now = GetTickCount();
         if (const unsigned palmMs = MagReload::g_LeftPalmMs.load(std::memory_order_relaxed);
             palmMs != 0 && now - palmMs < 500)
@@ -4598,8 +4599,11 @@ namespace
             ring[4] * rc[0] + ring[5] * rc[1] + ring[6] * rc[2] + ring[7],
             ring[8] * rc[0] + ring[9] * rc[1] + ring[10] * rc[2] + ring[11]);
         const int st = MagReload::g_PinState.load(std::memory_order_relaxed);
+        // Lenient like the bolt (user): fist centre or the controller spot,
+        // 1.5x the grab radius.
+        const float ringDist = (std::min)((fist - ringPos).Length(), (ctrlSpot - ringPos).Length());
         MagReload::g_PinNear.store(st == MagReload::kPinIn
-            && (fist - ringPos).Length() < bmvr::g_VrBoltGrabRadius * vmScale);
+            && ringDist < 1.5f * bmvr::g_VrBoltGrabRadius * vmScale);
         static thread_local bool s_holding = false;
         static thread_local Vector s_grabOffset; // ring - fist at the grab
         static thread_local Vector s_lastDelta;  // last pin move (for the drop)
