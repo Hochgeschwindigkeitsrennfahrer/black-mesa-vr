@@ -21072,6 +21072,7 @@ std::atomic<float> MagReload::g_LeftPalmLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
 std::atomic<unsigned> MagReload::g_357EjectTick{ 0 };
+std::atomic<bool> MagReload::g_EjectedEmpty{ false };
 std::atomic<bool> MagReload::g_PinWeapon{ false };
 std::atomic<int> MagReload::g_PinState{ MagReload::kPinIn };
 std::atomic<unsigned> MagReload::g_PinDropTick{ 0 };
@@ -21759,6 +21760,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
 
     if ((w.mag == kLoaded || w.mag == kDry) && reload && !s_reloadWas)
     {
+        g_EjectedEmpty.store(w.mag == kDry || clip <= 0);
         w.mag = kEmpty;
         g_DropFrom.store(0);
         g_DropTick.store(now ? now : 1);

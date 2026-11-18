@@ -4513,7 +4513,93 @@ namespace
         }
     }
 
+    // Crossbow bolts with manual magazines (user, 2026-11-18): the four in
+    // the magazine (Bolt02..05_Cntl, children of clip_export_bone) and the
+    // one on the string (Bolt01_bone, bodygroup dart_live) are drawn from the
+    // game's clip (a_bolts_advance layer + dart body), and the game refills
+    // its clip by itself once the mod's magazine is dry, so they came back
+    // in an empty gun. Draw them from the mod's state instead:
+    // - on the string only while a magazine with rounds is seated (with the
+    //   magazine out there is nothing to shoot, so none is shown);
+    // - in the magazine: none when it is dry in the gun or fell out empty;
+    //   all four for a fresh one in the hand (pose sampled from a full
+    //   magazine in idle).
+    void ApplyCrossbowBolts(unsigned char* hdr, float* bones, int nBones)
+    {
+        if (MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponCrossbow || !hdr || !bones)
+            return;
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_clip = -1, s_dart = -1, s_bolt[4]{};
+        static thread_local bool s_ok = false;
+        static thread_local float s_full[4][3][4]{};
+        static thread_local bool s_fullValid = false;
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_clip = FindStudioBoneIndex(hdr, "clip_export_bone");
+            s_dart = FindStudioBoneIndex(hdr, "Bolt01_bone");
+            s_ok = s_clip >= 0 && s_clip < nBones && s_dart >= 0 && s_dart < nBones;
+            for (int i = 0; i < 4; ++i)
+            {
+                char n[20];
+                std::snprintf(n, sizeof(n), "Bolt%02d_Cntl", i + 2);
+                s_bolt[i] = FindStudioBoneIndex(hdr, n);
+                s_ok = s_ok && s_bolt[i] >= 0 && s_bolt[i] < nBones;
+            }
+            s_fullValid = false;
+            Game::logMsg("Mag reload: crossbow bolts clip %d dart %d magazine %d..%d ok=%d",
+                s_clip, s_dart, s_bolt[0], s_bolt[3], s_ok ? 1 : 0);
+        }
+        if (!s_ok)
+            return;
+        float (*all)[3][4] = reinterpret_cast<float (*)[3][4]>(bones);
+        auto hide = [&](int b) {
+            for (int r = 0; r < 3; ++r)
+                all[b][r][0] = all[b][r][1] = all[b][r][2] = 0.f;
+        };
+        const int st = MagReload::g_State.load(std::memory_order_relaxed);
+        const int shown = MagReload::g_DisplayClip.load(std::memory_order_relaxed);
+        const int maxClip = MagReload::Def(MagReload::kWeaponCrossbow).maxClip;
+        const bool clipHidden = all[s_clip][0][0] == 0.f && all[s_clip][0][1] == 0.f && all[s_clip][0][2] == 0.f;
+        if (st == MagReload::kLoaded && shown >= maxClip && !clipHidden)
+        {
+            float inv[3][4];
+            if (InvertMatrix3x4General(all[s_clip], inv))
+            {
+                for (int i = 0; i < 4; ++i)
+                    MulMatrix3x4(inv, all[s_bolt[i]], s_full[i]);
+                if (!s_fullValid)
+                    Game::logMsg("Mag reload: crossbow full magazine bolts sampled");
+                s_fullValid = true;
+            }
+        }
+        if (st != MagReload::kLoaded || shown <= 0)
+            hide(s_dart);
+        const bool fellEmpty = st == MagReload::kEmpty && MagReload::g_DropFrom.load() == 0
+            && MagReload::g_EjectedEmpty.load();
+        if (st == MagReload::kDry || (st == MagReload::kLoaded && shown <= 0) || fellEmpty)
+        {
+            for (int i = 0; i < 4; ++i)
+                hide(s_bolt[i]);
+        }
+        else if (st == MagReload::kInHand && s_fullValid && !clipHidden)
+        {
+            for (int i = 0; i < 4; ++i)
+                MulMatrix3x4(all[s_clip], s_full[i], all[s_bolt[i]]);
+        }
+    }
+
+    void ApplyMagReloadBonesTracked(VR* vr, unsigned char* hdr, float* bones, int nBones,
+        const Vector& gunOrigin, const QAngle& gunAng, float vmScale);
+
     void ApplyMagReloadBones(VR* vr, unsigned char* hdr, float* bones, int nBones,
+        const Vector& gunOrigin, const QAngle& gunAng, float vmScale)
+    {
+        ApplyMagReloadBonesTracked(vr, hdr, bones, nBones, gunOrigin, gunAng, vmScale);
+        ApplyCrossbowBolts(hdr, bones, nBones);
+    }
+
+    void ApplyMagReloadBonesTracked(VR* vr, unsigned char* hdr, float* bones, int nBones,
         const Vector& gunOrigin, const QAngle& gunAng, float vmScale)
     {
         const int weapon = MagReload::g_Weapon.load(std::memory_order_relaxed);
@@ -5326,6 +5412,111 @@ namespace
         }
     }
 
+    // .357 brass with manual reloads (user, 2026-11-18: "ammo dropping to the
+    // ground from the left hand, not from the actual gun"): gun_reload1 has
+    // AE_CLIENT_EJECT_BRASS '6' at cycle 0.376. The hands scrub that clip to
+    // open the cylinder, so the event fired and the game spawned six casings
+    // from its own (un-held) pose of the clip, where the stock left hand
+    // dumps them. The drawn bullets already fall out of the cylinder
+    // (Apply357Extras), so the event moves past the clip end (same one-time
+    // header patch as the fidget sounds) while VrMagReload is on.
+    struct BrassHdrState { unsigned char* hdr; bool muted; };
+    BrassHdrState g_BrassHdrs[4]{};
+    unsigned g_BrassHdrNext = 0;
+
+    void Apply357BrassMute(unsigned char* hdr)
+    {
+        const bool mute = bmvr::g_VrMagReload;
+        if (!hdr)
+            return;
+        BrassHdrState* slot = nullptr;
+        for (auto& st : g_BrassHdrs)
+            if (st.hdr == hdr)
+                slot = &st;
+        if (slot && slot->muted == mute)
+            return;
+        if (!slot)
+            slot = &g_BrassHdrs[g_BrassHdrNext++ & 3];
+        slot->hdr = hdr;
+        slot->muted = mute;
+        // Only the .357 (checked once per header and switch, not per draw).
+        if (!StudioHdrMatchesModel(hdr, "models/weapons/v_357.mdl"))
+            return;
+        int numSeq = 0, seqIndex = 0;
+        BMVR_TRY
+        {
+            numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
+            seqIndex = *reinterpret_cast<int*>(hdr + kStudioHdrLocalSeqIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        if (numSeq <= 0 || numSeq > 256 || seqIndex <= 0)
+            return;
+        int changed = 0;
+        for (int s = 0; s < numSeq; ++s)
+        {
+            const char* label = StudioSequenceLabel(hdr, s);
+            if (!label || _stricmp(label, "gun_reload1") != 0)
+                continue;
+            unsigned char* desc = hdr + seqIndex + s * kStudioSeqDescSize;
+            int numEv = 0, evIndex = 0;
+            BMVR_TRY
+            {
+                numEv = *reinterpret_cast<int*>(desc + kStudioSeqNumEvents);
+                evIndex = *reinterpret_cast<int*>(desc + kStudioSeqEventIndex);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                continue;
+            }
+            if (numEv <= 0 || numEv > 64 || evIndex <= 0)
+                continue;
+            for (int e = 0; e < numEv; ++e)
+            {
+                unsigned char* ev = desc + evIndex + e * kStudioEventSize;
+                float cycle = 0.f;
+                bool brass = false;
+                BMVR_TRY
+                {
+                    cycle = *reinterpret_cast<float*>(ev);
+                    const int type = *reinterpret_cast<int*>(ev + 8);
+                    const int nameOff = *reinterpret_cast<int*>(ev + kStudioEventNameIndex);
+                    brass = (type & kStudioEventNewStyle) && nameOff > 0
+                        && std::strncmp(reinterpret_cast<const char*>(ev + nameOff), "AE_CLIENT_EJECT_BRASS", 22) == 0;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    continue;
+                }
+                if (!brass)
+                    continue;
+                int* p = reinterpret_cast<int*>(ev);
+                if (mute && cycle <= 1.f)
+                {
+                    RememberHdrPatch(p, FloatBits(cycle));
+                    if (PokeInt(p, FloatBits(kMutedEventCycle)))
+                        ++changed;
+                }
+                else if (!mute && cycle == kMutedEventCycle)
+                {
+                    for (int i = 0; i < g_ArmHdrPatchCount; ++i)
+                    {
+                        if (g_ArmHdrPatches[i].p == p)
+                        {
+                            if (PokeInt(p, g_ArmHdrPatches[i].original))
+                                ++changed;
+                            g_ArmHdrPatches[i].p = nullptr;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Game::logMsg("Mag reload: 357 gun_reload1 brass event %s (%d)", mute ? "off (bullets drawn from the cylinder)" : "restored", changed);
+    }
+
     int WeaponRootScore(const char* n)
     {
         if (!n || !n[0])
@@ -5569,6 +5760,7 @@ namespace
         {
             g_LastViewmodelStudioHdr = hdr;
             ApplyFidgetSoundMute(hdr);
+            Apply357BrassMute(hdr);
         }
         static char s_lastVm[260]{};
         if (modelName && modelName[0] && _stricmp(s_lastVm, modelName) != 0)
@@ -5609,6 +5801,9 @@ namespace
         if (g_ArmHdrPatchCount)
             Game::logMsg("HideViewmodelArms restored %d studiohdr nummeshes", n);
         g_ArmHdrPatchCount = 0;
+        // The event moves above were undone too: walk those headers again.
+        std::memset(g_FidgetHdrs, 0, sizeof(g_FidgetHdrs));
+        std::memset(g_BrassHdrs, 0, sizeof(g_BrassHdrs));
     }
 
     struct SourceRenderQueueBuildScope
