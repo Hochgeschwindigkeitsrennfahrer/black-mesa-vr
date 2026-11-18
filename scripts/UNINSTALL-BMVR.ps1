@@ -151,7 +151,7 @@ if (-not $restoredDxvk) {
   Write-Host "      Steam -> Black Mesa -> Properties -> Installed Files -> Verify integrity of game files."
 }
 
-foreach ($gamedir in @("bms", "bshift")) {
+foreach ($gamedir in @("bms", "bshift", "asheep")) {
   $cfgDir = Join-Path $GameRoot "$gamedir\cfg"
   Remove-Target (Join-Path $cfgDir "bmvr.cfg")
   $autoexec = Join-Path $cfgDir "autoexec.cfg"
@@ -171,6 +171,8 @@ foreach ($gamedir in @("bms", "bshift")) {
   $modelDir = Join-Path $GameRoot "$gamedir\models\weapons"
   Remove-Glob $modelDir "vr_crowbar.*"
   Remove-Target (Join-Path $GameRoot "$gamedir\materials\models\weapons\vr_crowbar")
+  # Shotgun pump halves the mod cuts from the game's own pump.wav.
+  Remove-Target (Join-Path $GameRoot "$gamedir\sound\bmvr")
 }
 
 Write-Host ""

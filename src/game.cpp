@@ -1138,6 +1138,131 @@ namespace
     }
 }
 
+// ---- Shotgun pump in two halves ----
+// Black Mesa's pump.wav holds the whole stroke: back (~0-190 ms), a short
+// quiet dip, forward (~215-480 ms). The manual pump plays each half at its
+// own stroke (the original author's HL2VR pump had separate wavs; we cannot
+// ship those, so the halves are cut from the player's own game file).
+const char* Game::PumpHalfSound(bool forward)
+{
+    static int s_state = 0; // 0 not tried, 1 ok, -1 failed
+    if (s_state == 0)
+    {
+        s_state = -1;
+        std::vector<unsigned char> wav;
+        if (m_BaseFileSystem)
+        {
+            if (void* file = SehFsOpen(m_BaseFileSystem, "sound/weapons/shotgun/pump.wav"))
+            {
+                unsigned char buf[4096];
+                for (int pos = 0; pos < (4 << 20); )
+                {
+                    const int n = SehFsReadAt(m_BaseFileSystem, file, pos, buf, sizeof(buf));
+                    if (n <= 0)
+                        break;
+                    wav.insert(wav.end(), buf, buf + n);
+                    pos += n;
+                }
+                SehFsClose(m_BaseFileSystem, file);
+            }
+        }
+        // RIFF/WAVE, PCM 16-bit: find fmt + data.
+        auto u32 = [&](size_t o) { return static_cast<uint32_t>(wav[o] | (wav[o + 1] << 8) | (wav[o + 2] << 16) | (wav[o + 3] << 24)); };
+        auto u16 = [&](size_t o) { return static_cast<uint32_t>(wav[o] | (wav[o + 1] << 8)); };
+        size_t fmtOfs = 0, dataOfs = 0;
+        uint32_t dataLen = 0;
+        if (wav.size() > 44 && std::memcmp(wav.data(), "RIFF", 4) == 0 && std::memcmp(wav.data() + 8, "WAVE", 4) == 0)
+        {
+            for (size_t o = 12; o + 8 <= wav.size(); )
+            {
+                const uint32_t len = u32(o + 4);
+                if (std::memcmp(wav.data() + o, "fmt ", 4) == 0)
+                    fmtOfs = o + 8;
+                else if (std::memcmp(wav.data() + o, "data", 4) == 0)
+                {
+                    dataOfs = o + 8;
+                    dataLen = (std::min)(len, static_cast<uint32_t>(wav.size() - dataOfs));
+                    break;
+                }
+                o += 8 + len + (len & 1);
+            }
+        }
+        const uint32_t channels = fmtOfs ? u16(fmtOfs + 2) : 0;
+        const uint32_t rate = fmtOfs ? u32(fmtOfs + 4) : 0;
+        const uint32_t bits = fmtOfs ? u16(fmtOfs + 14) : 0;
+        if (fmtOfs && dataOfs && u16(fmtOfs) == 1 && bits == 16 && channels >= 1 && channels <= 2 && rate >= 8000)
+        {
+            const uint32_t frameBytes = channels * 2;
+            const uint32_t frames = dataLen / frameBytes;
+            const int16_t* pcm = reinterpret_cast<const int16_t*>(wav.data() + dataOfs);
+            // Cut at the quietest 10 ms between 150 and 260 ms.
+            const uint32_t win = rate / 100;
+            uint32_t cut = 0, best = UINT32_MAX;
+            for (uint32_t f = rate * 150 / 1000; f + win <= (std::min)(frames, rate * 260 / 1000); f += win / 2)
+            {
+                uint32_t peak = 0;
+                for (uint32_t k = 0; k < win * channels; ++k)
+                    peak = (std::max)(peak, static_cast<uint32_t>(std::abs(static_cast<int>(pcm[f * channels + k]))));
+                if (peak < best)
+                {
+                    best = peak;
+                    cut = f + win / 2;
+                }
+            }
+            char exe[MAX_PATH]{};
+            GetModuleFileNameA(nullptr, exe, MAX_PATH - 1);
+            std::string root(exe);
+            root = root.substr(0, root.find_last_of("\\/") + 1);
+            // The running game's folder (Blue Shift / Azure Sheep run from their own).
+            const char* gameDir = bmvr::g_IsBlueShift ? "bshift" : bmvr::g_IsAzureSheep ? "asheep" : "bms";
+            const std::string dir = root + gameDir + "\\sound\\bmvr\\";
+            CreateDirectoryA((root + gameDir + "\\sound").c_str(), nullptr);
+            CreateDirectoryA(dir.c_str(), nullptr);
+            auto writePart = [&](const char* name, uint32_t from, uint32_t to) {
+                std::vector<int16_t> part(pcm + from * channels, pcm + to * channels);
+                // 5 ms fades so the cut does not click.
+                const uint32_t fade = (std::min)(rate / 200, (to - from) / 4);
+                const uint32_t nf = to - from;
+                for (uint32_t i = 0; i < fade; ++i)
+                    for (uint32_t c = 0; c < channels; ++c)
+                    {
+                        const float g = static_cast<float>(i) / static_cast<float>(fade);
+                        part[i * channels + c] = static_cast<int16_t>(part[i * channels + c] * g);
+                        part[(nf - 1 - i) * channels + c] = static_cast<int16_t>(part[(nf - 1 - i) * channels + c] * g);
+                    }
+                const uint32_t bytes = static_cast<uint32_t>(part.size() * 2);
+                std::vector<unsigned char> out(44 + bytes);
+                auto put32 = [&](size_t o, uint32_t v) { for (int i = 0; i < 4; ++i) out[o + i] = static_cast<unsigned char>(v >> (8 * i)); };
+                auto put16 = [&](size_t o, uint32_t v) { out[o] = static_cast<unsigned char>(v); out[o + 1] = static_cast<unsigned char>(v >> 8); };
+                std::memcpy(&out[0], "RIFF", 4); put32(4, 36 + bytes); std::memcpy(&out[8], "WAVEfmt ", 8);
+                put32(16, 16); put16(20, 1); put16(22, channels); put32(24, rate); put32(28, rate * frameBytes);
+                put16(32, frameBytes); put16(34, 16); std::memcpy(&out[36], "data", 4); put32(40, bytes);
+                std::memcpy(&out[44], part.data(), bytes);
+                const std::string path = dir + name;
+                const std::string tmp = path + ".tmp";
+                HANDLE h = CreateFileA(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (h == INVALID_HANDLE_VALUE)
+                    return false;
+                DWORD wrote = 0;
+                const BOOL ok = WriteFile(h, out.data(), static_cast<DWORD>(out.size()), &wrote, nullptr);
+                CloseHandle(h);
+                if (!ok || wrote != out.size())
+                    return false;
+                return MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+            };
+            if (cut > 0 && cut < frames && writePart("pump_back.wav", 0, cut) && writePart("pump_forward.wav", cut, frames))
+                s_state = 1;
+            Game::logMsg("Shotgun pump sound split at %u ms of %u ms: %s", cut * 1000 / rate, frames * 1000 / rate,
+                s_state == 1 ? "ok" : "write failed");
+        }
+        else
+            Game::logMsg("Shotgun pump sound split: pump.wav not read (%zu bytes, fmt %zu, data %zu)", wav.size(), fmtOfs, dataOfs);
+    }
+    if (s_state != 1)
+        return nullptr;
+    return forward ? "bmvr/pump_forward.wav" : "bmvr/pump_back.wav";
+}
+
 int Game::ReadMapEntityLump(const char* map, std::string& out)
 {
     out.clear();

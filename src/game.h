@@ -82,6 +82,10 @@ public:
     void EmitPlayerSound(const char* soundName);
     void EmitEntitySound(C_BaseEntity* entity, const char* soundName);
     void PlayUiSound(const char* sample);
+    // Shotgun pump in two parts, cut from the game's own pump.wav on first
+    // use (bms/sound/bmvr/pump_back.wav, pump_forward.wav). Returns the
+    // sample to play, or nullptr if the split is not available.
+    const char* PumpHalfSound(bool forward);
     void ScanWristHudNetVars();
     bool ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air);
     // False only when m_bWearingSuit resolved and reads 0 (pre-HEV intro).

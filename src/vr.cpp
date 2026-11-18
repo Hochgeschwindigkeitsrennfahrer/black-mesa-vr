@@ -21495,7 +21495,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
             if (pull >= 0.85f && !s_boltFull)
             {
                 s_boltFull = true;
-                sound(def.boltSound);
+                // Back stroke: first half of pump.wav (whole wav if the split
+                // is not available).
+                const char* back = m_Game ? m_Game->PumpHalfSound(false) : nullptr;
+                sound(back ? back : def.boltSound);
                 PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2000, 0.7f);
                 // Back stroke: the spent hull flies out of the port.
                 g_EjectTick.store(now ? now : 1);
@@ -21506,6 +21509,11 @@ void VR::UpdateMagReload(uint32_t& buttons)
             if (s_boltFull && pull <= 0.5f)
             {
                 s_boltFull = false;
+                // Forward stroke: second half + a firm pulse, so the player
+                // knows the pump landed (user, 2026-11-18).
+                if (const char* fwd = m_Game ? m_Game->PumpHalfSound(true) : nullptr)
+                    sound(fwd);
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.8f);
                 // An empty tube chambers nothing: still needs a pump once
                 // shells are in (user).
                 w.needPump = w.shells <= 0;
