@@ -1161,6 +1161,63 @@ namespace
         const int t = GetLayout().tab[index];
         return t == -1 || t == g_Tab;
     }
+    // Rows that only act while another setting allows it (user, 2026-11-18:
+    // "Physical weapons (beta)" off with everything under it reading ON looked
+    // wrong): drawn dim and not clickable until the setting they depend on is on.
+    bool RowDisabled(const Row& r)
+    {
+        const char* k = r.key ? r.key : r.fmt;
+        if (!k || r.kind == RowKind::Bind || r.kind == RowKind::Info)
+            return false;
+        auto is = [k](std::initializer_list<const char*> keys) {
+            for (const char* key : keys)
+                if (std::strcmp(k, key) == 0)
+                    return true;
+            return false;
+        };
+        using namespace bmvr;
+        if (is({ "SnapTurnAngle" }))
+            return !g_SnapTurning;
+        if (is({ "TurnSpeed" }))
+            return g_SnapTurning;
+        if (is({ "PhysicalLadderSmooth", "LadderBodyFollowsArms", "LadderGunHand", "LadderHandBack", "LadderStickClimb" }))
+            return !g_PhysicalLadders;
+        if (is({ "GestureWeaponShoulder" }))
+            return !g_ShoulderGestures;
+        if (is({ "GestureWeaponHipRight", "GestureWeaponHipLeft" }))
+            return !g_HipGestures;
+        if (is({ "DamageFlashStrength" }))
+            return !g_DamageFlash;
+        if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
+            return !g_HandHud;
+        // Classic flat hands: no roll, no gun-grip shift (VR::GunGripHandOffset).
+        if (is({ "VrHandsRollDeg", "VrHandsGunGripRight", "VrHandsGunGripUp", "VrHandsGunGripForward" }))
+            return g_VrHandsClassicPose;
+        if (is({ "VrMagReload", "VrStockHandPose", "VrSupportHandLock", "VrSatchelHands", "VrRecoil" }))
+            return !g_PhysicalWeapons;
+        if (is({ "VrGrenadePin", "VrMagDiscard", "VrReloadHints" }))
+            return !PhysicalWeapon(g_VrMagReload);
+        if (is({ "VrRecoilScale" }))
+            return !PhysicalWeapon(g_VrRecoil);
+        if (is({ "VrCrosshairDot", "VrCrosshairScale" }))
+            return !g_VrCrosshair;
+        if (is({ "VrLaserWidth" }))
+            return !g_VrLaserBeam;
+        if (is({ "ScopeRaiseMeters" }))
+            return !g_ScopeRaiseToZoom;
+        if (is({ "ScopeGunSmoothSec" }))
+            return !g_ScopeFollowsGun;
+        if (is({ "ThrowScale", "ThrowStroke" }))
+            return !g_VrHandThrow;
+        if (is({ "FoveatedInner", "FoveatedMid" }))
+            return g_Foveated < 0.5f;
+        if (is({ "AlphaToCoverage", "MsaaParticles1x" }))
+            return g_MsaaF < 0.5f;
+        // FXAA preset row (fmt "fxaa") and its values.
+        if (is({ "fxaa", "FxaaSubpixel", "FxaaEdgeThreshold", "FxaaEdgeThresholdMin" }))
+            return !g_FxaaApply;
+        return false;
+    }
     // Row under texture x/y, or -1 (headings are not interactive). Tab
     // buttons and Close are rows too.
     int RowAt(int px, int py)
@@ -1184,7 +1241,7 @@ namespace
             {
                 if (k == RowKind::BindPicture)
                     return PictureHit(RowHand(rows[i]), px - c * kColW, py - l.top[i]);
-                return (IsHeading(k) || k == RowKind::Info) ? -1 : i;
+                return (IsHeading(k) || k == RowKind::Info || RowDisabled(rows[i])) ? -1 : i;
             }
         }
         return -1;
@@ -1412,6 +1469,7 @@ namespace
     constexpr COLORREF kBtnHover = RGB(255, 176, 0);
     constexpr COLORREF kOn = RGB(60, 150, 80);
     constexpr COLORREF kOff = RGB(70, 74, 80);
+    constexpr COLORREF kDisabledBtn = RGB(42, 46, 52);   // buttons of a row whose setting it depends on is off
     constexpr COLORREF kAlert = RGB(210, 40, 30);
 
     // Missing-hook alert: 0 none, 1 debug-only hooks missing (amber), 2 gameplay hooks missing (red).
@@ -1683,35 +1741,39 @@ namespace
                 c.text(info.c_str(), x + kMinusX0 - 60, y0, x + cw - 40, y1, ink, 30, true, DT_RIGHT);
                 continue;
             }
-            c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, kText, 34, false, DT_LEFT);
+            // Depends on a setting that is off: everything in kDim, dark buttons.
+            const bool dis = RowDisabled(r);
+            const COLORREF ink = dis ? kDim : kText;
+            const COLORREF btn = dis ? kDisabledBtn : kBtn;
+            c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, ink, 34, false, DT_LEFT);
             if (r.kind == RowKind::Choice || r.kind == RowKind::Preset)
             {
                 // One wide button (the -/+ span); a click picks the next value.
-                c.fill(x + kMinusX0, y0 + 10, x + kPlusX1, y1 - 10, hover ? kBtnHover : kBtn);
+                c.fill(x + kMinusX0, y0 + 10, x + kPlusX1, y1 - 10, hover ? kBtnHover : btn);
                 const std::string name = r.kind == RowKind::Preset ? PresetText(r) : ChoiceText(r);
                 // Long names ("Headset +10 (default)") get a smaller font instead of spilling over.
                 int fontPx = 30;
                 while (fontPx > 20 && c.textWidth(name.c_str(), fontPx, true) > (kPlusX1 - 36 - kMinusX0) - 16)
                     fontPx -= 2;
-                c.text(name.c_str(), x + kMinusX0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : kText,
+                c.text(name.c_str(), x + kMinusX0, y0, x + kPlusX1 - 36, y1, hover ? RGB(0, 0, 0) : ink,
                     fontPx, true, DT_CENTER);
                 c.text(">", x + kPlusX1 - 40, y0, x + kPlusX1 - 8, y1 - 2, hover ? RGB(0, 0, 0) : kDim, 30, true, DT_CENTER);
             }
             else if (r.kind == RowKind::Toggle)
             {
                 const bool on = r.b && *r.b;
-                c.fill(x + kPillX0, y0 + 10, x + kPillX1, y1 - 10, on ? kOn : kOff);
-                c.text(on ? "ON" : "OFF", x + kPillX0, y0, x + kPillX1, y1, RGB(255, 255, 255), 30, true, DT_CENTER);
+                c.fill(x + kPillX0, y0 + 10, x + kPillX1, y1 - 10, dis ? kDisabledBtn : on ? kOn : kOff);
+                c.text(on ? "ON" : "OFF", x + kPillX0, y0, x + kPillX1, y1, dis ? kDim : RGB(255, 255, 255), 30, true, DT_CENTER);
             }
             else
             {
                 char val[32]{};
                 _snprintf(val, sizeof(val) - 1, r.fmt, r.f ? *r.f : 0.f);
-                c.fill(x + kMinusX0, y0 + 10, x + kMinusX1 - 8, y1 - 10, (hover && hoverZone == 0) ? kBtnHover : kBtn);
-                c.fill(x + kPlusX0 + 8, y0 + 10, x + kPlusX1, y1 - 10, (hover && hoverZone == 2) ? kBtnHover : kBtn);
-                c.text("-", x + kMinusX0, y0, x + kMinusX1 - 8, y1 - 4, kText, 44, true, DT_CENTER);
-                c.text("+", x + kPlusX0 + 8, y0, x + kPlusX1, y1 - 2, kText, 40, true, DT_CENTER);
-                c.text(val, x + kValueX0, y0, x + kValueX1, y1, kText, 34, true, DT_CENTER);
+                c.fill(x + kMinusX0, y0 + 10, x + kMinusX1 - 8, y1 - 10, (hover && hoverZone == 0) ? kBtnHover : btn);
+                c.fill(x + kPlusX0 + 8, y0 + 10, x + kPlusX1, y1 - 10, (hover && hoverZone == 2) ? kBtnHover : btn);
+                c.text("-", x + kMinusX0, y0, x + kMinusX1 - 8, y1 - 4, ink, 44, true, DT_CENTER);
+                c.text("+", x + kPlusX0 + 8, y0, x + kPlusX1, y1 - 2, ink, 40, true, DT_CENTER);
+                c.text(val, x + kValueX0, y0, x + kValueX1, y1, ink, 34, true, DT_CENTER);
             }
         }
         // Action picker over the content area.
