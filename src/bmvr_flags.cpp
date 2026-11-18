@@ -1179,7 +1179,7 @@ namespace bmvr
             else if (std::strcmp(n, "LadderGunHand") == 0)
             {
                 const int v = atoi(val);
-                if (v == 0 || v == 1)
+                if (v >= 0 && v <= 2)
                     g_LadderGunHand = static_cast<float>(v);
             }
             else if (std::strcmp(n, "VrRecoil") == 0)

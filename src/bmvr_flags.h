@@ -819,7 +819,8 @@ namespace bmvr
     extern bool g_PhysicalLadderSmooth;
     extern bool g_LadderBodyFollowsArms; // hand climbing: view closer/further from the ladder with the arms
     // Physical ladders, the gun hand: 0 = grabbing holsters the weapon (back
-    // when off the ladder), 1 = only an empty hand grabs a ladder.
+    // when off the ladder), 1 = only an empty hand grabs a ladder (default),
+    // 2 = grabbing holsters it and it stays holstered.
     extern float g_LadderGunHand;
     // Physical ladders: the stick also mounts (walk-on, mount assist) and
     // climbs, as before hand climbing. Off = hands only (sv_ladder_useonly).

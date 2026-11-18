@@ -1645,6 +1645,7 @@ private:
     bool UpdateShoulderGestures(bool paused);
     bool ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const;
     bool m_TwoHandActive = false;
+    std::atomic<bool> m_SupportNearGun{ false };   // support hand at the gun (ApplyTwoHandWeaponAim)
     bool m_TwoHandGripWasDown = false;   // TwoHandGripToggle press edge
     bool m_OffhandGripBoneValid = false;
     float m_OffhandGripGx = 0.f;

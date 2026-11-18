@@ -9614,6 +9614,17 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
                 if (f * f + sd * sd > 0.2f * 0.2f)
                     yaw -= atan2f(sd, f) * 180.f / 3.14159265f;   // Source yaw grows to the left
             }
+            else if (physLadderOn && onLadder && !physLadder.drop && !physLadder.topExit && !physLadder.stickTop)
+            {
+                // Hand climbing: straight up (climb / hold) or straight
+                // down (IN_FORWARD = down, see ladderBack). Fully underwater,
+                // HL2's FullLadderMove floats the player off to any
+                // info_ladder_dismount faced within 40 units (dot >= 0.7 of
+                // the view's flat part), which the head's yaw did mid-span:
+                // a grab pushed the player sideways (user 2026-11-19). A
+                // vertical view has no flat part.
+                pitch = ladderBack ? 89.f : -89.f;
+            }
             else if (ladderBack)
             {
                 pitch = 45.f;

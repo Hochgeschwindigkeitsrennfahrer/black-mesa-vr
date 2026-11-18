@@ -8314,27 +8314,61 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     for (int h = 0; h < 2; ++h)
         grip[h] = m_LadderGrip[h].load(std::memory_order_acquire) && valid[h];
     // The gun hand climbs empty (LadderGunHand): 0 = a grab holsters the
-    // weapon (back when off the ladder), 1 = only an empty hand grabs.
+    // weapon (back when off the ladder), 1 = only an empty hand grabs,
+    // 2 = a grab holsters it and it stays holstered.
     const int gunHand = bmvr::g_LeftHanded ? 0 : 1;
     const bool gunOut = m_HasHeldWeapon && !m_EmptyHands;
+    const int gunHandMode = static_cast<int>(bmvr::g_LadderGunHand + 0.5f);
+    // Touch = the hand at a rung of the map's ladder props (user 2026-11-19:
+    // a grab from a metre away while falling past a ladder caught it).
+    // Ladders without rung props (a few, e.g. elevator shafts) keep a short
+    // reach to the mount line. lineTouch (old 36 u reach) is only for a hand
+    // that already holds on taking over the climb.
+    constexpr float kRungTouchHu = 12.f;
+    constexpr float kNoRungTouchHu = 20.f;
+    constexpr float kRungPropNearHu = 48.f;
     bool touch[2]{};
+    bool lineTouch[2]{};
     for (int h = 0; h < 2; ++h)
     {
         float d = 0.f, yaw = 0.f;
-        touch[h] = valid[h] && nearestLadder(world[h], d, yaw) >= 0 && d < kTouchHu;
-        if (h == gunHand && gunOut && bmvr::g_LadderGunHand >= 0.5f && !(grip[h] && s_prevGrip[h] && h == s_climbHand))
-            touch[h] = false;   // its grip stays the mapped action
+        lineTouch[h] = valid[h] && nearestLadder(world[h], d, yaw) >= 0 && d < kTouchHu;
+        if (lineTouch[h])
+        {
+            Vector onRung{};
+            float rungDist = 1e9f;
+            if (bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungPropNearHu, onRung, &rungDist))
+                touch[h] = rungDist < kRungTouchHu;
+            else
+                touch[h] = d < kNoRungTouchHu;
+            static int s_missLog;
+            if (!touch[h] && grip[h] && !s_prevGrip[h] && s_missLog < 40)
+            {
+                ++s_missLog;
+                Game::logMsg("Ladder grab: %s hand not at a rung (rung %.1f, line %.1f units; hand %.0f,%.0f,%.0f rung %.0f,%.0f,%.0f)",
+                    h == 0 ? "left" : "right", rungDist, d, world[h].x, world[h].y, world[h].z, onRung.x, onRung.y, onRung.z);
+            }
+        }
+        const bool holding = grip[h] && s_prevGrip[h] && h == s_climbHand;
+        // The gun hand with "needs empty hand": its grip stays the mapped
+        // action. The support hand at the gun (two-hand grab): the gun
+        // takes the grip.
+        const bool blocked = !holding && gunOut
+            && ((h == gunHand && gunHandMode == 1)
+                || (h != gunHand && m_SupportNearGun.load(std::memory_order_acquire)));
+        if (blocked)
+            touch[h] = lineTouch[h] = false;
         m_LadderTouch[h].store(touch[h], std::memory_order_release);
     }
-    // Grips near or on a ladder are ladder grabs, not the mapped action
-    // (flashlight): on it, climbing, mounting, standing at one, and for a
-    // moment after leaving it (letting go at the top).
+    // Grips on a ladder are ladder grabs, not the mapped action
+    // (flashlight): on it, climbing, mounting, and for a moment after
+    // leaving it (letting go at the top). Standing in front of one is not
+    // enough any more (user 2026-11-19: the flashlight grip did nothing
+    // there); a hand at a rung is (m_LadderTouch).
     {
         static ULONGLONG s_activeUntil = 0;
-        float d = 0.f, yaw = 0.f;
-        const bool atLadder = nearestLadder(origin, d, yaw) >= 0 && d < 48.f;
         const ULONGLONG tNow = GetTickCount64();
-        if (onLadder || s_climbHand >= 0 || s_mountUntil != 0 || atLadder)
+        if (onLadder || s_climbHand >= 0 || s_mountUntil != 0)
             s_activeUntil = tNow + 500;
         m_LadderActive.store(tNow < s_activeUntil, std::memory_order_release);
     }
@@ -8354,8 +8388,8 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
             if (h == gunHand && gunOut)
             {
                 m_EmptyHands = true;
-                s_autoHolstered = true;
-                Game::logMsg("Ladder grab: weapon holstered for the climb");
+                s_autoHolstered = gunHandMode == 0;   // 0: drawn again off the ladder
+                Game::logMsg("Ladder grab: weapon holstered for the climb%s", gunHandMode == 0 ? "" : " (stays holstered)");
             }
             // Put the hand on the nearest rung of the ladder props.
             Vector onRung{};
@@ -8428,7 +8462,7 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     {
         // Let go: the other hand takes over if it still holds the ladder.
         const int other = 1 - s_climbHand;
-        if (grip[other] && touch[other])
+        if (grip[other] && (touch[other] || lineTouch[other] || m_LadderPin[other].valid))
         {
             s_climbHand = other;
             s_anchored = false;
@@ -8438,9 +8472,10 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
             s_climbHand = -1;
             // Both hands off: fall off like HL2VR (any grip without a
             // ladder dismount there). A short grace lets a hand-over where
-            // the new hand grabs a moment late keep the ladder.
+            // the new hand grabs a moment late keep the ladder (200 ms felt
+            // slow to fall, user 2026-11-19).
             if (onLadder)
-                s_dropAt = now + 200;
+                s_dropAt = now + 100;
         }
     }
     if (s_climbHand >= 0 || !onLadder)
@@ -14733,6 +14768,9 @@ void VR::ApplyTwoHandWeaponAim()
         m_TwoHandGripWasDown = true;
     else if (!holdingSqueeze)
         m_TwoHandGripWasDown = false;
+    // Re-set below once the support hand's distance to the gun is known
+    // (PhysicalLadderStep: a support grip on the gun is not a ladder grab).
+    m_SupportNearGun.store(false, std::memory_order_release);
 
     if (!m_VmClass.twoHand || m_EmptyHands || !m_HasHeldWeapon || IsMenuUp() || WeaponMenuOpen())
     {
@@ -14789,6 +14827,11 @@ void VR::ApplyTwoHandWeaponAim()
     const float railHu = m_VmClass.offhandRailMeters * scale;
     const float alongMin = gx - slop;
     const float alongMax = gx + (std::max)(railHu, 0.04f * scale);
+    // Support hand at the gun (a little wider than the grab zone): its grip
+    // takes the gun, not a ladder rung behind it.
+    m_SupportNearGun.store(m_TwoHandActive || distToGrip < stayR + slop
+        || (!pistol && lat < stayR && along >= alongMin - slop && along <= alongMax + slop),
+        std::memory_order_release);
 
     const bool was = m_TwoHandActive;
     if (m_TwoHandActive && bmvr::g_TwoHandGripToggle)
