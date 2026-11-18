@@ -3933,7 +3933,7 @@ namespace
         // width beside the top grip, floating off the gun (headless dump
         // 2026-11-18); without it the gluon has no right hand, as the Hivehand.
         static const char* kGuns[] = { "v_glock", "v_357", "v_mp5", "v_shotgun", "v_crossbow", "v_rpg",
-            "v_gauss", "v_tau", "v_crowbar" };
+            "v_gauss", "v_tau", "v_crowbar", "v_grenade" };
         char buf[128]{};
         strncpy_s(buf, modelName, _TRUNCATE);
         for (char* c = buf; *c; ++c)

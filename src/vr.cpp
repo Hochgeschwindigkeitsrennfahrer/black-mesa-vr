@@ -21305,14 +21305,27 @@ void VR::UpdateGrenadePin(uint32_t& buttons)
     switch (s_state)
     {
     case kPinIn:
-        // Light buzz while the hand is at the ring.
-        if (g_PinNear.load() && !gripDown)
+        // One light buzz when the hand reaches the ring (user 2026-11-18: a
+        // buzz every 150 ms while there was too much). Re-armed only after
+        // the hand has been away from the ring for 0.4 s.
         {
-            static DWORD s_hoverMs = 0;
-            if (now - s_hoverMs > 150)
+            static bool s_buzzed = false;
+            static DWORD s_awayMs = 0;
+            if (g_PinNear.load())
             {
-                s_hoverMs = now;
-                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 400, 0.25f);
+                s_awayMs = 0;
+                if (!s_buzzed && !gripDown)
+                {
+                    s_buzzed = true;
+                    PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 400, 0.25f);
+                }
+            }
+            else if (s_buzzed)
+            {
+                if (s_awayMs == 0)
+                    s_awayMs = now;
+                else if (now - s_awayMs > 400)
+                    s_buzzed = false;
             }
         }
         if (gripEdge && g_PinNear.load())
