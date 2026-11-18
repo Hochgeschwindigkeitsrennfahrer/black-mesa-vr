@@ -8392,15 +8392,16 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     }
     if (s_climbHand >= 0 || !onLadder)
         s_dropAt = 0;
-    // Top end: stick forward steps off onto the ledge (user, 2026-11-18).
-    // HL2's auto-dismount at the ends needs a forward move, which hands-only
-    // mode zeroes on the ladder, and climbing past the top is refused
-    // without +use. So: one IN_USE with the level head view; LadderMove's
-    // use-dismount then takes the info_ladder_dismount the player faces
-    // (60 degrees, 100 u) or else the nearest one. Letting go up there does
-    // the same instead of dropping.
-    constexpr float kTopExitHu = 40.f;   // feet this far under the top mount point
-    static ULONGLONG s_topExitNext = 0;
+    // Top end (user, 2026-11-18: stick mode gets off fine, forwards or to
+    // the side; hands-only did not, as it zeroes the stick on the ladder and
+    // HL2's auto-dismount needs a forward or side move). With the feet
+    // within kTopHu of the top mount point, a moved stick (not back) runs
+    // stick ladder mode for that tick: it climbs the rest and LadderMove's
+    // auto-dismount takes the info_ladder_dismount the head faces, as with
+    // LadderStickClimb. Letting go up there steps off (one IN_USE with the
+    // level head view: dismount faced, else the nearest) instead of
+    // dropping.
+    constexpr float kTopHu = 40.f;
     bool nearTop = false;
     if (onLadder)
     {
@@ -8409,18 +8410,31 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         if (ti >= 0)
         {
             const float topZ = tops[ti].z > bottoms[ti].z ? tops[ti].z : bottoms[ti].z;
-            nearTop = topZ - origin.z < kTopExitHu;
+            nearTop = topZ - origin.z < kTopHu;
         }
     }
-    const bool stickForward = m_WalkForward.load(std::memory_order_acquire) > 0.5f;
-    if (nearTop && (stickForward || (s_dropAt && now >= s_dropAt)) && now >= s_topExitNext)
     {
-        s_topExitNext = now + 400;   // retry while the stick stays forward
+        const float f = m_WalkForward.load(std::memory_order_acquire);
+        const float sd = m_WalkSide.load(std::memory_order_acquire);
+        static bool s_stickTopLogged = false;
+        if (nearTop && f > -0.2f && f * f + sd * sd > 0.2f * 0.2f)
+        {
+            s_dropAt = 0;
+            s_anchored = false;   // hands re-anchor when the stick is let go
+            out.stickTop = true;
+            if (!s_stickTopLogged)
+                Game::logMsg("Ladder: stick at the top -> stick ladder mode (auto-dismount)");
+            s_stickTopLogged = true;
+            return true;
+        }
+        s_stickTopLogged = false;
+    }
+    if (nearTop && s_dropAt && now >= s_dropAt)
+    {
         s_dropAt = 0;
-        s_climbHand = -1;
         m_LadderPin[0].valid = m_LadderPin[1].valid = false;
         out.topExit = true;
-        Game::logMsg("Ladder: %s at the top -> step off", stickForward ? "stick forward" : "let go");
+        Game::logMsg("Ladder: let go at the top -> step off");
         return true;
     }
     if (s_dropAt)

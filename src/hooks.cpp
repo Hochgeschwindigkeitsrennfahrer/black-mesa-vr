@@ -8438,6 +8438,12 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         ladderBits = physLadder.dir > 0 ? IN_FORWARD : (physLadder.dir < 0 ? IN_BACK : 0);
         if (physLadder.drop || physLadder.topExit)
             ladderBits = IN_USE;   // +use on a ladder = get off (HL2 LadderMove)
+        if (physLadder.stickTop)
+        {
+            // Near the top end: the stick works as in stick ladder mode.
+            bool stickOnLadder = false;
+            m_VR->LadderMode(ladderBits, stickOnLadder, nullptr);
+        }
         if (!onLadder)
         {
             ladderMountYaw = physLadder.yaw;
@@ -8457,7 +8463,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     const bool ladderHandsOnly = bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb;
     const bool ladderMode = ladderBase
         && (physLadderOn || (!ladderHandsOnly && m_VR->LadderMode(ladderBits, onLadder, &ladderMountYaw)));
-    const bool ladderStickBlocked = ladderHandsOnly && physLadder.onLadder;
+    const bool ladderStickBlocked = ladderHandsOnly && physLadder.onLadder && !physLadder.stickTop;
     const bool ladderMountAssist = ladderMode && !onLadder && std::isfinite(ladderMountYaw);
     const bool ladderJump = ladderMode && onLadder && (m_VR->HeldButtons() & IN_JUMP) != 0;
     const bool ladderBack = ladderMode && onLadder && !ladderJump && (ladderBits & IN_BACK) != 0;
