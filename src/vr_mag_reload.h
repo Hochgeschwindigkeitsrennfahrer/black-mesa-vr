@@ -2,7 +2,8 @@
 
 #include <atomic>
 
-// Manual magazines (VrMagReload): MP5, glock and the shotgun (pump + shells). State is shared between the
+// Manual magazines (VrMagReload): MP5, glock, crossbow, .357, the shotgun (pump + shells) and the RPG
+// (rocket pushed into the tube from the front). State is shared between the
 // input code (game thread, VR::UpdateMagReload) and the viewmodel draw
 // (render thread, ApplyMagReloadBones in hooks.cpp), which moves the gun's
 // own magazine and bolt/slide bones. Nothing new is drawn: the magazine in
@@ -24,7 +25,8 @@ namespace MagReload
         kWeaponShotgun = 3,
         kWeaponCrossbow = 4,
         kWeapon357 = 5,
-        kWeaponCount = 6,
+        kWeaponRpg = 6,
+        kWeaponCount = 7,
     };
 
     struct WeaponDef
@@ -73,6 +75,9 @@ namespace MagReload
     extern std::atomic<bool> g_NearWell;   // magazine in the hand is at the well
     extern std::atomic<bool> g_NearBolt;   // left hand is at the bolt/slide
     extern std::atomic<float> g_BoltPull;  // 0..1 of boltTravel while grabbed
+    // RPG: the rocket in the hand is on the tube axis in front of the muzzle
+    // (0 = just engaged at the muzzle .. 1 = seated), -1 = not in the tube.
+    extern std::atomic<float> g_RpgInsert;
 
     // Glove draw -> viewmodel draw: centre of the drawn left fist in the
     // left controller's frame (forward, right, up; game units) and when it

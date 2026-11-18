@@ -20984,6 +20984,7 @@ std::atomic<bool> MagReload::g_ScrubActive{ false };
 std::atomic<bool> MagReload::g_NearWell{ false };
 std::atomic<bool> MagReload::g_NearBolt{ false };
 std::atomic<float> MagReload::g_BoltPull{ 0.f };
+std::atomic<float> MagReload::g_RpgInsert{ -1.f };
 std::atomic<float> MagReload::g_LeftPalmLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
@@ -21119,6 +21120,12 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
         { "357", "speed_loader", nullptr, 6, 0.f, false,
           "weapons/pistol/pistol_empty.wav", nullptr,
           { 0.00f, -0.01f, -0.15f }, { 0, 0, 0 }, false, "Chamber", { 0.03f, 0.01f, -0.51f }, "357" },
+        // RPG: the rocket (bodygroup "rocket", rigid on RPG_Projectile; long
+        // axis = bone x, -15.6..12.7, radius 2.1, measured from v_rpg) goes
+        // into the tube from the front. "Clip" 1 = one rocket in the tube.
+        { "rpg", "RPG_Projectile", nullptr, 1, 0.f, false,
+          "weapons/ar2/ar2_empty.wav", nullptr,
+          { -1.46f, 0.f, 0.f }, { 0, 0, 0 }, false, nullptr, { 0, 0, 0 }, nullptr },
     };
     return kDefs[(weapon >= 0 && weapon < kWeaponCount) ? weapon : 0];
 }
@@ -21161,6 +21168,8 @@ int VR::MagReloadWeaponNow() const
         return MagReload::kWeaponCrossbow;
     if (ViewmodelIs357())
         return MagReload::kWeapon357;
+    if (ViewmodelIsRpg())
+        return MagReload::kWeaponRpg;
     return MagReload::kWeaponNone;
 }
 
@@ -21183,6 +21192,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     static DWORD s_pulseUntil = 0;
     static bool s_pulseReload = false;
     static int s_lastWeapon = kWeaponNone;
+    static int s_lastWeaponForRpg = kWeaponNone;
     static std::string s_level;
     const DWORD now = GetTickCount();
     const bool reload = (buttons & IN_RELOAD) != 0;
@@ -21197,6 +21207,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     if (weapon != s_lastWeapon)
     {
         s_lastWeapon = weapon;
+        s_lastWeaponForRpg = kWeaponNone;
         s_boltFull = false;
         g_BoltGrab.store(false);
         // A magazine in the hand is dropped by a weapon switch.
@@ -21246,7 +21257,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // (checked headless 2026-11-17). The magazine stays in, the chamber is
     // empty and the trigger blocked until a swap; the game's refill is only
     // bookkeeping.
-    if (w.mag == kLoaded && clip == 0 && w.lastClip > 0)
+    if (weapon != kWeaponRpg && w.mag == kLoaded && clip == 0 && w.lastClip > 0)
     {
         w.mag = kDry;
         w.chambered = def.boltBone == nullptr; // no bolt/slide to work: nothing to rack
@@ -21283,6 +21294,126 @@ void VR::UpdateMagReload(uint32_t& buttons)
         }
         return in;
     };
+
+    if (weapon == kWeaponRpg)
+    {
+        // RPG: the game's own (hidden) reload keeps the rocket count; the
+        // hands take a rocket from the hip and push it into the tube from the
+        // front (the draw code puts it on the tube axis and reports how far
+        // it is in). The trigger is blocked until it is seated.
+        static int s_lastNeed = -1, s_lastRounds = -1;
+        static bool s_wasEngaged = false;
+        if (s_lastWeaponForRpg != weapon)
+        {
+            s_lastNeed = -1;
+            s_lastRounds = -1;
+        }
+        int need = -1, inRel = -1;
+        if (m_Game)
+            m_Game->ReadWeaponReloadFlags(m_Game->GetActiveWeaponEntity(), need, inRel);
+        const int rounds = reserve < 0 ? -1 : reserve + (clip > 0 ? clip : 0);
+        {
+            static int s_logKey = -9999, s_logs = 0;
+            const int key = ((need + 1) * 1000 + (clip + 1)) * 1000 + (reserve + 1) + w.mag * 7919;
+            if (key != s_logKey && s_logs < 200)
+            {
+                ++s_logs;
+                s_logKey = key;
+                Game::logMsg("Mag reload: rpg game needReload %d inReload %d clip %d reserve %d (tube %d)",
+                    need, inRel, clip, reserve, w.mag);
+            }
+        }
+        // Fired: the game flags a reload (rocket left the tube) or its rocket
+        // count dropped. A load / first draw with an empty tube starts empty.
+        const bool fired = (need == 1 && s_lastNeed == 0)
+            || (rounds >= 0 && s_lastRounds >= 0 && rounds < s_lastRounds);
+        if (w.mag == kLoaded && (fired || (s_lastNeed < 0 && need == 1)))
+        {
+            w.mag = kEmpty;
+            Game::logMsg("Mag reload: rpg tube empty (%s)", fired ? "fired" : "empty at draw");
+        }
+        s_lastNeed = need;
+        s_lastRounds = rounds;
+        if (w.mag == kEmpty && gripEdge && atLeftHip() && rounds == 0)
+            outOfAmmo("rocket");
+        else if (w.mag == kEmpty && gripEdge && atLeftHip())
+        {
+            w.mag = kInHand;
+            g_RpgInsert.store(-1.f);
+            g_NearWell.store(false);
+            s_wasEngaged = false;
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 2500, 0.7f);
+            Game::logMsg("Mag reload: rpg rocket taken from the hip (%d rockets)", rounds);
+        }
+        else if (w.mag == kInHand)
+        {
+            const float in = g_RpgInsert.load();
+            const bool engaged = in >= 0.f;
+            if (engaged && !s_wasEngaged)
+            {
+                sound("weapons/ar2/ar2_reload_rotate.wav");
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 1500, 0.5f);
+                Game::logMsg("Mag reload: rpg rocket at the muzzle");
+            }
+            else if (engaged)
+            {
+                static DWORD s_slideMs = 0;
+                if (now - s_slideMs > 120)
+                {
+                    s_slideMs = now;
+                    PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 300 + static_cast<int>(in * 900.f), 0.2f);
+                }
+            }
+            s_wasEngaged = engaged;
+            if (g_NearWell.load())
+            {
+                w.mag = kLoaded;
+                s_wasEngaged = false;
+                // The game's reload, if it has not run yet (needs a rocket in reserve).
+                s_pulseReload = need != 0;
+                s_pulseUntil = now + 200;
+                sound("weapons/ar2/ar2_reload_push.wav");
+                PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.9f);
+                Game::logMsg("Mag reload: rpg rocket seated (needReload %d, game reload %d)", need, s_pulseReload ? 1 : 0);
+            }
+            else if (released)
+            {
+                w.mag = kEmpty;
+                s_wasEngaged = false;
+                g_DropFrom.store(1);
+                g_DropTick.store(now ? now : 1);
+                Game::logMsg("Mag reload: rpg rocket dropped");
+            }
+        }
+        else
+            s_wasEngaged = false;
+        s_lastWeaponForRpg = weapon;
+        const bool canFire = w.mag == kLoaded;
+        if (!canFire)
+        {
+            if (attack && !s_attackWas)
+                sound(def.emptyClick);
+            buttons &= ~IN_ATTACK;
+        }
+        if (s_pulseReload)
+        {
+            if (now < s_pulseUntil)
+                buttons |= IN_RELOAD;
+            else
+                s_pulseReload = false;
+        }
+        g_ScrubSeq.store(nullptr);
+        g_SlideLocked.store(false);
+        g_NeedRack.store(false);
+        g_DisplayClip.store(clip >= 0 ? (w.mag == kLoaded ? clip : 0) : -1);
+        g_State.store(w.mag);
+        w.lastClip = clip;
+        s_reloadWas = reload;
+        s_gripWas = gripDown;
+        s_attackWas = attack;
+        return;
+    }
+    s_lastWeaponForRpg = weapon;
 
     if (def.tube)
     {

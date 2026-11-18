@@ -3120,6 +3120,14 @@ namespace
         if (body < 0)
             return;
         const int rocket = (body / base) % models;
+        // Manual RPG reload: the rocket bone shows/hides/moves the rocket
+        // (tube, hand, gone after a shot), so the bodygroup stays on.
+        if (MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponRpg)
+        {
+            if (rocket == 0)
+                Hooks::m_Game->WriteEntityBody(viewmodel, body + base);
+            return;
+        }
         C_BaseEntity* weapon = Hooks::m_Game->GetActiveWeaponEntity();
         int need = -1, inRel = -1;
         Hooks::m_Game->ReadWeaponReloadFlags(weapon, need, inRel);
@@ -3359,7 +3367,8 @@ namespace
             }
         }
         const char* label = StudioSequenceLabel(hdr, seq);
-        if (bmvr::g_RpgRocketShown && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
+        if ((bmvr::g_RpgRocketShown || MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponRpg)
+            && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
             FixRpgRocketShown(viewmodel, hdr, label);
         const bool melee = Hooks::m_VR->IsPerformingMelee();
         // Classify once per sequence change instead of three lowercase passes
@@ -4404,7 +4413,7 @@ namespace
         // bottom along the gun's up axis, measured from v_mp5 / v_glock /
         // v_crossbow (model units at scale 1); the fist is ~8 cm tall (index
         // to pinky) around its centre. Shell and speed loader: small, as is.
-        static const float kMagBelowCentre[MagReload::kWeaponCount] = { 0.f, 5.26f, 3.93f, 0.f, 6.21f, 0.f };
+        static const float kMagBelowCentre[MagReload::kWeaponCount] = { 0.f, 5.26f, 3.93f, 0.f, 6.21f, 0.f, 0.f };
         const float fistHalf = 0.04f * (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f);
         const float lift = (std::max)(0.f, kMagBelowCentre[weapon] * vmScale - fistHalf);
         const Vector fistCentre = magAnchor;
@@ -4604,6 +4613,8 @@ namespace
         // In the hand.
         if (!handOk)
             return;
+        float seat[12];
+        std::memcpy(seat, m, sizeof(seat)); // the rocket's seated pose (RPG)
         auto basis = [](const QAngle& a, float out[3][3]) {
             Vector fa, ra, ua;
             QAngle::AngleVectors(a, &fa, &ra, &ua);
@@ -4633,6 +4644,83 @@ namespace
         m[3] = magAnchor.x - c0.x;
         m[7] = magAnchor.y - c0.y;
         m[11] = magAnchor.z - c0.z;
+        if (weapon == MagReload::kWeaponRpg)
+        {
+            // RPG: front loading. The tube axis is the seated rocket's long
+            // axis (bone x), pointing out of the muzzle. A rocket held in
+            // front of the muzzle, lined up with the tube, with its tail near
+            // the muzzle snaps onto the axis; pushing it back slides it in and
+            // it seats at its stock position. Brought to the seat from the
+            // side or the back it does not go in (user, 2026-11-18).
+            static thread_local bool s_engaged = false;
+            static thread_local DWORD s_inHandMs = 0;
+            if (now - s_inHandMs > 250)
+                s_engaged = false;
+            s_inHandMs = now;
+            Vector ax(seat[0], seat[4], seat[8]);
+            const float axLen = ax.Length();
+            Vector hx(m[0], m[4], m[8]);
+            const float hxLen = hx.Length();
+            float sign = 1.f;
+            if (axLen > 1e-4f && hxLen > 1e-4f)
+            {
+                ax = ax * (1.f / axLen);
+                hx = hx * (1.f / hxLen);
+                if (ax.Dot(f) < 0.f)
+                {
+                    ax = ax * -1.f;
+                    sign = -1.f;
+                }
+                hx = hx * sign;
+                const Vector seatC = local(seat, def.magCenter);
+                const Vector d = magAnchor - seatC;
+                const float along = d.Dot(ax);
+                const float radial = (d - ax * along).Length();
+                const float align = hx.Dot(ax);
+                // Rocket length 28.3 units; seated, ~5 stick out of the
+                // muzzle, so its tail reaches the muzzle at along ~0.8 L.
+                const float len = 28.3f * vmScale;
+                const float tol = 3.5f * vmScale;
+                if (!s_engaged && along > 0.5f * len && along < 0.95f * len && radial < tol && align > 0.8f)
+                {
+                    s_engaged = true;
+                    Game::logMsg("Mag reload: rpg rocket engaged at the muzzle (along %.1f radial %.1f align %.2f)",
+                        along / vmScale, radial / vmScale, align);
+                }
+                else if (s_engaged && (radial > 2.f * tol || along > 1.1f * len || align < 0.6f))
+                {
+                    s_engaged = false;
+                    Game::logMsg("Mag reload: rpg rocket off the tube (along %.1f radial %.1f align %.2f)",
+                        along / vmScale, radial / vmScale, align);
+                }
+                if (s_engaged)
+                {
+                    const float depth = std::clamp(along, 0.f, 0.95f * len);
+                    std::memcpy(m, seat, sizeof(seat));
+                    m[3] += ax.x * depth;
+                    m[7] += ax.y * depth;
+                    m[11] += ax.z * depth;
+                }
+                MagReload::g_RpgInsert.store(s_engaged ? 1.f - along / (0.95f * len) : -1.f);
+                MagReload::g_NearWell.store(s_engaged && along <= 1.5f * vmScale);
+                static thread_local DWORD s_rpgLogMs = 0;
+                if (now - s_rpgLogMs > 1000)
+                {
+                    s_rpgLogMs = now;
+                    Game::logMsg("Mag reload: rpg rocket along %.1f radial %.1f align %.2f (units at scale 1), engaged %d",
+                        along / vmScale, radial / vmScale, align, s_engaged ? 1 : 0);
+                }
+            }
+            else
+            {
+                MagReload::g_RpgInsert.store(-1.f);
+                MagReload::g_NearWell.store(false);
+            }
+            std::memcpy(s_handMag, m, sizeof(s_handMag));
+            s_handMagValid = true;
+            return;
+        }
+        MagReload::g_RpgInsert.store(-1.f);
         std::memcpy(s_handMag, m, sizeof(s_handMag));
         s_handMagValid = true;
         const float dist = (magAnchor - well).Length();
