@@ -748,6 +748,10 @@ namespace bmvr
     // in its grip pose (follows the shotgun pump) and the left glove is
     // hidden. Needs VrGunRightHand (the viewmodel's arms drawn).
     extern bool g_VrSupportHandLock;
+    // A/B (user, 2026-11-18): VR hands lit with the raw light at the palm
+    // (GetLightForPoint + flashlight) instead of the lifted/tinted value with
+    // a floor ("indoor gloves stay readable", Aug 2026). Off = the old look.
+    extern bool g_VrHandLightRaw;
     // Satchel (user, 2026-11-18): detonator always in the left hand while
     // the satchel is drawn, left trigger detonates (alt-fire), left grip is
     // Use meanwhile; the satchel is thrown from the right hand on the

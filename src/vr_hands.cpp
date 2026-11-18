@@ -508,6 +508,30 @@ namespace
         // Spec/cubemap uses raw luma so dark rooms do not stay chrome.
         outEnvExposure = 0.45f;
         Vector rgb(1.f, 1.f, 1.f);
+        if (bmvr::g_VrHandLightRaw)
+        {
+            // A/B: the light the game reports at the palm, unchanged (0..1 scale),
+            // plus the flashlight; no floor, lift or tint.
+            Vector raw(0.f, 0.f, 0.f);
+            if (CachedPalmLight(palm, raw))
+            {
+                if (raw.x > 1.5f || raw.y > 1.5f || raw.z > 1.5f)
+                {
+                    raw.x *= (1.f / 255.f);
+                    raw.y *= (1.f / 255.f);
+                    raw.z *= (1.f / 255.f);
+                }
+                rgb = Vector(std::max(0.f, raw.x), std::max(0.f, raw.y), std::max(0.f, raw.z));
+            }
+            const float luma = 0.2126f * rgb.x + 0.7152f * rgb.y + 0.0722f * rgb.z;
+            outEnvExposure = std::clamp(luma, 0.03f, 1.35f);
+            const Vector beam = FlashlightBoostAt(palm);
+            rgb.x = std::clamp(rgb.x + beam.x * 0.28f, 0.f, 1.28f);
+            rgb.y = std::clamp(rgb.y + beam.y * 0.28f, 0.f, 1.28f);
+            rgb.z = std::clamp(rgb.z + beam.z * 0.28f, 0.f, 1.28f);
+            outEnvExposure = std::clamp(outEnvExposure + beam.x * 0.55f, 0.03f, 1.5f);
+            return rgb;
+        }
         if (CachedPalmLight(palm, rgb))
         {
             if (rgb.x > 1.5f || rgb.y > 1.5f || rgb.z > 1.5f)

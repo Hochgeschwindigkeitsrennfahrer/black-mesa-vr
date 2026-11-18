@@ -148,6 +148,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrStockHandPose, nullptr },
             { "bmvr_support_hand_lock", "VR: support hand on the gun = the gun's own stock left hand (left glove hidden; needs Gun's own right hand)",
               Kind::Bool, 0.f, 1.f, &g_VrSupportHandLock, nullptr },
+            { "bmvr_hand_light_raw", "VR: A/B: VR hands lit with the raw light at the palm (no brightness floor / lift / tint)",
+              Kind::Bool, 0.f, 1.f, &g_VrHandLightRaw, nullptr },
             { "bmvr_satchel_hands", "VR: satchel: detonator in the left hand (left trigger detonates, left grip = Use), satchel thrown from the right hand",
               Kind::Bool, 0.f, 1.f, &g_VrSatchelHands, nullptr },
             { "bmvr_det_x", "VR: detonator offset right of the left controller (m)", Kind::Float, -0.3f, 0.3f, nullptr, &g_VrDetPos[0] },

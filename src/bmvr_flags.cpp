@@ -326,6 +326,7 @@ namespace bmvr
     bool g_VrGunRightHand = true;
     bool g_VrStockHandPose = true;
     bool g_VrSupportHandLock = true;
+    bool g_VrHandLightRaw = false;
     bool g_VrSatchelHands = true;
     float g_VrDetPos[3] = { -0.03f, 0.04f, 0.02f }; // box in the fist, button + antenna on top (headless sweep 2026-11-18)
     float g_VrDetCurl[3] = { 0.35f, 0.55f, 0.6f };
@@ -1201,6 +1202,8 @@ namespace bmvr
                 g_VrSatchelHands = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrSupportHandLock") == 0)
                 g_VrSupportHandLock = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrHandLightRaw") == 0)
+                g_VrHandLightRaw = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesaScale") == 0)
                 g_VrHandsBlackMesaScale = static_cast<float>(std::atof(val));
             else if (std::strcmp(n, "CompositorPostPresentHandoff") == 0)
