@@ -4115,6 +4115,52 @@ namespace
         return true;
     }
 
+    // VrStockHandPose: the stock left hand's finger joints relative to
+    // L_Wrist while the gun idles (settled, not scrubbed), for the support
+    // glove (vr_hands.cpp maps them through the glove's source bone frames).
+    // Read from the drawn copy before the arm collapse: viewmodel scale and
+    // the Y fix act on every bone alike, so they cancel in wrist^-1 * bone.
+    void SampleStockOffhandFingers(unsigned char* hdr, const float* bones12, int nBones)
+    {
+        if (!bmvr::g_VrStockHandPose || !bmvr::g_VrHandsBlackMesa || bmvr::g_LeftHanded || !Hooks::m_VR
+            || !Hooks::m_VR->m_VmClass.twoHand || !hdr || !bones12)
+            return;
+        if (MagReload::g_ScrubActive.load(std::memory_order_relaxed)
+            || !Hooks::m_VR->StockOffhandFingersIdleSettled())
+            return;
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_idx[16]{};
+        static thread_local bool s_ok = false;
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            static const char* kFinger[5] = { "Thumb", "Index", "Middle", "Ring", "Pinky" };
+            s_idx[0] = FindStudioBoneIndex(hdr, "L_Wrist");
+            s_ok = s_idx[0] >= 0 && s_idx[0] < nBones;
+            for (int f = 0; f < 5 && s_ok; ++f)
+                for (int seg = 0; seg < 3 && s_ok; ++seg)
+                {
+                    char name[24];
+                    std::snprintf(name, sizeof(name), "L_%s%d", kFinger[f], seg + 1);
+                    const int i = FindStudioBoneIndex(hdr, name);
+                    s_idx[1 + f * 3 + seg] = i;
+                    s_ok = i >= 0 && i < nBones;
+                }
+            if (!s_ok)
+                Game::logMsg("Stock hand pose: left finger bones missing on this viewmodel");
+        }
+        if (!s_ok)
+            return;
+        const auto* all = reinterpret_cast<const float (*)[3][4]>(bones12);
+        float wristInv[3][4];
+        if (!InvertMatrix3x4General(all[s_idx[0]], wristInv))
+            return;
+        float rel[15][12];
+        for (int j = 0; j < 15; ++j)
+            MulMatrix3x4(wristInv, all[s_idx[1 + j]], reinterpret_cast<float (*)[4]>(rel[j]));
+        Hooks::m_VR->NoteStockOffhandFingers(hdr, rel);
+    }
+
     // While a stock clip is scrubbed by the hands, the clip also swings the
     // whole gun. Hold the gun body bone at the pose it had in idle (relative
     // to the draw's gun frame) and move every bone by the same correction, so
@@ -4650,6 +4696,19 @@ namespace
         const float ringDist = (std::min)((fist - ringPos).Length(), (ctrlSpot - ringPos).Length());
         MagReload::g_PinNear.store(st == MagReload::kPinIn
             && ringDist < 1.5f * bmvr::g_VrBoltGrabRadius * vmScale);
+        {
+            // For harness hand placement; first 30 only.
+            static thread_local DWORD s_ringLogMs = 0;
+            static thread_local int s_ringLogs = 0;
+            if (st == MagReload::kPinIn && now - s_ringLogMs > 1000 && s_ringLogs < 30)
+            {
+                ++s_ringLogs;
+                s_ringLogMs = now;
+                const Vector d = ringPos - ctrlSpot;
+                Game::logMsg("Grenade pin: ring %.1f units from the hand (ring - hand: %.1f fwd %.1f right %.1f up in the hand frame)",
+                    ringDist, d.Dot(hf), d.Dot(hr), d.Dot(hu));
+            }
+        }
         static thread_local bool s_holding = false;
         static thread_local Vector s_grabOffset; // ring - fist at the grab
         static thread_local Vector s_lastDelta;  // last pin move (for the drop)
@@ -9364,6 +9423,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     m_VR->NoteDrawnMuzzleLocal(Vector(d.Dot(gf), d.Dot(gr), d.Dot(gu)));
                 }
                 SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
+                SampleStockOffhandFingers(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                 SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
                 if (gunRightHand)
                 {

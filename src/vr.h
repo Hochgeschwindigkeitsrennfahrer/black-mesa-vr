@@ -1471,6 +1471,12 @@ public:
     // Written on the game thread, read by the glove draw.
     bool GmanGestureActive() const { return m_GmanGestureActive.load(std::memory_order_relaxed); }
     bool TwoHandGripActive() const { return m_TwoHandActive; }
+    // VrStockHandPose: the drawn gun's stock left-hand finger joints in idle,
+    // relative to L_Wrist (thumb..pinky x 3 segments, 3x4 rows, game units).
+    // Viewmodel draw -> glove draw. Get is false for another gun's pose.
+    void NoteStockOffhandFingers(const void* studioHdr, const float rel[15][12]);
+    bool GetStockOffhandFingers(float rel[15][12]) const;
+    bool StockOffhandFingersIdleSettled() const;
     // Live L_Wrist (or L_Hand) world origin from DrawModelExecute bone matrices.
     void NoteViewmodelOffhandWorld(const Vector& worldOrigin, bool sideHandle = false);
     bool TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QAngle& trackingAng) const;
@@ -1628,6 +1634,9 @@ private:
     std::atomic<int> m_VmLowerState{ kVmLowerOther };
     std::atomic<const void*> m_VmLowerHdr{ nullptr };
     std::atomic<ULONGLONG> m_VmLowerIdleSinceMs{ 0 };
+    mutable std::mutex m_StockFingersMutex;
+    float m_StockFingers[15][12]{};
+    const void* m_StockFingersHdr = nullptr;
     Vector m_GunRootRefPos{};
     Vector m_GunRootRefAx[3]{};
     Vector m_GunRootLivePos{};

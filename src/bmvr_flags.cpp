@@ -323,6 +323,12 @@ namespace bmvr
     bool g_VrHandsUseHevGloves = true;
     bool g_VrHandsBlackMesa = false;
     bool g_VrGunRightHand = false;
+    bool g_VrStockHandPose = true;
+    // Side (key) pinch: thumb pad on the half-bent index (headless, bare
+    // hands from the thumb side, 2026-11-18; 0.6/0.55 was a fist).
+    float g_VrPinchThumb = 0.50f;
+    float g_VrPinchIndex = 0.30f;
+    bool g_VrPinchForce = false;
     bool g_VrMagReload = false;
     bool g_VrGrenadePin = true;
     bool g_VrReloadHints = true;
@@ -1153,6 +1159,8 @@ namespace bmvr
                 g_VrReloadHints = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGunRightHand") == 0)
                 g_VrGunRightHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrStockHandPose") == 0)
+                g_VrStockHandPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesa") == 0)
                 g_VrHandsBlackMesa = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesaScale") == 0)

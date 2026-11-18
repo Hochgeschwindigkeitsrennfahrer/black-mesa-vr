@@ -313,6 +313,102 @@ namespace
         return true;
     }
 
+    // VrStockHandPose: left glove fingers in the gun's own stock left-hand
+    // pose (idle), wrist kept on the controller. rel = each finger joint
+    // relative to L_Wrist on the viewmodel (VR::GetStockOffhandFingers).
+    // Only the joint rotations come from the viewmodel; bone lengths come
+    // from the glove's source bones (asset.sourceBoneBind: BM bone frames
+    // in glove space), so units and per-model bind differences drop out.
+    bool BuildStockPosePalette(const VrHandMeshAsset& asset, HandRig& rig, const float rel[15][12],
+        std::vector<VrHandMatrixRows3x4>& outPalette)
+    {
+        if (!rig.built)
+            BuildHandRig(asset, rig);
+        const size_t n = asset.jointNames.size();
+        if (!rig.valid || rig.rightHand || asset.sourceBoneBind.size() != n)
+            return false;
+        const int wrist = FindNameIndex(asset.jointNames, "wrist_l");
+        if (wrist < 0)
+            return false;
+        auto fromRows = [](const float* r) {
+            VrHandMatrix4 m = VrHandMath::Identity();
+            for (int row = 0; row < 3; ++row)
+                for (int col = 0; col < 4; ++col)
+                    VrHandMath::Set(m, row, col, r[row * 4 + col]);
+            return m;
+        };
+        const VrHandMatrix4& gw = asset.sourceBoneBind[static_cast<size_t>(wrist)];
+        outPalette.resize(n);
+        const VrHandMatrixRows3x4 identity = VrHandMath::ToRows3x4(VrHandMath::Identity());
+        for (size_t j = 0; j < n; ++j)
+            outPalette[j] = identity;
+        for (int finger = 0; finger < 5; ++finger)
+        {
+            VrHandMatrix4 parentPosed = gw;            // glove space
+            VrHandMatrix4 parentBind = gw;
+            VrHandMatrix4 parentRel = VrHandMath::Identity(); // viewmodel, wrist-relative
+            for (int seg = 0; seg < 3; ++seg)
+            {
+                const int joint = rig.fingerJoint[finger][seg];
+                if (joint < 0 || static_cast<size_t>(joint) >= n)
+                    return false;
+                const VrHandMatrix4 relB = fromRows(rel[finger * 3 + seg]);
+                VrHandMatrix4 parentRelInv, parentBindInv, bindInv;
+                const VrHandMatrix4& bind = asset.sourceBoneBind[static_cast<size_t>(joint)];
+                if (!VrHandMath::Invert4x4(parentRel, parentRelInv) || !VrHandMath::Invert4x4(parentBind, parentBindInv)
+                    || !VrHandMath::Invert4x4(bind, bindInv))
+                    return false;
+                VrHandMatrix4 local = VrHandMath::Multiply(parentRelInv, relB);
+                // Rotation, normalised per column (viewmodel bones can carry scale).
+                for (int col = 0; col < 3; ++col)
+                {
+                    float len = 0.f;
+                    for (int row = 0; row < 3; ++row)
+                        len += VrHandMath::Get(local, row, col) * VrHandMath::Get(local, row, col);
+                    len = std::sqrt(len);
+                    if (len < 1e-6f)
+                        return false;
+                    for (int row = 0; row < 3; ++row)
+                        VrHandMath::Set(local, row, col, VrHandMath::Get(local, row, col) / len);
+                }
+                const VrHandMatrix4 bindLocal = VrHandMath::Multiply(parentBindInv, bind);
+                for (int row = 0; row < 3; ++row)
+                    VrHandMath::Set(local, row, 3, VrHandMath::Get(bindLocal, row, 3));
+                const VrHandMatrix4 posed = VrHandMath::Multiply(parentPosed, local);
+                outPalette[static_cast<size_t>(joint)] = VrHandMath::ToRows3x4(VrHandMath::Multiply(posed, bindInv));
+                parentPosed = posed;
+                parentBind = bind;
+                parentRel = relB;
+            }
+        }
+        // The curl palette cache must rebuild once the stock pose ends.
+        rig.paletteValid = false;
+        return true;
+    }
+
+    // Pinch (VrStockHandPose): thumb and index meet, the rest tuck in. For
+    // the MP5 charging handle, the glock slide and the grenade pin ring.
+    bool LeftGlovePinch()
+    {
+        if (!bmvr::g_VrStockHandPose || bmvr::g_LeftHanded)
+            return false;
+        if (bmvr::g_VrPinchForce)
+            return true;
+        if (MagReload::g_BoltGrab.load(std::memory_order_relaxed))
+        {
+            const int w = MagReload::g_Weapon.load(std::memory_order_relaxed);
+            if (w == MagReload::kWeaponMp5 || w == MagReload::kWeaponGlock)
+                return true;
+        }
+        if (MagReload::g_PinWeapon.load(std::memory_order_relaxed))
+        {
+            const int s = MagReload::g_PinState.load(std::memory_order_relaxed);
+            return s == MagReload::kPinHeld || s == MagReload::kPinPulledInHand;
+        }
+        return false;
+    }
+    constexpr float kPinchRest[3] = { 0.80f, 0.90f, 0.95f }; // middle, ring, pinky
+
     void BuildBindPosePalette(const VrHandMeshAsset& asset, std::vector<VrHandMatrixRows3x4>& outPalette)
     {
         outPalette.resize(asset.jointNames.size());
@@ -935,7 +1031,32 @@ bool BmVrGloves::DrawForEye(
                     summary.flFingerCurl[4] = fold;
                 }
             }
-            if (!BuildSummaryCurlPalette(hand.asset, hand.rig, summary, hand.palette, gripCurl ? 0.40f : 0.f, gmanThumb))
+            const bool pinch = !rightHand && LeftGlovePinch();
+            if (pinch)
+            {
+                summary.flFingerCurl[0] = bmvr::g_VrPinchThumb;
+                summary.flFingerCurl[1] = bmvr::g_VrPinchIndex;
+                for (int f = 2; f < 5; ++f)
+                    summary.flFingerCurl[f] = kPinchRest[f - 2];
+                gmanThumb = 0.f;
+            }
+            float stockRel[15][12];
+            const bool stockPose = !pinch && !rightHand && gripCurl && bmvr::g_VrStockHandPose
+                && g_Game->m_VR->GetStockOffhandFingers(stockRel)
+                && BuildStockPosePalette(hand.asset, hand.rig, stockRel, hand.palette);
+            {
+                static int s_lastMode = -1;
+                const int mode = pinch ? 2 : (stockPose ? 1 : (gripCurl ? 3 : 0));
+                if (!rightHand && mode != s_lastMode)
+                {
+                    s_lastMode = mode;
+                    Game::logMsg("Stock hand pose: left glove %s", mode == 2 ? "pinch" : mode == 1 ? "stock fingers"
+                        : mode == 3 ? "grip curl (no stock pose)" : "controller curls");
+                }
+            }
+            if (!stockPose
+                && !BuildSummaryCurlPalette(hand.asset, hand.rig, summary, hand.palette,
+                    (gripCurl && !pinch) ? 0.40f : 0.f, gmanThumb))
                 BuildBindPosePalette(hand.asset, hand.palette);
         }
         else if (hand.palette.empty())

@@ -41,6 +41,10 @@ struct VrHandMeshAsset
     std::vector<int> jointParents;
     std::vector<VrHandMatrix4> bindMatrices;
     std::vector<VrHandMatrix4> inverseBindMatrices;
+    // BMVR (Black Mesa hands only): each joint's source bone frame in glove
+    // space, unrolled (bindMatrices rebase the finger frames for the curl
+    // hinges). Joint-local translations are in glove units. Empty otherwise.
+    std::vector<VrHandMatrix4> sourceBoneBind;
     std::vector<std::uint8_t> baseColorTextureBytes;
     std::uint32_t fallbackColorArgb = 0xFFFFFFFFu;
     std::string sourcePath;

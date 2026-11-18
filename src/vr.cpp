@@ -8794,6 +8794,34 @@ void VR::NoteViewmodelLowerState(int state, const void* studioHdr)
     m_VmLowerHdr.store(studioHdr, std::memory_order_relaxed);
 }
 
+bool VR::StockOffhandFingersIdleSettled() const
+{
+    // Same settle as the gun-root reference: idle blends in over ~0.2 s and
+    // the render thread draws a frame behind.
+    return m_VmLowerState.load(std::memory_order_relaxed) == kVmLowerIdle
+        && GetTickCount64() - m_VmLowerIdleSinceMs.load(std::memory_order_relaxed) >= 250;
+}
+
+void VR::NoteStockOffhandFingers(const void* studioHdr, const float rel[15][12])
+{
+    if (!studioHdr || studioHdr != m_VmLowerHdr.load(std::memory_order_relaxed))
+        return;
+    std::lock_guard<std::mutex> lock(m_StockFingersMutex);
+    if (m_StockFingersHdr != studioHdr)
+        Game::logMsg("Stock hand pose: idle fingers sampled for %p", studioHdr);
+    std::memcpy(m_StockFingers, rel, sizeof(m_StockFingers));
+    m_StockFingersHdr = studioHdr;
+}
+
+bool VR::GetStockOffhandFingers(float rel[15][12]) const
+{
+    std::lock_guard<std::mutex> lock(m_StockFingersMutex);
+    if (!m_StockFingersHdr || m_StockFingersHdr != m_VmLowerHdr.load(std::memory_order_relaxed))
+        return false;
+    std::memcpy(rel, m_StockFingers, sizeof(m_StockFingers));
+    return true;
+}
+
 void VR::NoteDrawnWeaponRootLocal(const void* studioHdr, const Vector& pos, const Vector axes[3])
 {
     // Only the weapon's own viewmodel (Black Mesa draws a second one that idles).

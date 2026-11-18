@@ -810,6 +810,10 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
     for (auto& m : bind)
         m.m[14] -= maxZ;
 
+    // Source bone frames before the roll below: the stock viewmodel finger
+    // pose (VrStockHandPose) maps through these.
+    std::vector<M4> rawBind = bind;
+
     // Finger joints: same frame around the bone as the HEV glove rig, so its
     // curl code (local Z hinge, ValveBiped sign) bends them into the palm.
     const float mirror = hand == 0 ? -1.f : 1.f;
@@ -834,6 +838,9 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
     for (auto& m : bind)
         for (int k = 12; k < 15; ++k)
             m.m[k] *= scale;
+    for (auto& m : rawBind)
+        for (int k = 12; k < 15; ++k)
+            m.m[k] *= scale;
 
     out.jointNames = names;
     out.jointParents = parents;
@@ -845,6 +852,12 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
         std::copy(std::begin(inv.m), std::end(inv.m), ib.m.begin());
         out.bindMatrices.push_back(b);
         out.inverseBindMatrices.push_back(ib);
+    }
+    for (const M4& m : rawBind)
+    {
+        VrHandMatrix4 b;
+        std::copy(std::begin(m.m), std::end(m.m), b.m.begin());
+        out.sourceBoneBind.push_back(b);
     }
     out.baseColorTextureBytes = g_Src.bmp[vi];
     // "hev_glove" / "bare_hand" in the path selects the ValveBiped curl sign.

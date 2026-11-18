@@ -737,6 +737,14 @@ namespace bmvr
     extern float g_VrHandsBlackMesaScale;
     // The weapon's own right hand (viewmodel arms, left arm + forearms collapsed) on the gun.
     extern bool g_VrGunRightHand;
+    // Black Mesa hands: the support glove on the gun takes the stock left
+    // hand's finger pose (idle), and pinches the MP5 bolt / grenade pin.
+    extern bool g_VrStockHandPose;
+    // Pinch curls (thumb, index; 0-1) and a test switch that pinches the left
+    // glove everywhere. Cvars only (bmvr_pinch_*), for tuning.
+    extern float g_VrPinchThumb;
+    extern float g_VrPinchIndex;
+    extern bool g_VrPinchForce;
     // Manual MP5 magazine (prototype): reload ejects, left grip at the left hip takes a magazine, seat it in the well.
     extern bool g_VrMagReload;
     // Frag grenade: pull the pin with the left hand before it can be thrown
