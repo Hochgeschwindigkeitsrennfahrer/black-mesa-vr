@@ -746,6 +746,8 @@ namespace bmvr
     // in its grip pose (follows the shotgun pump) and the left glove is
     // hidden. Needs VrGunRightHand (the viewmodel's arms drawn).
     extern bool g_VrSupportHandLock;
+    // Two-handed: health panel above the ammo panel on the gun (not on the support wrist).
+    extern bool g_HudHealthOnGun;
     extern bool g_VrSupportHandForce; // test: lock as if the left hand held the gun
     // Pinch curls (thumb, index; 0-1) and a test switch that pinches the left
     // glove everywhere. Cvars only (bmvr_pinch_*), for tuning.

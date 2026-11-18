@@ -326,6 +326,7 @@ namespace bmvr
     bool g_VrGunRightHand = false;
     bool g_VrStockHandPose = true;
     bool g_VrSupportHandLock = true;
+    bool g_HudHealthOnGun = true;
     bool g_VrSupportHandForce = false;
     // Side (key) pinch: thumb pad on the half-bent index (headless, bare
     // hands from the thumb side, 2026-11-18; 0.6/0.55 was a fist).
