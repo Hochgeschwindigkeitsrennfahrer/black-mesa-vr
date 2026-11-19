@@ -158,6 +158,8 @@ namespace bmvr
               Kind::Float, 0.f, 6.f, nullptr, &g_GunHandCuff },
             { "bmvr_tripmine_face_aim", "VR: the tripmine is placed along the mine's face (controller up) instead of the controller's forward",
               Kind::Bool, 0.f, 1.f, &g_TripmineFaceAim, nullptr },
+            { "bmvr_desktop_mouse_guard", "VR: ignore desktop mouse fire and release desktop mouse buttons Windows reports held > 0.5 s",
+              Kind::Bool, 0.f, 1.f, &g_DesktopMouseGuard, nullptr },
             { "bmvr_gun_hand_cuff_cap", "VR: cap the open HEV glove cuff of the gun's own hands (seen from the wrist side)",
               Kind::Bool, 0.f, 1.f, &g_GunHandCuffCap, nullptr },
             { "bmvr_pause_skip_paints", "VR: pause-menu paints dropped at the start of each pause (the first carry the flat menu background)",

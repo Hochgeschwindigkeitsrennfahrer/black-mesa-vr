@@ -10632,7 +10632,20 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     else if (vguiAteAttack || (m_VR && m_VR->WorldVguiSuppressAttack()))
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else
+    {
+        // Desktop mouse fire is not used in VR (user 2026-11-19: after an
+        // alt-tab the gun kept firing from a held desktop button): only the
+        // controllers' fire bits (bmvr_desktop_mouse_guard).
+        if (m_VR && m_VR->m_IsVREnabled && bmvr::g_DesktopMouseGuard)
+        {
+            static int s_dropLogs;
+            if ((cmd->buttons & (IN_ATTACK | IN_ATTACK2)) && s_dropLogs++ < 20)
+                Game::logMsg("Desktop mouse: dropped the game's own fire bits 0x%x from a usercmd",
+                    cmd->buttons & (IN_ATTACK | IN_ATTACK2));
+            cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+        }
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+    }
     applyLadderButtons();
 
     EnsureServerFlashlightHook();

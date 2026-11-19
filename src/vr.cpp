@@ -10998,6 +10998,47 @@ void VR::TickWindowFocus()
         s_releasePending = true;
         s_releaseAtMs = focused ? now + 300 : now;
     }
+    // Desktop mouse buttons while the game is in front (user 2026-11-19:
+    // after alt-tabbing back the gun kept firing and pause-menu items were
+    // clicked over and over on hover, not by the VR pointer). In VR the
+    // desktop mouse is not used: log every change of the left/right button
+    // as Windows reports it, and release one reported held > 0.5 s with a
+    // real button-up (bmvr_desktop_mouse_guard), which also clears a press
+    // whose release went to another window.
+    if (focused && bmvr::g_DesktopMouseGuard)
+    {
+        static bool s_down[2];
+        static DWORD s_downSince[2];
+        static int s_logs;
+        const int vk[2] = { VK_LBUTTON, VK_RBUTTON };
+        for (int b = 0; b < 2; ++b)
+        {
+            const bool down = (GetAsyncKeyState(vk[b]) & 0x8000) != 0;
+            if (down != s_down[b])
+            {
+                s_down[b] = down;
+                s_downSince[b] = now;
+                if (s_logs++ < 60)
+                    Game::logMsg("Desktop mouse: %s button %s", b ? "right" : "left", down ? "down" : "up");
+            }
+            else if (down && now - s_downSince[b] > 500)
+            {
+                INPUT in{};
+                in.type = INPUT_MOUSE;
+                in.mi.dwFlags = b ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
+                const UINT sent = SendInput(1, &in, sizeof(in));
+                s_downSince[b] = now;
+                static int s_relLogs;
+                if (s_relLogs++ < 20)
+                    Game::logMsg("Desktop mouse: %s button held %s 0.5 s in VR, sent a release (ok=%u)",
+                        b ? "right" : "left", "over", sent);
+                if (b == 0)
+                    m_Game->ClientCmd_Unrestricted("-attack");
+                else
+                    m_Game->ClientCmd_Unrestricted("-attack2");
+            }
+        }
+    }
     if (s_releasePending && (int)(now - s_releaseAtMs) >= 0)
     {
         s_releasePending = false;
