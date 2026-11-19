@@ -1362,6 +1362,30 @@ namespace
             return false;
         return r.key && !IsEngineKey(r.key) && !IsDefault(r);
     }
+    // Changed developer rows of tab `tab` that are hidden ("Show developer rows"
+    // off): shown as a note beside "Reset tab", which leaves them alone.
+    int TabHiddenDevChangedCount(int tab)
+    {
+        if (bmvr::g_PanelDevRows)
+            return 0;
+        const auto& rows = Rows();
+        int t = -1, n = 0;
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            const Row& r = rows[i];
+            if (r.kind == RowKind::Close)
+                break;
+            if (r.kind == RowKind::Tab)
+            {
+                if (++t > tab)
+                    break;
+                continue;
+            }
+            if (t == tab && DevRowHidden(i) && RowChanged(r))
+                ++n;
+        }
+        return n;
+    }
     // Changed rows of tab `tab` (its tab button gets a dot, "Reset this tab" the count).
     int TabChangedCount(int tab)
     {
@@ -1791,6 +1815,15 @@ namespace
                 const int y0 = l.top[i] + 8, y1 = l.top[i] + kRowPx - 8;
                 c.fill(l.x0[i], y0, l.x1[i], y1, fill);
                 c.text(label, l.x0[i], l.top[i], l.x1[i], l.top[i] + kRowPx, n == 0 ? kDim : RGB(255, 255, 255), 30, true, DT_CENTER);
+                // Hidden developer rows that differ from the default: a quiet
+                // note after the button (they are not reset from here).
+                const int hiddenDev = TabHiddenDevChangedCount(g_Tab);
+                if (hiddenDev > 0)
+                {
+                    char note[64]{};
+                    _snprintf(note, sizeof(note) - 1, "+%d dev row%s changed", hiddenDev, hiddenDev == 1 ? "" : "s");
+                    c.text(note, l.x1[i] + 20, l.top[i], l.x1[i] + 340, l.top[i] + kRowPx, kDim, 24, false, DT_LEFT);
+                }
                 continue;
             }
             if (!RowVisible(i))
