@@ -368,6 +368,7 @@ namespace bmvr
     float g_LadderTuneOutCm = 0.f, g_LadderTuneUpCm = 0.f, g_LadderTuneCurl = 0.7f;
     float g_SatchelGripCurl = 0.75f;
     float g_SatchelBagDepth = 1.5f;
+    float g_RpgFistCurl = 0.45f, g_RpgFistOutCm = 2.f;
     float g_SatchelBagTurn = 90.f, g_SatchelBagInCm = 2.5f, g_SatchelBagUpCm = 2.5f;
     float g_SatchelBagRoll = 0.f, g_SatchelBagSpin = 0.f, g_SatchelBagSideCm = 0.f;
     float g_GunHandCuff = 1.5f;

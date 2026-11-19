@@ -1400,7 +1400,8 @@ bool BmVrGloves::DrawForEye(
             {
                 // Round the rung / bag top: one fixed curl, thumb over the fingers.
                 for (int f = 0; f < 5; ++f)
-                    summary.flFingerCurl[f] = rungGrip ? rungCurl : bmvr::g_SatchelGripCurl;
+                    summary.flFingerCurl[f] = rungGrip ? rungCurl
+                        : (MagReload::RocketInFist() ? bmvr::g_RpgFistCurl : bmvr::g_SatchelGripCurl);
                 gmanThumb = 0.f;
                 straightMiddle = 0.f;
             }

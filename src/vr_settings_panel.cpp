@@ -389,6 +389,9 @@ namespace
             { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Roll", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneRoll, 2.5f, -90.f, 90.f, "%.1f deg" },
             // Per ladder model, for the last rung held (VR::SyncLadderGripRows).
+            { "RPG ROCKET IN THE HAND (NOT SAVED)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Rocket hand curl", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgFistCurl, 0.05f, 0.f, 1.f, "%.2f" },
+            { "Rocket out of the palm", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgFistOutCm, 0.5f, -5.f, 10.f, "%+.1f cm" },
             { "SATCHEL BAG IN THE HAND (NOT SAVED)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Bag turn (tip toward / away)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagTurn, 15.f, -180.f, 180.f, "%+.0f deg" },
             { "Bag roll (around the knuckles)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagRoll, 15.f, -180.f, 180.f, "%+.0f deg" },

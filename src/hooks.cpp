@@ -6013,6 +6013,17 @@ namespace
                         m[i * 4 + j] = rot[i][j];
                 const float len = 28.3f * vmScale;
                 magAnchor = tunnel + tail * (0.25f * len);
+                // The rocket is thicker than a closed fist (user screenshot
+                // 2026-11-19: fingers inside it): the hand opens partway
+                // (bmvr_rpg_fist_curl) and the rocket sits out of the palm,
+                // away from the palm centre past the curl (bmvr_rpg_fist_out, cm).
+                Vector outOfPalm = tunnel - fistCentre;
+                outOfPalm = outOfPalm - knuckle * outOfPalm.Dot(knuckle);
+                if (VectorNormalize(outOfPalm) > 1e-3f)
+                {
+                    const float ucm = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f;
+                    magAnchor = magAnchor + outOfPalm * (bmvr::g_RpgFistOutCm * ucm);
+                }
                 static thread_local DWORD s_fistLogMs = 0;
                 if (now - s_fistLogMs > 2000)
                 {
