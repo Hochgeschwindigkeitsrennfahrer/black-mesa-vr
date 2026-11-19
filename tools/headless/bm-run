@@ -19,6 +19,7 @@
 #      BMVR_DLLOVERRIDES (WINEDLLOVERRIDES for the game; default d3d9=n,b, empty = unset)
 #      BMVR_REAL_ARGS=1 (exactly the player's launch arguments: no -w/-h/-noborder/-nosound; the size comes from videoconfig)
 #      BMVR_PUT="src:game/relative/dst ..." (extra files for the run, e.g. a test cfg to +exec; never in the real folder)
+#      BMVR_PUTMOD="src:mod/relative/dst ..." (same, into the -game mod folder, e.g. a save: save/x.sav)
 #      BMVR_KEEP_UPPER=1 (keep the overlay's written files, e.g. to read a save the run made)
 set -euo pipefail
 out=$(realpath -m "$1"); shift
@@ -115,6 +116,7 @@ if [[ $profile != live ]]; then
 	fi
 fi
 for kv in ${BMVR_PUT:-}; do put "${kv%%:*}" "${kv#*:}"; done
+for kv in ${BMVR_PUTMOD:-}; do putmod "${kv%%:*}" "${kv#*:}"; done
 echo "settings profile: $profile" >> "$out/run.log"
 [[ $profile == live ]] || cp -p "$pdir/config.cfg" "$out/expected-settings.cfg"
 
