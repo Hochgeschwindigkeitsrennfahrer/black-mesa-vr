@@ -72,11 +72,27 @@ namespace
         bool Open(const std::filesystem::path& path)
         {
             dirPath = path;
-            if (!ReadFile(path, dir))
-                return false;
+            // Only the header + directory tree is read: a single-file VPK
+            // (no _dir/_NNN split, e.g. Black Mesa: Military's 208 MB
+            // bmmilitary01.vpk) keeps its data in the same file, read per
+            // entry in Get.
             std::uint32_t sig = 0, ver = 0, tree = 0;
-            if (!Rd(dir, 0, sig) || !Rd(dir, 4, ver) || !Rd(dir, 8, tree) || sig != 0x55aa1234u)
-                return false;
+            {
+                std::ifstream f(path, std::ios::binary);
+                if (!f)
+                    return false;
+                dir.assign(12, 0);
+                f.read(reinterpret_cast<char*>(dir.data()), 12);
+                if (f.gcount() != 12 || !Rd(dir, 0, sig) || !Rd(dir, 4, ver) || !Rd(dir, 8, tree) || sig != 0x55aa1234u)
+                    return false;
+                const size_t want = ((ver == 2) ? 28 : 12) + static_cast<size_t>(tree);
+                if (tree > (256u << 20))
+                    return false;
+                dir.resize(want);
+                f.read(reinterpret_cast<char*>(dir.data() + 12), static_cast<std::streamsize>(want - 12));
+                if (static_cast<size_t>(f.gcount()) != want - 12)
+                    return false;
+            }
             const size_t hdr = (ver == 2) ? 28 : 12;
             dataStart = hdr + tree;
             size_t p = hdr;
@@ -137,25 +153,23 @@ namespace
             out = e.preload;
             if (e.length == 0)
                 return true;
-            if (e.archive == 0x7fff)
-            {
-                const size_t o = dataStart + e.offset;
-                if (o + e.length > dir.size())
-                    return false;
-                out.insert(out.end(), dir.begin() + o, dir.begin() + o + e.length);
-                return true;
-            }
             std::string base = dirPath.string();
-            const size_t at = base.rfind("_dir.vpk");
-            if (at == std::string::npos)
-                return false;
-            char num[16];
-            std::snprintf(num, sizeof(num), "_%03u.vpk", e.archive);
-            base = base.substr(0, at) + num;
+            size_t fileOffset = e.offset;
+            if (e.archive == 0x7fff)
+                fileOffset = dataStart + e.offset;   // data in this file, after the tree
+            else
+            {
+                const size_t at = base.rfind("_dir.vpk");
+                if (at == std::string::npos)
+                    return false;
+                char num[16];
+                std::snprintf(num, sizeof(num), "_%03u.vpk", e.archive);
+                base = base.substr(0, at) + num;
+            }
             std::ifstream f(base, std::ios::binary);
             if (!f)
                 return false;
-            f.seekg(e.offset);
+            f.seekg(static_cast<std::streamoff>(fileOffset));
             const size_t start = out.size();
             out.resize(start + e.length);
             f.read(reinterpret_cast<char*>(out.data() + start), e.length);
@@ -676,16 +690,28 @@ namespace
             // next to the warm gun hand (headless 2026-11-19: VR hand mean
             // (39,30,22) vs gun hand (42,23,9)).
             float tint[3];
+            // Texture from Black Mesa's own bms_textures (null = the mod's
+            // materials VPK); both = the HEV variant too (the mod's player
+            // is never the scientist / HEV Gordon).
+            bool textureFromBms;
+            bool both;
         };
         const ModHands* mod = nullptr;
         static const ModHands kBlueShift{ "Blue Shift", "bshift", "bshift_models_dir.vpk", "bshift_materials_dir.vpk",
-            "guard_newrig_rework", "hand_diffuse_1", { 1.f, 1.f, 1.f } };
+            "guard_newrig_rework", "hand_diffuse_1", { 1.f, 1.f, 1.f }, false, false };
         static const ModHands kReborn{ "Azure Sheep: Reborn", "asheep_reborn", "asheep_reborn_models_dir.vpk",
-            "asheep_reborn_materials_dir.vpk", "as_fps_hands_ref", "as_v_hands", { 1.f, 0.75f, 0.42f } };
+            "asheep_reborn_materials_dir.vpk", "as_fps_hands_ref", "as_v_hands", { 1.f, 0.75f, 0.42f }, false, false };
+        // Black Mesa: Military (user, 2026-11-19): a HECU marine; its v_glock
+        // puts Black Mesa's own marine_d texture on the HEV rig, and the VR
+        // hands were the orange HEV glove (suit on) or the scientist (intro).
+        static const ModHands kMilitary{ "Black Mesa: Military", "bmmilitary", "bmmilitary01.vpk", nullptr,
+            "_hev_standardrig", "marine_d", { 1.f, 1.f, 1.f }, true, true };
         if (bmvr::IsBlueShift())
             mod = &kBlueShift;
         else if (bmvr::IsAzureSheepReborn())
             mod = &kReborn;
+        else if (bmvr::IsBmMilitary())
+            mod = &kMilitary;
         if (mod)
         {
             const auto modDir = dir.parent_path() / mod->folder;
@@ -694,14 +720,15 @@ namespace
             Model mModel;
             std::string mErr;
             const std::string vtfName = std::string("materials/models/weapons/v_hand/") + mod->skin + ".vtf";
-            if (!modModels.Open(modDir / mod->modelsVpk) || !modMaterials.Open(modDir / mod->materialsVpk))
+            if (!modModels.Open(modDir / mod->modelsVpk)
+                || (!mod->textureFromBms && !modMaterials.Open(modDir / mod->materialsVpk)))
                 mErr = std::string("cannot open ") + mod->name + " VPKs in " + modDir.string();
             else if (!modModels.Get("models/weapons/v_glock.mdl", mMdl) || !modModels.Get("models/weapons/v_glock.vvd", mVvd)
                 || !modModels.Get("models/weapons/v_glock.dx90.vtx", mVtx))
                 mErr = std::string(mod->name) + " v_glock model files missing";
             else if (!ParseModel(mMdl, mVvd, mVtx, mod->smd, mod->skin, mModel, mErr))
                 ;
-            else if (!modMaterials.Get(vtfName, mVtf))
+            else if (!(mod->textureFromBms ? textures : modMaterials).Get(vtfName, mVtf))
                 mErr = std::string(mod->name) + " " + mod->skin + ".vtf missing";
             else if (!VtfToBmp(mVtf, mBmp, mErr))
                 ;
@@ -711,10 +738,15 @@ namespace
                 for (size_t o = 54; o + 3 < mBmp.size(); o += 4)
                     for (int c = 0; c < 3; ++c)
                         mBmp[o + c] = static_cast<std::uint8_t>(mBmp[o + c] * mod->tint[2 - c] + 0.5f);
+                if (mod->both)
+                {
+                    g_Src.model[0] = mModel;
+                    g_Src.bmp[0] = mBmp;
+                }
                 g_Src.model[1] = std::move(mModel);
                 g_Src.bmp[1] = std::move(mBmp);
             }
-            Game::logMsg("BM hands: %s guard bare hands %s%s", mod->name, mErr.empty() ? "loaded" : "NOT loaded, scientist hands: ",
+            Game::logMsg("BM hands: %s player hands %s%s", mod->name, mErr.empty() ? "loaded" : "NOT loaded, scientist hands: ",
                 mErr.c_str());
         }
         return true;

@@ -374,6 +374,7 @@ namespace bmvr
     bool g_IsBlueShift = false;
     bool g_IsAzureSheep = false;
     bool g_IsAzureSheepReborn = false;
+    bool g_IsBmMilitary = false;
     uint32_t g_FullFrameActualWidth = 0;
     uint32_t g_FullFrameActualHeight = 0;
     uint32_t g_GbActualWidth = 0;
@@ -1881,6 +1882,11 @@ namespace bmvr
         return g_IsAzureSheep;
     }
 
+    bool IsBmMilitary()
+    {
+        return g_IsBmMilitary;
+    }
+
     bool IsAzureSheepReborn()
     {
         return g_IsAzureSheepReborn;
@@ -1909,6 +1915,7 @@ namespace bmvr
         g_IsBlueShift = false;
         g_IsAzureSheep = false;
         g_IsAzureSheepReborn = false;
+        g_IsBmMilitary = false;
         const wchar_t* p = GetCommandLineW();
         if (!p)
             return;
@@ -1953,6 +1960,12 @@ namespace bmvr
             {
                 g_IsAzureSheep = true;
                 Log("Azure Sheep session (-game asheep)");
+                return;
+            }
+            if (PathLeafEquals(tok, L"bmmilitary"))
+            {
+                g_IsBmMilitary = true;
+                Log("Black Mesa: Military session (-game bmmilitary)");
                 return;
             }
             if (PathLeafEquals(tok, L"asheep_reborn"))

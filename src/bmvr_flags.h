@@ -851,6 +851,7 @@ namespace bmvr
     extern bool g_IsAzureSheep;
     bool IsAzureSheep();
     bool IsAzureSheepReborn();   // -game asheep_reborn (own guard arms in v_glock)
+    bool IsBmMilitary();         // -game bmmilitary (marine arms: v_glock HEV rig with marine_d)
     // Wrist HUD, weapon-wheel chrome, HUD icons, and the pause cursor use
     // Calhoun blue (64,168,255) instead of HEV orange.
     bool UseBlueHud();
