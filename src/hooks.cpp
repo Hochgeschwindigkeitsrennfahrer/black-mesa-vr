@@ -3497,20 +3497,9 @@ namespace
             ForceViewmodelIdlePose(viewmodel, hdr);
             return;
         }
-        // MP5 grenade launch: the stock 'grenade' clip kicks the gun and
-        // moves its own left hand to the trigger on the stock after the
-        // grenade has left (user 2026-11-18: wrong with your own hands on the
-        // gun). The clip plays (the kick stays, user 2026-11-19); while it
-        // does, the support-hand lock lets go of the gun's left hand and the
-        // player's left glove stays where it is (g_Mp5GrenadeClipMs).
-        if (label && _stricmp(label, "grenade") == 0 && Hooks::m_Game
-            && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()) && Hooks::m_VR->ViewmodelIsMp5())
-        {
-            const DWORD nowMs = GetTickCount();
-            const unsigned last = MagReload::g_Mp5GrenadeClipMs.exchange(nowMs ? nowMs : 1, std::memory_order_relaxed);
-            if (last == 0 || nowMs - last > 1000)
-                Game::logMsg("MP5 grenade clip: plays, support glove instead of the gun's left hand");
-        }
+        // MP5 grenade launch: the stock 'grenade' clip plays (the gun kicks,
+        // user 2026-11-19); its left hand going to the stock is undone on the
+        // drawn bones (HoldLeftHandOnMp5Body).
         // Manual magazines: the hands do the reload, so the stock reload clip
         // (also the game's own refill after firing dry) is not shown.
         if (label && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
@@ -4705,6 +4694,84 @@ namespace
             MulMatrix3x4(delta, all[b], all[b]);
         for (int k = 0; k < s_armCount; ++k)
             MulMatrix3x4(all[s_body], s_armRel[k], all[s_arm[k]]);
+    }
+
+    // MP5 grenade launch (user 2026-11-19): the stock 'grenade' clip kicks the
+    // gun (kept) and moves the gun's own left hand from the grip to the
+    // trigger on the stock after the grenade has left. The left-arm bones are
+    // held at their idle pose relative to the gun body (the root bone), so the
+    // hand rides the kick on the grip instead. Idle frames refresh the
+    // relative pose; only the MP5 pays for it (~25 matrix products a frame).
+    void HoldLeftHandOnMp5Body(unsigned char* hdr, float* bones, int nBones)
+    {
+        if (!hdr || !bones || nBones <= 0 || !Hooks::m_Game || !Hooks::m_VR || !Hooks::m_VR->ViewmodelIsMp5())
+            return;
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_root = -1;
+        static thread_local int s_count = 0;
+        static thread_local int s_arm[40]{};
+        static thread_local float s_rel[40][3][4]{};
+        static thread_local bool s_valid = false;
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_valid = false;
+            s_count = 0;
+            float rest[3]{};
+            char rootName[64]{};
+            s_root = FindWeaponRootBone(hdr, rest, rootName);
+            int numbones = 0, boneindex = 0;
+            BMVR_TRY
+            {
+                numbones = *reinterpret_cast<int*>(hdr + kStudioHdrNumBones);
+                boneindex = *reinterpret_cast<int*>(hdr + kStudioHdrBoneIndex);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { numbones = 0; }
+            for (int i = 0; i < numbones && i < nBones && s_count < 40; ++i)
+            {
+                unsigned char* bone = hdr + boneindex + i * kStudioBoneSize;
+                int szname = 0;
+                BMVR_TRY { szname = *reinterpret_cast<int*>(bone); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+                const char* n = StudioRelString(bone, szname);
+                if (_strnicmp(n, "L_", 2) == 0 || _stricmp(n, "SCI_Hand_Forearm_L") == 0 || _stricmp(n, "gman_arms_l") == 0)
+                    s_arm[s_count++] = i;
+            }
+            Game::logMsg("MP5 grenade hold: root bone '%s' = %d, %d left-arm bones", rootName, s_root, s_count);
+        }
+        if (s_root < 0 || s_root >= nBones || s_count == 0)
+            return;
+        void* vm = Hooks::m_Game->GetViewModelEntity();
+        int seq = -1;
+        BMVR_TRY { if (vm) seq = *reinterpret_cast<int*>(static_cast<char*>(vm) + kViewmodelSequence); }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        const char* label = seq >= 0 ? StudioSequenceLabel(hdr, seq) : nullptr;
+        if (!label)
+            return;
+        float (*all)[3][4] = reinterpret_cast<float (*)[3][4]>(bones);
+        if (_stricmp(label, "grenade") == 0)
+        {
+            if (!s_valid)
+                return;
+            for (int k = 0; k < s_count; ++k)
+                MulMatrix3x4(all[s_root], s_rel[k], all[s_arm[k]]);
+            static int s_log;
+            if (s_log++ < 3)
+                Game::logMsg("MP5 grenade hold: left hand kept on the grip during the clip");
+            return;
+        }
+        // Plain idle only (the fidget moves the hands; lowered / sprint move the gun).
+        char lb[32]{};
+        for (int i = 0; i < 31 && label[i]; ++i)
+            lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+        if (!std::strstr(lb, "idle") || std::strstr(lb, "fidget") || std::strstr(lb, "low") || std::strstr(lb, "sprint"))
+            return;
+        float rootInv[3][4];
+        if (!InvertMatrix3x4General(all[s_root], rootInv))
+            return;
+        for (int k = 0; k < s_count; ++k)
+            MulMatrix3x4(rootInv, all[s_arm[k]], s_rel[k]);
+        s_valid = true;
     }
 
     // Manual magazines (VrMagReload, vr_mag_reload.h). Works on the copied
@@ -10520,6 +10587,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 usedBones = true;
                 StabilizeScrubbedBody(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                     needScale ? pivot + (targetOrigin - pivot) * scale : targetOrigin, targetAng);
+                HoldLeftHandOnMp5Body(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                 // Gun frame of this draw: scaled origin + target angles
                 // (VR::GunFrameNow at the same instant).
                 Vector o = targetOrigin;
@@ -10551,8 +10619,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                         && SupportHandFromGunModel(modelName)
                         && m_VR->m_VmClass.twoHand && (m_VR->TwoHandGripActive() || bmvr::g_VrSupportHandForce)
                         && !MagReload::g_ScrubActive.load(std::memory_order_relaxed)
-                        && magSt != MagReload::kInHand && !otherGrab
-                        && GetTickCount() - MagReload::g_Mp5GrenadeClipMs.load(std::memory_order_relaxed) > 100;
+                        && magSt != MagReload::kInHand && !otherGrab;
                     CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_KeepLeftHand);
                     if (t_KeepLeftHand && t_LeftHandCount > 0)
                     {

@@ -21298,7 +21298,6 @@ std::atomic<float> MagReload::g_LeftPinchLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPinchMs{ 0 };
 std::atomic<unsigned> MagReload::g_SupportHandFromGunMs{ 0 };
 std::atomic<unsigned> MagReload::g_SatchelRadioMs{ 0 };
-std::atomic<unsigned> MagReload::g_Mp5GrenadeClipMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
 std::atomic<unsigned> MagReload::g_357EjectTick{ 0 };
 std::atomic<bool> MagReload::g_EjectedEmpty{ false };

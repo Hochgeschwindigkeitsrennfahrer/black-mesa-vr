@@ -1132,10 +1132,7 @@ bool BmVrGloves::DrawForEye(
         if (!rightHand)
         {
             const unsigned fromGun = MagReload::g_SupportHandFromGunMs.load(std::memory_order_relaxed);
-            // MP5 grenade clip playing: the gun's left hand is let go at once,
-            // so the glove shows at once too.
-            const bool grenadeClip = GetTickCount() - MagReload::g_Mp5GrenadeClipMs.load(std::memory_order_relaxed) <= 100;
-            if (fromGun != 0 && GetTickCount() - fromGun < 150 && !grenadeClip)
+            if (fromGun != 0 && GetTickCount() - fromGun < 150)
                 continue;
         }
 
