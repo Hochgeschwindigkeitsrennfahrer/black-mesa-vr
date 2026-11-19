@@ -39,6 +39,7 @@ namespace
     constexpr int kHeaderPx = 96;
     constexpr int kRowPx = 64;
     constexpr int kSectionPx = 48;
+    constexpr int kSectionGapPx = 18;   // extra space above a heading (not a column's first)
     constexpr int kTabPx = 72;          // tab bar under the title
     constexpr int kTabGapPx = 16;
     constexpr int kContentTop = kHeaderPx + kTabPx + 24;
@@ -134,10 +135,11 @@ namespace
             { "Hand distance from rung", RowKind::Number, "LadderHandBack", nullptr, &bmvr::g_LadderHandBack, 0.5f, 0.f, 10.f, "%.1f" },
             { "Stick climbs ladders too", RowKind::Toggle, "LadderStickClimb", &bmvr::g_LadderStickClimb, nullptr, 0, 0, 0, nullptr },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
             { "Near clip (7 = game)", RowKind::Number, "VrNearZ", nullptr, &bmvr::g_VrNearZ, 0.5f, 1.f, 7.f, "%.1f" },
+            // No key/fmt: the button's default action is a recenter (closes the panel).
+            { "Recenter", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "MENUS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Game menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
             { "Game menu size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
@@ -1140,6 +1142,10 @@ namespace
                     continue;
                 }
                 const int c = i < split ? 0 : 1;
+                // A gap above every heading but a column's first, so a new
+                // section reads as one (user 2026-11-19).
+                if (IsHeading(rows[i].kind) && y[c] > kContentTop)
+                    y[c] += kSectionGapPx;
                 out.tab[i] = t;
                 out.col[i] = c;
                 out.top[i] = y[c];
