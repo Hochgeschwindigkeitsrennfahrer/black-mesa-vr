@@ -4022,9 +4022,12 @@ namespace
     // (glock, .357, MP5) look right, so their R_Wrist orientation in the
     // right controller's frame is the reference; the grenade model turns
     // about its fist so its R_Wrist matches. Reference sampled from the last
-    // such gun drawn (logged once for baking in).
+    // such gun drawn (logged for baking in). Baked from the user's
+    // 2026-11-18 headset log (v_mp5) and fixed from now on.
     struct WristRef { float m[3][3]; bool valid; };
-    WristRef g_WristRef{};
+    WristRef g_WristRef{ { { 0.999f, 0.049f, -0.004f },
+                           { 0.004f, 0.010f, 1.000f },
+                           { -0.049f, 0.999f, -0.010f } }, true };
 
     bool WristAxesInController(VR* vr, unsigned char* hdr, const float* bones, int nBones, float out[3][3],
         float world[3][3], Vector* fist)
@@ -4073,8 +4076,10 @@ namespace
         float local[3][3], world[3][3];
         if (!vr || !WristAxesInController(vr, hdr, bones, nBones, local, world, nullptr))
             return;
-        std::memcpy(g_WristRef.m, local, sizeof(local));
-        g_WristRef.valid = true;
+        // Logged only: the baked reference (g_WristRef) stays. Live samples
+        // differ a lot per gun and frame (headless glock 2026-11-19: x axis
+        // (0.57,-0.60,-0.56) vs the headset MP5's (1.00,0.00,-0.05)), so the
+        // grenade's pose depended on which gun was drawn last.
         static int s_log;
         if (s_log++ < 3)
             Game::logMsg("Wrist reference from %s: x=(%.3f,%.3f,%.3f) y=(%.3f,%.3f,%.3f) z=(%.3f,%.3f,%.3f) (controller fwd/right/up)",
