@@ -20,6 +20,9 @@ PICKS = [
     ("kXbowMag", "crossbow magazine", "reload", "0.500", "clip_export_bone"),
     ("k357Loader", "357 speed loader", "gun_reload1", "0.700", "speed_loader"),
     ("kShell", "shotgun shell", "shell_reload1", "0.300", "bone_shell"),
+    ("kRpgRocket", "rpg rocket", "gun_reload1", "0.300", "RPG_Projectile"),
+    ("kPinHold", "grenade pin held", "pinpullthrow", "0.450", "Grenad_Pin1"),
+    ("kPinPulled", "grenade pin pulled", "pinpullthrow", "0.600", "Grenad_Pin1"),
 ]
 FINGERS = [f"L_{f}{s}" for f in ("Thumb", "Index", "Middle", "Ring", "Pinky") for s in (1, 2, 3)]
 

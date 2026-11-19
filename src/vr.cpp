@@ -21598,7 +21598,12 @@ int MagReload::InHandClipPose(int weapon)
     case kWeaponCrossbow: return ClipHandPose::kXbowMag;
     case kWeapon357: return ClipHandPose::k357Loader;
     case kWeaponShotgun: return ClipHandPose::kShell;
-    default: return ClipHandPose::kNone; // RPG rocket: no clip frame
+    // RPG: Black Mesa's hand holds the rocket across the palm by its tail
+    // (gun_reload1 @ 0.30, kRpgRocket); on the glove that puts the rocket
+    // at ~90 deg to the tube with the controllers parallel (headless
+    // 2026-11-19: bone x . gun forward -0.07, engage needs 0.7), so it
+    // stays on the old controller-aligned hold.
+    default: return ClipHandPose::kNone;
     }
 }
 
@@ -21606,6 +21611,15 @@ int MagReload::WantedClipHandPose()
 {
     if (!bmvr::g_VrClipHandPose || !bmvr::g_VrStockHandPose || !bmvr::g_PhysicalWeapons || bmvr::g_LeftHanded)
         return ClipHandPose::kNone;
+    // Grenade pin by hand: Black Mesa's pinpullthrow fingers on the ring.
+    if (g_PinWeapon.load(std::memory_order_relaxed))
+    {
+        const int s = g_PinState.load(std::memory_order_relaxed);
+        if (s == kPinHeld)
+            return ClipHandPose::kPinHold;
+        if (s == kPinPulledInHand)
+            return ClipHandPose::kPinPulled;
+    }
     const int w = g_Weapon.load(std::memory_order_relaxed);
     if (g_BoltGrab.load(std::memory_order_relaxed))
     {

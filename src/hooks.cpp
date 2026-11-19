@@ -4637,7 +4637,8 @@ namespace
                 r[2][0], r[2][1], r[2][2], r[2][3]);
         };
         static const char* kObjects[] = { "Clip_New", "Bolt_New", "bone_clip", "Bone01", "bone_shell", "bone_pump",
-            "clip_export_bone", "speed_loader", "Chamber", "R_Wrist" };
+            "clip_export_bone", "speed_loader", "Chamber", "RPG_Projectile", "Grenade_Pin2", "Grenade_Pin1", "Grenad_Pin1",
+            "R_Wrist" };
         for (const char* n : kObjects)
             logRel(n);
         static const char* kFinger[5] = { "Thumb", "Index", "Middle", "Ring", "Pinky" };
@@ -5693,8 +5694,12 @@ namespace
                 {
                     s_clipLogMs = now;
                     const Vector d = magAnchor - hand;
-                    Game::logMsg("Clip hand pose: %s magazine centre %.1f fwd %.1f right %.1f up of the controller (unit %.3f, vm %.3f)",
-                        def.name, d.Dot(hf), d.Dot(hr), d.Dot(hu), unit, vmScale);
+                    // Object's bone x vs the gun's forward (RPG: rocket vs tube axis).
+                    Vector ox(m[0], m[4], m[8]);
+                    const float oxLen = ox.Length();
+                    const float alignF = oxLen > 1e-4f ? ox.Dot(f) / oxLen : 0.f;
+                    Game::logMsg("Clip hand pose: %s magazine centre %.1f fwd %.1f right %.1f up of the controller (unit %.3f, vm %.3f, bone x . gun fwd %.2f)",
+                        def.name, d.Dot(hf), d.Dot(hr), d.Dot(hu), unit, vmScale, alignF);
                 }
             }
         }
