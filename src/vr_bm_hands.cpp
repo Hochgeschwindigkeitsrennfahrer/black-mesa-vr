@@ -659,31 +659,63 @@ namespace
         // so the bare VR hands next to it looked like a second person (Black Mesa's
         // scientist). Take the bare hands from Blue Shift's own files; any failure
         // keeps the scientist hands.
-        if (bmvr::IsBlueShift())
+        // Same for Azure Sheep: Reborn (user, 2026-11-19): its v_glock, v_shotgun
+        // and v_hands carry the guard's own arms ("as_fps_hands_ref", hands skin
+        // as_v_hands, sleeves as_v_sleeves).
+        struct ModHands
         {
-            const auto bsDir = dir.parent_path() / "bshift";
-            Vpk bsModels, bsMaterials;
-            Bytes bsMdl, bsVvd, bsVtx, bsVtf, bsBmp;
-            Model bsModel;
-            std::string bsErr;
-            if (!bsModels.Open(bsDir / "bshift_models_dir.vpk") || !bsMaterials.Open(bsDir / "bshift_materials_dir.vpk"))
-                bsErr = "cannot open Blue Shift VPKs in " + bsDir.string();
-            else if (!bsModels.Get("models/weapons/v_glock.mdl", bsMdl) || !bsModels.Get("models/weapons/v_glock.vvd", bsVvd)
-                || !bsModels.Get("models/weapons/v_glock.dx90.vtx", bsVtx))
-                bsErr = "Blue Shift v_glock model files missing";
-            else if (!ParseModel(bsMdl, bsVvd, bsVtx, "guard_newrig_rework", "hand_diffuse_1", bsModel, bsErr))
+            const char* name;
+            const char* folder;
+            const char* modelsVpk;
+            const char* materialsVpk;
+            const char* smd;
+            const char* skin;
+            // Texture tint: the game shades these with a skin light-warp
+            // (Reborn: models/humans/skin_wrp) that our glove shader does not
+            // have; without it Reborn's pale skin texture came out grey-white
+            // next to the warm gun hand (headless 2026-11-19: VR hand mean
+            // (39,30,22) vs gun hand (42,23,9)).
+            float tint[3];
+        };
+        const ModHands* mod = nullptr;
+        static const ModHands kBlueShift{ "Blue Shift", "bshift", "bshift_models_dir.vpk", "bshift_materials_dir.vpk",
+            "guard_newrig_rework", "hand_diffuse_1", { 1.f, 1.f, 1.f } };
+        static const ModHands kReborn{ "Azure Sheep: Reborn", "asheep_reborn", "asheep_reborn_models_dir.vpk",
+            "asheep_reborn_materials_dir.vpk", "as_fps_hands_ref", "as_v_hands", { 1.f, 0.75f, 0.42f } };
+        if (bmvr::IsBlueShift())
+            mod = &kBlueShift;
+        else if (bmvr::IsAzureSheepReborn())
+            mod = &kReborn;
+        if (mod)
+        {
+            const auto modDir = dir.parent_path() / mod->folder;
+            Vpk modModels, modMaterials;
+            Bytes mMdl, mVvd, mVtx, mVtf, mBmp;
+            Model mModel;
+            std::string mErr;
+            const std::string vtfName = std::string("materials/models/weapons/v_hand/") + mod->skin + ".vtf";
+            if (!modModels.Open(modDir / mod->modelsVpk) || !modMaterials.Open(modDir / mod->materialsVpk))
+                mErr = std::string("cannot open ") + mod->name + " VPKs in " + modDir.string();
+            else if (!modModels.Get("models/weapons/v_glock.mdl", mMdl) || !modModels.Get("models/weapons/v_glock.vvd", mVvd)
+                || !modModels.Get("models/weapons/v_glock.dx90.vtx", mVtx))
+                mErr = std::string(mod->name) + " v_glock model files missing";
+            else if (!ParseModel(mMdl, mVvd, mVtx, mod->smd, mod->skin, mModel, mErr))
                 ;
-            else if (!bsMaterials.Get("materials/models/weapons/v_hand/hand_diffuse_1.vtf", bsVtf))
-                bsErr = "Blue Shift hand_diffuse_1.vtf missing";
-            else if (!VtfToBmp(bsVtf, bsBmp, bsErr))
+            else if (!modMaterials.Get(vtfName, mVtf))
+                mErr = std::string(mod->name) + " " + mod->skin + ".vtf missing";
+            else if (!VtfToBmp(mVtf, mBmp, mErr))
                 ;
             else
             {
-                g_Src.model[1] = std::move(bsModel);
-                g_Src.bmp[1] = std::move(bsBmp);
+                // 32-bit BMP, BGRA after the 54-byte header.
+                for (size_t o = 54; o + 3 < mBmp.size(); o += 4)
+                    for (int c = 0; c < 3; ++c)
+                        mBmp[o + c] = static_cast<std::uint8_t>(mBmp[o + c] * mod->tint[2 - c] + 0.5f);
+                g_Src.model[1] = std::move(mModel);
+                g_Src.bmp[1] = std::move(mBmp);
             }
-            Game::logMsg("BM hands: Blue Shift guard bare hands %s%s", bsErr.empty() ? "loaded" : "NOT loaded, scientist hands: ",
-                bsErr.c_str());
+            Game::logMsg("BM hands: %s guard bare hands %s%s", mod->name, mErr.empty() ? "loaded" : "NOT loaded, scientist hands: ",
+                mErr.c_str());
         }
         return true;
     }

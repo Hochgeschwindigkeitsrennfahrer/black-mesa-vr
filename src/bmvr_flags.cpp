@@ -373,6 +373,7 @@ namespace bmvr
     float g_VrHandsBlackMesaScale = 0.8f;
     bool g_IsBlueShift = false;
     bool g_IsAzureSheep = false;
+    bool g_IsAzureSheepReborn = false;
     uint32_t g_FullFrameActualWidth = 0;
     uint32_t g_FullFrameActualHeight = 0;
     uint32_t g_GbActualWidth = 0;
@@ -1880,6 +1881,11 @@ namespace bmvr
         return g_IsAzureSheep;
     }
 
+    bool IsAzureSheepReborn()
+    {
+        return g_IsAzureSheepReborn;
+    }
+
     bool UseBlueHud()
     {
         return g_IsBlueShift || g_IsAzureSheep;
@@ -1902,6 +1908,7 @@ namespace bmvr
     {
         g_IsBlueShift = false;
         g_IsAzureSheep = false;
+        g_IsAzureSheepReborn = false;
         const wchar_t* p = GetCommandLineW();
         if (!p)
             return;
@@ -1946,6 +1953,13 @@ namespace bmvr
             {
                 g_IsAzureSheep = true;
                 Log("Azure Sheep session (-game asheep)");
+                return;
+            }
+            if (PathLeafEquals(tok, L"asheep_reborn"))
+            {
+                g_IsAzureSheep = true;
+                g_IsAzureSheepReborn = true;
+                Log("Azure Sheep: Reborn session (-game asheep_reborn)");
                 return;
             }
         }
