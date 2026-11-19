@@ -4446,6 +4446,16 @@ namespace
                             nr[i][j] = Rm[i][0] * rot[0][j] + Rm[i][1] * rot[1][j] + Rm[i][2] * rot[2][j];
                     std::memcpy(rot, nr, sizeof(rot));
                 }
+                // The top is ~5 units thick at the viewmodel scale, more than a
+                // fist closes round (user 2026-11-19: still hung below the
+                // hand): grip the top edge on the back-of-hand side, so the
+                // bag body hangs on the palm side (+right for the left hand).
+                if (edge >= 0)
+                {
+                    const int thick = 3 - axis - edge;
+                    const float side = rot[0][thick] * lr.x + rot[1][thick] * lr.y + rot[2][thick] * lr.z;
+                    top[thick] = side > 0.f ? kLo[thick] : kHi[thick];
+                }
                 // Top edge at the fingers' curl, raised bmvr_satchel_bag_depth
                 // (units at scale 1) further into the fist.
                 const float sc = std::sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]);
@@ -5806,6 +5816,8 @@ namespace
         // bmvr_shell_out = shell centre beyond the pinch point, fraction of
         // its length (0.3 = a fifth held). The well check uses the moved
         // centre. Without a drawn glove pinch: slid out of the fist instead.
+        Vector shellTip;
+        bool haveShellTip = false;
         if (def.tube)
         {
             Vector axis(m[0], m[4], m[8]);
@@ -5847,6 +5859,9 @@ namespace
                             m[i * 4 + j] = rot[i][j];
                 }
                 magAnchor = base + out * (bmvr::g_VrShellOut * 4.27f * vmScale);
+                // Leading end (away from the fingers): what goes into the port.
+                shellTip = magAnchor + out * (0.5f * 4.27f * vmScale);
+                haveShellTip = true;
             }
         }
         // Reload-clip hand pose (VrClipHandPose): the magazine where Black
@@ -6070,7 +6085,9 @@ namespace
         // magazine's frame in the hand and in the gun (shotgun / .357: 180 =
         // not checked).
         const float unitsPerM = vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f;
-        float dist = (magAnchor - well).Length();
+        // Shotgun: the shell's leading tip at the port (user 2026-11-19: held
+        // upright under the port it did not load; its centre was measured).
+        float dist = ((haveShellTip ? shellTip : magAnchor) - well).Length();
         // Glock: the seated magazine's centre is up inside the grip, inside
         // the right fist, so the left hand stopped 7-9 cm short below it
         // (log 2026-11-19, angle 12-22 deg). Below the well along the gun's
@@ -11240,6 +11257,13 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                         const DWORD nowMs = GetTickCount();
                         MagReload::g_SupportHandFromGunMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
                     }
+                    else if (!std::strstr(modelName, "v_satchel"))
+                    {
+                        // Let go: the glove comes back with the next glove
+                        // draw, not 150 ms later (user 2026-11-19: the left
+                        // hand vanished for a frame on release).
+                        MagReload::g_SupportHandFromGunMs.store(0, std::memory_order_relaxed);
+                    }
                 }
                     // Crowbar (scale 1) and grenade (x1.25): hand back to the
                     // gun hands' size (user 2026-11-18: grenade hand too big).
@@ -11271,7 +11295,14 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 ApplyGrenadePinBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                     needScale ? scale : 1.f);
                 if (gunRightHand)
-                    PublishGunWrists(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_KeepLeftHand && t_LeftHandCount > 0);
+                    PublishGunWrists(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, false);
+                else if (modelName && !std::strstr(modelName, "v_satchel"))
+                {
+                    // A viewmodel without the gun's own hands: no cap, no
+                    // hidden support glove from the last gun.
+                    MagReload::g_GunWristMs[1].store(0, std::memory_order_release);
+                    MagReload::g_SupportHandFromGunMs.store(0, std::memory_order_relaxed);
+                }
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);

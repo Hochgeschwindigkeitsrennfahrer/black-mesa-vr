@@ -366,7 +366,7 @@ namespace bmvr
     bool g_LadderHandWrap = true;
     float g_LadderGripCurl = 0.7f;
     float g_SatchelGripCurl = 0.75f;
-    float g_SatchelBagDepth = 0.5f;
+    float g_SatchelBagDepth = 1.5f;
     float g_GunHandCuff = 1.5f;
     bool g_TripmineFaceAim = true;
     bool g_GunHandCuffCap = true;

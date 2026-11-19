@@ -8066,15 +8066,16 @@ QAngle VR::GetAimAngles() const
         }
     }
     aim = GetRightControllerAbsAngle();
-    // Tripmine (bmvr_tripmine_face_aim): placed along the mine's sensor face,
-    // which points along the controller's up axis in the hand, so a mine held
-    // face to the wall is placed there (user 2026-11-19: only a controller
-    // pointed at the wall, mine face up, placed it).
+    // Tripmine (bmvr_tripmine_face_aim): placed out of the mine's back. Its
+    // sensor faces along the controller's up axis in the hand; held as it
+    // goes on the wall (back to the wall, sensor toward the player) it was
+    // not placed (user 2026-11-19: only a controller pointed at the wall,
+    // sensor up, placed it).
     if (bmvr::g_TripmineFaceAim && m_VmClass.numpadKey == "tripmine")
     {
         Vector cf, cr, cu;
         QAngle::AngleVectors(aim, &cf, &cr, &cu);
-        QAngle::VectorAngles(cu, cf * -1.f, aim);
+        QAngle::VectorAngles(cu * -1.f, cf, aim);
         if (aim.x > 180.f) aim.x -= 360.f;
         if (aim.x > 89.f) aim.x = 89.f;
         if (aim.x < -89.f) aim.x = -89.f;
@@ -15498,10 +15499,11 @@ namespace vm_numpad
             cm = 5.f;
         else if (key == "shotgun")
         {
-            // Was 15 cm, any angle: too eager (user 2026-11-19). The angle is
-            // the shell's axis against the tube.
-            cm = 6.f;
-            deg = 35.f;
+            // Was 15 cm from the shell's centre: too eager (user 2026-11-19).
+            // Now the shell's leading tip within 5 cm of the port, any angle
+            // (it goes in upright from below; along the tube was wrong).
+            cm = 5.f;
+            deg = 180.f;
         }
         else if (key == "357")
         {
@@ -19575,15 +19577,17 @@ bool VR::TakeHudPaintFor(int kind)
     // menu's desktop-sized background (user 2026-11-19: one frame of it
     // centred at window size on every pause). Drop the first
     // bmvr_pause_skip_paints of each pause; the menu shows a frame later.
-    if (kind == 0 && m_VrPhase == VrPhase::Pause)
+    // A menu that starts after 300 ms without a pause-menu paint counts as
+    // fresh, in any phase: its first paints often land before the pause
+    // phase is set (log 2026-11-19: only the first pause dropped any).
+    if (kind == 0)
     {
-        static unsigned s_pauseSince = 0;
+        static DWORD s_lastMenuPaint = 0;
         static int s_dropped = 0;
-        if (s_pauseSince != m_VrPhaseSinceMs)
-        {
-            s_pauseSince = m_VrPhaseSinceMs;
+        const DWORD nowMs = GetTickCount();
+        if (s_lastMenuPaint == 0 || nowMs - s_lastMenuPaint > 300)
             s_dropped = 0;
-        }
+        s_lastMenuPaint = nowMs;
         if (s_dropped < static_cast<int>(bmvr::g_PauseSkipPaints + 0.5f))
         {
             ++s_dropped;
@@ -19591,8 +19595,8 @@ bool VR::TakeHudPaintFor(int kind)
             m_HudOverlayHasImage = false;
             static int s_log;
             if (s_log++ < 8)
-                Game::logMsg("HUD layer: dropped pause-menu paint %d of a fresh pause (%lu ms in)", s_dropped,
-                    static_cast<unsigned long>(GetTickCount() - m_VrPhaseSinceMs));
+                Game::logMsg("HUD layer: dropped menu paint %d of a fresh menu (phase %d)", s_dropped,
+                    static_cast<int>(m_VrPhase));
             return false;
         }
     }
@@ -22479,7 +22483,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
         // Rounds left in the magazine go with it (VrMagDiscard); a round in
         // the MP5/glock chamber stays. The game's reload below then takes a
         // full magazine from the reserve.
-        if (bmvr::g_VrMagDiscard && m_Game && clip > 0 && reserve > 0)
+        // Not after a dry fire: the game's own reload has already filled its
+        // count from the reserve; those rounds are the next magazine (user
+        // 2026-11-19: every magazine cost double).
+        if (bmvr::g_VrMagDiscard && m_Game && clip > 0 && reserve > 0 && w.mag == kLoaded)
         {
             const int keep = (weapon != kWeaponCrossbow && w.mag == kLoaded && w.chambered) ? 1 : 0;
             if (clip > keep && m_Game->SetServerActiveWeaponClip(clip, keep))

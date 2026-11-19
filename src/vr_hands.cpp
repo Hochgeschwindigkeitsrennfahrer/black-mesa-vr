@@ -1332,11 +1332,13 @@ bool BmVrGloves::DrawForEye(
             continue;
         if (!valid[i])
             continue;
-        // The gun's own left hand is the support hand this frame.
+        // The gun's own left hand is the support hand this frame (not with
+        // empty hands: the right glove shows then and no gun is drawn).
         if (!rightHand)
         {
             const unsigned fromGun = MagReload::g_SupportHandFromGunMs.load(std::memory_order_relaxed);
-            if (fromGun != 0 && GetTickCount() - fromGun < 150)
+            const bool emptyHands = g_Game && g_Game->m_VR && g_Game->m_VR->WantsRightGloveVisible();
+            if (fromGun != 0 && GetTickCount() - fromGun < 150 && !emptyHands)
                 continue;
         }
 
@@ -1568,7 +1570,11 @@ bool BmVrGloves::DrawForEye(
     if (bmvr::g_GunHandCuffCap && pair == m_Impl->hev)
     {
         const DWORD now = GetTickCount();
-        for (int h = 0; h < 2; ++h)
+        // Right only: the left one (support-hand lock) sat off the hand and
+        // that cuff was not seen open (user 2026-11-19). Never with the
+        // right glove showing (switch to empty hands: the cap stayed a frame).
+        const bool rightGlove = g_Game && g_Game->m_VR && g_Game->m_VR->WantsRightGloveVisible();
+        for (int h = 1; h < 2 && !rightGlove; ++h)
         {
             const unsigned ms = MagReload::g_GunWristMs[h].load(std::memory_order_acquire);
             if (ms == 0 || now - ms > 100)
