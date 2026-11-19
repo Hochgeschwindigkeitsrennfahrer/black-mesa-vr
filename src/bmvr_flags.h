@@ -858,7 +858,9 @@ namespace bmvr
     // g_LadderGripCurl; off = the controller's angle and curls.
     extern bool g_LadderHandWrap;
     extern float g_LadderGripCurl;
+    extern float g_SatchelBagDepth; // satchel bag top this far into the fist (units at scale 1)
     extern float g_SatchelGripCurl; // left glove fist round the satchel bag top
+    extern float g_PauseSkipPaints; // pause-menu paints dropped at the start of each pause
     extern bool g_TripmineFaceAim; // tripmine placed along the mine face (controller up)
     extern float g_GunHandCuff; // gun's own right hand: forearm folds this far behind the wrist (units at scale 1)
     extern float g_VrRecoilScale;

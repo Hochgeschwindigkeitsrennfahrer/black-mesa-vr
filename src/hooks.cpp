@@ -4367,8 +4367,67 @@ namespace
             for (int k = 0; k < 3; ++k)
                 top[k] = 0.5f * (kLo[k] + kHi[k]);
             top[axis] = best >= 0.f ? kHi[axis] : kLo[axis];
-            // Bone origin so that rot * top + origin = fist.
-            const float t[3] = { fist.x, fist.y, fist.z };
+            // In the fist (user 2026-11-19: the closed fist sat above the
+            // bag's corner): the top edge lies in the curl of the fingers
+            // (glove fist tunnel), turned about the bag's up axis so its long
+            // top edge runs along the knuckle line, a little into the fist.
+            Vector hold = fist;
+            if (const unsigned tunMs = MagReload::g_LeftTunnelMs.load(std::memory_order_relaxed);
+                tunMs != 0 && now - tunMs < 500)
+            {
+                float T[6];
+                for (int k = 0; k < 6; ++k)
+                    T[k] = MagReload::g_LeftTunnelLocal[k].load(std::memory_order_relaxed);
+                hold = lp + lf * T[0] + lr * T[1] + lu * T[2];
+                Vector knuckle = lf * T[3] + lr * T[4] + lu * T[5];
+                // Bag up (world) and its long top edge: the bigger of the two other axes.
+                Vector up(rot[0][axis], rot[1][axis], rot[2][axis]);
+                if (best < 0.f)
+                    up = up * -1.f;
+                const float upLen = VectorNormalize(up);
+                int edge = -1;
+                float edgeLen = 0.f;
+                for (int k = 0; k < 3; ++k)
+                    if (k != axis && kHi[k] - kLo[k] > edgeLen)
+                    {
+                        edgeLen = kHi[k] - kLo[k];
+                        edge = k;
+                    }
+                knuckle = knuckle - up * knuckle.Dot(up);
+                Vector e(rot[0][edge], rot[1][edge], rot[2][edge]);
+                e = e - up * e.Dot(up);
+                if (upLen > 1e-4f && edge >= 0 && VectorNormalize(knuckle) > 1e-3f && VectorNormalize(e) > 1e-3f)
+                {
+                    // Smallest turn about up taking the edge onto the knuckle line (either way round).
+                    if (e.Dot(knuckle) < 0.f)
+                        knuckle = knuckle * -1.f;
+                    const float c = std::clamp(e.Dot(knuckle), -1.f, 1.f);
+                    const float s = CrossProduct(e, knuckle).Dot(up);
+                    const float ang = std::atan2(s, c);
+                    const float ca = std::cos(ang), sa = std::sin(ang);
+                    const float K[3] = { up.x, up.y, up.z };
+                    float Rm[3][3];
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                        {
+                            const float cross = (i == 0 ? (j == 1 ? -K[2] : j == 2 ? K[1] : 0.f)
+                                : i == 1 ? (j == 0 ? K[2] : j == 2 ? -K[0] : 0.f)
+                                         : (j == 0 ? -K[1] : j == 1 ? K[0] : 0.f));
+                            Rm[i][j] = (i == j ? ca : 0.f) + sa * cross + (1.f - ca) * K[i] * K[j];
+                        }
+                    float nr[3][3];
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                            nr[i][j] = Rm[i][0] * rot[0][j] + Rm[i][1] * rot[1][j] + Rm[i][2] * rot[2][j];
+                    std::memcpy(rot, nr, sizeof(rot));
+                }
+                // Top edge at the fingers' curl, raised bmvr_satchel_bag_depth
+                // (units at scale 1) further into the fist.
+                const float sc = std::sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]);
+                hold = hold + up * (bmvr::g_SatchelBagDepth * (sc > 0.05f ? sc : 1.f));
+            }
+            // Bone origin so that rot * top + origin = the hold point.
+            const float t[3] = { hold.x, hold.y, hold.z };
             for (int r = 0; r < 3; ++r)
             {
                 for (int col = 0; col < 3; ++col)

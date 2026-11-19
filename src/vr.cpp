@@ -19571,6 +19571,31 @@ bool VR::TakeHudPaintFor(int kind)
     }
     if (!m_HudPaintedThisFrame.load(std::memory_order_acquire))
         return false;
+    // Fresh pause: the first pause-menu paint(s) still carry the flat
+    // menu's desktop-sized background (user 2026-11-19: one frame of it
+    // centred at window size on every pause). Drop the first
+    // bmvr_pause_skip_paints of each pause; the menu shows a frame later.
+    if (kind == 0 && m_VrPhase == VrPhase::Pause)
+    {
+        static unsigned s_pauseSince = 0;
+        static int s_dropped = 0;
+        if (s_pauseSince != m_VrPhaseSinceMs)
+        {
+            s_pauseSince = m_VrPhaseSinceMs;
+            s_dropped = 0;
+        }
+        if (s_dropped < static_cast<int>(bmvr::g_PauseSkipPaints + 0.5f))
+        {
+            ++s_dropped;
+            m_HudPaintedThisFrame.store(false, std::memory_order_release);
+            m_HudOverlayHasImage = false;
+            static int s_log;
+            if (s_log++ < 8)
+                Game::logMsg("HUD layer: dropped pause-menu paint %d of a fresh pause (%lu ms in)", s_dropped,
+                    static_cast<unsigned long>(GetTickCount() - m_VrPhaseSinceMs));
+            return false;
+        }
+    }
     m_HudPaintedThisFrame.store(false, std::memory_order_release);
     const int painted = m_HudPaintedKind.load(std::memory_order_relaxed);
     if (painted != kind)
