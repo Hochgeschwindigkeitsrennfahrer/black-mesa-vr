@@ -809,6 +809,8 @@ namespace bmvr
     extern bool g_VrClipHandSnap;
     // RPG rocket in Black Mesa's reload grip (across the palm, like a rod in a fist).
     extern bool g_VrClipHandRpg;
+    // Test: that rocket turned 180 deg about the controller's forward axis (out of the pinky side).
+    extern bool g_VrClipHandRpgFlip;
     // Manual reloads: rounds left in an ejected magazine / an opened .357
     // cylinder are lost (not topped up again); a chambered MP5/glock round
     // stays. Only while there is reserve ammo (user, 2026-11-18).

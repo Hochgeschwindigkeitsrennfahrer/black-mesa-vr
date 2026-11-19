@@ -5689,6 +5689,22 @@ namespace
                 v.y = grasp[1] * unit + (centre[1] - grasp[1]) * vmScale;
                 v.z = grasp[2] * unit + (centre[2] - grasp[2]) * vmScale;
                 magAnchor = wo + ax[0] * v.x + ax[1] * v.y + ax[2] * v.z;
+                // Test (VrClipHandRpgFlip): the rocket turned 180 deg about the
+                // controller's forward axis through the palm point, so it
+                // comes out of the other side of the fist.
+                if (want == ClipHandPose::kRpgRocket && bmvr::g_VrClipHandRpgFlip)
+                {
+                    const Vector g = wo + (ax[0] * grasp[0] + ax[1] * grasp[1] + ax[2] * grasp[2]) * unit;
+                    auto flip = [&](const Vector& q) { return hf * (2.f * q.Dot(hf)) - q; };
+                    magAnchor = g + flip(magAnchor - g);
+                    for (int j = 0; j < 3; ++j)
+                    {
+                        const Vector col = flip(Vector(m[0 * 4 + j], m[1 * 4 + j], m[2 * 4 + j]));
+                        m[0 * 4 + j] = col.x;
+                        m[1 * 4 + j] = col.y;
+                        m[2 * 4 + j] = col.z;
+                    }
+                }
                 static thread_local DWORD s_clipLogMs = 0;
                 if (now - s_clipLogMs > 2000)
                 {

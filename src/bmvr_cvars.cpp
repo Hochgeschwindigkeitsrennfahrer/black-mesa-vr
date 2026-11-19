@@ -154,6 +154,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrClipHandSnap, nullptr },
             { "bmvr_clip_hand_rpg", "VR: the RPG rocket in the hand takes Black Mesa's reload grip (across the palm; load with the controller handle toward the tube)",
               Kind::Bool, 0.f, 1.f, &g_VrClipHandRpg, nullptr },
+            { "bmvr_clip_hand_rpg_flip", "VR test: the RPG rocket in the reload grip turned 180 deg (out of the pinky side of the fist)",
+              Kind::Bool, 0.f, 1.f, &g_VrClipHandRpgFlip, nullptr },
             { "bmvr_dump_hand_pose", "VR debug: with bmvr_debug_vm_seq, keep the gun's own left hand and log it relative to the magazine/bolt",
               Kind::Bool, 0.f, 1.f, &g_DebugDumpHandPose, nullptr },
             { "bmvr_rpg_rocket_fix", "VR fix: the RPG shows its rocket whenever it is loaded (Black Mesa loses it on a save load or a cut-off reload/pickup clip)",
