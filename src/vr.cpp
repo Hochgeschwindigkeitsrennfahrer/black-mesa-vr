@@ -8370,6 +8370,9 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     constexpr float kRungPropNearHu = 48.f;
     bool touch[2]{};
     bool lineTouch[2]{};
+    // Last time on / climbing / mounting a ladder (set below, read next tick).
+    static ULONGLONG s_lastOnLadderMs = 0;
+    const bool recentLadder = s_lastOnLadderMs != 0 && GetTickCount64() - s_lastOnLadderMs < 3000;
     for (int h = 0; h < 2; ++h)
     {
         float d = 0.f, yaw = 0.f;
@@ -8399,7 +8402,12 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
                 || (h != gunHand && m_SupportNearGun.load(std::memory_order_acquire)));
         if (blocked)
             touch[h] = lineTouch[h] = false;
-        m_LadderTouch[h].store(touch[h], std::memory_order_release);
+        // Flashlight guard: for 3 s after being on a ladder a grip within the
+        // old line reach (36 u) is a missed ladder grab, not the flashlight
+        // (user 2026-11-19: re-grabs 26-37 u from the rung after letting go
+        // toggled it). Not for grabbing; standing at a ladder otherwise
+        // keeps the flashlight grip.
+        m_LadderTouch[h].store(touch[h] || (recentLadder && lineTouch[h]), std::memory_order_release);
     }
     // Grips on a ladder are ladder grabs, not the mapped action
     // (flashlight): on it, climbing, mounting, and for a moment after
@@ -8410,7 +8418,10 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         static ULONGLONG s_activeUntil = 0;
         const ULONGLONG tNow = GetTickCount64();
         if (onLadder || s_climbHand >= 0 || s_mountUntil != 0)
+        {
             s_activeUntil = tNow + 500;
+            s_lastOnLadderMs = tNow;
+        }
         m_LadderActive.store(tNow < s_activeUntil, std::memory_order_release);
     }
 
