@@ -6019,11 +6019,34 @@ namespace
                 // away from the palm centre past the curl (bmvr_rpg_fist_out, cm).
                 Vector outOfPalm = tunnel - fistCentre;
                 outOfPalm = outOfPalm - knuckle * outOfPalm.Dot(knuckle);
+                const float ucm = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f;
                 if (VectorNormalize(outOfPalm) > 1e-3f)
-                {
-                    const float ucm = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f;
                     magAnchor = magAnchor + outOfPalm * (bmvr::g_RpgFistOutCm * ucm);
-                }
+                // Hand tuning (DEBUG "RPG ROCKET IN THE HAND"): turned about the
+                // left controller's right / forward / up axes round the grip
+                // (curl centre), then moved forward / up / side (cm).
+                auto rotateRocket = [&](const Vector& axis, float deg) {
+                    if (deg == 0.f)
+                        return;
+                    const float a = deg * (3.14159265f / 180.f);
+                    const float ca = std::cos(a), sa = std::sin(a);
+                    auto rv = [&](const Vector& v) {
+                        return v * ca + CrossProduct(axis, v) * sa + axis * (axis.Dot(v) * (1.f - ca));
+                    };
+                    for (int j = 0; j < 3; ++j)
+                    {
+                        const Vector col = rv(Vector(m[0 * 4 + j], m[1 * 4 + j], m[2 * 4 + j]));
+                        m[0 * 4 + j] = col.x;
+                        m[1 * 4 + j] = col.y;
+                        m[2 * 4 + j] = col.z;
+                    }
+                    magAnchor = tunnel + rv(magAnchor - tunnel);
+                };
+                rotateRocket(hr, bmvr::g_RpgHandTurn);
+                rotateRocket(hf, bmvr::g_RpgHandRoll);
+                rotateRocket(hu, bmvr::g_RpgHandSpin);
+                magAnchor = magAnchor + hf * (bmvr::g_RpgHandFwdCm * ucm) + hu * (bmvr::g_RpgHandUpCm * ucm)
+                    + hr * (bmvr::g_RpgHandSideCm * ucm);
                 static thread_local DWORD s_fistLogMs = 0;
                 if (now - s_fistLogMs > 2000)
                 {

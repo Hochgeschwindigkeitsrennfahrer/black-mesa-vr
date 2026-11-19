@@ -862,7 +862,8 @@ namespace bmvr
     // (out toward the player / up, cm; curl), saved in VR/ladder_grip.txt.
     extern float g_LadderTuneOutCm, g_LadderTuneUpCm, g_LadderTuneCurl;
     extern float g_SatchelBagDepth;
-    extern float g_RpgFistCurl, g_RpgFistOutCm; // RPG rocket in the left hand: finger curl, rocket out of the palm (cm)
+    extern float g_RpgFistCurl, g_RpgFistOutCm;
+    extern float g_RpgHandTurn, g_RpgHandRoll, g_RpgHandSpin, g_RpgHandFwdCm, g_RpgHandUpCm, g_RpgHandSideCm; // RPG rocket in the left hand: finger curl, rocket out of the palm (cm)
     extern float g_SatchelBagTurn, g_SatchelBagInCm, g_SatchelBagUpCm; // satchel bag hand tuning
     extern float g_SatchelBagRoll, g_SatchelBagSpin, g_SatchelBagSideCm; // satchel bag top this far into the fist (units at scale 1)
     extern float g_SatchelGripCurl; // left glove fist round the satchel bag top

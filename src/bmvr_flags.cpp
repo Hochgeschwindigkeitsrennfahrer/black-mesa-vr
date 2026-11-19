@@ -369,6 +369,7 @@ namespace bmvr
     float g_SatchelGripCurl = 0.75f;
     float g_SatchelBagDepth = 1.5f;
     float g_RpgFistCurl = 0.45f, g_RpgFistOutCm = 2.f;
+    float g_RpgHandTurn = 0.f, g_RpgHandRoll = 0.f, g_RpgHandSpin = 0.f, g_RpgHandFwdCm = 0.f, g_RpgHandUpCm = 0.f, g_RpgHandSideCm = 0.f;
     // User's tuning in the headset 2026-11-19: turn 0, roll 0, spin 90, in -3.5, up 13.5, side 14.5.
     float g_SatchelBagTurn = 0.f, g_SatchelBagInCm = -3.5f, g_SatchelBagUpCm = 13.5f;
     float g_SatchelBagRoll = 0.f, g_SatchelBagSpin = 90.f, g_SatchelBagSideCm = 14.5f;
