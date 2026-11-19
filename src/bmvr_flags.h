@@ -332,7 +332,10 @@ namespace bmvr
     extern float g_DebugBlankEye;        // VR panel debug row: 1 = blank the left eye, 2 = the right (not saved)
     extern bool g_PauseMenuColourFromFrame; // pause-menu layer colour from the presented desktop frame (VR repaint stacks windows wrongly)
     extern float g_PauseMenuAlphaPasses; // pause-menu layer: N passes of a -> a + a(1-a), i.e. 1-(1-a)^(2^N); 0 = off
-    extern bool g_FlashlightLeftHand;    // flashlight from the left hand (along the gun while two-handed)
+    // Flashlight from (FlashlightFrom): 0 = right (gun) hand (default), 1 = left hand (along the
+    // gun while two-handed), 2 = head (the light follows the view, as in the flat game).
+    // The old FlashlightLeftHand=true maps to 1.
+    extern float g_FlashlightFrom;
     extern bool g_FlashlightOnSquare;    // left Square toggles the flashlight (replaces previous weapon)
     extern float g_FrameCapMode;         // fps_max: 0 = game's own, 1 = headset rate + 10, 2 = 2x headset rate
     extern bool g_VrHandThrow;           // frag leaves the hand at the hand's speed (Lambda1VR-style throw)
@@ -830,6 +833,9 @@ namespace bmvr
     // Physical ladders: glove this far (units) in front of the rung it holds.
     extern float g_LadderHandBack;
     extern float g_VrRecoilScale;
+    // Kick with the second hand on the gun, as a share of the one-handed kick (default 0.3;
+    // pistols use x5/3 of it, capped at 1).
+    extern float g_VrRecoilTwoHand;
     // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
     extern bool g_RpgRocketShown;
     extern float g_DebugVmSeq, g_DebugVmCycle; // debug: hold the viewmodel on a sequence/cycle (-1 = off)

@@ -6741,7 +6741,9 @@ void VR::UpdateVrRecoil()
             twoHand = m_TwoHandActive;
             pistolGrip = m_VmClass.offhandPistol;
         }
-        const float hands = twoHand ? (pistolGrip ? 0.5f : 0.3f) : 1.f;
+        // Second hand on the gun: VrRecoilTwoHand of the kick (pistols x5/3).
+        const float two = std::clamp(bmvr::g_VrRecoilTwoHand, 0.f, 1.f);
+        const float hands = twoHand ? (pistolGrip ? (std::min)(1.f, two * 5.f / 3.f) : two) : 1.f;
         const int shots = (std::min)(m_RecoilClip - clip, 3);
         const float add = perShot * static_cast<float>(shots) * hands * bmvr::g_VrRecoilScale;
         kick = (std::min)(kick + add, 15.f);
@@ -21350,7 +21352,7 @@ void VR::ReloadHaptic(ReloadFeel feel)
 
 bool VR::SatchelHandsActive() const
 {
-    return bmvr::PhysicalWeapon(bmvr::g_VrSatchelHands) && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
+    return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
 }
 
 void VR::UpdateSnarkThrow(uint32_t& buttons)

@@ -458,7 +458,7 @@ namespace
     // the MP5 charging handle, the glock slide and the grenade pin ring.
     bool LeftGlovePinch()
     {
-        if (!bmvr::PhysicalWeapon(bmvr::g_VrStockHandPose) || bmvr::g_LeftHanded)
+        if (!bmvr::g_VrStockHandPose || bmvr::g_LeftHanded)
             return false;
         if (bmvr::g_VrPinchForce)
             return true;
@@ -1181,7 +1181,7 @@ bool BmVrGloves::DrawForEye(
                 gmanThumb = 0.f;
             }
             float stockRel[15][12];
-            const bool stockPose = !pinch && !rightHand && gripCurl && bmvr::PhysicalWeapon(bmvr::g_VrStockHandPose)
+            const bool stockPose = !pinch && !rightHand && gripCurl && bmvr::g_VrStockHandPose
                 && g_Game->m_VR->GetStockOffhandFingers(stockRel)
                 && BuildStockPosePalette(hand.asset, hand.rig, stockRel, hand.palette);
             {

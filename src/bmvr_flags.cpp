@@ -136,7 +136,8 @@ namespace bmvr
     bool g_VrShootFromMuzzle = true;
     bool g_TwoHandHoldWhileGrip = true;
     bool g_TwoHandGripToggle = false;
-    bool g_FlashlightLeftHand = false;
+    float g_FlashlightFrom = 0.f;
+    static bool g_FlashlightFromSeen = false;
     bool g_FlashlightOnSquare = false;
     float g_PauseMenuAlphaPasses = 3.f;
     bool g_PauseMenuColourFromFrame = true;
@@ -356,6 +357,7 @@ namespace bmvr
     bool g_LadderStickClimb = false;
     float g_LadderHandBack = 3.f;
     float g_VrRecoilScale = 1.f;
+    float g_VrRecoilTwoHand = 0.3f;
     bool g_RpgRocketShown = true;
     float g_DebugVmSeq = -1.f;
     float g_DebugVmCycle = 0.f;
@@ -869,7 +871,20 @@ namespace bmvr
             else if (std::strcmp(n, "PauseMenuAlphaPasses") == 0)
                 g_PauseMenuAlphaPasses = static_cast<float>(atof(val));
             else if (std::strcmp(n, "FlashlightLeftHand") == 0)
-                g_FlashlightLeftHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            {
+                // Old switch: true = left hand, unless FlashlightFrom is set too.
+                if (!g_FlashlightFromSeen && (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0))
+                    g_FlashlightFrom = 1.f;
+            }
+            else if (std::strcmp(n, "FlashlightFrom") == 0)
+            {
+                const int v = atoi(val);
+                if (v >= 0 && v <= 2)
+                {
+                    g_FlashlightFrom = static_cast<float>(v);
+                    g_FlashlightFromSeen = true;
+                }
+            }
             else if (std::strcmp(n, "FlashlightOnSquare") == 0)
             {
                 g_FlashlightOnSquare = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
@@ -1194,6 +1209,12 @@ namespace bmvr
                 const float v = static_cast<float>(atof(val));
                 if (v >= 0.25f && v <= 3.f)
                     g_VrRecoilScale = v;
+            }
+            else if (std::strcmp(n, "VrRecoilTwoHand") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 0.f && v <= 1.f)
+                    g_VrRecoilTwoHand = v;
             }
             else if (std::strcmp(n, "PhysicalWeapons") == 0)
                 g_PhysicalWeapons = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
@@ -2085,6 +2106,25 @@ namespace bmvr
         DetectCampaignSession();
         CapturePanelDefaults();   // before config.txt: the panel saves only values that differ
         ReadUserConfig(ExeDir() + L"\\VR\\config.txt");
+        // Panel rows removed in the 2026-11-19 review: their values are fixed
+        // at the defaults, whatever an older config.txt still says.
+        g_PhysicalLadderSmooth = true;
+        g_VrHandsGunGripRight = 1.2f;
+        g_VrHandsGunGripUp = 0.f;
+        g_VrHandsGunGripForward = 0.f;
+        g_VrGmanGesture = true;
+        g_VrMagReload = true;            // manual reloads = the Physical weapons switch itself
+        g_VrStockHandPose = true;        // support hand pose + lock and satchel hands:
+        g_VrSupportHandLock = true;      // always on, beta switch or not
+        g_VrSatchelHands = true;
+        g_ScopeFollowsGun = true;
+        g_ScopeRaiseToZoom = true;
+        g_FxaaApply = true;              // stock FXAA = the "Stock" preset
+        g_ParticleLevel = true;
+        g_SpriteLevel = true;
+        g_ScopeMonoZoom = true;
+        g_VrHandLightRaw = false;
+        g_TitleLevel = true;
         // Old switches that picked button defaults become mappings, once
         // (user, 2026-11-18: one place to change a button). Kept while the
         // fixed layout is in use (ButtonMapping=false), which still reads them.

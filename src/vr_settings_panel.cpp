@@ -54,6 +54,8 @@ namespace
 
     // Panel copies of engine cvars (rows with a "cvar:" key).
     bool g_EngSvCheats = false;
+    // mat_fxaa_enabled (the game's video-settings FXAA), read while the panel is open.
+    bool g_FxaaVideoOn = true;
     bool g_EngOcclusion = true;
     bool g_EngOccTracker = true;
     bool g_EngOccTrackerShadow = true;
@@ -127,7 +129,6 @@ namespace
             // Off = stick ladders as in the stable release; the rows below only act while it is on.
             { "LADDERS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Physical ladders (beta)", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
-            { "Smooth hand climbing", RowKind::Toggle, "PhysicalLadderSmooth", &bmvr::g_PhysicalLadderSmooth, nullptr, 0, 0, 0, nullptr },
             { "Ladder distance follows arms", RowKind::Toggle, "LadderBodyFollowsArms", &bmvr::g_LadderBodyFollowsArms, nullptr, 0, 0, 0, nullptr },
             { "Gun hand on ladders", RowKind::Choice, "LadderGunHand", nullptr, &bmvr::g_LadderGunHand, 1.f, 0.f, 2.f, "Holster + draw again|Needs empty hand|Holster only" },
             { "Hand distance from rung", RowKind::Number, "LadderHandBack", nullptr, &bmvr::g_LadderHandBack, 0.5f, 0.f, 10.f, "%.1f" },
@@ -140,14 +141,14 @@ namespace
             { "Right hip takes", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureWeaponHipRight, 1.f, 0.f, 10.f, "Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Left hip takes", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureWeaponHipLeft, 1.f, 0.f, 10.f, "Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Flashlight in left hand", RowKind::Toggle, "FlashlightLeftHand", &bmvr::g_FlashlightLeftHand, nullptr, 0, 0, 0, nullptr },
+            { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter view", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
             { "Near clip (7 = game)", RowKind::Number, "VrNearZ", nullptr, &bmvr::g_VrNearZ, 0.5f, 1.f, 7.f, "%.1f" },
             { "MENUS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Weapon menu faces the eye", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
+            { "Weapon menu tilt", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
             { "Game menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
             { "Game menu size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
             { "Game menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
@@ -158,6 +159,56 @@ namespace
             // Glow fades and other effects run on game time: with the game
             // paused a change only shows after the panel closes.
             { "Panel pauses the game", RowKind::Toggle, "VrSettingsPause", &bmvr::g_VrSettingsPause, nullptr, 0, 0, 0, nullptr },
+            { "HANDS & WEAPONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
+            { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
+            { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
+            { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Gloves are always built from the installed game's own first-person arms.
+            { "Hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
+            { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
+            // The original release's look: flat gloves, HUD on the back of the hand.
+            { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
+            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
+            // Off = the stable release's reloads; the rows below only act while it is on (manual
+            // mag/shell/RPG reloads always, snarks thrown from the hand too). The support hand's
+            // finger pose + lock and the satchel hands are always on (user 2026-11-19).
+            { "PHYSICAL WEAPONS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Physical weapons (beta)", RowKind::Toggle, "PhysicalWeapons", &bmvr::g_PhysicalWeapons, nullptr, 0, 0, 0, nullptr },
+            { "Grenade pin by hand", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
+            { "Ejected rounds are lost", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
+            { "Reload hints", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
+            { "Recoil", RowKind::Toggle, "VrRecoil", &bmvr::g_VrRecoil, nullptr, 0, 0, 0, nullptr },
+            { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
+            // Kick with the second hand on the gun, as a share of one-handed (pistols x5/3, capped at 1).
+            { "Recoil with two hands", RowKind::Number, "VrRecoilTwoHand", nullptr, &bmvr::g_VrRecoilTwoHand, 0.05f, 0.f, 1.f, "%.2f" },
+            { "HUD POSITION", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "HUD size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
+            { "Up from the hand", RowKind::Number, "HandHudUp", nullptr, &bmvr::g_HandHudUp, 0.25f, -4.f, 8.f, "%+.2f" },
+            { "Forward (- = to the wrist)", RowKind::Number, "HandHudForward", nullptr, &bmvr::g_HandHudForward, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Sideways (+ = left)", RowKind::Number, "HandHudSide", nullptr, &bmvr::g_HandHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
+            { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
+            { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
+            // Resets the HANDS and HUD POSITION rows above (also turns classic hands off).
+            { "Reset hands + HUD position", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
+            { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
+            { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
+            { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
+            { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
+            { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
+            { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
+            { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
+            { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Raise distance", RowKind::Number, "ScopeRaiseMeters", nullptr, &bmvr::g_ScopeRaiseMeters, 0.02f, 0.1f, 0.6f, "%.2f m" },
+            { "Zoom smoothing", RowKind::Number, "ScopeGunSmoothSec", nullptr, &bmvr::g_ScopeGunSmoothSec, 0.02f, 0.f, 0.5f, "%.2f s" },
+            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
+            { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
+            { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
+            { "MOUNTED GUNS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Turn per hand move", RowKind::Number, "MountedGunGain", nullptr, &bmvr::g_MountedGunGain, 0.25f, 0.5f, 4.f, "%.2fx" },
             { "CONTROLS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Left column = left controller, right column = right controller. Headings name
             // the detected controller; button names follow it (A/B, Cross/Circle).
@@ -201,63 +252,6 @@ namespace
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickup" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickdown" },
             { "Stick sideways", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixedR:Turn" },
-            { "HANDS & WEAPONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
-            { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
-            { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
-            { "HANDS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            // Gloves are always built from the installed game's own first-person arms.
-            { "Hand size", RowKind::Number, "VrHandsBlackMesaScale", nullptr, &bmvr::g_VrHandsBlackMesaScale, 0.05f, 0.4f, 1.5f, "%.2f" },
-            { "Gun's own right hand", RowKind::Toggle, "VrGunRightHand", &bmvr::g_VrGunRightHand, nullptr, 0, 0, 0, nullptr },
-            // The original release's look: flat gloves, HUD on the back of the hand.
-            { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
-            { "Hand roll (thumb up)", RowKind::Number, "VrHandsRollDeg", nullptr, &bmvr::g_VrHandsRollDeg, 5.f, -135.f, 135.f, "%+.0f\xB0" },
-            { "Hand on gun: right", RowKind::Number, "VrHandsGunGripRight", nullptr, &bmvr::g_VrHandsGunGripRight, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Hand on gun: up", RowKind::Number, "VrHandsGunGripUp", nullptr, &bmvr::g_VrHandsGunGripUp, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Hand on gun: forward", RowKind::Number, "VrHandsGunGripForward", nullptr, &bmvr::g_VrHandsGunGripForward, 0.25f, -12.f, 12.f, "%+.2f" },
-            { "G-Man gesture", RowKind::Toggle, "VrGmanGesture", &bmvr::g_VrGmanGesture, nullptr, 0, 0, 0, nullptr },
-            // Off = the stable release's reloads and hand poses; the rows below only act while it is on
-            // (snarks thrown from the hand too).
-            { "PHYSICAL WEAPONS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Physical weapons (beta)", RowKind::Toggle, "PhysicalWeapons", &bmvr::g_PhysicalWeapons, nullptr, 0, 0, 0, nullptr },
-            { "Manual reloads (mags, shells, RPG)", RowKind::Toggle, "VrMagReload", &bmvr::g_VrMagReload, nullptr, 0, 0, 0, nullptr },
-            { "Grenade pin by hand", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
-            { "Ejected rounds are lost", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
-            { "Reload hints", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
-            { "Support hand finger pose", RowKind::Toggle, "VrStockHandPose", &bmvr::g_VrStockHandPose, nullptr, 0, 0, 0, nullptr },
-            { "Support hand locks to the gun", RowKind::Toggle, "VrSupportHandLock", &bmvr::g_VrSupportHandLock, nullptr, 0, 0, 0, nullptr },
-            { "Satchel: bag left, detonator right", RowKind::Toggle, "VrSatchelHands", &bmvr::g_VrSatchelHands, nullptr, 0, 0, 0, nullptr },
-            { "Recoil (less with two hands)", RowKind::Toggle, "VrRecoil", &bmvr::g_VrRecoil, nullptr, 0, 0, 0, nullptr },
-            { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
-            { "HUD POSITION", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "HUD size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
-            { "Up from the hand", RowKind::Number, "HandHudUp", nullptr, &bmvr::g_HandHudUp, 0.25f, -4.f, 8.f, "%+.2f" },
-            { "Forward (- = to the wrist)", RowKind::Number, "HandHudForward", nullptr, &bmvr::g_HandHudForward, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Sideways (+ = left)", RowKind::Number, "HandHudSide", nullptr, &bmvr::g_HandHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
-            { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
-            { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
-            // Resets the HANDS and HUD POSITION rows above (also turns classic hands off).
-            { "Reset hands + HUD position", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
-            { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
-            { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
-            { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
-            { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
-            { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
-            { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
-            { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
-            { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Zoom follows the gun", RowKind::Toggle, "ScopeFollowsGun", &bmvr::g_ScopeFollowsGun, nullptr, 0, 0, 0, nullptr },
-            { "Raise to face zooms (2 hands)", RowKind::Toggle, "ScopeRaiseToZoom", &bmvr::g_ScopeRaiseToZoom, nullptr, 0, 0, 0, nullptr },
-            { "Raise distance", RowKind::Number, "ScopeRaiseMeters", nullptr, &bmvr::g_ScopeRaiseMeters, 0.02f, 0.1f, 0.6f, "%.2f m" },
-            { "Zoom smoothing", RowKind::Number, "ScopeGunSmoothSec", nullptr, &bmvr::g_ScopeGunSmoothSec, 0.02f, 0.f, 0.5f, "%.2f s" },
-            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
-            { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
-            { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
-            { "MOUNTED GUNS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Turn per hand move", RowKind::Number, "MountedGunGain", nullptr, &bmvr::g_MountedGunGain, 0.25f, 0.5f, 4.f, "%.2fx" },
             { "GRAPHICS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "PERFORMANCE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Frame cap", RowKind::Choice, "FrameCap", nullptr, &bmvr::g_FrameCapMode, 1.f, 0.f, 2.f, "Off|Headset +10|2x headset" },
@@ -278,7 +272,6 @@ namespace
             // glass keep MSAA; the gun loses it only while particles are in view.
             { "MSAA skips particles", RowKind::Toggle, "MsaaParticles1x", &bmvr::g_MsaaParticles1x, nullptr, 0, 0, 0, nullptr },
             { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Use these settings", RowKind::Toggle, "FxaaApply", &bmvr::g_FxaaApply, nullptr, 0, 0, 0, nullptr },
             // Sets the three values below; "Custom" when they match no preset.
             { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa" },
             { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
@@ -289,15 +282,12 @@ namespace
             { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "envmap" },
             { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
             { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
-            // Left column: performance, anti-aliasing, reflections (user 2026-11-19).
-            { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "IMAGE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
             // Mip LOD bias in the 3D views (experimental): + = softer textures;
             // foliage and fences look more solid, at the cost of detail. Does
             // not fix the shimmering sand outdoors. Menus and the HUD stay sharp.
             { "Texture calm (LOD bias)", RowKind::Number, "LodBias", nullptr, &bmvr::g_LodBias, 0.25f, -0.5f, 2.f, "%+.2f" },
-            { "Smoke stays upright", RowKind::Toggle, "ParticleLevel", &bmvr::g_ParticleLevel, nullptr, 0, 0, 0, nullptr },
             { "LENS FLARES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Fade out at angle", RowKind::Number, "FlareFadeAngle", nullptr, &bmvr::g_FlareFadeAngle, 5.f, 0.f, 90.f, "%.0f\xB0" },
             { "Strength on the light", RowKind::Number, "FlareLightScale", nullptr, &bmvr::g_FlareLightScale, 0.05f, 0.f, 1.f, "%.2f" },
@@ -306,7 +296,6 @@ namespace
             { "Ghosts away from light", RowKind::Number, "FlareGhostScale", nullptr, &bmvr::g_FlareGhostScale, 0.05f, 0.f, 1.f, "%.2f" },
             { "Reset flare values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "flare_default" },
             { "LIGHT GLOWS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Glows level, face you", RowKind::Toggle, "SpriteLevel", &bmvr::g_SpriteLevel, nullptr, 0, 0, 0, nullptr },
             { "Glow smoothing", RowKind::Number, "GlowSmooth", nullptr, &bmvr::g_GlowSmooth, 0.05f, 0.f, 0.5f, "%.2f s" },
             { "Dark when hidden after", RowKind::Number, "GlowHideMs", nullptr, &bmvr::g_GlowHideMs, 10.f, 0.f, 500.f, "%.0f ms" },
             { "Reset glow values", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_default" },
@@ -335,7 +324,6 @@ namespace
             { "LOGS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Lens flare positions per eye into the log; switch on when a flare sits in the wrong place.
             { "Flare position log", RowKind::Toggle, nullptr, &bmvr::g_FlareLog, nullptr, 0, 0, 0, nullptr },
-            { "Glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
             { "VIEW TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Freeze head pose", RowKind::Toggle, nullptr, &bmvr::g_FreezeHead, nullptr, 0, 0, 0, nullptr },
             // Skips Black Mesa's Xen fog (Xog) draws by material: global = __gbxog0,
@@ -344,8 +332,6 @@ namespace
             { "Blank eye", RowKind::Choice, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "Off|Left|Right" },
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Zoom: same image in both eyes", RowKind::Toggle, "ScopeMonoZoom", &bmvr::g_ScopeMonoZoom, nullptr, 0, 0, 0, nullptr },
-            { "Hands: raw palm light (no lift)", RowKind::Toggle, "VrHandLightRaw", &bmvr::g_VrHandLightRaw, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
             { "Head hold: angle", RowKind::Number, "PoseHoldDeg", nullptr, &bmvr::g_PoseHoldDeg, 0.02f, 0.f, 1.f, "%.2f\xB0" },
             { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
@@ -371,36 +357,18 @@ namespace
             { "FIXES: RENDERING", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow queries per eye", RowKind::Toggle, nullptr, &bmvr::g_PixelVisPerEye, nullptr, 0, 0, 0, nullptr },
             { "Glow through objects fix", RowKind::Toggle, nullptr, &bmvr::g_GlowCountDepthFix, nullptr, 0, 0, 0, nullptr },
-            { "Glow hold", RowKind::Number, nullptr, nullptr, &bmvr::g_GlowHold, 0.1f, 0.f, 2.f, "%.1f s" },
             { "Lights culled per eye", RowKind::Toggle, nullptr, &bmvr::g_LightCullEyeView, nullptr, 0, 0, 0, nullptr },
-            { "Flares: one layout", RowKind::Toggle, nullptr, &bmvr::g_FlareSharedLayout, nullptr, 0, 0, 0, nullptr },
-            { "Flares level with horizon", RowKind::Toggle, nullptr, &bmvr::g_FlareLevel, nullptr, 0, 0, 0, nullptr },
             { "Flares on each eye's axis", RowKind::Toggle, nullptr, &bmvr::g_FlareEyeAxis, nullptr, 0, 0, 0, nullptr },
             { "Sky water per eye", RowKind::Toggle, nullptr, &bmvr::g_SkyWaterPerEye, nullptr, 0, 0, 0, nullptr },
             { "Underwater world fix", RowKind::Toggle, nullptr, &bmvr::g_EyeUnderwaterWorld, nullptr, 0, 0, 0, nullptr },
-            { "Water line: no clip", RowKind::Toggle, nullptr, &bmvr::g_WaterLineClipFix, nullptr, 0, 0, 0, nullptr },
-            { "Screen quads: identity model", RowKind::Toggle, nullptr, &bmvr::g_ScreenSpaceModelFix, nullptr, 0, 0, 0, nullptr },
             { "Xen ground fog off", RowKind::Toggle, nullptr, &bmvr::g_XenGlobalFogOff, nullptr, 0, 0, 0, nullptr },
-            { "Rope normals fix", RowKind::Toggle, nullptr, &bmvr::g_ViewProjNormalFix, nullptr, 0, 0, 0, nullptr },
             { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
-            { "Titles level in the room", RowKind::Toggle, "TitleLevel", &bmvr::g_TitleLevel, nullptr, 0, 0, 0, nullptr },
             { "FIXES: TRACKING, WEAPONS, GAME", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Pose valid never blinks", RowKind::Toggle, nullptr, &bmvr::g_PoseFlagsNoBlink, nullptr, 0, 0, 0, nullptr },
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
-            { "Guns skip draw animation", RowKind::Toggle, nullptr, &bmvr::g_SkipDrawAnim, nullptr, 0, 0, 0, nullptr },
-            { "Tau/crossbow switch fix", RowKind::Toggle, nullptr, &bmvr::g_DeltaSeqIdle, nullptr, 0, 0, 0, nullptr },
-            { "Crowbar hits along drawn bar", RowKind::Toggle, nullptr, &bmvr::g_CrowbarHitDrawnBar, nullptr, 0, 0, 0, nullptr },
-            { "Two-hand: gun not lowered", RowKind::Toggle, nullptr, &bmvr::g_TwoHandNoLower, nullptr, 0, 0, 0, nullptr },
-            { "Support hand follows lowered gun", RowKind::Toggle, nullptr, &bmvr::g_TwoHandLoweredFollow, nullptr, 0, 0, 0, nullptr },
-            { "No crossbow scope animation", RowKind::Toggle, nullptr, &bmvr::g_ScopeClipIdle, nullptr, 0, 0, 0, nullptr },
-            { "RPG rocket shown when loaded", RowKind::Toggle, nullptr, &bmvr::g_RpgRocketShown, nullptr, 0, 0, 0, nullptr },
-            { "Mute weapon fidget sounds", RowKind::Toggle, nullptr, &bmvr::g_MuteFidgetSounds, nullptr, 0, 0, 0, nullptr },
-            { "Muzzle flash follows gun", RowKind::Toggle, nullptr, &bmvr::g_ViewmodelFxCatchUp, nullptr, 0, 0, 0, nullptr },
-            { "LOADING card", RowKind::Toggle, nullptr, &bmvr::g_LoadingCard, nullptr, 0, 0, 0, nullptr },
             // Live per-weapon angle trim for the weapon in the hand (saved in
             // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows).
-            { "HELD WEAPON TUNING (SAVED PER WEAPON)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "HELD WEAPON TUNING (SAVED PER WEAPON)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Support hand (+ forward)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSupportCm, 1.f, -20.f, 20.f, "%+.0f cm" },
             { "Pitch", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTunePitch, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
@@ -416,6 +384,29 @@ namespace
             { "Reset tab", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "tab_default" },
         };
         return rows;
+    }
+
+    // Single developer rows inside a player section (user's panel review,
+    // 2026-11-19): shown only with "Show developer rows", like a DevSection.
+    bool IsDevRow(const Row& r)
+    {
+        const char* k = r.key ? r.key : (r.kind == RowKind::Button ? r.fmt : nullptr);
+        if (!k)
+            return false;
+        static const char* kDev[] = {
+            "LadderBodyFollowsArms", "LadderHandBack", "VrNearZ", "MenuHeightOffsetMeters", "MenuCursorSmoothSec",
+            "ControlsPicture", "DamageFlashStrength", "VrHandsBlackMesaScale", "VrGunRightHand", "VrHandsRollDeg",
+            "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll",
+            "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain",
+            "MsaaParticles1x", "FxaaSubpixel", "FxaaEdgeThreshold", "FxaaEdgeThresholdMin",
+            "EnvmapScaleWorld", "EnvmapScaleModels", "LodBias",
+            "FlareFadeAngle", "FlareLightScale", "FlareHazeScale", "FlareHazeMinSize", "FlareGhostScale", "flare_default",
+            "GlowSmooth", "GlowHideMs", "glow_default",
+        };
+        for (const char* d : kDev)
+            if (std::strcmp(k, d) == 0)
+                return true;
+        return false;
     }
 
     int PictureAreaHeight(int hand);
@@ -927,7 +918,8 @@ namespace
         int count;                 // values per preset
         int def;                   // index of the built-in default (bmvr_flags.cpp)
         float* targets[3];
-        struct { const char* name; float v[3]; } items[3];
+        int n;                     // presets in items
+        struct { const char* name; float v[3]; } items[4];
     };
     // Items in order (one direction per click); the default is marked on the panel.
     const std::vector<PresetSet>& Presets()
@@ -936,12 +928,14 @@ namespace
             // FXAA 3.11 terms: sub-pixel smoothing, edge threshold, dark edge threshold.
             // Sharp keeps texture detail (about as sharp as the stock game); Smooth is
             // FXAA's own sub-pixel default with most edges treated (softer, calmer).
-            { "fxaa", 3, 0, { &bmvr::g_FxaaSubpixel, &bmvr::g_FxaaEdgeThreshold, &bmvr::g_FxaaEdgeThresholdMin },
+            // Stock = what the game itself sends (all 0: it never passes mat_fxaa_*).
+            { "fxaa", 3, 0, { &bmvr::g_FxaaSubpixel, &bmvr::g_FxaaEdgeThreshold, &bmvr::g_FxaaEdgeThresholdMin }, 4,
               { { "Sharp", { 0.25f, 0.166f, 0.0833f } },
                 { "Balanced", { 0.5f, 0.125f, 0.0625f } },
-                { "Smooth", { 0.75f, 0.063f, 0.0312f } } } },
+                { "Smooth", { 0.75f, 0.063f, 0.0312f } },
+                { "Stock", { 0.f, 0.f, 0.f } } } },
             // Cubemap reflection strength, walls/floors and props/NPCs.
-            { "envmap", 2, 1, { &bmvr::g_EnvmapScaleWorld, &bmvr::g_EnvmapScaleModels, nullptr },
+            { "envmap", 2, 1, { &bmvr::g_EnvmapScaleWorld, &bmvr::g_EnvmapScaleModels, nullptr }, 3,
               { { "Full", { 1.f, 1.f, 0.f } },   // as in the game
                 { "Balanced", { 0.4f, 0.8f, 0.f } },
                 { "Subtle", { 0.2f, 0.5f, 0.f } } } },
@@ -958,7 +952,7 @@ namespace
     // Index of the preset the current values match, or -1 (custom).
     int PresetIndex(const PresetSet& p)
     {
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < p.n; ++i)
         {
             bool match = true;
             for (int k = 0; k < p.count && match; ++k)
@@ -1052,10 +1046,30 @@ namespace
                 inDev = true;
             // Picture shown: the hand's Bind and fixed rows are its card lines instead.
             const int hand = RowHand(rows[i]);
-            hidden[i] = (inDev && !devRows) || k == RowKind::ColumnBreak
+            hidden[i] = ((inDev || IsDevRow(rows[i])) && !devRows) || k == RowKind::ColumnBreak
                 || (k == RowKind::Bind && BindRowHidden(rows[i]))
                 || (k == RowKind::BindPicture && !PictureShown(hand))
                 || (k != RowKind::BindPicture && hand >= 0 && PictureShown(hand));
+        }
+        // A section heading whose rows are all hidden (developer rows) goes too.
+        for (int i = 0; i < n; ++i)
+        {
+            if (!IsHeading(rows[i].kind) || hidden[i])
+                continue;
+            bool any = false;
+            for (int j = i + 1; j < n; ++j)
+            {
+                const RowKind k = rows[j].kind;
+                if (IsHeading(k) || k == RowKind::Tab || k == RowKind::Close || k == RowKind::ColumnBreak)
+                    break;
+                if (!hidden[j])
+                {
+                    any = true;
+                    break;
+                }
+            }
+            if (!any)
+                hidden[i] = true;
         }
         const int tabW = out.tabCount > 0 ? (kTexW - 80 - (out.tabCount - 1) * kTabGapPx) / out.tabCount : 0;
         int contentBottom = kContentTop;
@@ -1219,7 +1233,7 @@ namespace
             return !g_SnapTurning;
         if (is({ "TurnSpeed" }))
             return g_SnapTurning;
-        if (is({ "PhysicalLadderSmooth", "LadderBodyFollowsArms", "LadderGunHand", "LadderHandBack", "LadderStickClimb" }))
+        if (is({ "LadderBodyFollowsArms", "LadderGunHand", "LadderHandBack", "LadderStickClimb" }))
             return !g_PhysicalLadders;
         if (is({ "GestureWeaponShoulder" }))
             return !g_ShoulderGestures;
@@ -1230,22 +1244,16 @@ namespace
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
             return !g_HandHud;
         // Classic flat hands: no roll, no gun-grip shift (VR::GunGripHandOffset).
-        if (is({ "VrHandsRollDeg", "VrHandsGunGripRight", "VrHandsGunGripUp", "VrHandsGunGripForward" }))
+        if (is({ "VrHandsRollDeg" }))
             return g_VrHandsClassicPose;
-        if (is({ "VrMagReload", "VrStockHandPose", "VrSupportHandLock", "VrSatchelHands", "VrRecoil" }))
+        if (is({ "VrRecoil", "VrGrenadePin", "VrMagDiscard", "VrReloadHints" }))
             return !g_PhysicalWeapons;
-        if (is({ "VrGrenadePin", "VrMagDiscard", "VrReloadHints" }))
-            return !PhysicalWeapon(g_VrMagReload);
-        if (is({ "VrRecoilScale" }))
+        if (is({ "VrRecoilScale", "VrRecoilTwoHand" }))
             return !PhysicalWeapon(g_VrRecoil);
         if (is({ "VrCrosshairDot", "VrCrosshairScale" }))
             return !g_VrCrosshair;
         if (is({ "VrLaserWidth" }))
             return !g_VrLaserBeam;
-        if (is({ "ScopeRaiseMeters" }))
-            return !g_ScopeRaiseToZoom;
-        if (is({ "ScopeGunSmoothSec" }))
-            return !g_ScopeFollowsGun;
         if (is({ "ThrowScale", "ThrowStroke" }))
             return !g_VrHandThrow;
         if (is({ "FoveatedInner", "FoveatedMid" }))
@@ -1253,8 +1261,9 @@ namespace
         if (is({ "AlphaToCoverage", "MsaaParticles1x" }))
             return g_MsaaF < 0.5f;
         // FXAA preset row (fmt "fxaa") and its values.
+        // Off when FXAA is off in the game's video settings (mat_fxaa_enabled).
         if (is({ "fxaa", "FxaaSubpixel", "FxaaEdgeThreshold", "FxaaEdgeThresholdMin" }))
-            return !g_FxaaApply;
+            return !g_FxaaVideoOn;
         return false;
     }
     // Row under texture x/y, or -1 (headings are not interactive). Tab
@@ -2063,6 +2072,15 @@ void VR::FlushPanelEngineCommands()
             changed = true;
         }
     }
+    {
+        // Video-settings FXAA: the FXAA rows are greyed while it is off.
+        float fx = 1.f;
+        if (m_Game->GetConVarFloat("mat_fxaa_enabled", fx) && g_FxaaVideoOn != (fx != 0.f))
+        {
+            g_FxaaVideoOn = fx != 0.f;
+            changed = true;
+        }
+    }
     if (changed)
         m_SettingsDirty = true;
 }
@@ -2432,7 +2450,7 @@ void VR::UpdateSettingsPanel()
         if (!p)
             return;
         const int cur = PresetIndex(*p);
-        const int next = cur < 0 ? p->def : (cur + 1) % 3;   // custom -> the default
+        const int next = cur < 0 ? p->def : (cur + 1) % p->n;   // custom -> the default
         for (int k = 0; k < p->count; ++k)
             *p->targets[k] = p->items[next].v[k];
         Game::logMsg("VR settings: %s preset = %s", r.fmt, p->items[next].name);

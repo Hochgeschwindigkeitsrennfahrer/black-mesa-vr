@@ -4533,7 +4533,7 @@ namespace
     // the Y fix act on every bone alike, so they cancel in wrist^-1 * bone.
     void SampleStockOffhandFingers(unsigned char* hdr, const float* bones12, int nBones)
     {
-        if (!bmvr::PhysicalWeapon(bmvr::g_VrStockHandPose) || !bmvr::g_VrHandsBlackMesa || bmvr::g_LeftHanded || !Hooks::m_VR
+        if (!bmvr::g_VrStockHandPose || !bmvr::g_VrHandsBlackMesa || bmvr::g_LeftHanded || !Hooks::m_VR
             || !Hooks::m_VR->m_VmClass.twoHand || !hdr || !bones12)
             return;
         if (MagReload::g_ScrubActive.load(std::memory_order_relaxed)
@@ -10523,7 +10523,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     // the grip; the shotgun pump keeps it (it rides the pump).
                     const bool otherGrab = MagReload::g_BoltGrab.load(std::memory_order_relaxed)
                         && MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponShotgun;
-                    t_KeepLeftHand = bmvr::PhysicalWeapon(bmvr::g_VrSupportHandLock) && !bmvr::g_LeftHanded
+                    t_KeepLeftHand = bmvr::g_VrSupportHandLock && !bmvr::g_LeftHanded
                         && SupportHandFromGunModel(modelName)
                         && m_VR->m_VmClass.twoHand && (m_VR->TwoHandGripActive() || bmvr::g_VrSupportHandForce)
                         && !MagReload::g_ScrubActive.load(std::memory_order_relaxed)
@@ -11798,10 +11798,29 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
                     }
                 }
             }
+            // Head (FlashlightFrom 2): from the eyes along the view, as the
+            // flat game does.
+            const int from = static_cast<int>(bmvr::g_FlashlightFrom + 0.5f);
+            if (from == 2)
+            {
+                const Vector eye = m_VR->GetViewOrigin(body);
+                const Vector va = m_VR->GetViewAngle();
+                QAngle::AngleVectors(QAngle(va.x, va.y, 0.f), &f, &r, &u);
+                if (VectorNormalize(f) > 0.001f && eye.LengthSqr() > 1.f)
+                {
+                    p = eye;
+                    vr = true;
+                    static int s_headLog;
+                    if (s_headLog++ < 2)
+                        Game::logMsg("BM flashlight from the head (%.1f,%.1f,%.1f)", eye.x, eye.y, eye.z);
+                }
+                hkBmFlashlightUpdate.fOriginal(ecx, vr ? &p : pos, player, vr ? &f : fwd, vr ? &r : right, vr ? &u : up);
+                return;
+            }
             // Left hand (option): its own pointing direction, except while
             // both hands hold the gun, when it shines along the gun (as the
             // Lambda1VR torch does).
-            const bool leftHand = bmvr::g_FlashlightLeftHand;
+            const bool leftHand = from == 1;
             QAngle dir = m_VR->GetAimAngles();
             if (leftHand && !m_VR->TwoHandGripActive())
             {
