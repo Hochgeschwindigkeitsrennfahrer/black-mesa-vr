@@ -395,6 +395,7 @@ namespace
             { "Bag spin (around vertical)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagSpin, 15.f, -180.f, 180.f, "%+.0f deg" },
             { "Bag in (toward the fist)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagInCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
             { "Bag up", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagUpCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
+            { "Bag side (+ = to the right of the hand)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagSideCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
             { "LADDER GRIP TUNING (SAVED PER LADDER MODEL)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip out (toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneOutCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
             { "Grip up", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneUpCm, 0.5f, -10.f, 10.f, "%+.1f cm" },

@@ -4495,7 +4495,8 @@ namespace
             rotateBag(lu, bmvr::g_SatchelBagSpin);
             {
                 const float ucm = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f;
-                hold = hold - lf * (bmvr::g_SatchelBagInCm * ucm) + lu * (bmvr::g_SatchelBagUpCm * ucm);
+                hold = hold - lf * (bmvr::g_SatchelBagInCm * ucm) + lu * (bmvr::g_SatchelBagUpCm * ucm)
+                    + lr * (bmvr::g_SatchelBagSideCm * ucm);
             }
             // Bone origin so that rot * top + origin = the hold point.
             const float t[3] = { hold.x, hold.y, hold.z };
