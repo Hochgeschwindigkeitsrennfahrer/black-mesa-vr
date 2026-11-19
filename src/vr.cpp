@@ -21435,6 +21435,8 @@ std::atomic<float> MagReload::g_LeftClipUnit{ 0.f };
 std::atomic<unsigned> MagReload::g_SupportHandFromGunMs{ 0 };
 std::atomic<unsigned> MagReload::g_SatchelRadioMs{ 0 };
 std::atomic<unsigned> MagReload::g_SatchelBagMs{ 0 };
+std::atomic<float> MagReload::g_GunWrist[2][12]{};
+std::atomic<unsigned> MagReload::g_GunWristMs[2]{};
 std::atomic<float> MagReload::g_LeftTunnelLocal[6]{};
 std::atomic<unsigned> MagReload::g_LeftTunnelMs{ 0 };
 std::atomic<unsigned> MagReload::g_DetonateHeldMs{ 0 };

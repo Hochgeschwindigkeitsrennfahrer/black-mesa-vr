@@ -4215,6 +4215,31 @@ namespace
     // the clip's frame-4 press here (decoded from v_satchel_radio: R_Thumb2
     // -16.2 -> -26.9 deg, R_Thumb3 -30.3 -> -51.3 deg about their own z;
     // neither moves in idle).
+    // Gun's own hands: wrist bones as drawn, for the glove renderer's cuff
+    // caps (MagReload::g_GunWrist). The left one only while the gun's own
+    // left hand is kept (support-hand lock / bolt snap).
+    void PublishGunWrists(unsigned char* hdr, const float* bones, int nBones, bool left)
+    {
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_w[2] = { -1, -1 };
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_w[0] = FindStudioBoneIndex(hdr, "L_Wrist");
+            s_w[1] = FindStudioBoneIndex(hdr, "R_Wrist");
+        }
+        const DWORD now = GetTickCount();
+        for (int h = 0; h < 2; ++h)
+        {
+            if (s_w[h] < 0 || s_w[h] >= nBones || (h == 0 && !left))
+                continue;
+            const float* m = bones + s_w[h] * 12;
+            for (int k = 0; k < 12; ++k)
+                MagReload::g_GunWrist[h][k].store(m[k], std::memory_order_relaxed);
+            MagReload::g_GunWristMs[h].store(now ? now : 1, std::memory_order_release);
+        }
+    }
+
     bool InvertMatrix3x4General(const float in[3][4], float out[3][4]);
     void PressDetonatorThumb(unsigned char* hdr, float* bones, int nBones)
     {
@@ -11245,6 +11270,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     SnapLeftHandToClipObject(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_SnapClipPose);
                 ApplyGrenadePinBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                     needScale ? scale : 1.f);
+                if (gunRightHand)
+                    PublishGunWrists(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_KeepLeftHand && t_LeftHandCount > 0);
             }
             else if (needScale)
                 SehWriteModelScale(info.pRenderable, scale);

@@ -19,4 +19,7 @@ namespace BmHands
 
     // hand: 0 left, 1 right. scale: 1 = Black Mesa's viewmodel size.
     bool Build(Variant variant, int hand, float scale, VrHandMeshAsset& out, std::string& error);
+    // HEV cuff cap for the gun's own hand (viewmodel arms): positions in the
+    // R_/L_Wrist bone frame, model units, one joint. After a Hev Build.
+    bool GunCuffCap(int hand, VrHandMeshAsset& out);
 }

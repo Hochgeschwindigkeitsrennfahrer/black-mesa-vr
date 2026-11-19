@@ -654,6 +654,9 @@ struct BmVrGloves::Impl
 
     Hand hev[2];
     Hand bare[2];
+    // HEV cuff caps drawn over the gun's own hands (BmHands::GunCuffCap).
+    VrHandMeshAsset gunCap[2];
+    bool gunCapLoaded[2] = { false, false };
     VrHandRendererD3D9 renderer;
     bool assetAttempted = false;
     bool assetsLoaded = false;
@@ -1556,6 +1559,55 @@ bool BmVrGloves::DrawForEye(
             continue;
         }
         drew = true;
+    }
+
+    // Gun's own hands (viewmodel arms, forearm folded away): the HEV glove's
+    // open cuff is capped with the same fan as the gloves', placed on the
+    // wrist bone as drawn (user 2026-11-19: hands looked hollow from the
+    // wrist side). Bare hands are closed.
+    if (bmvr::g_GunHandCuffCap && pair == m_Impl->hev)
+    {
+        const DWORD now = GetTickCount();
+        for (int h = 0; h < 2; ++h)
+        {
+            const unsigned ms = MagReload::g_GunWristMs[h].load(std::memory_order_acquire);
+            if (ms == 0 || now - ms > 100)
+                continue;
+            if (!m_Impl->gunCapLoaded[h])
+            {
+                m_Impl->gunCapLoaded[h] = BmHands::GunCuffCap(h, m_Impl->gunCap[h]);
+                if (m_Impl->gunCapLoaded[h])
+                    Game::logMsg("Gun hand cuff cap %s: %zu triangles", h ? "right" : "left",
+                        m_Impl->gunCap[h].indices.size() / 3);
+                else
+                    continue;
+            }
+            float W[12];
+            for (int k = 0; k < 12; ++k)
+                W[k] = MagReload::g_GunWrist[h][k].load(std::memory_order_relaxed);
+            VrHandMatrix4 world;
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c)
+                    world.m[c * 4 + r] = W[r * 4 + c];
+            world.m[3] = world.m[7] = world.m[11] = 0.f;
+            world.m[15] = 1.f;
+            const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
+            std::vector<VrHandMatrixRows3x4> palette(1);
+            palette[0].v = { 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f };
+            float exposure = 0.45f;
+            const Vector at(W[3], W[7], W[11]);
+            const Vector rgb = SamplePalmSceneLight(at, exposure);
+            IDirect3DBaseTexture9* envCube = (g_Game && g_Game->m_VR) ? g_Game->m_VR->SceneCubemap() : nullptr;
+            std::string error;
+            if (!m_Impl->renderer.Draw(device, 5 + h, m_Impl->gunCap[h], palette, world, wvp,
+                    (overlayNoDepth || stereoEye == 0) ? VrHandDrawPass::OverlayNoDepth : VrHandDrawPass::WorldDepth,
+                    rgb, eyeOrigin, exposure, envCube, error))
+            {
+                static int s_capFail;
+                if (s_capFail++ < 4)
+                    Game::logMsg("Gun hand cuff cap draw %d: %s", h, error.c_str());
+            }
+        }
     }
 
     if (drew && !m_Impl->loggedReady)

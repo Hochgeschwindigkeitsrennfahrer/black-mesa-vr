@@ -130,6 +130,11 @@ namespace MagReload
     // GetTickCount of the last satchel bag draw (hung from the left glove):
     // the left glove closes into a fist round its top while it is drawn.
     extern std::atomic<unsigned> g_SatchelBagMs;
+    // Gun's own hands as drawn (viewmodel R_Wrist / L_Wrist bone-to-world,
+    // 3x4 rows, after every bone edit) and when (GetTickCount, 0 = never):
+    // the glove renderer caps their open HEV cuffs there.
+    extern std::atomic<float> g_GunWrist[2][12];
+    extern std::atomic<unsigned> g_GunWristMs[2];
     // GetTickCount of the last input frame with the detonate trigger held
     // (satchel hands): the radio's own thumb is drawn on the button at once,
     // the game's detonate clip only arrives a few frames after the blast.

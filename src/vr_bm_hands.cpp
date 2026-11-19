@@ -611,6 +611,9 @@ namespace
         Bytes bmp[2];
     };
     std::mutex g_Mutex;
+    // Cuff caps for the gun's own hands (BmHands::GunCuffCap), wrist-bone local.
+    VrHandMeshAsset g_GunCap[2];
+    bool g_GunCapValid[2] = { false, false };
     Source g_Src;
 
     const char* kVariantSmd[2] = { "_hev_standardrig", "_sci_standardrig" };
@@ -766,6 +769,15 @@ namespace
         }
         return best;
     }
+}
+
+bool BmHands::GunCuffCap(int hand, VrHandMeshAsset& out)
+{
+    std::lock_guard<std::mutex> lock(g_Mutex);
+    if (hand < 0 || hand > 1 || !g_GunCapValid[hand])
+        return false;
+    out = g_GunCap[hand];
+    return true;
 }
 
 bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out, std::string& error)
@@ -973,6 +985,51 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
                 out.indices.push_back(r.second);
                 out.indices.push_back(r.first);
                 out.indices.push_back(ci);
+            }
+            // The same fan for the gun's own hand (viewmodel arms with the
+            // forearm folded away show this open cuff too, user 2026-11-19):
+            // positions in the wrist bone's frame, model units, one joint.
+            if (variant == Variant::Hev)
+            {
+                const M4 toWrist = Inv(mdl.bones[srcIds[0]].world);
+                VrHandMeshAsset& cap = g_GunCap[hand];
+                cap = VrHandMeshAsset{};
+                std::map<std::uint16_t, std::uint16_t> capIdx;
+                auto addVert = [&](std::uint16_t src) -> std::uint16_t {
+                    auto it = capIdx.find(src);
+                    if (it != capIdx.end())
+                        return it->second;
+                    VrHandVertex v = out.vertices[src];
+                    const V3 model = XformP(align, V3{ v.position[0], v.position[1], v.position[2] } * kUnitsPerMeter);
+                    const V3 p = XformP(toWrist, model);
+                    const V3 n = Norm(XformN(toWrist, XformN(align, V3{ v.normal[0], v.normal[1], v.normal[2] })));
+                    v.position[0] = p.x; v.position[1] = p.y; v.position[2] = p.z;
+                    v.normal[0] = n.x; v.normal[1] = n.y; v.normal[2] = n.z;
+                    v.joints[0] = 0; v.joints[1] = v.joints[2] = v.joints[3] = 0;
+                    v.weights[0] = 1.f; v.weights[1] = v.weights[2] = v.weights[3] = 0.f;
+                    const std::uint16_t ni = static_cast<std::uint16_t>(cap.vertices.size());
+                    cap.vertices.push_back(v);
+                    capIdx[src] = ni;
+                    return ni;
+                };
+                for (const auto& r : ring)
+                {
+                    cap.indices.push_back(addVert(r.second));
+                    cap.indices.push_back(addVert(r.first));
+                    cap.indices.push_back(addVert(ci));
+                }
+                cap.jointNames = { "wrist_cap" };
+                cap.jointParents = { -1 };
+                cap.bindMatrices.resize(1);
+                cap.inverseBindMatrices.resize(1);
+                for (int k = 0; k < 4; ++k)
+                {
+                    cap.bindMatrices[0].m[k * 5] = 1.f;
+                    cap.inverseBindMatrices[0].m[k * 5] = 1.f;
+                }
+                cap.baseColorTextureBytes = g_Src.bmp[vi];
+                cap.sourcePath = std::string("bm:gun_cuff_cap_") + (hand == 0 ? "left" : "right");
+                g_GunCapValid[hand] = cap.IsValid();
             }
         }
         Game::logMsg("BM hands %s %c: cuff %s (%zu open edges at the wrist, %d elsewhere)",
