@@ -4585,6 +4585,62 @@ namespace
         Hooks::m_VR->NoteStockOffhandFingers(hdr, rel);
     }
 
+    // Debug (bmvr_dump_hand_pose + bmvr_debug_vm_seq): the stock left hand
+    // at the held clip frame, logged once per model/sequence/cycle as
+    // inv(L_Wrist) * bone for the object bones (magazine, bolt, slide,
+    // shell, loader) and the 15 finger joints. Raw game bones (before our
+    // scale/Y fix); the rows are the 3x4 matrix, model units.
+    void DumpClipHandPose(unsigned char* hdr, const void* raw, int nBones)
+    {
+        if (!bmvr::g_DebugDumpHandPose || bmvr::g_DebugVmSeq < 0.f || !hdr || !raw || nBones <= 0)
+            return;
+        static unsigned char* s_hdr = nullptr;
+        static int s_seq = -1;
+        static float s_cycle = -1.f;
+        const int seq = static_cast<int>(bmvr::g_DebugVmSeq + 0.5f);
+        const float cycle = bmvr::g_DebugVmCycle;
+        if (hdr == s_hdr && seq == s_seq && cycle == s_cycle)
+            return;
+        s_hdr = hdr;
+        s_seq = seq;
+        s_cycle = cycle;
+        const auto* all = reinterpret_cast<const float (*)[3][4]>(raw);
+        const int lw = FindStudioBoneIndex(hdr, "L_Wrist");
+        const char* label = StudioSequenceLabel(hdr, seq);
+        if (lw < 0 || lw >= nBones)
+        {
+            Game::logMsg("Hand pose dump: seq %d (%s) cycle %.3f: no L_Wrist", seq, label ? label : "?", cycle);
+            return;
+        }
+        float inv[3][4];
+        if (!InvertMatrix3x4General(all[lw], inv))
+            return;
+        Game::logMsg("Hand pose dump: seq %d (%s) cycle %.3f", seq, label ? label : "?", cycle);
+        auto logRel = [&](const char* name)
+        {
+            const int i = FindStudioBoneIndex(hdr, name);
+            if (i < 0 || i >= nBones)
+                return;
+            float r[3][4];
+            MulMatrix3x4(inv, all[i], r);
+            Game::logMsg("Hand pose dump:   %-16s %8.4f %8.4f %8.4f %8.3f | %8.4f %8.4f %8.4f %8.3f | %8.4f %8.4f %8.4f %8.3f",
+                name, r[0][0], r[0][1], r[0][2], r[0][3], r[1][0], r[1][1], r[1][2], r[1][3],
+                r[2][0], r[2][1], r[2][2], r[2][3]);
+        };
+        static const char* kObjects[] = { "Clip_New", "Bolt_New", "bone_clip", "Bone01", "bone_shell", "bone_pump",
+            "clip_export_bone", "speed_loader", "Chamber", "R_Wrist" };
+        for (const char* n : kObjects)
+            logRel(n);
+        static const char* kFinger[5] = { "Thumb", "Index", "Middle", "Ring", "Pinky" };
+        for (int f = 0; f < 5; ++f)
+            for (int seg = 1; seg <= 3; ++seg)
+            {
+                char name[24];
+                std::snprintf(name, sizeof(name), "L_%s%d", kFinger[f], seg);
+                logRel(name);
+            }
+    }
+
     // While a stock clip is scrubbed by the hands, the clip also swings the
     // whole gun. Hold the gun body bone at the pose it had in idle (relative
     // to the draw's gun frame) and move every bone by the same correction, so
@@ -10585,6 +10641,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             {
                 bonesToDraw = g_ScaledViewmodelBones[slot];
                 usedBones = true;
+                DumpClipHandPose(hdr, pCustomBoneToWorld, nBones);
                 StabilizeScrubbedBody(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                     needScale ? pivot + (targetOrigin - pivot) * scale : targetOrigin, targetAng);
                 HoldLeftHandOnMp5Body(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
@@ -10615,11 +10672,13 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     // the grip; the shotgun pump keeps it (it rides the pump).
                     const bool otherGrab = MagReload::g_BoltGrab.load(std::memory_order_relaxed)
                         && MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponShotgun;
-                    t_KeepLeftHand = bmvr::g_VrSupportHandLock && !bmvr::g_LeftHanded
+                    // Debug hand pose dump: the clip's own left hand stays drawn.
+                    const bool dumpHold = bmvr::g_DebugDumpHandPose && bmvr::g_DebugVmSeq >= 0.f;
+                    t_KeepLeftHand = dumpHold || (bmvr::g_VrSupportHandLock && !bmvr::g_LeftHanded
                         && SupportHandFromGunModel(modelName)
                         && m_VR->m_VmClass.twoHand && (m_VR->TwoHandGripActive() || bmvr::g_VrSupportHandForce)
                         && !MagReload::g_ScrubActive.load(std::memory_order_relaxed)
-                        && magSt != MagReload::kInHand && !otherGrab;
+                        && magSt != MagReload::kInHand && !otherGrab);
                     CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_KeepLeftHand);
                     if (t_KeepLeftHand && t_LeftHandCount > 0)
                     {

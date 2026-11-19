@@ -842,6 +842,7 @@ namespace bmvr
     // Show the RPG rocket whenever the RPG is loaded (stock loses it on a save load / a cut-off clip).
     extern bool g_RpgRocketShown;
     extern float g_DebugVmSeq, g_DebugVmCycle; // debug: hold the viewmodel on a sequence/cycle (-1 = off)
+    extern bool g_DebugDumpHandPose; // debug hold: keep the stock left hand + log its pose around the object
     extern float g_VrMagHandForward, g_VrMagHandUp, g_VrMagSeatDistance; // game units
     extern float g_VrShellOut; // shotgun shell centre beyond the pinch, fraction of its length
     extern bool g_VrShellFlip; // test: the other shell end in the fingers
