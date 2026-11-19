@@ -5888,13 +5888,49 @@ namespace
         }
         if (st == MagReload::kPinHeld || st == MagReload::kPinPulledInHand)
         {
+            // Anchored to the controller, not the drawn fist: the fist centre
+            // moves when the glove changes finger pose at the grab (pinch /
+            // reload-clip pose), which would move the ring and count as pull.
             if (!s_holding)
             {
                 s_holding = true;
-                s_grabOffset = ringPos - fist;
+                s_grabOffset = ringPos - hand;
             }
-            // The ring stays where the fist took it; the pin comes along.
-            const Vector d = fist + s_grabOffset - ringPos;
+            // The ring stays where the hand took it; the pin comes along.
+            Vector target = hand + s_grabOffset;
+            // Pulled, with the reload-clip pose on the glove: the ring glides
+            // (~0.15 s) to where Black Mesa's pinpullthrow hand holds it,
+            // between thumb and index (the grab offset can be ~10 cm with
+            // the lenient grab radius). Before the pull it stays put, so the
+            // pull distance is unchanged.
+            static thread_local float s_toFingers = 0.f;
+            static thread_local DWORD s_blendMs = 0;
+            const unsigned clipMs = MagReload::g_LeftClipMs.load(std::memory_order_relaxed);
+            const float unit = MagReload::g_LeftClipUnit.load(std::memory_order_relaxed);
+            if (st == MagReload::kPinPulledInHand
+                && MagReload::g_LeftClipPose.load(std::memory_order_relaxed) == ClipHandPose::kPinPulled
+                && clipMs != 0 && now - clipMs < 500 && unit > 1e-4f)
+            {
+                const float dt = s_blendMs ? (now - s_blendMs) * 0.001f : 0.f;
+                s_toFingers = (std::min)(1.f, s_toFingers + dt / 0.15f);
+                float W[12];
+                for (int k = 0; k < 12; ++k)
+                    W[k] = MagReload::g_LeftClipWrist[k].load(std::memory_order_relaxed);
+                const float* O = ClipHandPose::kPoses[ClipHandPose::kPinPulled].object;
+                float p[3];
+                for (int i = 0; i < 3; ++i)
+                    p[i] = (O[i * 4 + 0] * rc[0] + O[i * 4 + 1] * rc[1] + O[i * 4 + 2] * rc[2] + O[i * 4 + 3]) * unit;
+                Vector local(0.f, 0.f, 0.f);
+                for (int c = 0; c < 3; ++c)
+                    local = local + Vector(W[0 * 4 + c], W[1 * 4 + c], W[2 * 4 + c]) * p[c];
+                local = local + Vector(W[3], W[7], W[11]);
+                const Vector fingers = hand + hf * local.x + hr * local.y + hu * local.z;
+                target = target + (fingers - target) * s_toFingers;
+            }
+            else
+                s_toFingers = 0.f;
+            s_blendMs = now;
+            const Vector d = target - ringPos;
             if (st == MagReload::kPinHeld)
                 MagReload::g_PinPull.store(d.Length() / (vmScale > 0.05f ? vmScale : 1.f));
             move(d);
