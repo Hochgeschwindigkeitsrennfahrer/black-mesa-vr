@@ -807,9 +807,9 @@ namespace bmvr
     // While the MP5 bolt / glock slide is held: the gun's own left hand in that clip pose sits on
     // it (like the support-hand lock), the glove hides.
     extern bool g_VrClipHandSnap;
-    // RPG rocket in Black Mesa's reload grip (across the palm, like a rod in a fist).
+    // RPG rocket held through a closed left fist (along the knuckle line).
     extern bool g_VrClipHandRpg;
-    // Test: that rocket turned 180 deg about the controller's forward axis (out of the pinky side).
+    // That rocket's tail out of the pinky side (default, user 2026-11-19); off = thumb side.
     extern bool g_VrClipHandRpgFlip;
     // Manual reloads: rounds left in an ejected magazine / an opened .357
     // cylinder are lost (not topped up again); a chambered MP5/glock round
@@ -832,6 +832,14 @@ namespace bmvr
     extern float g_VmTunePitch, g_VmTuneYaw, g_VmTuneRoll;
     // Same rows: support (left) hand point along the held gun, cm (+ = forward).
     extern float g_VmTuneSupportCm;
+    // Same rows: how close (cm, magazine centre to the well) and how
+    // straight (deg between the magazine in the hand and its seated pose,
+    // 180 = any angle) a magazine/shell/loader must be to seat. Per weapon,
+    // built-in defaults until changed (vm_numpad seat columns).
+    extern float g_VmTuneSeatCm, g_VmTuneSeatDeg;
+    // Built-in seat values for the weapon in the hand (vr.cpp): what
+    // "Reset tab" puts back on those two rows.
+    void HeldWeaponSeatDefaults(float& cm, float& deg);
     // Physical ladders: the view follows the climb hand every frame instead
     // of LadderMove's per-tick bursts (render offset only). On by default.
     extern bool g_PhysicalLadderSmooth;
@@ -850,6 +858,8 @@ namespace bmvr
     // g_LadderGripCurl; off = the controller's angle and curls.
     extern bool g_LadderHandWrap;
     extern float g_LadderGripCurl;
+    extern float g_SatchelGripCurl; // left glove fist round the satchel bag top
+    extern float g_GunHandCuff; // gun's own right hand: forearm folds this far behind the wrist (units at scale 1)
     extern float g_VrRecoilScale;
     // Kick with the second hand on the gun, as a share of the one-handed kick (default 0.3;
     // pistols use x5/3 of it, capped at 1).
@@ -858,7 +868,7 @@ namespace bmvr
     extern bool g_RpgRocketShown;
     extern float g_DebugVmSeq, g_DebugVmCycle; // debug: hold the viewmodel on a sequence/cycle (-1 = off)
     extern bool g_DebugDumpHandPose; // debug hold: keep the stock left hand + log its pose around the object
-    extern float g_VrMagHandForward, g_VrMagHandUp, g_VrMagSeatDistance; // game units
+    extern float g_VrMagHandForward, g_VrMagHandUp; // game units
     extern float g_VrShellOut; // shotgun shell centre beyond the pinch, fraction of its length
     extern bool g_VrShellFlip; // test: the other shell end in the fingers
     extern bool g_Vr357Flick;     // .357 cylinder closes on a wrist flick (or the reload button)

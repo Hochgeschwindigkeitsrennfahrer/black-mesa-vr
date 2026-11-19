@@ -151,7 +151,7 @@ namespace bmvr
     bool g_VrHandThrow = true;
     float g_MountedGunGain = 1.75f;
     float g_ThrowScale = 5.5f;
-    float g_SnarkThrowScale = 0.5f;
+    float g_SnarkThrowScale = 0.7f;
     bool g_VrSkipMotionBlur = true;
     bool g_VrSkipScreenEffects = true;
     float g_EnvmapScaleWorld = 0.4f;
@@ -351,12 +351,13 @@ namespace bmvr
     bool g_VrClipHandPose = true;
     bool g_VrClipHandSnap = true;
     bool g_VrClipHandRpg = true;
-    bool g_VrClipHandRpgFlip = false;
+    bool g_VrClipHandRpgFlip = true;
     bool g_VrMagDiscard = true;
     float g_VrNearZ = 4.f;
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = false;
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
+    float g_VmTuneSeatCm = 6.f, g_VmTuneSeatDeg = 45.f;
     bool g_PhysicalLadderSmooth = true;
     bool g_LadderBodyFollowsArms = true;
     float g_LadderGunHand = 1.f;
@@ -364,6 +365,8 @@ namespace bmvr
     float g_LadderHandBack = 3.f;
     bool g_LadderHandWrap = true;
     float g_LadderGripCurl = 0.7f;
+    float g_SatchelGripCurl = 0.75f;
+    float g_GunHandCuff = 1.5f;
     float g_VrRecoilScale = 1.f;
     float g_VrRecoilTwoHand = 0.3f;
     bool g_RpgRocketShown = true;
@@ -372,7 +375,6 @@ namespace bmvr
     bool g_DebugDumpHandPose = false;
     float g_VrMagHandForward = 0.f;
     float g_VrMagHandUp = 0.f;
-    float g_VrMagSeatDistance = 9.f;
     float g_VrShellOut = 0.3f;
     bool g_VrShellFlip = false;
     bool g_Vr357Flick = true;

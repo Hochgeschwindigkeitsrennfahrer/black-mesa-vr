@@ -1152,13 +1152,13 @@ namespace
         const VrHandMatrix4& world, const Vector& controller, const QAngle& controllerAng)
     {
         static const VrHandMeshAsset* s_asset = nullptr;
-        static int s_joints[6] = { -1, -1, -1, -1, -1, -1 };
+        static int s_joints[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
         if (s_asset != &asset)
         {
             s_asset = &asset;
-            const char* names[6] = { "wrist_l", "finger_middle_0_l", "finger_middle_1_l", "finger_middle_2_l",
-                "finger_thumb_2_l", "finger_index_2_l" };
-            for (int k = 0; k < 6; ++k)
+            const char* names[8] = { "wrist_l", "finger_middle_0_l", "finger_middle_1_l", "finger_middle_2_l",
+                "finger_thumb_2_l", "finger_index_2_l", "finger_index_0_l", "finger_pinky_0_l" };
+            for (int k = 0; k < 8; ++k)
                 s_joints[k] = FindNameIndex(asset.jointNames, names[k]);
         }
         auto jointWorld = [&](int j, Vector& out) {
@@ -1197,6 +1197,35 @@ namespace
             MagReload::g_LeftPinchLocal[2].store(dp.Dot(u), std::memory_order_relaxed);
             const DWORD t = GetTickCount();
             MagReload::g_LeftPinchMs.store(t ? t : 1, std::memory_order_relaxed);
+        }
+        // Fist tunnel (what a closed fist holds a rod through): along the
+        // knuckle line pinky -> index, through the circumcentre of the middle
+        // finger's joints (as WrapGloveOnRung). Holds the RPG rocket.
+        {
+            Vector ip, pp, m0, m1, m2;
+            if (jointWorld(s_joints[6], ip) && jointWorld(s_joints[7], pp) && jointWorld(s_joints[1], m0)
+                && jointWorld(s_joints[2], m1) && jointWorld(s_joints[3], m2))
+            {
+                Vector a = ip - pp;
+                if (VectorNormalize(a) > 1e-3f)
+                {
+                    Vector c = (m0 + m1 + m2) * (1.f / 3.f);
+                    const Vector uu = m1 - m0, vv = m2 - m0;
+                    const Vector n = CrossProduct(uu, vv);
+                    const float n2 = n.Dot(n);
+                    if (n2 > 1e-4f)
+                        c = m0 + (CrossProduct(n, uu) * vv.Dot(vv) + CrossProduct(vv, n) * uu.Dot(uu)) * (0.5f / n2);
+                    const Vector dc = c - controller;
+                    MagReload::g_LeftTunnelLocal[0].store(dc.Dot(f), std::memory_order_relaxed);
+                    MagReload::g_LeftTunnelLocal[1].store(dc.Dot(r), std::memory_order_relaxed);
+                    MagReload::g_LeftTunnelLocal[2].store(dc.Dot(u), std::memory_order_relaxed);
+                    MagReload::g_LeftTunnelLocal[3].store(a.Dot(f), std::memory_order_relaxed);
+                    MagReload::g_LeftTunnelLocal[4].store(a.Dot(r), std::memory_order_relaxed);
+                    MagReload::g_LeftTunnelLocal[5].store(a.Dot(u), std::memory_order_relaxed);
+                    const DWORD t = GetTickCount();
+                    MagReload::g_LeftTunnelMs.store(t ? t : 1, std::memory_order_relaxed);
+                }
+            }
         }
         const Vector d = centre - controller;
         MagReload::g_LeftPalmLocal[0].store(d.Dot(f), std::memory_order_relaxed);
@@ -1351,11 +1380,21 @@ bool BmVrGloves::DrawForEye(
             // palette depends only on the pose and the glove, so it is built
             // once per pose and reused.
             bool clipPose = false;
-            if (rungGrip)
+            // Satchel bag hung from the left glove (SatchelBagToLeftHand):
+            // the fist closes round its top. The left grip is Use there, so
+            // the glove otherwise stayed open with the bag under the palm
+            // (user screenshot 2026-11-19).
+            // Same for the RPG rocket held through the fist (RocketInFist).
+            unsigned bagMs = 0;
+            const bool bagGrip = !rightHand && !rungGrip
+                && (MagReload::RocketInFist()
+                    || ((bagMs = MagReload::g_SatchelBagMs.load(std::memory_order_relaxed)) != 0
+                        && GetTickCount() - bagMs < 200));
+            if (rungGrip || bagGrip)
             {
-                // Round the rung: one fixed curl, thumb over the fingers.
+                // Round the rung / bag top: one fixed curl, thumb over the fingers.
                 for (int f = 0; f < 5; ++f)
-                    summary.flFingerCurl[f] = bmvr::g_LadderGripCurl;
+                    summary.flFingerCurl[f] = rungGrip ? bmvr::g_LadderGripCurl : bmvr::g_SatchelGripCurl;
                 gmanThumb = 0.f;
                 straightMiddle = 0.f;
             }

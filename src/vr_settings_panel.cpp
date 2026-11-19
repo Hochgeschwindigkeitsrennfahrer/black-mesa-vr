@@ -213,8 +213,8 @@ namespace
             // Developer row: A/B for the hand poses taken from Black Mesa's reload clips.
             { "Hand pose from reload clips", RowKind::Toggle, "VrClipHandPose", &bmvr::g_VrClipHandPose, nullptr, 0, 0, 0, nullptr },
             { "Hand locks onto bolt/slide", RowKind::Toggle, "VrClipHandSnap", &bmvr::g_VrClipHandSnap, nullptr, 0, 0, 0, nullptr },
-            { "RPG rocket in reload grip", RowKind::Toggle, "VrClipHandRpg", &bmvr::g_VrClipHandRpg, nullptr, 0, 0, 0, nullptr },
-            { "RPG rocket flipped", RowKind::Toggle, "VrClipHandRpgFlip", &bmvr::g_VrClipHandRpgFlip, nullptr, 0, 0, 0, nullptr },
+            { "RPG rocket through the fist", RowKind::Toggle, "VrClipHandRpg", &bmvr::g_VrClipHandRpg, nullptr, 0, 0, 0, nullptr },
+            { "RPG rocket tail out of the pinky side", RowKind::Toggle, "VrClipHandRpgFlip", &bmvr::g_VrClipHandRpgFlip, nullptr, 0, 0, 0, nullptr },
             { "Recoil", RowKind::Toggle, "VrRecoil", &bmvr::g_VrRecoil, nullptr, 0, 0, 0, nullptr },
             { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
             // Kick with the second hand on the gun, as a share of one-handed (pistols x5/3, capped at 1).
@@ -379,6 +379,8 @@ namespace
             // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows).
             { "HELD WEAPON TUNING (SAVED PER WEAPON)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Support hand (+ forward)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSupportCm, 1.f, -20.f, 20.f, "%+.0f cm" },
+            { "Mag seat distance", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatCm, 0.5f, 1.f, 30.f, "%.1f cm" },
+            { "Mag seat angle (180 = any)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatDeg, 5.f, 5.f, 180.f, "%.0f deg" },
             { "Pitch", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTunePitch, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Roll", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneRoll, 2.5f, -90.f, 90.f, "%.1f deg" },
@@ -918,6 +920,20 @@ namespace
                 }
                 Game::logMsg("VR settings reset: %s -> %s", r.label, r.defB ? "on" : "off");
                 ++changed;
+            }
+            else if ((r.kind == RowKind::Number || r.kind == RowKind::Choice) && r.f
+                && (r.f == &bmvr::g_VmTuneSeatCm || r.f == &bmvr::g_VmTuneSeatDeg))
+            {
+                // Per-weapon seat rows: back to the held weapon's built-in values.
+                float cm = 0.f, deg = 0.f;
+                bmvr::HeldWeaponSeatDefaults(cm, deg);
+                const float want = r.f == &bmvr::g_VmTuneSeatCm ? cm : deg;
+                if (std::fabs(*r.f - want) > 1e-4f)
+                {
+                    *r.f = want;
+                    Game::logMsg("VR settings reset: %s -> %g", r.label, want);
+                    ++changed;
+                }
             }
             else if ((r.kind == RowKind::Number || r.kind == RowKind::Choice) && r.f && std::fabs(*r.f - r.defF) > 1e-4f)
             {

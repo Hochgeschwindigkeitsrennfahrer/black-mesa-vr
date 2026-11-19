@@ -7113,7 +7113,14 @@ void VR::ProcessInput()
         UpdateMountedGun();
         const bool gunGripRight = m_OnGun || m_GunRightNear;
         if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped() && !gunGripRight)
+        {
             buttons |= satchelHands ? IN_ATTACK2 : IN_ATTACK;
+            if (satchelHands)
+            {
+                const DWORD nowMs = GetTickCount();
+                MagReload::g_DetonateHeldMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
+            }
+        }
         if (!menuOwnsButtons && m_OnGun)
         {
             if (PressedDigitalAction(m_ActionSecondaryAttack))
@@ -15458,9 +15465,36 @@ namespace vm_numpad
         float ay = 0.f;
         float az = 0.f;
         float sf = 0.f;   // support (left) hand point along the gun, cm (+ = forward)
+        float seatCm = -1.f;  // magazine seat distance, cm (< 0 = built-in default)
+        float seatDeg = -1.f; // magazine seat angle, deg (< 0 = built-in default)
     };
 
+    // Built-in magazine seat tolerances per weapon key (VR panel DEBUG rows
+    // "Mag seat distance/angle" override them per weapon). Was one global
+    // 9 units x viewmodel scale (~15 cm on the MP5) and no angle: with the
+    // magazine drawn in Black Mesa's own reload grip it snapped in from far
+    // too far (user, 2026-11-19). Shotgun shell and .357 loader keep their
+    // old reach (~15/18 cm) and no angle check for now.
+    void SeatDefaults(const std::string& key, float& cm, float& deg)
+    {
+        cm = 6.f;
+        deg = 45.f;
+        if (key == "mp5" || key == "glock")
+            cm = 5.f;
+        else if (key == "shotgun")
+        {
+            cm = 15.f;
+            deg = 180.f;
+        }
+        else if (key == "357")
+        {
+            cm = 18.f;
+            deg = 180.f;
+        }
+    }
+
     std::map<std::string, Offsets> g_Off;
+    std::string g_HeldKey; // weapon key the DEBUG tuning rows show (game thread)
     bool g_Loaded = false;
     DWORD g_LastRepeatMs = 0;
     int g_LastVk = 0;
@@ -15496,9 +15530,9 @@ namespace vm_numpad
                 continue;
             char key[32]{};
             Offsets o{};
-            const int nread = sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f",
+            const int nread = sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f %f %f",
                 key, static_cast<unsigned>(sizeof(key)),
-                &o.ox, &o.oy, &o.oz, &o.ax, &o.ay, &o.az, &o.sf);
+                &o.ox, &o.oy, &o.oz, &o.ax, &o.ay, &o.az, &o.sf, &o.seatCm, &o.seatDeg);
             if (nread >= 4)
             {
                 g_Off[key] = o;
@@ -15522,13 +15556,15 @@ namespace vm_numpad
         }
         out << "# Numpad (gameplay): 4/6 Y  8/2 Z  7/9 X. Hold Ctrl for angles.\n";
         out << "# Numpad 5 save, 0 reset this weapon, Shift = fine step.\n";
-        out << "# key ox oy oz ax ay az [support_cm]  (added on top of the built-in table;\n";
-        out << "# support_cm moves the support-hand point along the gun, + = forward)\n";
+        out << "# key ox oy oz ax ay az [support_cm [seat_cm seat_deg]]  (added on top of the built-in table;\n";
+        out << "# support_cm moves the support-hand point along the gun, + = forward;\n";
+        out << "# seat_cm / seat_deg: magazine seat distance and angle, -1 = built-in default)\n";
         for (const auto& kv : g_Off)
         {
             out << kv.first << " "
                 << kv.second.ox << " " << kv.second.oy << " " << kv.second.oz << " "
-                << kv.second.ax << " " << kv.second.ay << " " << kv.second.az << " " << kv.second.sf << "\n";
+                << kv.second.ax << " " << kv.second.ay << " " << kv.second.az << " " << kv.second.sf
+                << " " << kv.second.seatCm << " " << kv.second.seatDeg << "\n";
         }
         Game::logMsg("Viewmodel numpad saved %d weapons %ls", static_cast<int>(g_Off.size()), path.c_str());
     }
@@ -15585,6 +15621,11 @@ namespace vm_numpad
     }
 }
 
+void bmvr::HeldWeaponSeatDefaults(float& cm, float& deg)
+{
+    vm_numpad::SeatDefaults(vm_numpad::g_HeldKey, cm, deg);
+}
+
 // VR panel DEBUG rows "HELD WEAPON ANGLE": show the held weapon's saved
 // angle extras, write row changes back to them (and the file). Also picks up
 // numpad edits so the rows never write a stale value over them.
@@ -15595,15 +15636,22 @@ void VR::SyncHeldWeaponAngleRows()
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
         key = m_VmClass.numpadKey;
     }
-    static std::string s_key;
-    static float s_p = 0.f, s_y = 0.f, s_r = 0.f, s_s = 0.f;
+    static std::string& s_key = vm_numpad::g_HeldKey;
+    static float s_p = 0.f, s_y = 0.f, s_r = 0.f, s_s = 0.f, s_sc = 0.f, s_sd = 0.f;
     auto it = key.empty() ? vm_numpad::g_Off.end() : vm_numpad::g_Off.find(key);
     const bool have = it != vm_numpad::g_Off.end();
     const float fp = have ? it->second.ax : 0.f;
     const float fy = have ? it->second.ay : 0.f;
     const float fr = have ? it->second.az : 0.f;
     const float fs = have ? it->second.sf : 0.f;
-    if (key != s_key || fp != s_p || fy != s_y || fr != s_r || fs != s_s)
+    // Seat rows show the effective value: the file's, else the built-in one.
+    float fsc = 0.f, fsd = 0.f;
+    vm_numpad::SeatDefaults(key, fsc, fsd);
+    if (have && it->second.seatCm > 0.f)
+        fsc = it->second.seatCm;
+    if (have && it->second.seatDeg > 0.f)
+        fsd = it->second.seatDeg;
+    if (key != s_key || fp != s_p || fy != s_y || fr != s_r || fs != s_s || fsc != s_sc || fsd != s_sd)
     {
         // New weapon, or the numpad changed it: the rows show the file.
         s_key = key;
@@ -15611,21 +15659,30 @@ void VR::SyncHeldWeaponAngleRows()
         s_y = bmvr::g_VmTuneYaw = fy;
         s_r = bmvr::g_VmTuneRoll = fr;
         s_s = bmvr::g_VmTuneSupportCm = fs;
+        s_sc = bmvr::g_VmTuneSeatCm = fsc;
+        s_sd = bmvr::g_VmTuneSeatDeg = fsd;
         return;
     }
     if (key.empty())
         return;
     if (bmvr::g_VmTunePitch != s_p || bmvr::g_VmTuneYaw != s_y || bmvr::g_VmTuneRoll != s_r
-        || bmvr::g_VmTuneSupportCm != s_s)
+        || bmvr::g_VmTuneSupportCm != s_s || bmvr::g_VmTuneSeatCm != s_sc || bmvr::g_VmTuneSeatDeg != s_sd)
     {
         auto& o = vm_numpad::g_Off[key];
         o.ax = s_p = bmvr::g_VmTunePitch;
         o.ay = s_y = bmvr::g_VmTuneYaw;
         o.az = s_r = bmvr::g_VmTuneRoll;
         o.sf = s_s = bmvr::g_VmTuneSupportCm;
+        // Seat values are only written once they differ from the built-in one.
+        float dc = 0.f, dd = 0.f;
+        vm_numpad::SeatDefaults(key, dc, dd);
+        s_sc = bmvr::g_VmTuneSeatCm;
+        s_sd = bmvr::g_VmTuneSeatDeg;
+        o.seatCm = s_sc != dc ? s_sc : -1.f;
+        o.seatDeg = s_sd != dd ? s_sd : -1.f;
         vm_numpad::Save();
-        Game::logMsg("Held weapon tune %s: pitch %.1f yaw %.1f roll %.1f support %+.1f cm (extras on top of the table)",
-            key.c_str(), o.ax, o.ay, o.az, o.sf);
+        Game::logMsg("Held weapon tune %s: pitch %.1f yaw %.1f roll %.1f support %+.1f cm, mag seat %.1f cm %.0f deg (extras on top of the table)",
+            key.c_str(), o.ax, o.ay, o.az, o.sf, s_sc, s_sd);
     }
 }
 
@@ -21315,10 +21372,13 @@ std::atomic<bool> MagReload::g_NeedRack{ false };
 std::atomic<unsigned> MagReload::g_DropTick{ 0 };
 std::atomic<int> MagReload::g_DropFrom{ 0 };
 std::atomic<int> MagReload::g_DisplayClip{ -1 };
+std::atomic<int> MagReload::g_DisplayReserveExtra{ 0 };
 std::atomic<const char*> MagReload::g_ScrubSeq{ nullptr };
 std::atomic<float> MagReload::g_ScrubCycle{ 0.f };
 std::atomic<bool> MagReload::g_ScrubActive{ false };
 std::atomic<bool> MagReload::g_NearWell{ false };
+std::atomic<float> MagReload::g_SeatDistCm{ 0.f };
+std::atomic<float> MagReload::g_SeatAngleDeg{ 0.f };
 std::atomic<bool> MagReload::g_NearBolt{ false };
 std::atomic<float> MagReload::g_BoltPull{ 0.f };
 std::atomic<float> MagReload::g_RpgInsert{ -1.f };
@@ -21332,6 +21392,10 @@ std::atomic<float> MagReload::g_LeftClipWrist[12]{};
 std::atomic<float> MagReload::g_LeftClipUnit{ 0.f };
 std::atomic<unsigned> MagReload::g_SupportHandFromGunMs{ 0 };
 std::atomic<unsigned> MagReload::g_SatchelRadioMs{ 0 };
+std::atomic<unsigned> MagReload::g_SatchelBagMs{ 0 };
+std::atomic<float> MagReload::g_LeftTunnelLocal[6]{};
+std::atomic<unsigned> MagReload::g_LeftTunnelMs{ 0 };
+std::atomic<unsigned> MagReload::g_DetonateHeldMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
 std::atomic<unsigned> MagReload::g_357EjectTick{ 0 };
 std::atomic<bool> MagReload::g_EjectedEmpty{ false };
@@ -21619,6 +21683,13 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
     return kDefs[(weapon >= 0 && weapon < kWeaponCount) ? weapon : 0];
 }
 
+bool MagReload::RocketInFist()
+{
+    return bmvr::g_VrClipHandRpg && bmvr::g_PhysicalWeapons && !bmvr::g_LeftHanded
+        && g_Weapon.load(std::memory_order_relaxed) == kWeaponRpg
+        && g_State.load(std::memory_order_relaxed) == kInHand;
+}
+
 int MagReload::InHandClipPose(int weapon)
 {
     switch (weapon)
@@ -21628,12 +21699,10 @@ int MagReload::InHandClipPose(int weapon)
     case kWeaponCrossbow: return ClipHandPose::kXbowMag;
     case kWeapon357: return ClipHandPose::k357Loader;
     case kWeaponShotgun: return ClipHandPose::kShell;
-    // RPG: Black Mesa's hand holds the rocket across the palm, along the
-    // grip line like a rod in a fist (gun_reload1 @ 0.30); with the
-    // controllers parallel it sits ~90 deg to the tube, so it lines up
-    // when the controller's handle points at the tube. Own developer row
-    // (VrClipHandRpg) on top of VrClipHandPose.
-    case kWeaponRpg: return bmvr::g_VrClipHandRpg ? ClipHandPose::kRpgRocket : ClipHandPose::kNone;
+    // RPG: no clip pose. Black Mesa's gun_reload1 hand is an open palm
+    // pushing the rocket, which did not read as holding it (user
+    // 2026-11-19); with VrClipHandRpg the glove closes into a fist and the
+    // rocket runs through it instead (RocketInFist, ApplyMagReloadBones).
     default: return ClipHandPose::kNone;
     }
 }
@@ -21756,6 +21825,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
             weapon ? s_w[weapon].mag : 0, weapon ? (s_w[weapon].chambered ? 1 : 0) : 1);
     }
     g_Weapon.store(weapon);
+    if (!Def(weapon).tube)
+        g_DisplayReserveExtra.store(0);
     if (weapon == kWeaponNone)
     {
         g_State.store(kLoaded);
@@ -22118,6 +22189,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         g_SlideLocked.store(false);
         g_NeedRack.store(w.needPump);
         g_DisplayClip.store(w.shells);
+        g_DisplayReserveExtra.store(clip > w.shells ? clip - w.shells : 0);
         g_State.store(w.mag);
         if (clip != w.lastClip && w.lastClip >= 0)
             Game::logMsg("Mag reload: shotgun game clip %d -> %d (tube %d, pump %d)", w.lastClip, clip, w.shells, w.needPump ? 1 : 0);
@@ -22387,14 +22459,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
         PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.5f);
         Game::logMsg("Mag reload: %s ejected (clip %d, chambered %d)", def.name, clip, w.chambered ? 1 : 0);
     }
-    // Bolt / slide: left grip at it, pull back, let go.
-    else if (boltGrab && gripEdge && bmvr::g_TwoHandGripToggle)
-    {
-        // Toggle hold: a second squeeze lets go of the bolt/slide.
-        boltGrab = false;
-        s_boltFull = false;
-        Game::logMsg("Mag reload: %s bolt let go", def.name);
-    }
+    // Bolt / slide: left grip held at it, pull back; letting go of the grip
+    // lets go of the handle (also with the two-hand grip toggle: user
+    // 2026-11-19, the toggle kept the MP5 handle held after the grip was
+    // released and the hand moving back still finished the pull).
     else if (!boltGrab && gripEdge && w.mag != kInHand && !w.chambered && g_NearBolt.load())
     {
         boltGrab = true;
@@ -22419,8 +22487,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_pulseUntil = now + 200;
             sound("weapons/ar2/ar2_reload_push.wav");
             ReloadHaptic(ReloadFeel::Seat);
-            Game::logMsg("Mag reload: %s seated (clip %d, game reload %d, chambered %d)",
-                def.name, clip, s_pulseReload ? 1 : 0, w.chambered ? 1 : 0);
+            Game::logMsg("Mag reload: %s seated (%.1f cm, %.0f deg; clip %d, game reload %d, chambered %d)",
+                def.name, g_SeatDistCm.load(), g_SeatAngleDeg.load(), clip, s_pulseReload ? 1 : 0, w.chambered ? 1 : 0);
         }
         else if (released)
         {
@@ -22456,10 +22524,11 @@ void VR::UpdateMagReload(uint32_t& buttons)
             ReloadHaptic(ReloadFeel::Chamber);
             Game::logMsg("Mag reload: %s bolt pulled back, chambered %d", def.name, w.chambered ? 1 : 0);
         }
-        else if (released && !bmvr::g_TwoHandGripToggle)
+        else if (released)
         {
             boltGrab = false;
             s_boltFull = false;
+            Game::logMsg("Mag reload: %s bolt let go (pull %.2f)", def.name, pull);
         }
     }
     g_BoltGrab.store(boltGrab);

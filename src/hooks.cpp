@@ -3959,7 +3959,7 @@ namespace
         // width beside the top grip, floating off the gun (headless dump
         // 2026-11-18); without it the gluon has no right hand, as the Hivehand.
         static const char* kGuns[] = { "v_glock", "v_357", "v_mp5", "v_shotgun", "v_crossbow", "v_rpg",
-            "v_gauss", "v_tau", "v_crowbar", "v_grenade", "v_squeak" };
+            "v_gauss", "v_tau", "v_crowbar", "v_grenade", "v_squeak", "v_tripmine" };
         char buf[128]{};
         strncpy_s(buf, modelName, _TRUNCATE);
         for (char* c = buf; *c; ++c)
@@ -3990,7 +3990,10 @@ namespace
             s_n = 0;
             static const char* kHand[] = { "R_Wrist", "R_Thumb1", "R_Thumb2", "R_Thumb3", "R_Index1", "R_Index2",
                 "R_Index3", "R_Middle1", "R_Middle2", "R_Middle3", "R_Ring1", "R_Ring2", "R_Ring3", "R_Pinky1",
-                "R_Pinky2", "R_Pinky3", "R_Middlenub" };
+                "R_Pinky2", "R_Pinky3", "R_Middlenub",
+                // Grenade: the grenade and its pin shrink with the hand (user
+                // 2026-11-19: the smaller fist cut through the x1.25 grenade).
+                "GrenadeSpawn", "Grenade_Pin2", "Grenade_Pin1", "Grenad_Pin1" };
             for (const char* n : kHand)
             {
                 const int i = FindStudioBoneIndex(hdr, n);
@@ -4000,7 +4003,7 @@ namespace
             const char* kCentre[4] = { "R_Wrist", "R_Middle1", "R_Middle2", "R_Middle3" };
             for (int c = 0; c < 4; ++c)
                 s_centre[c] = FindStudioBoneIndex(hdr, kCentre[c]);
-            Game::logMsg("Gun right hand: crowbar hand shrink over %d bones, k=%.2f", s_n, k);
+            Game::logMsg("Gun right hand: hand shrink over %d bones, k=%.2f", s_n, k);
         }
         if (!bones || !(k > 0.2f && k < 1.5f) || std::fabs(k - 1.f) < 0.01f)
             return;
@@ -4204,6 +4207,98 @@ namespace
         MagReload::g_SatchelRadioMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
     }
 
+    // Detonator thumb (user 2026-11-19: the charge blew, then the finger
+    // pressed). The game detonates on the trigger frame, but its
+    // detonateDetonator clip (31 frames, thumb down on frames 4-9) reaches
+    // the viewmodel a few frames later. While the trigger is held and that
+    // clip is not past its own press yet, the radio hand's thumb is bent to
+    // the clip's frame-4 press here (decoded from v_satchel_radio: R_Thumb2
+    // -16.2 -> -26.9 deg, R_Thumb3 -30.3 -> -51.3 deg about their own z;
+    // neither moves in idle).
+    bool InvertMatrix3x4General(const float in[3][4], float out[3][4]);
+    void PressDetonatorThumb(unsigned char* hdr, float* bones, int nBones)
+    {
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_t2 = -1, s_t3 = -1, s_detSeq = -1;
+        if (!hdr || !bones || !Hooks::m_Game)
+            return;
+        if (s_hdr != hdr)
+        {
+            s_hdr = hdr;
+            s_t2 = FindStudioBoneIndex(hdr, "R_Thumb2");
+            s_t3 = FindStudioBoneIndex(hdr, "R_Thumb3");
+            s_detSeq = FindSequenceByLabel(hdr, "detonateDetonator");
+            Game::logMsg("Detonator thumb: bones %d %d, detonate clip %d", s_t2, s_t3, s_detSeq);
+        }
+        if (s_t2 < 0 || s_t3 < 0 || s_t2 >= nBones || s_t3 >= nBones)
+            return;
+        const unsigned held = MagReload::g_DetonateHeldMs.load(std::memory_order_relaxed);
+        const DWORD now = GetTickCount();
+        if (held == 0 || now - held > 60)
+            return;
+        void* vm = Hooks::m_Game->GetViewModelEntity();
+        int seq = -1;
+        float cycle = 0.f;
+        BMVR_TRY
+        {
+            if (vm)
+            {
+                seq = *reinterpret_cast<int*>(static_cast<char*>(vm) + kViewmodelSequence);
+                cycle = *reinterpret_cast<float*>(static_cast<char*>(vm) + kViewmodelCycle);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        // The clip's own press (frame 4 of 30) has started: it takes over.
+        if (seq == s_detSeq && cycle >= 4.f / 30.f && cycle < 13.f / 30.f)
+            return;
+        // Clip frames 0-3 already bend part of the way: only the rest.
+        float done = 0.f;
+        if (seq == s_detSeq && cycle < 4.f / 30.f)
+        {
+            static const float kPart[5] = { 0.f, 0.16f, 0.50f, 0.84f, 1.f }; // frames 0..4, from the decoded angles
+            const float fr = cycle * 30.f;
+            const int i = static_cast<int>(fr);
+            done = kPart[i] + (kPart[i + 1] - kPart[i]) * (fr - i);
+        }
+        auto bend = [&](int b, float deg, int child) {
+            float* m = bones + b * 12;
+            const float a = deg * (3.14159265f / 180.f);
+            const float c = std::cos(a), s = std::sin(a);
+            // M' = M * Rz(a): the bone turned about its own z axis.
+            float before[12];
+            std::memcpy(before, m, sizeof(before));
+            for (int r = 0; r < 3; ++r)
+            {
+                const float x = before[r * 4 + 0], y = before[r * 4 + 1];
+                m[r * 4 + 0] = c * x + s * y;
+                m[r * 4 + 1] = -s * x + c * y;
+            }
+            if (child < 0)
+                return;
+            // The child rides along: child' = M' * inv(M) * child (rotation
+            // about the bone's origin, which stays).
+            float inv[3][4], rel[3][4], out[3][4];
+            if (!InvertMatrix3x4General(reinterpret_cast<const float(*)[4]>(before), inv))
+                return;
+            float* ch = bones + child * 12;
+            MulMatrix3x4(inv, reinterpret_cast<const float(*)[4]>(ch), rel);
+            MulMatrix3x4(reinterpret_cast<const float(*)[4]>(m), rel, out);
+            std::memcpy(ch, out, sizeof(out));
+        };
+        BMVR_TRY
+        {
+            bend(s_t2, -10.7f * (1.f - done), s_t3);
+            bend(s_t3, -21.0f * (1.f - done), -1);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        static int s_log;
+        if (s_log++ < 3)
+            Game::logMsg("Detonator thumb pressed with the trigger (clip seq %d cycle %.2f)", seq, cycle);
+    }
+
     void SatchelBagToLeftHand(VR* vr, unsigned char* hdr, float* bones, int nBones)
     {
         static thread_local unsigned char* s_hdr = nullptr;
@@ -4285,6 +4380,7 @@ namespace
                 Game::logMsg("Satchel bag: top along bone axis %d (%s), hung from the left fist", axis, best >= 0.f ? "+" : "-");
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
+        MagReload::g_SatchelBagMs.store(now ? now : 1, std::memory_order_relaxed);
     }
 
     // Satchel bag viewmodel playing its stock 'throw' clip (VrSatchelHands:
@@ -4432,6 +4528,7 @@ namespace
             unsigned char* hdr = nullptr;
             int wrist = -1;
             int lwrist = -1;
+            int rforearm = -1;
             int count = 0;
             int idx[48]{};
             bool leftHand[48]{}; // L_Wrist + fingers (kept with keepLeftHand)
@@ -4471,6 +4568,8 @@ namespace
                         || _stricmp(n, "SCI_Hand_Forearm_L") == 0 || _stricmp(n, "gman_arms_l") == 0;
                     const bool rightArm = _stricmp(n, "R_Arm") == 0 || _stricmp(n, "R_Forearm") == 0
                         || _stricmp(n, "SCI_Hand_Forearm_R") == 0 || _stricmp(n, "gman_arms_r") == 0;
+                    if (_stricmp(n, "R_Forearm") == 0)
+                        c.rforearm = i;
                     if (left || rightArm)
                     {
                         const bool hand = _stricmp(n, "L_Wrist") == 0 || _strnicmp(n, "L_Thumb", 7) == 0
@@ -4494,10 +4593,31 @@ namespace
         const bool keepLeft = keepLeftHand && c.lwrist >= 0 && c.lwrist < nBones;
         t_LeftHandCount = 0;
         t_LeftArmCount = 0;
+        // Right forearm/arm fold to a point a little behind the wrist (along
+        // the forearm toward the elbow), not into the wrist origin inside the
+        // hand: the sleeve then closes as a short cone over the cuff instead
+        // of folding into the hand and leaving the wrist open from behind
+        // (user screenshot 2026-11-19, glock). bmvr_gun_hand_cuff units.
+        const int forearm = c.rforearm < nBones ? c.rforearm : -1;
         BMVR_TRY
         {
             const float* w = bones + c.wrist * 12;
-            const float t[3] = { w[3], w[7], w[11] };
+            float t[3] = { w[3], w[7], w[11] };
+            if (forearm >= 0 && bmvr::g_GunHandCuff > 0.f)
+            {
+                const float* fa = bones + forearm * 12;
+                float d[3] = { fa[3] - t[0], fa[7] - t[1], fa[11] - t[2] };
+                const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+                if (len > 1e-3f)
+                {
+                    // Bones are already scaled: the wrist matrix's column
+                    // length is the draw scale.
+                    const float sc = std::sqrt(w[0] * w[0] + w[4] * w[4] + w[8] * w[8]);
+                    const float back = (std::min)(bmvr::g_GunHandCuff * (sc > 0.05f ? sc : 1.f), 0.5f * len);
+                    for (int r = 0; r < 3; ++r)
+                        t[r] += d[r] / len * back;
+                }
+            }
             const float* lw = keepLeft ? bones + c.lwrist * 12 : w;
             const float lt[3] = { lw[3], lw[7], lw[11] };
             for (int k = 0; k < c.count; ++k)
@@ -5689,22 +5809,6 @@ namespace
                 v.y = grasp[1] * unit + (centre[1] - grasp[1]) * vmScale;
                 v.z = grasp[2] * unit + (centre[2] - grasp[2]) * vmScale;
                 magAnchor = wo + ax[0] * v.x + ax[1] * v.y + ax[2] * v.z;
-                // Test (VrClipHandRpgFlip): the rocket turned 180 deg about the
-                // controller's forward axis through the palm point, so it
-                // comes out of the other side of the fist.
-                if (want == ClipHandPose::kRpgRocket && bmvr::g_VrClipHandRpgFlip)
-                {
-                    const Vector g = wo + (ax[0] * grasp[0] + ax[1] * grasp[1] + ax[2] * grasp[2]) * unit;
-                    auto flip = [&](const Vector& q) { return hf * (2.f * q.Dot(hf)) - q; };
-                    magAnchor = g + flip(magAnchor - g);
-                    for (int j = 0; j < 3; ++j)
-                    {
-                        const Vector col = flip(Vector(m[0 * 4 + j], m[1 * 4 + j], m[2 * 4 + j]));
-                        m[0 * 4 + j] = col.x;
-                        m[1 * 4 + j] = col.y;
-                        m[2 * 4 + j] = col.z;
-                    }
-                }
                 static thread_local DWORD s_clipLogMs = 0;
                 if (now - s_clipLogMs > 2000)
                 {
@@ -5718,6 +5822,68 @@ namespace
                         def.name, d.Dot(hf), d.Dot(hr), d.Dot(hu), unit, vmScale, alignF,
                         oxLen > 1e-4f ? ox.Dot(hf) / oxLen : 0.f, oxLen > 1e-4f ? ox.Dot(hr) / oxLen : 0.f,
                         oxLen > 1e-4f ? ox.Dot(hu) / oxLen : 0.f);
+                }
+            }
+        }
+        // RPG rocket through the closed left fist (VrClipHandRpg; user
+        // 2026-11-19: in BM's open pushing palm it did not look held): its
+        // long axis along the glove's knuckle line, the fist round it a
+        // quarter of its length from the warhead, the tail out of the pinky
+        // side (VrClipHandRpgFlip, default) or the thumb side. The tail goes
+        // into the tube first.
+        if (weapon == MagReload::kWeaponRpg && bmvr::g_VrClipHandRpg)
+        {
+            const unsigned tunMs = MagReload::g_LeftTunnelMs.load(std::memory_order_relaxed);
+            Vector seatX(seat[0], seat[4], seat[8]);
+            Vector hx(m[0], m[4], m[8]);
+            if (tunMs != 0 && now - tunMs < 500 && VectorNormalize(seatX) > 1e-4f && VectorNormalize(hx) > 1e-4f)
+            {
+                float T[6];
+                for (int k = 0; k < 6; ++k)
+                    T[k] = MagReload::g_LeftTunnelLocal[k].load(std::memory_order_relaxed);
+                const Vector tunnel = hand + hf * T[0] + hr * T[1] + hu * T[2];
+                Vector knuckle = hf * T[3] + hr * T[4] + hu * T[5]; // pinky -> index
+                VectorNormalize(knuckle);
+                // Warhead direction of the bone x axis: out of the muzzle when seated.
+                const Vector warheadNow = seatX.Dot(f) < 0.f ? hx * -1.f : hx;
+                const Vector tail = bmvr::g_VrClipHandRpgFlip ? knuckle * -1.f : knuckle;
+                const Vector want = tail * -1.f;
+                const Vector v = CrossProduct(warheadNow, want);
+                const float c = warheadNow.Dot(want);
+                float R[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+                if (c > -0.999f)
+                {
+                    const float k = 1.f / (1.f + c);
+                    const float Rv[3][3] = {
+                        { 1.f - (v.y * v.y + v.z * v.z) * k, -v.z + v.x * v.y * k, v.y + v.x * v.z * k },
+                        { v.z + v.x * v.y * k, 1.f - (v.x * v.x + v.z * v.z) * k, -v.x + v.y * v.z * k },
+                        { -v.y + v.x * v.z * k, v.x + v.y * v.z * k, 1.f - (v.x * v.x + v.y * v.y) * k } };
+                    std::memcpy(R, Rv, sizeof(R));
+                }
+                else
+                {
+                    // Opposite: half a turn about the controller's up axis.
+                    const Vector ax = hu;
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                            R[i][j] = 2.f * (&ax.x)[i] * (&ax.x)[j] - (i == j ? 1.f : 0.f);
+                }
+                float rot[3][3];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        rot[i][j] = R[i][0] * m[0 * 4 + j] + R[i][1] * m[1 * 4 + j] + R[i][2] * m[2 * 4 + j];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        m[i * 4 + j] = rot[i][j];
+                const float len = 28.3f * vmScale;
+                magAnchor = tunnel + tail * (0.25f * len);
+                static thread_local DWORD s_fistLogMs = 0;
+                if (now - s_fistLogMs > 2000)
+                {
+                    s_fistLogMs = now;
+                    const Vector d = magAnchor - hand;
+                    Game::logMsg("Mag reload: rpg rocket through the left fist (tail out of the %s side), centre %.1f fwd %.1f right %.1f up of the controller",
+                        bmvr::g_VrClipHandRpgFlip ? "pinky" : "thumb", d.Dot(hf), d.Dot(hr), d.Dot(hu));
                 }
             }
         }
@@ -5763,16 +5929,18 @@ namespace
                 // Rocket length 28.3 units; seated, ~5 stick out of the
                 // muzzle, so its tail reaches the muzzle at along ~0.8 L.
                 const float len = 28.3f * vmScale;
-                // Lenient on purpose (user: realistic but never finicky in a
-                // fight): wide entry depth, 5 units off the axis, ~45 deg off.
-                const float tol = 5.f * vmScale;
-                if (!s_engaged && along > 0.3f * len && along < 1.0f * len && radial < tol && align > 0.7f)
+                // Was lenient (5 units off the axis, ~45 deg, kept on the axis up
+                // to 10 units away): it snapped onto the muzzle too easily and
+                // then sat there without the hand (user 2026-11-19). Now 2.5
+                // units / ~25 deg to engage, off again past 4 units / ~40 deg.
+                const float tol = 2.5f * vmScale;
+                if (!s_engaged && along > 0.4f * len && along < 0.95f * len && radial < tol && align > 0.9f)
                 {
                     s_engaged = true;
                     Game::logMsg("Mag reload: rpg rocket engaged at the muzzle (along %.1f radial %.1f align %.2f)",
                         along / vmScale, radial / vmScale, align);
                 }
-                else if (s_engaged && (radial > 2.f * tol || along > 1.1f * len || align < 0.5f))
+                else if (s_engaged && (radial > 1.6f * tol || along > 1.05f * len || align < 0.75f))
                 {
                     s_engaged = false;
                     Game::logMsg("Mag reload: rpg rocket off the tube (along %.1f radial %.1f align %.2f)",
@@ -5810,15 +5978,47 @@ namespace
         MagReload::g_RpgInsert.store(-1.f);
         std::memcpy(s_handMag, m, sizeof(s_handMag));
         s_handMagValid = true;
+        // Seats when the magazine centre is within the held weapon's seat
+        // distance (cm) of the well and turned less than its seat angle away
+        // from the seated pose (VR panel DEBUG rows, saved per weapon; user
+        // 2026-11-19: with the magazine in BM's reload grip it snapped in
+        // from far too far, so be strict). Angle = rotation between the
+        // magazine's frame in the hand and in the gun (shotgun / .357: 180 =
+        // not checked).
+        const float unitsPerM = vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f;
         const float dist = (magAnchor - well).Length();
-        MagReload::g_NearWell.store(dist < bmvr::g_VrMagSeatDistance * vmScale);
+        const float distCm = dist / unitsPerM * 100.f;
+        float angleDeg = 0.f;
+        {
+            float tr = 0.f;
+            for (int j = 0; j < 3; ++j)
+            {
+                const Vector a(m[j], m[4 + j], m[8 + j]);
+                const Vector b(seat[j], seat[4 + j], seat[8 + j]);
+                const float la = a.Length(), lb = b.Length();
+                if (la > 1e-5f && lb > 1e-5f)
+                    tr += a.Dot(b) / (la * lb);
+            }
+            angleDeg = std::acos(std::clamp((tr - 1.f) * 0.5f, -1.f, 1.f)) * (180.f / 3.14159265f);
+        }
+        const float maxCm = bmvr::g_VmTuneSeatCm;
+        const float maxDeg = bmvr::g_VmTuneSeatDeg;
+        const bool angleOk = maxDeg >= 179.5f || angleDeg <= maxDeg;
+        const bool atWell = distCm <= maxCm && angleOk;
+        MagReload::g_NearWell.store(atWell);
+        MagReload::g_SeatDistCm.store(distCm, std::memory_order_relaxed);
+        MagReload::g_SeatAngleDeg.store(angleDeg, std::memory_order_relaxed);
         static thread_local DWORD s_logMs = 0;
-        if (now - s_logMs > 1000)
+        // Once a second, and at once when only the angle keeps it out.
+        static thread_local bool s_angleLogged = false;
+        const bool angleOnly = distCm <= maxCm && !angleOk;
+        if (now - s_logMs > 1000 || (angleOnly && !s_angleLogged))
         {
             s_logMs = now;
+            s_angleLogged = angleOnly;
             const Vector d = well - magAnchor;
-            Game::logMsg("Mag reload: magazine %.1f units from the well (well - hand: %.1f fwd %.1f right %.1f up in the hand frame)",
-                dist, d.Dot(hf), d.Dot(hr), d.Dot(hu));
+            Game::logMsg("Mag reload: magazine %.1f cm from the well, %.0f deg off the seated pose (seats within %.1f cm, %.0f deg)%s (well - hand: %.1f fwd %.1f right %.1f up units in the hand frame)",
+                distCm, angleDeg, maxCm, maxDeg, angleOnly ? " - angle keeps it out" : "", d.Dot(hf), d.Dot(hr), d.Dot(hu));
         }
     }
 
@@ -5912,19 +6112,23 @@ namespace
                 s_holding = true;
                 s_grabOffset = ringPos - hand;
             }
-            // The ring stays where the hand took it; the pin comes along.
-            Vector target = hand + s_grabOffset;
-            // Pulled, with the reload-clip pose on the glove: the ring glides
-            // (~0.15 s) to where Black Mesa's pinpullthrow hand holds it,
-            // between thumb and index (the grab offset can be ~10 cm with
-            // the lenient grab radius). Before the pull it stays put, so the
-            // pull distance is unchanged.
+            // The pull is the hand's travel since the grab (ring kept where
+            // the hand took it, against the ring's own spot on the grenade).
+            const Vector held = hand + s_grabOffset;
+            if (st == MagReload::kPinHeld)
+                MagReload::g_PinPull.store((held - ringPos).Length() / (vmScale > 0.05f ? vmScale : 1.f));
+            Vector target = held;
+            // With the reload-clip pose on the glove the ring is drawn where
+            // Black Mesa's pinpullthrow hand holds it, round the finger
+            // (gliding there over ~0.15 s; the grab offset can be ~10 cm with
+            // the lenient grab radius). Was only after the pull: held, the
+            // ring floated beside the fingers (user 2026-11-19).
             static thread_local float s_toFingers = 0.f;
             static thread_local DWORD s_blendMs = 0;
             const unsigned clipMs = MagReload::g_LeftClipMs.load(std::memory_order_relaxed);
             const float unit = MagReload::g_LeftClipUnit.load(std::memory_order_relaxed);
-            if (st == MagReload::kPinPulledInHand
-                && MagReload::g_LeftClipPose.load(std::memory_order_relaxed) == ClipHandPose::kPinPulled
+            const int pinPose = st == MagReload::kPinHeld ? ClipHandPose::kPinHold : ClipHandPose::kPinPulled;
+            if (MagReload::g_LeftClipPose.load(std::memory_order_relaxed) == pinPose
                 && clipMs != 0 && now - clipMs < 500 && unit > 1e-4f)
             {
                 const float dt = s_blendMs ? (now - s_blendMs) * 0.001f : 0.f;
@@ -5932,7 +6136,7 @@ namespace
                 float W[12];
                 for (int k = 0; k < 12; ++k)
                     W[k] = MagReload::g_LeftClipWrist[k].load(std::memory_order_relaxed);
-                const float* O = ClipHandPose::kPoses[ClipHandPose::kPinPulled].object;
+                const float* O = ClipHandPose::kPoses[pinPose].object;
                 float p[3];
                 for (int i = 0; i < 3; ++i)
                     p[i] = (O[i * 4 + 0] * rc[0] + O[i * 4 + 1] * rc[1] + O[i * 4 + 2] * rc[2] + O[i * 4 + 3]) * unit;
@@ -5947,8 +6151,6 @@ namespace
                 s_toFingers = 0.f;
             s_blendMs = now;
             const Vector d = target - ringPos;
-            if (st == MagReload::kPinHeld)
-                MagReload::g_PinPull.store(d.Length() / (vmScale > 0.05f ? vmScale : 1.f));
             move(d);
             s_lastDelta = d;
             return;
@@ -5970,17 +6172,27 @@ namespace
         }
     }
 
+    // Snark (user 2026-11-19): on the hand throw's release the game plays
+    // snark_throw (0.4 s, spawn at cycle 0.67), which swung the snark sideways
+    // in the hand before it left, so it did not look thrown. During the throw
+    // clips the whole model (hand + snark) is held where SnarkROOT sits in
+    // idle, like the grenade; other clips (draw, reload) play as they are.
     bool GrenadeHoldCorrection(unsigned char* hdr, const void* bones, int nBones,
-        const float entity[3][4], float out[3][4])
+        const float entity[3][4], float out[3][4], bool snark = false)
     {
-        static unsigned char* s_hdr = nullptr;
-        static int s_bone = -1;
-        static bool s_haveAnchor = false;
-        static float s_anchor[3][4];
+        static unsigned char* s_hdrs[2] = { nullptr, nullptr };
+        static int s_bones[2] = { -1, -1 };
+        static bool s_haveAnchors[2] = { false, false };
+        static float s_anchors[2][3][4];
+        const int w = snark ? 1 : 0;
+        unsigned char*& s_hdr = s_hdrs[w];
+        int& s_bone = s_bones[w];
+        bool& s_haveAnchor = s_haveAnchors[w];
+        float (&s_anchor)[3][4] = s_anchors[w];
         if (hdr != s_hdr)
         {
             s_hdr = hdr;
-            s_bone = FindStudioBoneIndex(hdr, "GrenadeSpawn");
+            s_bone = FindStudioBoneIndex(hdr, snark ? "SnarkROOT" : "GrenadeSpawn");
             s_haveAnchor = false;
         }
         if (s_bone < 0 || s_bone >= nBones || !Hooks::m_Game)
@@ -6008,6 +6220,8 @@ namespace
             return false;
         }
         if (!s_haveAnchor)
+            return false;
+        if (snark && !(label && _strnicmp(label, "snark_throw", 11) == 0))
             return false;
         // out = entity * anchor * cur^-1: moves GrenadeSpawn back onto its idle pose.
         float want[3][4], curInv[3][4];
@@ -10840,12 +11054,13 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
             const int nBones = StudioHdrNumBones(hdr);
             const float* boneDelta = rigidPtr;
             float grenadeDelta[3][4]{};
+            const bool snarkModel = modelName && (std::strstr(modelName, "v_squeak") || std::strstr(modelName, "v_Squeak"));
             if (rigidPtr && pCustomBoneToWorld && nBones > 0 && modelName
-                && (std::strstr(modelName, "v_grenade") || std::strstr(modelName, "v_Grenade")))
+                && (std::strstr(modelName, "v_grenade") || std::strstr(modelName, "v_Grenade") || snarkModel))
             {
                 float entity[3][4]{}, hold[3][4]{};
                 BuildMatrix3x4FromOrgAngles(entity, info.origin, info.angles);
-                if (GrenadeHoldCorrection(hdr, pCustomBoneToWorld, nBones, entity, hold))
+                if (GrenadeHoldCorrection(hdr, pCustomBoneToWorld, nBones, entity, hold, snarkModel))
                 {
                     MulMatrix3x4(rigidDelta, hold, grenadeDelta);
                     boneDelta = &grenadeDelta[0][0];
@@ -10922,10 +11137,14 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                             bmvr::g_ViewmodelScale / scale);
                     if (std::strstr(modelName, "v_glock") || std::strstr(modelName, "v_357") || std::strstr(modelName, "v_mp5"))
                         NoteGunWristReference(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, modelName);
-                    else if (std::strstr(modelName, "v_grenade") || std::strstr(modelName, "v_squeak"))
+                    else if (std::strstr(modelName, "v_grenade") || std::strstr(modelName, "v_squeak")
+                        || std::strstr(modelName, "v_tripmine"))
                         AlignWristToReference(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                     if (std::strstr(modelName, "v_satchel_radio") && m_VR->SatchelHandsActive())
+                    {
+                        PressDetonatorThumb(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                         SatchelRadioToRightHand(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot);
+                    }
                     LogGunFistVsController(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot,
                         modelName);
                 }

@@ -66,6 +66,11 @@ namespace MagReload
     extern std::atomic<unsigned> g_357EjectTick; // .357 cylinder open: old bullets fall out from here
     extern std::atomic<bool> g_EjectedEmpty;    // the magazine that left the gun last had no rounds
     extern std::atomic<int> g_DisplayClip;  // ammo HUD count while on (-1 = the game's)
+    // Added to the HUD reserve: shotgun shells the game's background reload
+    // already took into its tube that the hands have not loaded yet (they
+    // still come off the hip), so the reserve does not drop by a tube's worth
+    // when the gun runs dry (user 2026-11-19). 0 for every other gun.
+    extern std::atomic<int> g_DisplayReserveExtra;
 
     // Stock clip scrubbed by the hands: sequence label + cycle, frozen (the
     // gun body is held at its idle pose so only the moving parts animate).
@@ -76,6 +81,8 @@ namespace MagReload
 
     // Draw -> game thread.
     extern std::atomic<bool> g_NearWell;   // magazine in the hand is at the well
+    extern std::atomic<float> g_SeatDistCm;   // last magazine -> well distance (cm)
+    extern std::atomic<float> g_SeatAngleDeg; // last magazine angle off its seated pose
     extern std::atomic<bool> g_NearBolt;   // left hand is at the bolt/slide
     extern std::atomic<float> g_BoltPull;  // 0..1 of boltTravel while grabbed
     // RPG: the rocket in the hand is on the tube axis in front of the muzzle
@@ -98,6 +105,12 @@ namespace MagReload
     // forward, right, up; columns = the wrist's x, y, z axes, unit length,
     // then its origin) plus game units per viewmodel model unit at the
     // glove's size. The held magazine is placed from it.
+    // Fist tunnel of the drawn left glove, same controller frame: centre
+    // (0..2) and unit knuckle-line direction pinky -> index (3..5).
+    extern std::atomic<float> g_LeftTunnelLocal[6];
+    extern std::atomic<unsigned> g_LeftTunnelMs;
+    // RPG rocket in the left hand, held through a closed fist (VrClipHandRpg).
+    bool RocketInFist();
     extern std::atomic<int> g_LeftClipPose;
     extern std::atomic<unsigned> g_LeftClipMs;
     extern std::atomic<float> g_LeftClipWrist[12];
@@ -114,6 +127,13 @@ namespace MagReload
     // GetTickCount of the last satchel radio (detonator) draw: until it
     // exists (first charge out) the right glove shows instead.
     extern std::atomic<unsigned> g_SatchelRadioMs;
+    // GetTickCount of the last satchel bag draw (hung from the left glove):
+    // the left glove closes into a fist round its top while it is drawn.
+    extern std::atomic<unsigned> g_SatchelBagMs;
+    // GetTickCount of the last input frame with the detonate trigger held
+    // (satchel hands): the radio's own thumb is drawn on the button at once,
+    // the game's detonate clip only arrives a few frames after the blast.
+    extern std::atomic<unsigned> g_DetonateHeldMs;
     // Shotgun pump back stroke: a spent hull flies out of the ejection port
     // (GetTickCount, 0 = none).
     extern std::atomic<unsigned> g_EjectTick;

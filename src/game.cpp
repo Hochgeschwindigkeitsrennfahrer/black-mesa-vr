@@ -1728,6 +1728,8 @@ bool Game::ReadWristHudValues(int& health, int& armor, int& clip, int& reserve, 
     const int ammoType = rdInt(weapon, g_nvPrimaryAmmoType);
     if (player && g_nvAmmoBase >= 0 && ammoType >= 0 && ammoType < 32)
         reserve = rdInt(player, g_nvAmmoBase + 4 * ammoType);
+    if (reserve >= 0 && MagReload::g_DisplayClip.load(std::memory_order_relaxed) >= 0)
+        reserve += MagReload::g_DisplayReserveExtra.load(std::memory_order_relaxed);
     const int secType = rdInt(weapon, g_nvSecondaryAmmoType);
     if (secType >= 0 && secType < 32 && player && g_nvAmmoBase >= 0)
         secondary = rdInt(player, g_nvAmmoBase + 4 * secType);
