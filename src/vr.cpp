@@ -21589,17 +21589,35 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
     return kDefs[(weapon >= 0 && weapon < kWeaponCount) ? weapon : 0];
 }
 
+int MagReload::InHandClipPose(int weapon)
+{
+    switch (weapon)
+    {
+    case kWeaponMp5: return ClipHandPose::kMp5Mag;
+    case kWeaponGlock: return ClipHandPose::kGlockMag;
+    case kWeaponCrossbow: return ClipHandPose::kXbowMag;
+    case kWeapon357: return ClipHandPose::k357Loader;
+    case kWeaponShotgun: return ClipHandPose::kShell;
+    default: return ClipHandPose::kNone; // RPG rocket: no clip frame
+    }
+}
+
 int MagReload::WantedClipHandPose()
 {
     if (!bmvr::g_VrClipHandPose || !bmvr::g_VrStockHandPose || !bmvr::g_PhysicalWeapons || bmvr::g_LeftHanded)
         return ClipHandPose::kNone;
     const int w = g_Weapon.load(std::memory_order_relaxed);
-    if (w != kWeaponMp5 && w != kWeaponGlock)
-        return ClipHandPose::kNone;
     if (g_BoltGrab.load(std::memory_order_relaxed))
-        return w == kWeaponMp5 ? ClipHandPose::kMp5Bolt : ClipHandPose::kGlockSlide;
+    {
+        // Shotgun pump: the gun's own left hand rides it already.
+        if (w == kWeaponMp5)
+            return ClipHandPose::kMp5Bolt;
+        if (w == kWeaponGlock)
+            return ClipHandPose::kGlockSlide;
+        return ClipHandPose::kNone;
+    }
     if (g_State.load(std::memory_order_relaxed) == kInHand)
-        return w == kWeaponMp5 ? ClipHandPose::kMp5Mag : ClipHandPose::kGlockMag;
+        return InHandClipPose(w);
     return ClipHandPose::kNone;
 }
 

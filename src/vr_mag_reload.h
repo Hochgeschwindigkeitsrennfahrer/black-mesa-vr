@@ -106,6 +106,8 @@ namespace MagReload
     // (ClipHandPose::Id, -1 = none): magazine in the hand, MP5 bolt or
     // glock slide held.
     int WantedClipHandPose();
+    // The reload-clip pose for this weapon's magazine/loader/shell in the hand (-1 = none).
+    int InHandClipPose(int weapon);
     // GetTickCount of the last viewmodel draw that showed the gun's own
     // left hand as the support hand (VrSupportHandLock): the glove skips it.
     extern std::atomic<unsigned> g_SupportHandFromGunMs;

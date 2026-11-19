@@ -17,6 +17,9 @@ PICKS = [
     ("kMp5Bolt", "mp5 bolt", "reload_long", "0.200", "Bolt_New"),
     ("kGlockMag", "glock magazine", "gun_reload", "0.450", "bone_clip"),
     ("kGlockSlide", "glock slide", "draw_admire", "0.550", "Bone01"),
+    ("kXbowMag", "crossbow magazine", "reload", "0.500", "clip_export_bone"),
+    ("k357Loader", "357 speed loader", "gun_reload1", "0.700", "speed_loader"),
+    ("kShell", "shotgun shell", "shell_reload1", "0.300", "bone_shell"),
 ]
 FINGERS = [f"L_{f}{s}" for f in ("Thumb", "Index", "Middle", "Ring", "Pinky") for s in (1, 2, 3)]
 
@@ -28,7 +31,7 @@ def read(paths):
         for line in open(p, errors="replace"):
             m = re.search(r"Hand pose dump: seq \d+ \((\S+)\) cycle ([\d.]+)", line)
             if m:
-                cur = blocks.setdefault((m[1], m[2]), {})
+                cur = blocks.setdefault((m[1], m[2], len(blocks)), {})
                 continue
             m = re.search(r"Hand pose dump:\s+(\S+)\s+([-\d.| ]+)$", line)
             if m and cur is not None:
@@ -67,9 +70,10 @@ def main():
     out.append("")
     out.append("    inline constexpr Pose kPoses[kCount] = {")
     for enum, label, clip, cycle, obj in PICKS:
-        b = blocks.get((clip, cycle))
-        if b is None:
-            sys.exit(f"no dump for {clip} @ {cycle}")
+        cands = [b for (c, cy, _), b in blocks.items() if c == clip and cy == cycle and obj in b]
+        if not cands:
+            sys.exit(f"no dump for {clip} @ {cycle} with {obj}")
+        b = cands[-1]
         missing = [n for n in [obj] + FINGERS if n not in b]
         if missing:
             sys.exit(f"{clip} @ {cycle}: missing {missing}")

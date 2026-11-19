@@ -5650,9 +5650,8 @@ namespace
         // wrist -> magazine pose. The palm point scales with the glove,
         // the magazine's own extent with the gun, so a glove size that
         // differs from the viewmodel scale keeps it in the fingers.
-        if (!def.tube && (weapon == MagReload::kWeaponMp5 || weapon == MagReload::kWeaponGlock))
+        if (const int want = MagReload::InHandClipPose(weapon); want >= 0)
         {
-            const int want = weapon == MagReload::kWeaponMp5 ? ClipHandPose::kMp5Mag : ClipHandPose::kGlockMag;
             const unsigned clipMs = MagReload::g_LeftClipMs.load(std::memory_order_relaxed);
             const float unit = MagReload::g_LeftClipUnit.load(std::memory_order_relaxed);
             if (MagReload::g_LeftClipPose.load(std::memory_order_relaxed) == want && clipMs != 0 && now - clipMs < 500
