@@ -9491,6 +9491,60 @@ namespace
     }
 }
 
+namespace
+{
+    // RPG rocket flight log (diagnostic, user 2026-11-18: the rocket rises
+    // after launch before flying forward): after a shot with the RPG out,
+    // every client entity whose network class names a rocket/missile is
+    // logged every ~100 ms for 2.5 s (first 4 shots per run).
+    void TraceRpgRocket(Game* game, VR* vr, const CUserCmd* cmd)
+    {
+        static DWORD s_until = 0, s_start = 0, s_last = 0;
+        static int s_shots = 0;
+        static std::vector<const char*> s_before;   // network name per index at the shot
+        static bool s_prevAttack = false;
+        if (!game || !vr || !cmd || !game->m_ClientEntityList)
+            return;
+        const bool attack = (cmd->buttons & IN_ATTACK) != 0;
+        const DWORD now = GetTickCount();
+        if (attack && !s_prevAttack && s_shots < 4)
+        {
+            const char* wm = game->GetActiveWeaponModelName();
+            if (wm && std::strstr(wm, "rpg"))
+            {
+                ++s_shots;
+                s_start = now;
+                const int top = game->m_ClientEntityList->GetHighestEntityIndex();
+                s_before.assign(static_cast<size_t>(top + 1 > 0 ? top + 1 : 0), nullptr);
+                for (int e = 1; e <= top; ++e)
+                    s_before[static_cast<size_t>(e)] = game->GetEntityNetworkName(e);
+                s_until = now + 2500;
+                Game::logMsg("RPG flight log: shot %d, aim pitch %.1f yaw %.1f", s_shots, cmd->viewangles.x, cmd->viewangles.y);
+            }
+        }
+        s_prevAttack = attack;
+        if (!s_until || now > s_until || now - s_last < 100)
+            return;
+        s_last = now;
+        const int hi = game->m_ClientEntityList->GetHighestEntityIndex();
+        for (int e = 1; e <= hi; ++e)
+        {
+            const char* name = game->GetEntityNetworkName(e);
+            // Entities that appeared since the shot (or rocket-named ones).
+            const bool isNew = static_cast<size_t>(e) >= s_before.size() || s_before[static_cast<size_t>(e)] != name;
+            if (!name || !(isNew || std::strstr(name, "issile") || std::strstr(name, "ocket")))
+                continue;
+            const char* ent = static_cast<const char*>(game->m_ClientEntityList->GetClientEntity(e));
+            if (!ent)
+                continue;
+            Vector org{};
+            BMVR_TRY { org = *reinterpret_cast<const Vector*>(ent + Offsets::kCBaseEntity_AbsOrigin); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+            Game::logMsg("RPG flight +%lums: %s #%d at (%.0f,%.0f,%.0f)", static_cast<unsigned long>(now - s_start), name, e, org.x, org.y, org.z);
+        }
+    }
+}
+
 bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime, CUserCmd* cmd)
 {
     TraceThrownSnark();
@@ -9849,6 +9903,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     }
 
     bool result = hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
+    TraceRpgRocket(m_Game, m_VR, cmd);
 
     if (m_VR && cmd->command_number && m_VR->IsGameplayEligible())
         m_VR->m_SeenGameplay = true;
@@ -14785,18 +14840,67 @@ void* __cdecl Hooks::dProjectileCreate(int type, Vector* target, float speed, vo
     // aim trace) is kept, so the flight direction, the alt-fire spread and
     // the homing target are unchanged.
     constexpr int kProjectileHornet = 12;
+    // RPG rocket (headless 2026-11-19: type 4): spawned at the eye, ~10 u
+    // above a gun held lower, it flew level and then the laser guidance
+    // pulled it down onto the gun's line = "rises, then flies forward"
+    // (user 2026-11-18). From the RPG's muzzle like the hornets.
+    constexpr int kProjectileRpg = 4;
     Vector muzzle{};
-    if (type == kProjectileHornet && m_VR && bmvr::g_VrShotOriginFix
+    if ((type == kProjectileHornet || type == kProjectileRpg) && m_VR && bmvr::g_VrShotOriginFix
         && ShouldRewriteShootAngles(thrower ? thrower : owner) && m_VR->TryGetVrShootOrigin(muzzle))
     {
         static int s_hornetLogs = 6;
         g_VrSpawnPoint = muzzle;
-        g_VrSpawnWhat = "Hornet";
+        g_VrSpawnWhat = type == kProjectileRpg ? "RPG rocket" : "Hornet";
         g_VrSpawnLogBudget = bmvr::g_AimDebug ? -1 : s_hornetLogs;
         g_VrSpawnMaxDist = 100.f;
         g_VrGrenadeSpawn = true;
-        void* proj = hkProjectileCreate.fOriginal(type, target, speed, owner, thrower);
+        // RPG: launched at the laser's end point (the beam the dot sits on),
+        // not the game's aim trace end, so it leaves the muzzle along the
+        // line the guidance will hold it on.
+        Vector rpgTarget{}, beamStart{};
+        Vector* useTarget = target;
+        if (type == kProjectileRpg && target && m_VR->TryGetVrBeamSegment(beamStart, rpgTarget))
+        {
+            static int s_rpgLogs;
+            if (s_rpgLogs++ < 6)
+                Game::logMsg("RPG rocket target: game (%.0f,%.0f,%.0f) -> laser end (%.0f,%.0f,%.0f)",
+                    target->x, target->y, target->z, rpgTarget.x, rpgTarget.y, rpgTarget.z);
+            useTarget = &rpgTarget;
+        }
+        void* proj = hkProjectileCreate.fOriginal(type, useTarget, speed, owner, thrower);
         g_VrGrenadeSpawn = false;
+        // RPG: before ignition the rocket coasts along the player's aim
+        // angles; the laser (where the guidance takes it next) can point
+        // elsewhere, so it bent onto the laser line after ~0.2 s. Start it
+        // along the beam at its own launch speed.
+        if (proj && type == kProjectileRpg && useTarget == &rpgTarget)
+        {
+            if (HMODULE server = GetModuleHandleA("server.dll"))
+            {
+                auto* fn = reinterpret_cast<unsigned char*>(server) + Offsets::kSetAbsVelocity_Server;
+                static const unsigned char kSig[] = { 0x55, 0x8B, 0xEC, 0xF3, 0x0F, 0x10, 0x05 };
+                bool ok = false;
+                BMVR_TRY { ok = std::memcmp(fn, kSig, sizeof(kSig)) == 0; }
+                __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+                Vector vel{};
+                BMVR_TRY { vel = *reinterpret_cast<const Vector*>(static_cast<const char*>(proj) + 0x218); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+                Vector dir = rpgTarget - muzzle;
+                const float len = dir.Length();
+                const float spd = vel.Length();
+                if (ok && len > 1.f && spd > 1.f)
+                {
+                    const Vector want = dir * (spd / len);
+                    BMVR_TRY { reinterpret_cast<tSetAbsVelocity>(fn)(proj, &want); }
+                    __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    static int s_velLogs;
+                    if (s_velLogs++ < 6)
+                        Game::logMsg("RPG rocket: launch velocity (%.0f,%.0f,%.0f) -> along the laser (%.0f,%.0f,%.0f)",
+                            vel.x, vel.y, vel.z, want.x, want.y, want.z);
+                }
+            }
+        }
         if (!bmvr::g_AimDebug)
             s_hornetLogs = g_VrSpawnLogBudget;
         g_VrSpawnLogBudget = -1;
