@@ -367,6 +367,7 @@ namespace bmvr
     float g_LadderGripCurl = 0.7f;
     float g_SatchelGripCurl = 0.75f;
     float g_GunHandCuff = 1.5f;
+    bool g_TripmineFaceAim = true;
     float g_VrRecoilScale = 1.f;
     float g_VrRecoilTwoHand = 0.3f;
     bool g_RpgRocketShown = true;

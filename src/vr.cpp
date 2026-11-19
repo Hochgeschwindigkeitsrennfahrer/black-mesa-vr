@@ -8066,6 +8066,21 @@ QAngle VR::GetAimAngles() const
         }
     }
     aim = GetRightControllerAbsAngle();
+    // Tripmine (bmvr_tripmine_face_aim): placed along the mine's sensor face,
+    // which points along the controller's up axis in the hand, so a mine held
+    // face to the wall is placed there (user 2026-11-19: only a controller
+    // pointed at the wall, mine face up, placed it).
+    if (bmvr::g_TripmineFaceAim && m_VmClass.numpadKey == "tripmine")
+    {
+        Vector cf, cr, cu;
+        QAngle::AngleVectors(aim, &cf, &cr, &cu);
+        QAngle::VectorAngles(cu, cf * -1.f, aim);
+        if (aim.x > 180.f) aim.x -= 360.f;
+        if (aim.x > 89.f) aim.x = 89.f;
+        if (aim.x < -89.f) aim.x = -89.f;
+        aim.z = 0.f;
+        return aim;
+    }
     // Trim the shot direction only. The viewmodel keeps its tuned pose, so a
     // grip that consistently lands low is corrected without rotating models.
     aim.x -= bmvr::g_AimPitchOffset;
@@ -15483,8 +15498,10 @@ namespace vm_numpad
             cm = 5.f;
         else if (key == "shotgun")
         {
-            cm = 15.f;
-            deg = 180.f;
+            // Was 15 cm, any angle: too eager (user 2026-11-19). The angle is
+            // the shell's axis against the tube.
+            cm = 6.f;
+            deg = 35.f;
         }
         else if (key == "357")
         {
@@ -22107,7 +22124,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
                     s_pulseReload = true;
                     s_pulseUntil = now + 200;
                 }
-                Game::logMsg("Mag reload: shotgun shell in (%d in the tube, game %d)", w.shells, clip);
+                Game::logMsg("Mag reload: shotgun shell in (%.1f cm, %.0f deg; %d in the tube, game %d)",
+                    g_SeatDistCm.load(), g_SeatAngleDeg.load(), w.shells, clip);
             }
             else if (released)
             {

@@ -5986,9 +5986,36 @@ namespace
         // magazine's frame in the hand and in the gun (shotgun / .357: 180 =
         // not checked).
         const float unitsPerM = vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f;
-        const float dist = (magAnchor - well).Length();
+        float dist = (magAnchor - well).Length();
+        // Glock: the seated magazine's centre is up inside the grip, inside
+        // the right fist, so the left hand stopped 7-9 cm short below it
+        // (log 2026-11-19, angle 12-22 deg). Below the well along the gun's
+        // up axis, the first kEntryCm count as at the well; sideways stays
+        // strict.
+        static const float kEntryCm[MagReload::kWeaponCount] = { 0.f, 0.f, 6.f, 0.f, 0.f, 0.f, 0.f };
+        if (kEntryCm[weapon] > 0.f)
+        {
+            const Vector d = magAnchor - well;
+            const float up = d.Dot(u);
+            if (up < 0.f)
+            {
+                const float lateral = (d - u * up).Length();
+                const float below = (std::max)(0.f, -up - kEntryCm[weapon] * 0.01f * unitsPerM);
+                dist = std::sqrt(lateral * lateral + below * below);
+            }
+        }
         const float distCm = dist / unitsPerM * 100.f;
         float angleDeg = 0.f;
+        if (def.tube)
+        {
+            // Shotgun shell: its long axis (bone x) along the tube (gun
+            // forward), either end; the idle shell bone can be hidden, so the
+            // seated pose is not used.
+            Vector sx(m[0], m[4], m[8]);
+            if (VectorNormalize(sx) > 1e-4f)
+                angleDeg = std::acos(std::clamp(std::fabs(sx.Dot(f)), 0.f, 1.f)) * (180.f / 3.14159265f);
+        }
+        else
         {
             float tr = 0.f;
             for (int j = 0; j < 3; ++j)

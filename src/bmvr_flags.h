@@ -859,6 +859,7 @@ namespace bmvr
     extern bool g_LadderHandWrap;
     extern float g_LadderGripCurl;
     extern float g_SatchelGripCurl; // left glove fist round the satchel bag top
+    extern bool g_TripmineFaceAim; // tripmine placed along the mine face (controller up)
     extern float g_GunHandCuff; // gun's own right hand: forearm folds this far behind the wrist (units at scale 1)
     extern float g_VrRecoilScale;
     // Kick with the second hand on the gun, as a share of the one-handed kick (default 0.3;

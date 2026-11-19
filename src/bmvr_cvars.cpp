@@ -154,6 +154,8 @@ namespace bmvr
               Kind::Float, 0.f, 1.f, nullptr, &g_SatchelGripCurl },
             { "bmvr_gun_hand_cuff", "VR: gun's own right hand: the forearm folds this far behind the wrist, closing the cuff (units at scale 1, 0 = into the wrist)",
               Kind::Float, 0.f, 6.f, nullptr, &g_GunHandCuff },
+            { "bmvr_tripmine_face_aim", "VR: the tripmine is placed along the mine's face (controller up) instead of the controller's forward",
+              Kind::Bool, 0.f, 1.f, &g_TripmineFaceAim, nullptr },
             { "bmvr_clip_hand_pose", "VR: left glove takes Black Mesa's reload-clip hand pose on a held magazine, the MP5 bolt and the glock slide",
               Kind::Bool, 0.f, 1.f, &g_VrClipHandPose, nullptr },
             { "bmvr_clip_hand_snap", "VR: while the MP5 bolt / glock slide is held, the gun's own left hand sits on it in Black Mesa's clip pose",
