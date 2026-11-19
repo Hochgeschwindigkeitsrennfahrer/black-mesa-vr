@@ -1358,14 +1358,16 @@ namespace
         return r.f && std::fabs(*r.f - r.defF) <= 1e-4f * (std::max)(1.f, std::fabs(r.defF));
     }
     // Set away from its built-in default (= what config.txt keeps): label (and value) amber.
-    // Same colour as the changed buttons on the CONTROLS tab.
+    // Same colour as the changed buttons on the CONTROLS tab. Engine rows (cvar:/cmd:,
+    // e.g. sv_cheats, god) count too, against the same defaults "Reset tab" puts back
+    // (user 2026-11-19: sv_cheats on was not marked, yet a reset turned it off).
     bool RowChanged(const Row& r)
     {
         if (r.kind == RowKind::Bind)
             return BindRowAction(r) != BindRowAction(r, true);
         if (r.kind != RowKind::Toggle && r.kind != RowKind::Number && r.kind != RowKind::Choice)
             return false;
-        return r.key && !IsEngineKey(r.key) && !IsDefault(r);
+        return r.key && !IsDefault(r);
     }
     // Changed developer rows of tab `tab` that are hidden ("Show developer rows"
     // off): shown as a note beside "Reset tab", which leaves them alone.
