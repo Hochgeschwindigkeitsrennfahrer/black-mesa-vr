@@ -386,6 +386,11 @@ namespace
             { "Pitch", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTunePitch, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Roll", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneRoll, 2.5f, -90.f, 90.f, "%.1f deg" },
+            // Per ladder model, for the last rung held (VR::SyncLadderGripRows).
+            { "LADDER GRIP TUNING (SAVED PER LADDER MODEL)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Grip out (toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneOutCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
+            { "Grip up", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneUpCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
+            { "Grip curl", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneCurl, 0.05f, 0.f, 1.f, "%.2f" },
             { "G-MAN GESTURE TUNING", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Force gesture (tuning)", RowKind::Toggle, nullptr, &bmvr::g_VrGmanGestureForce, nullptr, 0, 0, 0, nullptr },
             { "Finger straight", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanFingerStraight, 0.05f, 0.f, 0.5f, "%.2f" },

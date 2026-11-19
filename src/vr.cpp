@@ -35,6 +35,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+namespace ladder_tune { void NoteHeld(int model); }
 #include <set>
 #include <new>
 #include <string>
@@ -8447,10 +8448,22 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
             Vector onRung{};
             float rungDist = 0.f;
             Vector rungAxis{};
-            m_LadderPin[h].valid = bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungSnapHu, onRung, &rungDist, &rungAxis);
+            int rungModel = -1;
+            m_LadderPin[h].valid = bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungSnapHu, onRung,
+                &rungDist, &rungAxis, &rungModel);
             m_LadderPin[h].world = onRung;
             m_LadderPin[h].rung = onRung;
             m_LadderPin[h].hasAxis = false;
+            m_LadderPin[h].model = rungModel;
+            m_LadderPin[h].face = Vector(0.f, 0.f, 0.f);
+            if (m_LadderPin[h].valid)
+            {
+                Vector fc = onRung - origin;
+                fc.z = 0.f;
+                if (VectorNormalize(fc) > 0.1f)
+                    m_LadderPin[h].face = fc;
+                ladder_tune::NoteHeld(rungModel);
+            }
             if (m_LadderPin[h].valid)
             {
                 // Overhand grip: the thumbs point inward, the left one to the
@@ -15469,14 +15482,115 @@ bool VR::TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& t
     return true;
 }
 
-bool VR::LadderRungGrip(bool physicalLeft, Vector& point, Vector& axis) const
+namespace ladder_tune
+{
+    // Per ladder model: the wrapped glove's grip point moved out (toward the
+    // player) / up, cm, and its finger curl. VR/ladder_grip.txt
+    // ("model out_cm up_cm curl"); a model not in it = 0 0 g_LadderGripCurl.
+    struct Grip
+    {
+        float out = 0.f, up = 0.f, curl = -1.f;   // curl < 0 = g_LadderGripCurl
+    };
+    std::mutex g_Lock;
+    std::map<std::string, Grip> g_Grip;
+    bool g_Loaded = false;
+    std::atomic<int> g_HeldModel{ -1 };
+
+    std::string Path() { return bmvr::VrFilePath("ladder_grip.txt"); }
+
+    void Load()
+    {
+        if (g_Loaded)
+            return;
+        g_Loaded = true;
+        std::ifstream in(Path());
+        std::string line;
+        int n = 0;
+        while (in && std::getline(in, line))
+        {
+            if (line.empty() || line[0] == '#')
+                continue;
+            char key[128]{};
+            Grip g;
+            if (sscanf_s(line.c_str(), "%127s %f %f %f", key, static_cast<unsigned>(sizeof(key)), &g.out, &g.up, &g.curl) >= 3)
+            {
+                g_Grip[key] = g;
+                ++n;
+            }
+        }
+        Game::logMsg("Ladder grip tuning: %d ladder models from %s", n, Path().c_str());
+    }
+
+    void Save()
+    {
+        std::ofstream out(Path(), std::ios::trunc);
+        if (!out)
+            return;
+        out << "# Ladder grip tuning (VR panel DEBUG rows), per ladder model below models/:\n";
+        out << "# model out_cm(toward the player) up_cm curl(0..1, -1 = default)\n";
+        for (const auto& kv : g_Grip)
+            out << kv.first << " " << kv.second.out << " " << kv.second.up << " " << kv.second.curl << "\n";
+    }
+
+    void NoteHeld(int model)
+    {
+        if (model >= 0)
+            g_HeldModel.store(model, std::memory_order_relaxed);
+    }
+
+    Grip For(int model)
+    {
+        const char* name = bmvr::ladders::ModelName(model);
+        std::lock_guard<std::mutex> lock(g_Lock);
+        Load();
+        auto it = name ? g_Grip.find(name) : g_Grip.end();
+        return it != g_Grip.end() ? it->second : Grip{};
+    }
+}
+
+bool VR::LadderRungGrip(bool physicalLeft, Vector& point, Vector& axis, float* curl) const
 {
     const LadderPin& pin = m_LadderPin[physicalLeft ? 0 : 1];
     if (!pin.valid || !pin.hasAxis || !bmvr::g_PhysicalLadders || !bmvr::g_LadderHandWrap)
         return false;
-    point = pin.rung;
+    const ladder_tune::Grip g = ladder_tune::For(pin.model);
+    const float u = (m_VRScale > 1.f ? m_VRScale : 39.37f) * 0.01f;   // units per cm
+    point = pin.rung - pin.face * (g.out * u) + Vector(0.f, 0.f, g.up * u);
     axis = pin.axis;
+    if (curl)
+        *curl = g.curl >= 0.f ? g.curl : bmvr::g_LadderGripCurl;
     return true;
+}
+
+void VR::SyncLadderGripRows()
+{
+    const int model = ladder_tune::g_HeldModel.load(std::memory_order_relaxed);
+    const char* name = bmvr::ladders::ModelName(model);
+    static int s_model = -2;
+    static float s_o = 0.f, s_u = 0.f, s_c = 0.f;
+    if (model != s_model)
+    {
+        // New ladder model held: the rows show its values.
+        s_model = model;
+        const ladder_tune::Grip g = ladder_tune::For(model);
+        s_o = bmvr::g_LadderTuneOutCm = g.out;
+        s_u = bmvr::g_LadderTuneUpCm = g.up;
+        s_c = bmvr::g_LadderTuneCurl = g.curl >= 0.f ? g.curl : bmvr::g_LadderGripCurl;
+        return;
+    }
+    if (!name)
+        return;
+    if (bmvr::g_LadderTuneOutCm != s_o || bmvr::g_LadderTuneUpCm != s_u || bmvr::g_LadderTuneCurl != s_c)
+    {
+        s_o = bmvr::g_LadderTuneOutCm;
+        s_u = bmvr::g_LadderTuneUpCm;
+        s_c = bmvr::g_LadderTuneCurl;
+        std::lock_guard<std::mutex> lock(ladder_tune::g_Lock);
+        ladder_tune::Load();
+        ladder_tune::g_Grip[name] = ladder_tune::Grip{ s_o, s_u, s_c };
+        ladder_tune::Save();
+        Game::logMsg("Ladder grip tune %s: out %+.1f cm up %+.1f cm curl %.2f", name, s_o, s_u, s_c);
+    }
 }
 
 void VR::GetRightGlovePalmOffsetMeters(Vector& meters) const
@@ -15761,6 +15875,7 @@ void VR::UpdateViewmodelNumpadAdjust(bool paused)
 {
     vm_numpad::Load();
     SyncHeldWeaponAngleRows();
+    SyncLadderGripRows();
     if (paused || !m_GameplayEligible)
         return;
 

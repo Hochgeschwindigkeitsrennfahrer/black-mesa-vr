@@ -365,6 +365,7 @@ namespace bmvr
     float g_LadderHandBack = 3.f;
     bool g_LadderHandWrap = true;
     float g_LadderGripCurl = 0.7f;
+    float g_LadderTuneOutCm = 0.f, g_LadderTuneUpCm = 0.f, g_LadderTuneCurl = 0.7f;
     float g_SatchelGripCurl = 0.75f;
     float g_SatchelBagDepth = 1.5f;
     float g_GunHandCuff = 1.5f;

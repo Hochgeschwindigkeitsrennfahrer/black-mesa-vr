@@ -224,6 +224,7 @@ namespace
             {
                 const float z = m.z0 + m.step * k;
                 bmvr::ladders::Rung rung;
+                rung.model = modelOf[type];
                 if (m.lateralX)
                 {
                     rung.a = toWorld(-m.half, m.depth, z);
@@ -262,7 +263,15 @@ namespace bmvr::ladders
         return static_cast<int>(c.rungs.size());
     }
 
-    bool NearestRung(const char* map, const Vector& p, float maxDist, Vector& onRung, float* dist, Vector* axis)
+    const char* ModelName(int model)
+    {
+        if (model < 0 || model >= static_cast<int>(sizeof(kModels) / sizeof(kModels[0])))
+            return nullptr;
+        return kModels[model].name;
+    }
+
+    bool NearestRung(const char* map, const Vector& p, float maxDist, Vector& onRung, float* dist, Vector* axis,
+        int* model)
     {
         const Rung* rungs = nullptr;
         const int n = MapRungs(map, &rungs);
@@ -287,6 +296,8 @@ namespace bmvr::ladders
                 onRung = c;
                 if (axis)
                     *axis = ab * (1.f / len);
+                if (model)
+                    *model = rungs[i].model;
                 found = true;
             }
         }

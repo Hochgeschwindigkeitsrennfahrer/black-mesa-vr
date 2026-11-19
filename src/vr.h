@@ -1008,12 +1008,18 @@ public:
         Vector rung{};    // the point on the rung itself
         Vector axis{};    // along the rung, toward the thumb of an overhand grip (inward)
         bool hasAxis = false;
+        int model = -1;   // ladder model of the rung (per-model grip tuning)
+        Vector face{};    // player -> rung, flat, unit (grip tuning "out" = against it)
     };
     LadderPin m_LadderPin[2];
     bool TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& trackingPos) const;
     // LadderHandWrap: the glove holding a rung is turned so its fist closes
     // round the rung (vr_hands.cpp). Point on the rung + axis (thumb side).
-    bool LadderRungGrip(bool physicalLeft, Vector& point, Vector& axis) const;
+    // curl: the finger curl for that ladder model (DEBUG ladder grip tuning).
+    bool LadderRungGrip(bool physicalLeft, Vector& point, Vector& axis, float* curl = nullptr) const;
+    // DEBUG "LADDER GRIP TUNING" rows <-> VR/ladder_grip.txt for the ladder
+    // model last held (game thread).
+    void SyncLadderGripRows();
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover

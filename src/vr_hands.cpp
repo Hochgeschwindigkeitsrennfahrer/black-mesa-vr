@@ -1346,7 +1346,8 @@ bool BmVrGloves::DrawForEye(
         vr::VRSkeletalSummaryData_t summary{};
         int drawnClip = ClipHandPose::kNone; // reload-clip hand pose drawn on this glove
         Vector rungPoint{}, rungAxis{};
-        const bool rungGrip = g_Game && g_Game->m_VR && g_Game->m_VR->LadderRungGrip(!rightHand, rungPoint, rungAxis);
+        float rungCurl = bmvr::g_LadderGripCurl;
+        const bool rungGrip = g_Game && g_Game->m_VR && g_Game->m_VR->LadderRungGrip(!rightHand, rungPoint, rungAxis, &rungCurl);
         const bool gripCurl = !rungGrip && g_Game && g_Game->m_VR && (
             (rightHand && g_Game->m_VR->WantsRightGloveWeaponGripCurl())
             || (!rightHand && g_Game->m_VR->WantsOffhandGloveWeaponGripCurl()));
@@ -1399,7 +1400,7 @@ bool BmVrGloves::DrawForEye(
             {
                 // Round the rung / bag top: one fixed curl, thumb over the fingers.
                 for (int f = 0; f < 5; ++f)
-                    summary.flFingerCurl[f] = rungGrip ? bmvr::g_LadderGripCurl : bmvr::g_SatchelGripCurl;
+                    summary.flFingerCurl[f] = rungGrip ? rungCurl : bmvr::g_SatchelGripCurl;
                 gmanThumb = 0.f;
                 straightMiddle = 0.f;
             }
