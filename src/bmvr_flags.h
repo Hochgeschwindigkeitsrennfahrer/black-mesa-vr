@@ -865,6 +865,7 @@ namespace bmvr
     extern float g_SatchelGripCurl; // left glove fist round the satchel bag top
     extern float g_PauseSkipPaints; // pause-menu paints dropped at the start of each pause
     extern bool g_TripmineFaceAim;
+    extern bool g_PauseCaptureArm; // DEBUG: capture the next pause (not saved)
     extern bool g_DesktopMouseGuard; // VR: no desktop mouse fire, stuck desktop buttons released
     extern bool g_GunHandCuffCap; // cap the open HEV cuff of the gun's own hands // tripmine placed along the mine face (controller up)
     extern float g_GunHandCuff; // gun's own right hand: forearm folds this far behind the wrist (units at scale 1)

@@ -5406,6 +5406,23 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
     // The panel's "Capture debug frame" works in every build: it writes the
     // same trigger files a test would, then this keeps polling until they
     // are consumed.
+    if (m_PauseCapEyes.load() > 0)
+    {
+        const int left = m_PauseCapEyes.fetch_sub(1) - 1;
+        IDirect3DDevice9* dev = nullptr;
+        if (slot < kOpenXrPublishSlots && g_D3DVR9 && SUCCEEDED(g_D3DVR9->GetD3DDevice(&dev)) && dev)
+        {
+            char nm[96];
+            std::snprintf(nm, sizeof(nm), "pausecap-%05lu-eyes-%02d",
+                static_cast<unsigned long>(GetTickCount() - m_PauseCapStartMs), 11 - left);
+            const std::string base = bmvr::VrFilePath(nm);
+            DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[0][slot], base + "-left.bmp", 3);
+            DumpSurfaceBmp(dev, m_D9OpenXrPublishSurface[1][slot], base + "-right.bmp", 3);
+            dev->Release();
+            Game::logMsg("Pause capture: %s (phase %d, menu up %d)", nm, static_cast<int>(m_VrPhase), IsMenuUp() ? 1 : 0);
+        }
+        return;
+    }
     static int s_capturePolls = 0;
     if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime && !bmvr::g_DebugDumps
         && !bmvr::g_DebugCaptureAt && !bmvr::g_ScreenshotAt && s_capturePolls <= 0)
@@ -7388,6 +7405,14 @@ void VR::ProcessInput()
             Game::logMsg("Pause action edge paused=%d gameUi=%d handle=%llu",
                 paused ? 1 : 0, IsMenuUp() ? 1 : 0,
                 static_cast<unsigned long long>(m_ActionPause));
+            if (bmvr::g_PauseCaptureArm && !IsMenuUp())
+            {
+                bmvr::g_PauseCaptureArm = false;
+                m_PauseCapStartMs = GetTickCount();
+                m_PauseCapEyes.store(12);
+                m_PauseCapHud.store(12);
+                Game::logMsg("Pause capture: next 12 eye pairs + 12 menu layers to VR/pausecap-*");
+            }
             QueueGameUiToggle(paused);
         }
     }
@@ -17604,6 +17629,22 @@ bool VR::FillSharedTexture(IDirect3DSurface9* surface, SharedTextureHolder& hold
     D3D9_TEXTURE_VR_DESC desc{};
     if (FAILED(g_D3DVR9->GetVRDesc(surface, &desc)) || !desc.Image)
         return false;
+    if (surface == m_D9HUDPublishSurface && m_PauseCapHud.load() > 0)
+    {
+        const int left = m_PauseCapHud.fetch_sub(1) - 1;
+        IDirect3DDevice9* dev = nullptr;
+        if (SUCCEEDED(g_D3DVR9->GetD3DDevice(&dev)) && dev)
+        {
+            char nm[96];
+            std::snprintf(nm, sizeof(nm), "pausecap-%05lu-layer-%02d",
+                static_cast<unsigned long>(GetTickCount() - m_PauseCapStartMs), 11 - left);
+            const std::string base = bmvr::VrFilePath(nm);
+            DumpSurfaceBmp(dev, surface, base + ".bmp", 2);
+            DumpSurfaceBmp(dev, surface, base + "-alpha.bmp", 2, true);
+            dev->Release();
+            Game::logMsg("Pause capture: %s (phase %d, menu up %d)", nm, static_cast<int>(m_VrPhase), IsMenuUp() ? 1 : 0);
+        }
+    }
     std::memcpy(&holder.m_VulkanData, &desc, sizeof(holder.m_VulkanData));
     holder.m_VRTexture.handle = &holder.m_VulkanData;
     holder.m_VRTexture.eType = vr::TextureType_Vulkan;

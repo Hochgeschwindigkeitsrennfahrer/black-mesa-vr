@@ -1606,6 +1606,11 @@ private:
     bool EnsurePrivateEyeSurfaces(IDirect3DDevice9* device);
     bool EnsureFrameCopySurface(IDirect3DDevice9* device, uint32_t width, uint32_t height);
     bool FillSharedTexture(IDirect3DSurface9* surface, SharedTextureHolder& holder);
+    // DEBUG "Capture next pause": from the Pause press, the next published
+    // eye pairs and menu-layer images go to VR/pausecap-*.bmp.
+    std::atomic<int> m_PauseCapEyes{ 0 };
+    std::atomic<int> m_PauseCapHud{ 0 };
+    DWORD m_PauseCapStartMs = 0;
     IDirect3DSurface9* SubmitSurfaceForEye(IDirect3DSurface9* eye) const;
     void NoteMsaaEyeScene(IDirect3DSurface9* dst, bool copied);
     void ResolveMsaaEyesToSubmit(IDirect3DDevice9* device);

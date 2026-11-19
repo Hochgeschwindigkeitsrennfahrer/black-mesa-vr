@@ -316,6 +316,8 @@ namespace
             { "Missing hooks", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "missing_hooks" },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Screenshot (eyes only)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "screenshot" },
+            // One shot: the next Pause press saves 12 eye pairs + 12 menu layers (VR/pausecap-*).
+            { "Capture next pause", RowKind::Toggle, nullptr, &bmvr::g_PauseCaptureArm, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
             // Eye GPU ms every ~5 s (timestamp queries); with the always-on "Frame budget" CPU line it shows
             // whether a scene is CPU- or GPU-limited.

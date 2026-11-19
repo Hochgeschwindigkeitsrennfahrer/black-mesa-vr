@@ -370,6 +370,7 @@ namespace bmvr
     float g_SatchelBagDepth = 1.5f;
     float g_GunHandCuff = 1.5f;
     bool g_TripmineFaceAim = true;
+    bool g_PauseCaptureArm = false;
     bool g_DesktopMouseGuard = true;
     bool g_GunHandCuffCap = true;
     float g_PauseSkipPaints = 2.f;
