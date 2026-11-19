@@ -262,7 +262,7 @@ namespace bmvr::ladders
         return static_cast<int>(c.rungs.size());
     }
 
-    bool NearestRung(const char* map, const Vector& p, float maxDist, Vector& onRung, float* dist)
+    bool NearestRung(const char* map, const Vector& p, float maxDist, Vector& onRung, float* dist, Vector* axis)
     {
         const Rung* rungs = nullptr;
         const int n = MapRungs(map, &rungs);
@@ -285,6 +285,8 @@ namespace bmvr::ladders
             {
                 best = d2;
                 onRung = c;
+                if (axis)
+                    *axis = ab * (1.f / len);
                 found = true;
             }
         }

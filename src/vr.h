@@ -1004,10 +1004,16 @@ public:
     struct LadderPin
     {
         bool valid = false;
-        Vector world{};
+        Vector world{};   // where the controller is drawn (rung + LadderHandBack toward the player)
+        Vector rung{};    // the point on the rung itself
+        Vector axis{};    // along the rung, toward the thumb of an overhand grip (inward)
+        bool hasAxis = false;
     };
     LadderPin m_LadderPin[2];
     bool TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& trackingPos) const;
+    // LadderHandWrap: the glove holding a rung is turned so its fist closes
+    // round the rung (vr_hands.cpp). Point on the rung + axis (thumb side).
+    bool LadderRungGrip(bool physicalLeft, Vector& point, Vector& axis) const;
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover

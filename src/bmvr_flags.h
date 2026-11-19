@@ -845,6 +845,11 @@ namespace bmvr
     extern bool g_LadderStickClimb;
     // Physical ladders: glove this far (units) in front of the rung it holds.
     extern float g_LadderHandBack;
+    // Physical ladders: the glove on a rung is turned so its fist closes round
+    // the rung (knuckle line along the rung, overhand), fingers at
+    // g_LadderGripCurl; off = the controller's angle and curls.
+    extern bool g_LadderHandWrap;
+    extern float g_LadderGripCurl;
     extern float g_VrRecoilScale;
     // Kick with the second hand on the gun, as a share of the one-handed kick (default 0.3;
     // pistols use x5/3 of it, capped at 1).

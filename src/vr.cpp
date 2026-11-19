@@ -8412,8 +8412,28 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
             // Put the hand on the nearest rung of the ladder props.
             Vector onRung{};
             float rungDist = 0.f;
-            m_LadderPin[h].valid = bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungSnapHu, onRung, &rungDist);
+            Vector rungAxis{};
+            m_LadderPin[h].valid = bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungSnapHu, onRung, &rungDist, &rungAxis);
             m_LadderPin[h].world = onRung;
+            m_LadderPin[h].rung = onRung;
+            m_LadderPin[h].hasAxis = false;
+            if (m_LadderPin[h].valid)
+            {
+                // Overhand grip: the thumbs point inward, the left one to the
+                // player's right as seen facing the ladder. Facing = player
+                // to rung, flattened.
+                Vector face = onRung - origin;
+                face.z = 0.f;
+                Vector ax = rungAxis;
+                ax.z = 0.f;
+                if (VectorNormalize(face) > 0.1f && VectorNormalize(ax) > 0.1f)
+                {
+                    const Vector rightOfFace(face.y, -face.x, 0.f);   // face x up
+                    const float side = ax.Dot(rightOfFace);
+                    m_LadderPin[h].axis = (h == 0) == (side > 0.f) ? ax : ax * -1.f;
+                    m_LadderPin[h].hasAxis = true;
+                }
+            }
             if (m_LadderPin[h].valid)
             {
                 // Glove a little in front of the rung (towards the player's
@@ -15371,6 +15391,16 @@ bool VR::TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& t
         return false;
     PivotYaw(d, -m_RotationOffsetY.load(std::memory_order_acquire));
     trackingPos += d;
+    return true;
+}
+
+bool VR::LadderRungGrip(bool physicalLeft, Vector& point, Vector& axis) const
+{
+    const LadderPin& pin = m_LadderPin[physicalLeft ? 0 : 1];
+    if (!pin.valid || !pin.hasAxis || !bmvr::g_PhysicalLadders || !bmvr::g_LadderHandWrap)
+        return false;
+    point = pin.rung;
+    axis = pin.axis;
     return true;
 }
 

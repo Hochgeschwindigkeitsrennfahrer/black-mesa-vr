@@ -1041,6 +1041,113 @@ namespace
         }
     }
 
+    // A glove joint's world position from the skinning palette and the glove's world matrix.
+    bool GloveJointWorld(const VrHandMeshAsset& asset, const std::vector<VrHandMatrixRows3x4>& palette,
+        const VrHandMatrix4& world, int j, Vector& out)
+    {
+        if (j < 0 || static_cast<size_t>(j) >= palette.size() || static_cast<size_t>(j) >= asset.bindMatrices.size())
+            return false;
+        const VrHandMatrix4& bind = asset.bindMatrices[static_cast<size_t>(j)];
+        const float b[3] = { VrHandMath::Get(bind, 0, 3), VrHandMath::Get(bind, 1, 3), VrHandMath::Get(bind, 2, 3) };
+        const auto& r = palette[static_cast<size_t>(j)].v;
+        float m[3];
+        for (int row = 0; row < 3; ++row)
+            m[row] = r[row * 4 + 0] * b[0] + r[row * 4 + 1] * b[1] + r[row * 4 + 2] * b[2] + r[row * 4 + 3];
+        float w[3];
+        for (int row = 0; row < 3; ++row)
+            w[row] = VrHandMath::Get(world, row, 0) * m[0] + VrHandMath::Get(world, row, 1) * m[1]
+                + VrHandMath::Get(world, row, 2) * m[2] + VrHandMath::Get(world, row, 3);
+        out = Vector(w[0], w[1], w[2]);
+        return true;
+    }
+
+    // LadderHandWrap: turn and move the glove's world matrix so its fist closes
+    // round the rung. The knuckle line (pinky -> index knuckle) is the axis of
+    // the tunnel through a closed fist: the smallest rotation lays it along
+    // the rung (thumb side = axis), which keeps the controller's twist about
+    // the rung (the wrist tipping up or down). The centre of the middle
+    // finger's curl (circle through its three joints) lands on the rung.
+    void WrapGloveOnRung(const VrHandMeshAsset& asset, const std::vector<VrHandMatrixRows3x4>& palette,
+        VrHandMatrix4& world, bool rightHand, const Vector& rung, const Vector& axis)
+    {
+        const char* suf = rightHand ? "r" : "l";
+        auto idx = [&](const char* base) { return FindNameIndex(asset.jointNames, std::string(base) + suf); };
+        static const VrHandMeshAsset* s_asset[2] = { nullptr, nullptr };
+        static int s_j[2][5];
+        const int h = rightHand ? 1 : 0;
+        if (s_asset[h] != &asset)
+        {
+            s_asset[h] = &asset;
+            s_j[h][0] = idx("finger_index_0_");
+            s_j[h][1] = idx("finger_pinky_0_");
+            s_j[h][2] = idx("finger_middle_0_");
+            s_j[h][3] = idx("finger_middle_1_");
+            s_j[h][4] = idx("finger_middle_2_");
+        }
+        Vector p[5];
+        for (int k = 0; k < 5; ++k)
+            if (!GloveJointWorld(asset, palette, world, s_j[h][k], p[k]))
+                return;
+        Vector a = p[0] - p[1];
+        if (VectorNormalize(a) < 1e-3f)
+            return;
+        // Curl centre: circumcentre of the middle finger's joints.
+        Vector c = (p[2] + p[3] + p[4]) * (1.f / 3.f);
+        {
+            const Vector u = p[3] - p[2], v = p[4] - p[2];
+            const Vector n = CrossProduct(u, v);
+            const float n2 = n.Dot(n);
+            if (n2 > 1e-4f)
+                c = p[2] + (CrossProduct(n, u) * v.Dot(v) + CrossProduct(v, n) * u.Dot(u)) * (0.5f / n2);
+            if ((c - p[3]).LengthSqr() > 6.f * 6.f)
+                c = (p[2] + p[3] + p[4]) * (1.f / 3.f);   // nearly straight finger: no usable circle
+        }
+        // Rotation taking a onto axis (Rodrigues); opposite: half turn about
+        // the palm normal-ish (a x (c - p[2])).
+        float R[3][3];
+        const Vector v = CrossProduct(a, axis);
+        const float cs = a.Dot(axis);
+        if (cs > -0.999f)
+        {
+            const float k = 1.f / (1.f + cs);
+            const float r[3][3] = {
+                { 1.f - (v.y * v.y + v.z * v.z) * k, -v.z + v.x * v.y * k, v.y + v.x * v.z * k },
+                { v.z + v.x * v.y * k, 1.f - (v.x * v.x + v.z * v.z) * k, -v.x + v.y * v.z * k },
+                { -v.y + v.x * v.z * k, v.x + v.y * v.z * k, 1.f - (v.x * v.x + v.y * v.y) * k } };
+            std::memcpy(R, r, sizeof(R));
+        }
+        else
+        {
+            Vector q = CrossProduct(a, p[3] - p[2]);
+            if (VectorNormalize(q) < 1e-3f)
+                return;
+            const float qq[3] = { q.x, q.y, q.z };
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    R[i][j] = 2.f * qq[i] * qq[j] - (i == j ? 1.f : 0.f);
+        }
+        float M[3][4];
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 4; ++j)
+                M[i][j] = VrHandMath::Get(world, i, j);
+        const float t[3] = { M[0][3] - c.x, M[1][3] - c.y, M[2][3] - c.z };
+        const float dst[3] = { rung.x, rung.y, rung.z };
+        for (int i = 0; i < 3; ++i)
+        {
+            for (int j = 0; j < 3; ++j)
+                VrHandMath::Set(world, i, j, R[i][0] * M[0][j] + R[i][1] * M[1][j] + R[i][2] * M[2][j]);
+            VrHandMath::Set(world, i, 3, R[i][0] * t[0] + R[i][1] * t[1] + R[i][2] * t[2] + dst[i]);
+        }
+        static DWORD s_logMs[2] = { 0, 0 };
+        const DWORD now = GetTickCount();
+        if (now - s_logMs[h] > 2000)
+        {
+            s_logMs[h] = now;
+            Game::logMsg("Ladder hand wrap: %s glove turned %.0f deg onto the rung, curl centre moved %.1f units",
+                rightHand ? "right" : "left", std::acos(std::clamp(cs, -1.f, 1.f)) * 57.2958f, (rung - c).Length());
+        }
+    }
+
     void StoreLeftFistCentre(const VrHandMeshAsset& asset, const std::vector<VrHandMatrixRows3x4>& palette,
         const VrHandMatrix4& world, const Vector& controller, const QAngle& controllerAng)
     {
@@ -1204,7 +1311,9 @@ bool BmVrGloves::DrawForEye(
         Impl::Hand& hand = pair[i];
         vr::VRSkeletalSummaryData_t summary{};
         int drawnClip = ClipHandPose::kNone; // reload-clip hand pose drawn on this glove
-        const bool gripCurl = g_Game && g_Game->m_VR && (
+        Vector rungPoint{}, rungAxis{};
+        const bool rungGrip = g_Game && g_Game->m_VR && g_Game->m_VR->LadderRungGrip(!rightHand, rungPoint, rungAxis);
+        const bool gripCurl = !rungGrip && g_Game && g_Game->m_VR && (
             (rightHand && g_Game->m_VR->WantsRightGloveWeaponGripCurl())
             || (!rightHand && g_Game->m_VR->WantsOffhandGloveWeaponGripCurl()));
         if (TryGetSummary(input, actions[i], summary))
@@ -1242,7 +1351,15 @@ bool BmVrGloves::DrawForEye(
             // palette depends only on the pose and the glove, so it is built
             // once per pose and reused.
             bool clipPose = false;
-            const int clipId = rightHand ? ClipHandPose::kNone : MagReload::WantedClipHandPose();
+            if (rungGrip)
+            {
+                // Round the rung: one fixed curl, thumb over the fingers.
+                for (int f = 0; f < 5; ++f)
+                    summary.flFingerCurl[f] = bmvr::g_LadderGripCurl;
+                gmanThumb = 0.f;
+                straightMiddle = 0.f;
+            }
+            const int clipId = (rightHand || rungGrip) ? ClipHandPose::kNone : MagReload::WantedClipHandPose();
             if (clipId >= 0 && clipId < ClipHandPose::kCount)
             {
                 static const VrHandMeshAsset* s_clipAsset = nullptr;
@@ -1263,7 +1380,7 @@ bool BmVrGloves::DrawForEye(
                 hand.rig.paletteValid = false;
             }
             drawnClip = clipPose ? clipId : ClipHandPose::kNone;
-            const bool pinch = !clipPose && !rightHand && LeftGlovePinch();
+            const bool pinch = !clipPose && !rightHand && !rungGrip && LeftGlovePinch();
             if (pinch)
             {
                 summary.flFingerCurl[0] = bmvr::g_VrPinchThumb;
@@ -1339,13 +1456,15 @@ bool BmVrGloves::DrawForEye(
         Vector gloveOrigin = *origins[i];
         if (gripCurl && g_Game && g_Game->m_VR)
             gloveOrigin = gloveOrigin + g_Game->m_VR->GunGripHandOffset(rightHand, *angles[1 - i]);
-        const VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
+        VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
             gloveOrigin,
             gloveAngles,
             sourceUnitsPerMeter,
             scale,
             posOffset,
             rotOffset);
+        if (rungGrip)
+            WrapGloveOnRung(hand.asset, hand.palette, world, rightHand, rungPoint, rungAxis);
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
         if (i == 0 && !gripCurl)
             StoreLeftFistCentre(hand.asset, hand.palette, world, *origins[0], *angles[0]);

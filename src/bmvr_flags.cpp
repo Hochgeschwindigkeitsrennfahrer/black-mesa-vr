@@ -362,6 +362,8 @@ namespace bmvr
     float g_LadderGunHand = 1.f;
     bool g_LadderStickClimb = false;
     float g_LadderHandBack = 3.f;
+    bool g_LadderHandWrap = true;
+    float g_LadderGripCurl = 0.7f;
     float g_VrRecoilScale = 1.f;
     float g_VrRecoilTwoHand = 0.3f;
     bool g_RpgRocketShown = true;
@@ -1209,6 +1211,8 @@ namespace bmvr
                 g_PhysicalLadderSmooth = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LadderStickClimb") == 0)
                 g_LadderStickClimb = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "LadderHandWrap") == 0)
+                g_LadderHandWrap = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LadderHandBack") == 0)
             {
                 const float v = static_cast<float>(atof(val));

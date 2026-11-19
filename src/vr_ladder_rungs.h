@@ -19,5 +19,6 @@ namespace bmvr::ladders
     int MapRungs(const char* map, const Rung** out);
     // Nearest rung point to p within maxDist (world units). The point keeps a
     // little distance from the rails. False when none is that close.
-    bool NearestRung(const char* map, const Vector& p, float maxDist, Vector& onRung, float* dist = nullptr);
+    bool NearestRung(const char* map, const Vector& p, float maxDist, Vector& onRung, float* dist = nullptr,
+        Vector* axis = nullptr);   // axis: unit vector along that rung (a -> b)
 }
