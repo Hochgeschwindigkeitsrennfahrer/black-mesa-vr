@@ -854,6 +854,26 @@ namespace
     // too (user 2026-11-19: a reset left it as the one changed row); a tab with button rows also gets the default buttons for this controller. Engine
     // rows get console commands: god/noclip/notarget (toggles) are switched off before the
     // cvars, so sv_cheats 0 comes last. Returns the number of rows changed; each one is logged.
+    // Row i is a developer row (DevSection group or IsDevRow) while
+    // "Show developer rows" is off: not counted as changed, not reset.
+    bool DevRowHidden(size_t i)
+    {
+        if (bmvr::g_PanelDevRows)
+            return false;
+        const auto& rows = Rows();
+        if (IsDevRow(rows[i]))
+            return true;
+        for (size_t j = i + 1; j-- > 0;)
+        {
+            const RowKind k = rows[j].kind;
+            if (k == RowKind::DevSection)
+                return true;
+            if (k == RowKind::Section || k == RowKind::Tab || k == RowKind::Close)
+                return false;
+        }
+        return false;
+    }
+
     int ResetTabRows(int tab)
     {
         std::vector<Row>& rows = Rows();
@@ -870,6 +890,8 @@ namespace
         for (++i; i < rows.size() && rows[i].kind != RowKind::Tab && rows[i].kind != RowKind::Close; ++i)
         {
             Row& r = rows[i];
+            if (DevRowHidden(i))
+                continue;   // hidden developer row: left as it is
             if (r.kind == RowKind::Bind)
                 binds = true;
             char cmd[96]{};
@@ -1345,8 +1367,9 @@ namespace
     {
         const auto& rows = Rows();
         int t = -1, n = 0;
-        for (const Row& r : rows)
+        for (size_t i = 0; i < rows.size(); ++i)
         {
+            const Row& r = rows[i];
             if (r.kind == RowKind::Close)
                 break;
             if (r.kind == RowKind::Tab)
@@ -1355,7 +1378,9 @@ namespace
                     break;
                 continue;
             }
-            if (t == tab && RowChanged(r))
+            // Only rows on screen: hidden developer rows would make the count
+            // disagree with the amber rows (user 2026-11-19).
+            if (t == tab && !DevRowHidden(i) && RowChanged(r))
                 ++n;
         }
         return n;
