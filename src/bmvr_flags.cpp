@@ -369,8 +369,9 @@ namespace bmvr
     float g_SatchelGripCurl = 0.75f;
     float g_SatchelBagDepth = 1.5f;
     float g_RpgFistCurl = 0.45f, g_RpgFistOutCm = 2.f;
-    float g_SatchelBagTurn = 90.f, g_SatchelBagInCm = 2.5f, g_SatchelBagUpCm = 2.5f;
-    float g_SatchelBagRoll = 0.f, g_SatchelBagSpin = 0.f, g_SatchelBagSideCm = 0.f;
+    // User's tuning 2026-11-19 (turn 0, roll 0, spin 90, in 2.5, up 10, side 10; still tuning up/side).
+    float g_SatchelBagTurn = 0.f, g_SatchelBagInCm = 2.5f, g_SatchelBagUpCm = 10.f;
+    float g_SatchelBagRoll = 0.f, g_SatchelBagSpin = 90.f, g_SatchelBagSideCm = 10.f;
     float g_GunHandCuff = 1.5f;
     bool g_TripmineFaceAim = true;
     bool g_PauseCaptureArm = false;
