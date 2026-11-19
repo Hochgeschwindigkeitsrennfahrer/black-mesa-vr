@@ -1527,7 +1527,17 @@ public:
     // HL2VR hlvr_msaa from VR/config.txt. Scene targets pick it up on the
     // next map load. Advanced Video is not hooked.
     void UpdateHl2vrMsaa();
-    uint32_t HeldButtons() const { return m_HeldButtons.load(std::memory_order_acquire); }
+    // IN_JUMP is masked while m_LadderJumpLatch is set: a hand mount that
+    // caught with jump (stick up = swim up) held does not jump straight off
+    // the ladder; cleared once jump is let go (hooks.cpp CreateMove).
+    uint32_t HeldButtons() const
+    {
+        const uint32_t b = m_HeldButtons.load(std::memory_order_acquire);
+        constexpr uint32_t kInJump = 1u << 1;   // IN_JUMP (in_buttons.h)
+        return m_LadderJumpLatch.load(std::memory_order_relaxed) ? (b & ~kInJump) : b;
+    }
+    uint32_t RawHeldButtons() const { return m_HeldButtons.load(std::memory_order_acquire); }
+    std::atomic<bool> m_LadderJumpLatch{ false };
     static constexpr uint32_t kWeaponSoundHover = 1u;
     static constexpr uint32_t kWeaponSoundSelect = 2u;
     void NoteViewmodelModel(const char* modelName);

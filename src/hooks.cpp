@@ -10310,8 +10310,38 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     const bool ladderBase = m_VR && m_VR->m_IsVREnabled && cmd->command_number
         && m_VR->IsGameplayEligible() && !afterLadderJump
         && (m_VR->HeldButtons() & (IN_ATTACK | IN_ATTACK2)) == 0;
-    const bool physLadderOn = ladderBase && (m_VR->HeldButtons() & IN_JUMP) == 0
+    // Jump latch: released once the stick lets go of jump.
+    if (m_VR && m_VR->m_LadderJumpLatch.load(std::memory_order_relaxed)
+        && (m_VR->RawHeldButtons() & IN_JUMP) == 0)
+    {
+        m_VR->m_LadderJumpLatch.store(false, std::memory_order_relaxed);
+        Game::logMsg("Ladder grab: jump released, stick jump works again");
+    }
+    // Jump held only skips the hand ladder on a ladder (jump = jump off).
+    // Not on one yet it still runs: under water stick up swims up, and a
+    // grab made while swimming up never mounted (user 2026-11-19, the
+    // bm_c2a5a water ladder; near the surface it worked).
+    constexpr int kMoveTypeLadderHook = 9;
+    const bool jumpHeldNow = m_VR && (m_VR->HeldButtons() & IN_JUMP) != 0;
+    const bool onLadderNow = m_Game && m_Game->LocalPlayerMoveType() == kMoveTypeLadderHook;
+    const bool physLadderOn = ladderBase && (!jumpHeldNow || !onLadderNow)
         && m_VR->PhysicalLadderStep(physLadder);
+    // Hand mount with jump held: ignore jump from now until it is let go,
+    // or the tick after the mount (on the ladder, jump still held) would
+    // jump straight off.
+    if (physLadderOn && !physLadder.onLadder && physLadder.mountPush && jumpHeldNow
+        && !m_VR->m_LadderJumpLatch.load(std::memory_order_relaxed))
+    {
+        m_VR->m_LadderJumpLatch.store(true, std::memory_order_relaxed);
+        Game::logMsg("Ladder grab: mounting with jump held, jump ignored until it is let go");
+    }
+    // Mount failed (not on a ladder, not mounting): swimming up works again.
+    else if (m_VR && m_VR->m_LadderJumpLatch.load(std::memory_order_relaxed) && !onLadderNow
+        && !(physLadderOn && (physLadder.onLadder || physLadder.mountPush)))
+    {
+        m_VR->m_LadderJumpLatch.store(false, std::memory_order_relaxed);
+        Game::logMsg("Ladder grab: not on the ladder, jump latch cleared");
+    }
     if (physLadderOn)
     {
         onLadder = physLadder.onLadder;
