@@ -97,6 +97,9 @@ namespace MagReload
     // GetTickCount of the last satchel radio (detonator) draw: until it
     // exists (first charge out) the right glove shows instead.
     extern std::atomic<unsigned> g_SatchelRadioMs;
+    // GetTickCount of the last frame the MP5 'grenade' clip played: while it
+    // plays, the support glove stays instead of the gun's own left hand.
+    extern std::atomic<unsigned> g_Mp5GrenadeClipMs;
     // Shotgun pump back stroke: a spent hull flies out of the ejection port
     // (GetTickCount, 0 = none).
     extern std::atomic<unsigned> g_EjectTick;

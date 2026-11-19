@@ -3454,7 +3454,30 @@ namespace
                 __except (EXCEPTION_EXECUTE_HANDLER) {}
             }
             const bool beamHide = noLower ? false : (s_lc.beamHide || kick);
-            Hooks::m_VR->NoteViewmodelBeamHidden(beamHide || now < s_loweredUntil);
+            // Right after a switch the last drawn header is still the previous
+            // gun's, so the draw-skip / delta-idle guards (which need a match)
+            // cannot hold the new gun yet: a fast menu switch to the gluon
+            // showed its draw1 pose with the laser far off the aim for the
+            // first frame (also in stable-26713286). No laser until the drawn
+            // model is the selected one, nor on a frame that still shows a
+            // draw / holster clip (the draw skip turns it into idle for the
+            // next one), plus 150 ms: the overlay draws a beam snapshot a frame
+            // behind this flag, and the gun cannot fire for ~0.5 s anyway.
+            // The name compare only runs when the header or model changes.
+            static ULONGLONG s_switchUntil = 0;
+            static unsigned char* s_cmpHdr = nullptr;
+            static const char* s_cmpModel = nullptr;
+            static bool s_cmpMatch = false;
+            const char* vmModel = Hooks::m_Game->GetEntityModelName(static_cast<C_BaseEntity*>(viewmodel));
+            if (hdr != s_cmpHdr || vmModel != s_cmpModel)
+            {
+                s_cmpHdr = hdr;
+                s_cmpModel = vmModel;
+                s_cmpMatch = StudioHdrMatchesModel(hdr, vmModel);
+            }
+            if (s_lc.equip || !s_cmpMatch)
+                s_switchUntil = now + 150;
+            Hooks::m_VR->NoteViewmodelBeamHidden(beamHide || now < s_loweredUntil || now < s_switchUntil);
             // Same 300 ms tail for the support glove: idle blends in from the
             // lowered pose, and the glove follows the wrist back up.
             const int lowerState = (lowered || now < s_loweredUntil) ? VR::kVmLowerLowered
@@ -3474,18 +3497,19 @@ namespace
             ForceViewmodelIdlePose(viewmodel, hdr);
             return;
         }
-        // MP5 grenade launch (user 2026-11-18): the stock 'grenade' clip
-        // moves the left hand to the trigger on the stock after the grenade
-        // has already left; the player's own hands hold the gun in VR, so the
-        // gun stays in its idle pose (the clip has no sound events).
+        // MP5 grenade launch: the stock 'grenade' clip kicks the gun and
+        // moves its own left hand to the trigger on the stock after the
+        // grenade has left (user 2026-11-18: wrong with your own hands on the
+        // gun). The clip plays (the kick stays, user 2026-11-19); while it
+        // does, the support-hand lock lets go of the gun's left hand and the
+        // player's left glove stays where it is (g_Mp5GrenadeClipMs).
         if (label && _stricmp(label, "grenade") == 0 && Hooks::m_Game
             && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()) && Hooks::m_VR->ViewmodelIsMp5())
         {
-            static int s_log;
-            if (s_log++ < 5)
-                Game::logMsg("MP5 grenade clip not shown (idle pose)");
-            ForceViewmodelIdlePose(viewmodel, hdr);
-            return;
+            const DWORD nowMs = GetTickCount();
+            const unsigned last = MagReload::g_Mp5GrenadeClipMs.exchange(nowMs ? nowMs : 1, std::memory_order_relaxed);
+            if (last == 0 || nowMs - last > 1000)
+                Game::logMsg("MP5 grenade clip: plays, support glove instead of the gun's left hand");
         }
         // Manual magazines: the hands do the reload, so the stock reload clip
         // (also the game's own refill after firing dry) is not shown.
@@ -10527,7 +10551,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                         && SupportHandFromGunModel(modelName)
                         && m_VR->m_VmClass.twoHand && (m_VR->TwoHandGripActive() || bmvr::g_VrSupportHandForce)
                         && !MagReload::g_ScrubActive.load(std::memory_order_relaxed)
-                        && magSt != MagReload::kInHand && !otherGrab;
+                        && magSt != MagReload::kInHand && !otherGrab
+                        && GetTickCount() - MagReload::g_Mp5GrenadeClipMs.load(std::memory_order_relaxed) > 100;
                     CollapseViewmodelArmBones(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_KeepLeftHand);
                     if (t_KeepLeftHand && t_LeftHandCount > 0)
                     {
