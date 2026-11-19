@@ -964,6 +964,7 @@ public:
         bool onLadder = false;
         bool useEdge = false;   // send IN_USE this tick (mount)
         bool mountPush = false; // mounting: walk toward the ladder (yaw) this tick
+        bool mountRise = false; // mounting below the ladder's bottom end: swim up
         bool drop = false;      // let go of the ladder (IN_USE on it, view straight down)
         bool topExit = false;   // step off at the top end (IN_USE on it, level head view)
         bool stickTop = false;  // near the top with the stick moved: stick ladder mode this tick
@@ -1538,6 +1539,9 @@ public:
     }
     uint32_t RawHeldButtons() const { return m_HeldButtons.load(std::memory_order_acquire); }
     std::atomic<bool> m_LadderJumpLatch{ false };
+    // A hand mount is running: HL2's walk-on auto-mount is allowed meanwhile
+    // (SyncLadderUseOnly), so the mount needs only one use press.
+    std::atomic<bool> m_LadderMountActive{ false };
     static constexpr uint32_t kWeaponSoundHover = 1u;
     static constexpr uint32_t kWeaponSoundSelect = 2u;
     void NoteViewmodelModel(const char* modelName);

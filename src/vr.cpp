@@ -8279,6 +8279,10 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     static ULONGLONG s_mountUntil = 0;
     static bool s_mountUseSent = false;
     static ULONGLONG s_mountStart = 0;
+    static int s_mountLadder = -1;
+    // Walk-on mounting only while a hand mount runs (every exit path).
+    if (s_mountUntil == 0)
+        m_LadderMountActive.store(false, std::memory_order_relaxed);
     static float s_mountYaw = 0.f;
     static ULONGLONG s_dropAt = 0;   // both hands let go: fall off at this time
     static bool s_autoHolstered = false;
@@ -8528,9 +8532,10 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
                 // on a fresh IN_USE when the view faces a ladder within 64.
                 float d = 0.f;
                 float yaw = 0.f;
-                nearestLadder(origin, d, yaw);
+                const int li = nearestLadder(origin, d, yaw);
                 if (d < 64.f)
                 {
+                    s_mountLadder = li;
                     // 1.5 s of use presses (was one in 0.6 s): in moving
                     // water the current carried the player out of reach of
                     // the single press (user 2026-11-19, bm_c2a5a; stick
@@ -8660,17 +8665,26 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
                     (now - s_mountStart) * 0.001f);
             else if (onLadder && s_mountStart)
                 Game::logMsg("Ladder grab: mounted after %.2f s", (now - s_mountStart) * 0.001f);
+            m_LadderMountActive.store(false, std::memory_order_relaxed);
             s_mountUntil = 0;
         }
         else
         {
             out.yaw = s_mountYaw;
-            // A fresh press every 0.2 s (pressed 0.1 s, released 0.1 s), and
-            // walk toward the ladder meanwhile.
-            out.useEdge = ((now - s_mountStart) / 100) % 2 == 0;
+            // One use press (more each played the deny sound); then walk in
+            // with the walk-on auto-mount allowed (SyncLadderUseOnly), as the
+            // stick mounts. Below the ladder's bottom end (rungs of the prop
+            // reach lower than the game's ladder, e.g. the bm_c2a5a pool
+            // ladder) swim up into its range first.
+            out.useEdge = !s_mountUseSent;
+            s_mountUseSent = true;
             out.mountPush = true;
-            if (!s_mountUseSent)
-                s_mountUseSent = true;
+            m_LadderMountActive.store(true, std::memory_order_relaxed);
+            if (s_mountLadder >= 0 && s_mountLadder < n)
+            {
+                const float lowZ = (std::min)(bottoms[s_mountLadder].z, tops[s_mountLadder].z);
+                out.mountRise = origin.z < lowZ + 2.f;
+            }
             return true;
         }
     }
@@ -10135,7 +10149,11 @@ void VR::SyncLadderUseOnly()
     static std::string s_map;
     if (!m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
         return;
-    const int want = (bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb) ? 1 : 0;
+    // During a hand mount: 0, so walking in (the mount push) mounts like the
+    // stick does, with one use press instead of repeated ones (each press
+    // that finds nothing plays the deny sound, user 2026-11-19).
+    const int want = (bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb
+        && !m_LadderMountActive.load(std::memory_order_relaxed)) ? 1 : 0;
     if (want == s_sent && s_map == m_CurrentMapName)
         return;
     if (want == 0 && s_sent != 1)

@@ -10373,7 +10373,11 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     const bool ladderHandsOnly = bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb;
     const bool ladderMode = ladderBase
         && (physLadderOn || (!ladderHandsOnly && m_VR->LadderMode(ladderBits, onLadder, &ladderMountYaw)));
-    const bool ladderStickBlocked = ladderHandsOnly && physLadder.onLadder && !physLadder.stickTop;
+    // Hands only: on a ladder the stick never climbs, also when the hand
+    // step is not running this tick (no hand holding, mounted some other
+    // way); user 2026-11-19: the left stick still moved them up/down.
+    const bool ladderStickBlocked = ladderHandsOnly
+        && (physLadderOn ? (physLadder.onLadder && !physLadder.stickTop) : onLadderNow);
     const bool ladderMountAssist = ladderMode && !onLadder && std::isfinite(ladderMountYaw);
     const bool ladderJump = ladderMode && onLadder && (m_VR->HeldButtons() & IN_JUMP) != 0;
     const bool ladderBack = ladderMode && onLadder && !ladderJump && (ladderBits & IN_BACK) != 0;
@@ -10596,6 +10600,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             cmd->forwardmove = sqrtf(analogF * analogF + analogS * analogS);
             if (physLadder.mountPush)
                 cmd->forwardmove = (std::max)(cmd->forwardmove, 0.4f * 190.f);
+            if (physLadder.mountRise)
+                cmd->upmove = (std::max)(cmd->upmove, 190.f);   // swim up into the ladder's range
             cmd->sidemove = 0.f;
         }
         else if (afterLadderJump && cmd->forwardmove > 0.f)
