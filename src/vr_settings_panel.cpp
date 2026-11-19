@@ -490,12 +490,21 @@ namespace
         default: return "not detected yet";
         }
     }
+    // The controller's name is shown once, on the pictures switch (user
+    // 2026-11-18: it was in both controller headings).
     std::string SectionText(const Row& r)
     {
-        if (r.fmt && std::strcmp(r.fmt, "bind_head_left") == 0)
-            return std::string("LEFT CONTROLLER (") + ControllerName() + ")";
-        if (r.fmt && std::strcmp(r.fmt, "bind_head_right") == 0)
-            return std::string("RIGHT CONTROLLER (") + ControllerName() + ")";
+        return r.label;
+    }
+    std::string RowLabelText(const Row& r)
+    {
+        if (r.b == &bmvr::g_ControlsPicture)
+        {
+            const char* name = ControllerName();
+            if (std::strcmp(name, "not detected yet") == 0)
+                return "Controller pictures (no controller detected)";
+            return std::string(name) + " pictures";
+        }
         return r.label;
     }
     std::string BindPresetText()
@@ -1835,7 +1844,7 @@ namespace
             const bool changed = RowChanged(r);
             const COLORREF ink = dis ? kDim : changed ? kAmber : kText;
             const COLORREF btn = dis ? kDisabledBtn : kBtn;
-            c.text(r.label, x + 40, y0, x + kMinusX0 - 10, y1, ink, 34, false, DT_LEFT);
+            c.text(RowLabelText(r).c_str(), x + 40, y0, x + kMinusX0 - 10, y1, ink, 34, false, DT_LEFT);
             if (r.kind == RowKind::Choice || r.kind == RowKind::Preset)
             {
                 // One wide button (the -/+ span); a click picks the next value.
