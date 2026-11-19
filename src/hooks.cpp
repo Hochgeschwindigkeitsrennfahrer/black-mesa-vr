@@ -10559,8 +10559,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         else if (ladderMountAssist)
         {
             // Whole stick deflection as forward: any sidemove counts as
-            // strafing and blocks the engine's auto-mount.
+            // strafing and blocks the engine's auto-mount. A hand mount
+            // walks in by itself (at least 40 % of walking speed): in moving
+            // water the current otherwise carried the player off the ladder
+            // before the use press caught it (user 2026-11-19).
             cmd->forwardmove = sqrtf(analogF * analogF + analogS * analogS);
+            if (physLadder.mountPush)
+                cmd->forwardmove = (std::max)(cmd->forwardmove, 0.4f * 190.f);
             cmd->sidemove = 0.f;
         }
         else if (afterLadderJump && cmd->forwardmove > 0.f)

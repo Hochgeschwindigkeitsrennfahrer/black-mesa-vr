@@ -8278,6 +8278,7 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     static bool s_prevGrip[2] = {};
     static ULONGLONG s_mountUntil = 0;
     static bool s_mountUseSent = false;
+    static ULONGLONG s_mountStart = 0;
     static float s_mountYaw = 0.f;
     static ULONGLONG s_dropAt = 0;   // both hands let go: fall off at this time
     static bool s_autoHolstered = false;
@@ -8530,7 +8531,12 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
                 nearestLadder(origin, d, yaw);
                 if (d < 64.f)
                 {
-                    s_mountUntil = now + 600;
+                    // 1.5 s of use presses (was one in 0.6 s): in moving
+                    // water the current carried the player out of reach of
+                    // the single press (user 2026-11-19, bm_c2a5a; stick
+                    // mounting, which keeps walking in, worked there).
+                    s_mountUntil = now + 1500;
+                    s_mountStart = now;
                     s_mountUseSent = false;
                     s_mountYaw = yaw;
                 }
@@ -8650,14 +8656,21 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         if (onLadder || now > s_mountUntil || s_climbHand < 0)
         {
             if (!onLadder && s_climbHand >= 0)
-                Game::logMsg("Ladder grab: mount did not happen (no ladder within use range facing it?)");
+                Game::logMsg("Ladder grab: mount did not happen in %.1f s (no ladder within use range facing it?)",
+                    (now - s_mountStart) * 0.001f);
+            else if (onLadder && s_mountStart)
+                Game::logMsg("Ladder grab: mounted after %.2f s", (now - s_mountStart) * 0.001f);
             s_mountUntil = 0;
         }
         else
         {
             out.yaw = s_mountYaw;
-            out.useEdge = !s_mountUseSent;
-            s_mountUseSent = true;
+            // A fresh press every 0.2 s (pressed 0.1 s, released 0.1 s), and
+            // walk toward the ladder meanwhile.
+            out.useEdge = ((now - s_mountStart) / 100) % 2 == 0;
+            out.mountPush = true;
+            if (!s_mountUseSent)
+                s_mountUseSent = true;
             return true;
         }
     }

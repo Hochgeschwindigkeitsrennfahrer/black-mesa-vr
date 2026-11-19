@@ -963,6 +963,7 @@ public:
     {
         bool onLadder = false;
         bool useEdge = false;   // send IN_USE this tick (mount)
+        bool mountPush = false; // mounting: walk toward the ladder (yaw) this tick
         bool drop = false;      // let go of the ladder (IN_USE on it, view straight down)
         bool topExit = false;   // step off at the top end (IN_USE on it, level head view)
         bool stickTop = false;  // near the top with the stick moved: stick ladder mode this tick
