@@ -861,7 +861,8 @@ namespace bmvr
     // VR panel DEBUG "LADDER GRIP TUNING": the last held ladder model's grip
     // (out toward the player / up, cm; curl), saved in VR/ladder_grip.txt.
     extern float g_LadderTuneOutCm, g_LadderTuneUpCm, g_LadderTuneCurl;
-    extern float g_SatchelBagDepth; // satchel bag top this far into the fist (units at scale 1)
+    extern float g_SatchelBagDepth;
+    extern float g_SatchelBagTurn, g_SatchelBagInCm, g_SatchelBagUpCm; // satchel bag hand tuning // satchel bag top this far into the fist (units at scale 1)
     extern float g_SatchelGripCurl; // left glove fist round the satchel bag top
     extern float g_PauseSkipPaints; // pause-menu paints dropped at the start of each pause
     extern bool g_TripmineFaceAim;

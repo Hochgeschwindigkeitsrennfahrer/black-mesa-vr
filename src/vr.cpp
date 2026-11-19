@@ -22086,6 +22086,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         int shells = -1;      // shotgun: shells the hands put in the tube
         bool needPump = false;
         bool spentHull = false; // shotgun: a fired hull waits for the back stroke
+        bool dryRefill = false; // fired dry: the game's own reload filled its count from the reserve
     };
     static WeaponState s_w[kWeaponCount];
     static bool s_reloadWas = false, s_gripWas = false, s_attackWas = false;
@@ -22183,6 +22184,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     {
         w.mag = kDry;
         w.chambered = def.boltBone == nullptr; // no bolt/slide to work: nothing to rack
+        w.dryRefill = true;
         Game::logMsg("Mag reload: %s fired dry, swap the magazine", def.name);
     }
     const float grip = LeftSupportGripValue();
@@ -22781,6 +22783,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         if (g_NearWell.load())
         {
             w.mag = kLoaded;
+            w.dryRefill = false;
             s_pulseReload = clip >= 0 && clip < def.maxClip;
             s_pulseUntil = now + 200;
             sound("weapons/ar2/ar2_reload_push.wav");
@@ -22797,15 +22800,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
         }
     }
 
-    // Light buzz while the hand is over a bolt/slide that needs working.
-    if (!boltGrab && !w.chambered && w.mag != kInHand && g_NearBolt.load())
+    // One light buzz when the hand reaches a bolt/slide that needs working
+    // (was every 150 ms while there: user 2026-11-19, kept vibrating).
     {
-        static DWORD s_hoverMs = 0;
-        if (now - s_hoverMs > 150)
-        {
-            s_hoverMs = now;
-            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 400, 0.25f);
-        }
+        static bool s_wasNear = false;
+        const bool atBolt = !boltGrab && !w.chambered && w.mag != kInHand && g_NearBolt.load();
+        if (atBolt && !s_wasNear)
+            PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 600, 0.3f);
+        s_wasNear = atBolt;
     }
     if (boltGrab)
     {
@@ -22855,6 +22857,11 @@ void VR::UpdateMagReload(uint32_t& buttons)
     g_SlideLocked.store(def.slideLocksBack && !w.chambered);
     g_NeedRack.store(!w.chambered);
     g_DisplayClip.store((w.mag == kLoaded) ? clip : 0);
+    // After a dry fire the game's own reload already moved a magazine from
+    // the reserve into its count; until the new magazine is seated the HUD
+    // shows those rounds in the reserve (user 2026-11-19: the reserve dropped
+    // the moment the gun ran dry).
+    g_DisplayReserveExtra.store(w.dryRefill && w.mag != kLoaded && clip > 0 ? clip : 0);
     g_State.store(w.mag);
     if (clip > w.lastClip && w.lastClip >= 0)
         Game::logMsg("Mag reload: %s clip %d -> %d (mag %d, reserve %d)", def.name, w.lastClip, clip, w.mag, reserve);

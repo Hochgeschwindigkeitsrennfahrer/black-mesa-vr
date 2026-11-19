@@ -4461,6 +4461,35 @@ namespace
                 const float sc = std::sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]);
                 hold = hold + up * (bmvr::g_SatchelBagDepth * (sc > 0.05f ? sc : 1.f));
             }
+            // Hand-tuned on top (user 2026-11-19 screenshot: bag upright in
+            // front of the knuckles): turned about the left controller's right
+            // axis by bmvr_satchel_bag_turn (+90 = its top back toward the
+            // fist, the bag along the knuckle direction), then moved in toward
+            // the fist and up (cm).
+            if (bmvr::g_SatchelBagTurn != 0.f)
+            {
+                const float a = bmvr::g_SatchelBagTurn * (3.14159265f / 180.f);
+                const float ca = std::cos(a), sa = std::sin(a);
+                const float K[3] = { lr.x, lr.y, lr.z };
+                float Rm[3][3];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                    {
+                        const float cross = (i == 0 ? (j == 1 ? -K[2] : j == 2 ? K[1] : 0.f)
+                            : i == 1 ? (j == 0 ? K[2] : j == 2 ? -K[0] : 0.f)
+                                     : (j == 0 ? -K[1] : j == 1 ? K[0] : 0.f));
+                        Rm[i][j] = (i == j ? ca : 0.f) + sa * cross + (1.f - ca) * K[i] * K[j];
+                    }
+                float nr[3][3];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        nr[i][j] = Rm[i][0] * rot[0][j] + Rm[i][1] * rot[1][j] + Rm[i][2] * rot[2][j];
+                std::memcpy(rot, nr, sizeof(rot));
+            }
+            {
+                const float ucm = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f;
+                hold = hold - lf * (bmvr::g_SatchelBagInCm * ucm) + lu * (bmvr::g_SatchelBagUpCm * ucm);
+            }
             // Bone origin so that rot * top + origin = the hold point.
             const float t[3] = { hold.x, hold.y, hold.z };
             for (int r = 0; r < 3; ++r)
@@ -6320,7 +6349,9 @@ namespace
         if (hdr != s_hdr)
         {
             s_hdr = hdr;
-            s_bone = FindStudioBoneIndex(hdr, snark ? "SnarkROOT" : "GrenadeSpawn");
+            // Snark: the hand itself (user 2026-11-19: after the throw it was
+            // pulled back and came back with a new snark).
+            s_bone = FindStudioBoneIndex(hdr, snark ? "R_Wrist" : "GrenadeSpawn");
             s_haveAnchor = false;
         }
         if (s_bone < 0 || s_bone >= nBones || !Hooks::m_Game)
@@ -6349,7 +6380,9 @@ namespace
         }
         if (!s_haveAnchor)
             return false;
-        if (snark && !(label && _strnicmp(label, "snark_throw", 11) == 0))
+        // Snark: held through the throw and the "reload" that brings the next
+        // snark into the hand; draw / holster play as they are.
+        if (snark && !(label && (_strnicmp(label, "snark_throw", 11) == 0 || _stricmp(label, "reload") == 0)))
             return false;
         // out = entity * anchor * cur^-1: moves GrenadeSpawn back onto its idle pose.
         float want[3][4], curInv[3][4];

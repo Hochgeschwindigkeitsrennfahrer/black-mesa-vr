@@ -389,6 +389,10 @@ namespace
             { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
             { "Roll", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneRoll, 2.5f, -90.f, 90.f, "%.1f deg" },
             // Per ladder model, for the last rung held (VR::SyncLadderGripRows).
+            { "SATCHEL BAG IN THE HAND (NOT SAVED)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Bag turn", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagTurn, 15.f, -180.f, 180.f, "%+.0f deg" },
+            { "Bag in (toward the fist)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagInCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
+            { "Bag up", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagUpCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
             { "LADDER GRIP TUNING (SAVED PER LADDER MODEL)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip out (toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneOutCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
             { "Grip up", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneUpCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
