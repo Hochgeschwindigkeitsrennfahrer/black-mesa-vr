@@ -5698,8 +5698,10 @@ namespace
                     Vector ox(m[0], m[4], m[8]);
                     const float oxLen = ox.Length();
                     const float alignF = oxLen > 1e-4f ? ox.Dot(f) / oxLen : 0.f;
-                    Game::logMsg("Clip hand pose: %s magazine centre %.1f fwd %.1f right %.1f up of the controller (unit %.3f, vm %.3f, bone x . gun fwd %.2f)",
-                        def.name, d.Dot(hf), d.Dot(hr), d.Dot(hu), unit, vmScale, alignF);
+                    Game::logMsg("Clip hand pose: %s magazine centre %.1f fwd %.1f right %.1f up of the controller (unit %.3f, vm %.3f, bone x . gun fwd %.2f; bone x in the controller frame %.2f fwd %.2f right %.2f up)",
+                        def.name, d.Dot(hf), d.Dot(hr), d.Dot(hu), unit, vmScale, alignF,
+                        oxLen > 1e-4f ? ox.Dot(hf) / oxLen : 0.f, oxLen > 1e-4f ? ox.Dot(hr) / oxLen : 0.f,
+                        oxLen > 1e-4f ? ox.Dot(hu) / oxLen : 0.f);
                 }
             }
         }

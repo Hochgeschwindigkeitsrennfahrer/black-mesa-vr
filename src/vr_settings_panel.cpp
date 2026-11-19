@@ -212,6 +212,7 @@ namespace
             // Developer row: A/B for the hand poses taken from Black Mesa's reload clips.
             { "Hand pose from reload clips", RowKind::Toggle, "VrClipHandPose", &bmvr::g_VrClipHandPose, nullptr, 0, 0, 0, nullptr },
             { "Hand locks onto bolt/slide", RowKind::Toggle, "VrClipHandSnap", &bmvr::g_VrClipHandSnap, nullptr, 0, 0, 0, nullptr },
+            { "RPG rocket in reload grip", RowKind::Toggle, "VrClipHandRpg", &bmvr::g_VrClipHandRpg, nullptr, 0, 0, 0, nullptr },
             { "Recoil", RowKind::Toggle, "VrRecoil", &bmvr::g_VrRecoil, nullptr, 0, 0, 0, nullptr },
             { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
             // Kick with the second hand on the gun, as a share of one-handed (pistols x5/3, capped at 1).
@@ -403,7 +404,7 @@ namespace
             "LadderBodyFollowsArms", "LadderHandBack", "VrNearZ", "MenuHeightOffsetMeters", "MenuCursorSmoothSec",
             "ControlsPicture", "DamageFlashStrength", "VrHandsBlackMesaScale", "VrGunRightHand", "VrHandsRollDeg",
             "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll",
-            "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain", "VrClipHandPose", "VrClipHandSnap",
+            "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg",
             "MsaaParticles1x", "FxaaSubpixel", "FxaaEdgeThreshold", "FxaaEdgeThresholdMin",
             "EnvmapScaleWorld", "EnvmapScaleModels", "LodBias",
             "FlareFadeAngle", "FlareLightScale", "FlareHazeScale", "FlareHazeMinSize", "FlareGhostScale", "flare_default",
@@ -1277,7 +1278,7 @@ namespace
         // Classic flat hands: no roll, no gun-grip shift (VR::GunGripHandOffset).
         if (is({ "VrHandsRollDeg" }))
             return g_VrHandsClassicPose;
-        if (is({ "VrRecoil", "VrGrenadePin", "VrMagDiscard", "VrReloadHints", "VrClipHandPose", "VrClipHandSnap" }))
+        if (is({ "VrRecoil", "VrGrenadePin", "VrMagDiscard", "VrReloadHints", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg" }))
             return !g_PhysicalWeapons;
         if (is({ "VrRecoilScale", "VrRecoilTwoHand" }))
             return !PhysicalWeapon(g_VrRecoil);

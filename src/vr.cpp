@@ -21598,11 +21598,12 @@ int MagReload::InHandClipPose(int weapon)
     case kWeaponCrossbow: return ClipHandPose::kXbowMag;
     case kWeapon357: return ClipHandPose::k357Loader;
     case kWeaponShotgun: return ClipHandPose::kShell;
-    // RPG: Black Mesa's hand holds the rocket across the palm by its tail
-    // (gun_reload1 @ 0.30, kRpgRocket); on the glove that puts the rocket
-    // at ~90 deg to the tube with the controllers parallel (headless
-    // 2026-11-19: bone x . gun forward -0.07, engage needs 0.7), so it
-    // stays on the old controller-aligned hold.
+    // RPG: Black Mesa's hand holds the rocket across the palm, along the
+    // grip line like a rod in a fist (gun_reload1 @ 0.30); with the
+    // controllers parallel it sits ~90 deg to the tube, so it lines up
+    // when the controller's handle points at the tube. Own developer row
+    // (VrClipHandRpg) on top of VrClipHandPose.
+    case kWeaponRpg: return bmvr::g_VrClipHandRpg ? ClipHandPose::kRpgRocket : ClipHandPose::kNone;
     default: return ClipHandPose::kNone;
     }
 }

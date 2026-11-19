@@ -807,6 +807,8 @@ namespace bmvr
     // While the MP5 bolt / glock slide is held: the gun's own left hand in that clip pose sits on
     // it (like the support-hand lock), the glove hides.
     extern bool g_VrClipHandSnap;
+    // RPG rocket in Black Mesa's reload grip (across the palm, like a rod in a fist).
+    extern bool g_VrClipHandRpg;
     // Manual reloads: rounds left in an ejected magazine / an opened .357
     // cylinder are lost (not topped up again); a chambered MP5/glock round
     // stays. Only while there is reserve ammo (user, 2026-11-18).
