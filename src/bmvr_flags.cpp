@@ -349,6 +349,7 @@ namespace bmvr
     bool g_VrGrenadePin = true;
     bool g_VrReloadHints = true;
     bool g_VrClipHandPose = true;
+    bool g_VrClipHandSnap = true;
     bool g_VrMagDiscard = true;
     float g_VrNearZ = 4.f;
     bool g_VrRecoil = false;
@@ -1246,6 +1247,8 @@ namespace bmvr
                 g_VrReloadHints = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrClipHandPose") == 0)
                 g_VrClipHandPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrClipHandSnap") == 0)
+                g_VrClipHandSnap = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGunRightHand") == 0)
                 g_VrGunRightHand = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrStockHandPose") == 0)

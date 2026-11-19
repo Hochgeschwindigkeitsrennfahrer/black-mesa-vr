@@ -4400,6 +4400,12 @@ namespace
     thread_local bool t_KeepLeftHand = false;
     thread_local int t_LeftHandBones[24]{};
     thread_local int t_LeftHandCount = 0;
+    // Left forearm/arm bones folded into the kept L_Wrist (keepLeftHand).
+    thread_local int t_LeftArmBones[24]{};
+    thread_local int t_LeftArmCount = 0;
+    // VrClipHandSnap: reload-clip pose (ClipHandPose::Id) the gun's own left
+    // hand takes on the bolt/slide in this draw, -1 = none.
+    thread_local int t_SnapClipPose = -1;
 
     // Guns whose stock idle holds the left hand on the gun (headless dumps
     // 2026-11-18: MP5 magazine, shotgun pump, crossbow forestock, RPG front
@@ -4487,6 +4493,7 @@ namespace
             return false;
         const bool keepLeft = keepLeftHand && c.lwrist >= 0 && c.lwrist < nBones;
         t_LeftHandCount = 0;
+        t_LeftArmCount = 0;
         BMVR_TRY
         {
             const float* w = bones + c.wrist * 12;
@@ -4505,6 +4512,8 @@ namespace
                 }
                 // Left forearm folds into the kept left wrist (as the right
                 // forearm folds into the right one).
+                if (keepLeft && c.leftArm[k] && t_LeftArmCount < 24)
+                    t_LeftArmBones[t_LeftArmCount++] = c.idx[k];
                 const float* to = (keepLeft && c.leftArm[k]) ? lt : t;
                 float* m = bones + c.idx[k] * 12;
                 for (int r = 0; r < 3; ++r)
@@ -5141,6 +5150,102 @@ namespace
 
     void ApplyMagReloadBonesTracked(VR* vr, unsigned char* hdr, float* bones, int nBones,
         const Vector& gunOrigin, const QAngle& gunAng, float vmScale);
+
+    // VrClipHandSnap: the gun's own (kept) left hand onto the held object
+    // in Black Mesa's clip pose: L_Wrist = object bone * inv(baked wrist ->
+    // object), fingers = L_Wrist * baked finger poses. The baked poses are
+    // raw-bone relative and the drawn copy applies one affine map to every
+    // bone, so the map carries over. Fingertip nubs follow their finger's
+    // last joint, the folded forearm follows the wrist.
+    void SnapLeftHandToClipObject(unsigned char* hdr, float* bones, int nBones, int pose)
+    {
+        if (pose < 0 || pose >= ClipHandPose::kCount || !hdr || !bones)
+            return;
+        const ClipHandPose::Pose& P = ClipHandPose::kPoses[pose];
+        static thread_local unsigned char* s_hdr = nullptr;
+        static thread_local int s_pose = -1;
+        static thread_local int s_obj = -1, s_wrist = -1, s_fing[15]{};
+        static thread_local bool s_ok = false;
+        static thread_local float s_objInv[3][4]{};
+        if (s_hdr != hdr || s_pose != pose)
+        {
+            s_hdr = hdr;
+            s_pose = pose;
+            s_obj = FindStudioBoneIndex(hdr, P.objectBone);
+            s_wrist = FindStudioBoneIndex(hdr, "L_Wrist");
+            s_ok = s_obj >= 0 && s_obj < nBones && s_wrist >= 0 && s_wrist < nBones
+                && InvertMatrix3x4General(reinterpret_cast<const float (*)[4]>(P.object), s_objInv);
+            static const char* kFinger[5] = { "Thumb", "Index", "Middle", "Ring", "Pinky" };
+            for (int f = 0; f < 5 && s_ok; ++f)
+                for (int seg = 0; seg < 3 && s_ok; ++seg)
+                {
+                    char name[24];
+                    std::snprintf(name, sizeof(name), "L_%s%d", kFinger[f], seg + 1);
+                    s_fing[f * 3 + seg] = FindStudioBoneIndex(hdr, name);
+                    s_ok = s_fing[f * 3 + seg] >= 0 && s_fing[f * 3 + seg] < nBones;
+                }
+            Game::logMsg("Clip hand pose: snap %s onto '%s' %s", P.name, P.objectBone, s_ok ? "ok" : "MISSING BONES");
+        }
+        if (!s_ok)
+            return;
+        auto* all = reinterpret_cast<float (*)[3][4]>(bones);
+        // Old pose of the kept hand bones (nubs follow their finger's last joint).
+        float oldDistal[5][3][4];
+        for (int f = 0; f < 5; ++f)
+            std::memcpy(oldDistal[f], all[s_fing[f * 3 + 2]], sizeof(oldDistal[f]));
+        float wristNew[3][4];
+        MulMatrix3x4(all[s_obj], s_objInv, wristNew);
+        float fingNew[15][3][4];
+        for (int j = 0; j < 15; ++j)
+            MulMatrix3x4(wristNew, reinterpret_cast<const float (*)[4]>(P.fingers[j]), fingNew[j]);
+        static const char* kPrefix[5] = { "L_Thumb", "L_Index", "L_Middle", "L_Ring", "L_Pinky" };
+        for (int k = 0; k < t_LeftHandCount; ++k)
+        {
+            const int b = t_LeftHandBones[k];
+            if (b < 0 || b >= nBones)
+                continue;
+            if (b == s_wrist)
+                continue;
+            bool done = false;
+            for (int j = 0; j < 15 && !done; ++j)
+                done = (b == s_fing[j]);
+            if (done)
+                continue;
+            // Other kept bones (fingertip nubs): ride their finger's last joint.
+            int bone = 0;
+            BMVR_TRY
+            {
+                const int boneindex = *reinterpret_cast<int*>(hdr + kStudioHdrBoneIndex);
+                unsigned char* bp = hdr + boneindex + b * kStudioBoneSize;
+                const char* n = StudioRelString(bp, *reinterpret_cast<int*>(bp));
+                bone = -1;
+                for (int f = 0; f < 5; ++f)
+                    if (_strnicmp(n, kPrefix[f], std::strlen(kPrefix[f])) == 0)
+                        bone = f;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { bone = -1; }
+            if (bone < 0)
+                continue;
+            float inv[3][4], d[3][4], out[3][4];
+            if (!InvertMatrix3x4General(oldDistal[bone], inv))
+                continue;
+            MulMatrix3x4(fingNew[bone * 3 + 2], inv, d);
+            MulMatrix3x4(d, all[b], out);
+            std::memcpy(all[b], out, sizeof(out));
+        }
+        std::memcpy(all[s_wrist], wristNew, sizeof(wristNew));
+        for (int j = 0; j < 15; ++j)
+            std::memcpy(all[s_fing[j]], fingNew[j], sizeof(fingNew[j]));
+        for (int k = 0; k < t_LeftArmCount; ++k)
+        {
+            const int b = t_LeftArmBones[k];
+            if (b < 0 || b >= nBones)
+                continue;
+            all[b][0][3] = wristNew[0][3];
+            all[b][1][3] = wristNew[1][3];
+            all[b][2][3] = wristNew[2][3];
+        }
+    }
 
     void ApplyMagReloadBones(VR* vr, unsigned char* hdr, float* bones, int nBones,
         const Vector& gunOrigin, const QAngle& gunAng, float vmScale)
@@ -10729,7 +10834,18 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                         && MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponShotgun;
                     // Debug hand pose dump: the clip's own left hand stays drawn.
                     const bool dumpHold = bmvr::g_DebugDumpHandPose && bmvr::g_DebugVmSeq >= 0.f;
-                    t_KeepLeftHand = dumpHold || (bmvr::g_VrSupportHandLock && !bmvr::g_LeftHanded
+                    // VrClipHandSnap: the gun's own left hand goes onto the
+                    // held MP5 bolt / glock slide (posed after the bolt moves,
+                    // SnapLeftHandToClipObject).
+                    t_SnapClipPose = -1;
+                    if (bmvr::g_VrClipHandSnap && !dumpHold)
+                    {
+                        const int want = MagReload::WantedClipHandPose();
+                        if ((want == ClipHandPose::kMp5Bolt && std::strstr(modelName, "v_mp5"))
+                            || (want == ClipHandPose::kGlockSlide && std::strstr(modelName, "v_glock")))
+                            t_SnapClipPose = want;
+                    }
+                    t_KeepLeftHand = dumpHold || t_SnapClipPose >= 0 || (bmvr::g_VrSupportHandLock && !bmvr::g_LeftHanded
                         && SupportHandFromGunModel(modelName)
                         && m_VR->m_VmClass.twoHand && (m_VR->TwoHandGripActive() || bmvr::g_VrSupportHandForce)
                         && !MagReload::g_ScrubActive.load(std::memory_order_relaxed)
@@ -10762,6 +10878,8 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                     NoteDrawnCrowbarBar(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, pivot);
                 ApplyMagReloadBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, targetAng,
                     needScale ? scale : 1.f);
+                if (gunRightHand && t_SnapClipPose >= 0 && t_KeepLeftHand)
+                    SnapLeftHandToClipObject(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, t_SnapClipPose);
                 ApplyGrenadePinBones(m_VR, hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones,
                     needScale ? scale : 1.f);
             }
