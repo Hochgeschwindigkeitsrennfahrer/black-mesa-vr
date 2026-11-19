@@ -4466,11 +4466,15 @@ namespace
             // axis by bmvr_satchel_bag_turn (+90 = its top back toward the
             // fist, the bag along the knuckle direction), then moved in toward
             // the fist and up (cm).
-            if (bmvr::g_SatchelBagTurn != 0.f)
-            {
-                const float a = bmvr::g_SatchelBagTurn * (3.14159265f / 180.f);
+            // Turn (about the left controller's right axis: tips toward / away
+            // from the player), roll (about its forward axis) and spin (about
+            // its up axis), in that order.
+            auto rotateBag = [&](const Vector& axis, float deg) {
+                if (deg == 0.f)
+                    return;
+                const float a = deg * (3.14159265f / 180.f);
                 const float ca = std::cos(a), sa = std::sin(a);
-                const float K[3] = { lr.x, lr.y, lr.z };
+                const float K[3] = { axis.x, axis.y, axis.z };
                 float Rm[3][3];
                 for (int i = 0; i < 3; ++i)
                     for (int j = 0; j < 3; ++j)
@@ -4485,7 +4489,10 @@ namespace
                     for (int j = 0; j < 3; ++j)
                         nr[i][j] = Rm[i][0] * rot[0][j] + Rm[i][1] * rot[1][j] + Rm[i][2] * rot[2][j];
                 std::memcpy(rot, nr, sizeof(rot));
-            }
+            };
+            rotateBag(lr, bmvr::g_SatchelBagTurn);
+            rotateBag(lf, bmvr::g_SatchelBagRoll);
+            rotateBag(lu, bmvr::g_SatchelBagSpin);
             {
                 const float ucm = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f;
                 hold = hold - lf * (bmvr::g_SatchelBagInCm * ucm) + lu * (bmvr::g_SatchelBagUpCm * ucm);
