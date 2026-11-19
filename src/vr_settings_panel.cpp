@@ -264,7 +264,7 @@ namespace
             { "Foveation now", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "foveation" },
             { "Foveated: sharp radius", RowKind::Number, "FoveatedInner", nullptr, &bmvr::g_FoveatedInner, 0.05f, 0.1f, 1.f, "%.2f" },
             { "Foveated: half-rate radius", RowKind::Number, "FoveatedMid", nullptr, &bmvr::g_FoveatedMid, 0.05f, 0.2f, 1.5f, "%.2f" },
-            { "ANTI-ALIASING (MSAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "ANTI-ALIASING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "MSAA on edges", RowKind::Choice, "Msaa", nullptr, &bmvr::g_MsaaF, 2.f, 0.f, 4.f, "Off|2x|4x" },
             // Leaves, grass, fences: their cut-out edges get the MSAA samples
             // too (softer, less crawl; can look a bit thinner). Needs MSAA on.
@@ -273,9 +273,8 @@ namespace
             // much cheaper where particles fill the view. Models, wires and
             // glass keep MSAA; the gun loses it only while particles are in view.
             { "MSAA skips particles", RowKind::Toggle, "MsaaParticles1x", &bmvr::g_MsaaParticles1x, nullptr, 0, 0, 0, nullptr },
-            { "ANTI-ALIASING (FXAA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Sets the three values below; "Custom" when they match no preset.
-            { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa" },
+            { "FXAA preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "fxaa" },
             { "Sub-pixel smoothing", RowKind::Number, "FxaaSubpixel", nullptr, &bmvr::g_FxaaSubpixel, 0.05f, 0.f, 1.f, "%.2f" },
             { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
             { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
