@@ -424,11 +424,14 @@ namespace bmvr
     extern bool g_ScopeClipIdle;         // crossbow to/from-scope clips show idle (the clip moves the gun to the eye)
     extern bool g_MuteFidgetSounds;      // weapon fidget clips play no sound (the pose is frozen in VR)
     // Optional features, default off:
-    extern bool g_ShoulderGestures;      // hand behind shoulder + grip: left quick save, right crowbar
-    extern bool g_HipGestures;           // right hand + grip at right hip = pistol, above left hip = MP5
-    // Weapon each grab zone takes (index into GestureWeaponName / parts):
-    // 0 crowbar, 1 pistol, 2 .357, 3 MP5, 4 shotgun, 5 crossbow, 6 RPG,
-    // 7 tau, 8 gluon, 9 hivehand, 10 grenade. Floats for the panel's Choice rows.
+    // Grab zones (grip with the hand there). Left shoulder (left hand):
+    // -1 off, 0 quick save (default), 1 flashlight toggle.
+    extern float g_GestureLeftShoulder;
+    // Weapon each right-hand zone takes (index into GestureWeaponName / parts),
+    // -1 = zone off: 0 crowbar, 1 pistol, 2 .357, 3 MP5, 4 shotgun, 5 crossbow,
+    // 6 RPG, 7 tau, 8 gluon, 9 hivehand, 10 grenade. Floats for the panel's
+    // Choice rows. The old ShoulderGestures / HipGestures switches (false =
+    // zones off) migrate once to these values and are dropped from config.txt.
     extern float g_GestureWeaponShoulder;  // right shoulder (default crowbar)
     extern float g_GestureWeaponHipRight;  // right hip (default pistol)
     extern float g_GestureWeaponHipLeft;   // above the left hip, cross draw (default MP5)

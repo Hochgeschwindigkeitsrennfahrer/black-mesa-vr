@@ -15035,7 +15035,13 @@ bool VR::UpdateShoulderGestures(bool paused)
     // the right grip does not also toggle the flashlight there.
     struct Zone { DWORD enteredMs = 0; bool armed = false; bool gripDown = true; };
     static Zone s_left, s_right, s_hipRight, s_hipLeft;
-    const bool active = (bmvr::g_ShoulderGestures || bmvr::g_HipGestures) && m_GameplayEligible && !paused && !MenuGameplayBlocked()
+    // Zone settings: -1 = off (user 2026-11-19: one row per zone).
+    const int leftAction = static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder));
+    const int shoulderW = static_cast<int>(std::lround(bmvr::g_GestureWeaponShoulder));
+    const int hipRightW = static_cast<int>(std::lround(bmvr::g_GestureWeaponHipRight));
+    const int hipLeftW = static_cast<int>(std::lround(bmvr::g_GestureWeaponHipLeft));
+    const bool active = (leftAction >= 0 || shoulderW >= 0 || hipRightW >= 0 || hipLeftW >= 0)
+        && m_GameplayEligible && !paused && !MenuGameplayBlocked()
         && !m_WeaponMenuOpen && !m_SettingsOpen && m_HmdPoseValid;
     if (!active)
     {
@@ -15099,16 +15105,48 @@ bool VR::UpdateShoulderGestures(bool paused)
         return false;
     };
 
-    const bool leftIn = bmvr::g_ShoulderGestures && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
+    // A weapon zone counts only while that weapon is carried (user
+    // 2026-11-19: the pistol hip buzzed in the intro, before the pistol):
+    // otherwise no buzz, and the grip keeps its own action there.
+    auto carries = [&](int w) {
+        if (w < 0 || !m_Game)
+            return false;
+        const char* const* parts = bmvr::GestureWeaponParts(w);
+        auto matches = [&](const char* nm) {
+            if (!nm)
+                return false;
+            for (const char* const* part = parts; *part; ++part)
+                if (strstr(nm, *part))
+                    return true;
+            return false;
+        };
+        if (!m_LastViewmodelModel.empty() && matches(m_LastViewmodelModel.c_str()))
+            return true;
+        Game::InventoryWeapon inv[32]{};
+        const int n = m_Game->CollectInventoryWeapons(inv, 32);
+        for (int i = 0; i < n; ++i)
+            if (inv[i].entityIndex > 0 && (matches(inv[i].networkName) || matches(inv[i].modelName)))
+                return true;
+        return false;
+    };
+    const bool leftIn = leftAction >= 0 && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
     m_GestureZoneLeft = leftIn;
     // Not while both hands hold the gun: that grip squeeze is the gun's.
-    const bool rightIn = bmvr::g_ShoulderGestures && m_PhysicalRightTrackingValid && !m_TwoHandActive
-        && inZone(m_PhysicalRightPosAbs, 1.f);
+    const bool rightIn = shoulderW >= 0 && m_PhysicalRightTrackingValid && !m_TwoHandActive
+        && inZone(m_PhysicalRightPosAbs, 1.f) && carries(shoulderW);
     if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
     {
-        m_PendingQuickSave.store(true, std::memory_order_release);
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
-        Game::logMsg("Shoulder gesture: quick save");
+        if (leftAction == 1)
+        {
+            m_PendingImpulse.store(100, std::memory_order_release);
+            Game::logMsg("Shoulder gesture: flashlight");
+        }
+        else
+        {
+            m_PendingQuickSave.store(true, std::memory_order_release);
+            Game::logMsg("Shoulder gesture: quick save");
+        }
     }
     // Selects the first inventory weapon whose network or model name has one
     // of the given parts. Already held = nothing to do (still counts).
@@ -15157,8 +15195,7 @@ bool VR::UpdateShoulderGestures(bool paused)
     const float rightGrip = gripValue(m_ActionFlashlight);
     if (step(s_right, rightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        const int w = static_cast<int>(bmvr::g_GestureWeaponShoulder + 0.5f);
-        grabWeapon(bmvr::GestureWeaponName(w), bmvr::GestureWeaponParts(w));
+        grabWeapon(bmvr::GestureWeaponName(shoulderW), bmvr::GestureWeaponParts(shoulderW));
     }
 
     // Hip holsters (right hand only): right hip = pistol, a bit above the
@@ -15172,21 +15209,21 @@ bool VR::UpdateShoulderGestures(bool paused)
         return along > back && along < front && height > lo && height < hi
             && lateral > latLo && lateral < latHi;
     };
-    const bool hipsOn = bmvr::g_HipGestures && m_PhysicalRightTrackingValid && !m_TwoHandActive;
+    const bool hipsOn = m_PhysicalRightTrackingValid && !m_TwoHandActive;
     // Pistol zone 18 cm further back and 8 cm lower than the first try
     // (2026-11-14: it took the pistol 5-10 cm too far forward and too high;
     // 2026-11-16 headset: still 10 cm too far forward).
-    const bool hipRightIn = hipsOn && inHip(m_PhysicalRightPosAbs, 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f);
-    const bool hipLeftIn = hipsOn && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f);
+    const bool hipRightIn = hipsOn && hipRightW >= 0 && inHip(m_PhysicalRightPosAbs, 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f)
+        && carries(hipRightW);
+    const bool hipLeftIn = hipsOn && hipLeftW >= 0 && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f)
+        && carries(hipLeftW);
     if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        const int w = static_cast<int>(bmvr::g_GestureWeaponHipRight + 0.5f);
-        grabWeapon(bmvr::GestureWeaponName(w), bmvr::GestureWeaponParts(w));
+        grabWeapon(bmvr::GestureWeaponName(hipRightW), bmvr::GestureWeaponParts(hipRightW));
     }
     if (step(s_hipLeft, hipLeftIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        const int w = static_cast<int>(bmvr::g_GestureWeaponHipLeft + 0.5f);
-        grabWeapon(bmvr::GestureWeaponName(w), bmvr::GestureWeaponParts(w));
+        grabWeapon(bmvr::GestureWeaponName(hipLeftW), bmvr::GestureWeaponParts(hipLeftW));
     }
 
     // Also for 1 s after leaving a zone, so the grip squeeze that took the

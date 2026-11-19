@@ -185,8 +185,10 @@ namespace bmvr
     bool g_ThrowStroke = false;
     bool g_MuteFidgetSounds = true;
     // Optional features: off unless enabled in VR/config.txt.
-    bool g_ShoulderGestures = true;
-    bool g_HipGestures = true;
+    static bool g_ShoulderGestures = true;   // old switches, read only for the migration
+    static bool g_HipGestures = true;
+    static bool g_OldGestureKeysSeen = false;
+    float g_GestureLeftShoulder = 0.f;
     float g_GestureWeaponShoulder = 0.f;
     float g_GestureWeaponHipRight = 1.f;
     float g_GestureWeaponHipLeft = 3.f;
@@ -844,14 +846,26 @@ namespace bmvr
             else if (std::strcmp(n, "VrShootFromMuzzle") == 0)
                 g_VrShootFromMuzzle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ShoulderGestures") == 0)
+            {
                 g_ShoulderGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_OldGestureKeysSeen = true;
+            }
             else if (std::strcmp(n, "HipGestures") == 0)
+            {
                 g_HipGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_OldGestureKeysSeen = true;
+            }
+            else if (std::strcmp(n, "GestureLeftShoulder") == 0)
+            {
+                const int v = atoi(val);
+                if (v >= -1 && v <= 1)
+                    g_GestureLeftShoulder = static_cast<float>(v);
+            }
             else if (std::strcmp(n, "GestureWeaponShoulder") == 0 || std::strcmp(n, "GestureWeaponHipRight") == 0
                 || std::strcmp(n, "GestureWeaponHipLeft") == 0)
             {
                 const int w = atoi(val);
-                if (w >= 0 && w < kGestureWeaponCount)
+                if (w >= -1 && w < kGestureWeaponCount)
                     (n[13] == 'S' ? g_GestureWeaponShoulder : n[16] == 'R' ? g_GestureWeaponHipRight : g_GestureWeaponHipLeft)
                         = static_cast<float>(w);
             }
@@ -2106,6 +2120,29 @@ namespace bmvr
         DetectCampaignSession();
         CapturePanelDefaults();   // before config.txt: the panel saves only values that differ
         ReadUserConfig(ExeDir() + L"\\VR\\config.txt");
+        // Old grab-zone switches (user 2026-11-19: one row per zone, Off as a
+        // choice): off = those zones off. Written once, old keys dropped.
+        if (g_OldGestureKeysSeen)
+        {
+            std::vector<std::pair<std::string, std::string>> set;
+            if (!g_ShoulderGestures)
+            {
+                g_GestureLeftShoulder = -1.f;
+                g_GestureWeaponShoulder = -1.f;
+                set.emplace_back("GestureLeftShoulder", "-1");
+                set.emplace_back("GestureWeaponShoulder", "-1");
+            }
+            if (!g_HipGestures)
+            {
+                g_GestureWeaponHipRight = -1.f;
+                g_GestureWeaponHipLeft = -1.f;
+                set.emplace_back("GestureWeaponHipRight", "-1");
+                set.emplace_back("GestureWeaponHipLeft", "-1");
+            }
+            const bool ok = WriteVrConfigValues(set, { "ShoulderGestures", "HipGestures" });
+            Log("Grab zones: old ShoulderGestures=%d HipGestures=%d migrated (%zu value%s), %s",
+                g_ShoulderGestures ? 1 : 0, g_HipGestures ? 1 : 0, set.size(), set.size() == 1 ? "" : "s", ok ? "ok" : "FAILED");
+        }
         // Panel rows removed in the 2026-11-19 review: their values are fixed
         // at the defaults, whatever an older config.txt still says.
         g_PhysicalLadderSmooth = true;
