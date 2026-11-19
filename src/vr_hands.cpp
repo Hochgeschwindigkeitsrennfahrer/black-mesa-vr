@@ -976,6 +976,71 @@ namespace
     // finger's three joints as posed (curled around a held magazine, they
     // ring the inside of the fist), in the controller frame the viewmodel
     // draw uses (OffhandWorldPoseForDraw).
+    // VrClipHandPose: Black Mesa's L_Wrist frame on the drawn left glove
+    // (MagReload::g_LeftClipWrist, controller frame) while it shows a
+    // reload-clip pose. BuildStockPosePalette leaves the wrist joint at
+    // identity, so the frame is world * the glove's source wrist bone.
+    // Units: the source bones are Black Mesa's in glove metres (x size), so
+    // the wrist -> middle knuckle distance against Black Mesa's own (5.894
+    // model units, rigid in every clip frame measured) gives game units per
+    // model unit at the glove's size.
+    void StoreLeftClipWrist(const VrHandMeshAsset& asset, const VrHandMatrix4& world, const Vector& controller,
+        const QAngle& controllerAng, int clip)
+    {
+        if (clip < 0)
+            return;
+        static const VrHandMeshAsset* s_asset = nullptr;
+        static int s_wrist = -1, s_middle = -1;
+        if (s_asset != &asset)
+        {
+            s_asset = &asset;
+            s_wrist = FindNameIndex(asset.jointNames, "wrist_l");
+            s_middle = FindNameIndex(asset.jointNames, "finger_middle_0_l");
+        }
+        const size_t n = asset.sourceBoneBind.size();
+        if (s_wrist < 0 || s_middle < 0 || static_cast<size_t>(s_wrist) >= n || static_cast<size_t>(s_middle) >= n)
+            return;
+        const VrHandMatrix4 w = VrHandMath::Multiply(world, asset.sourceBoneBind[static_cast<size_t>(s_wrist)]);
+        const VrHandMatrix4 mid = VrHandMath::Multiply(world, asset.sourceBoneBind[static_cast<size_t>(s_middle)]);
+        const Vector wo(VrHandMath::Get(w, 0, 3), VrHandMath::Get(w, 1, 3), VrHandMath::Get(w, 2, 3));
+        const Vector mo(VrHandMath::Get(mid, 0, 3), VrHandMath::Get(mid, 1, 3), VrHandMath::Get(mid, 2, 3));
+        constexpr float kBmWristToMiddle = 5.894f;
+        const float unit = (mo - wo).Length() / kBmWristToMiddle;
+        if (!(unit > 1e-4f))
+            return;
+        Vector f, r, u;
+        QAngle::AngleVectors(controllerAng, &f, &r, &u);
+        const Vector d = wo - controller;
+        float out[12];
+        for (int col = 0; col < 3; ++col)
+        {
+            Vector a(VrHandMath::Get(w, 0, col), VrHandMath::Get(w, 1, col), VrHandMath::Get(w, 2, col));
+            const float len = a.Length();
+            if (len < 1e-6f)
+                return;
+            a = a * (1.f / len);
+            out[0 * 4 + col] = a.Dot(f);
+            out[1 * 4 + col] = a.Dot(r);
+            out[2 * 4 + col] = a.Dot(u);
+        }
+        out[3] = d.Dot(f);
+        out[7] = d.Dot(r);
+        out[11] = d.Dot(u);
+        for (int k = 0; k < 12; ++k)
+            MagReload::g_LeftClipWrist[k].store(out[k], std::memory_order_relaxed);
+        MagReload::g_LeftClipUnit.store(unit, std::memory_order_relaxed);
+        MagReload::g_LeftClipPose.store(clip, std::memory_order_relaxed);
+        const DWORD now = GetTickCount();
+        MagReload::g_LeftClipMs.store(now ? now : 1, std::memory_order_relaxed);
+        static DWORD s_logMs = 0;
+        if (now - s_logMs > 5000)
+        {
+            s_logMs = now;
+            Game::logMsg("Clip hand pose: %s wrist %.1f fwd %.1f right %.1f up of the controller, %.3f units per model unit",
+                ClipHandPose::kPoses[clip].name, out[3], out[7], out[11], unit);
+        }
+    }
+
     void StoreLeftFistCentre(const VrHandMeshAsset& asset, const std::vector<VrHandMatrixRows3x4>& palette,
         const VrHandMatrix4& world, const Vector& controller, const QAngle& controllerAng)
     {
@@ -1138,6 +1203,7 @@ bool BmVrGloves::DrawForEye(
 
         Impl::Hand& hand = pair[i];
         vr::VRSkeletalSummaryData_t summary{};
+        int drawnClip = ClipHandPose::kNone; // reload-clip hand pose drawn on this glove
         const bool gripCurl = g_Game && g_Game->m_VR && (
             (rightHand && g_Game->m_VR->WantsRightGloveWeaponGripCurl())
             || (!rightHand && g_Game->m_VR->WantsOffhandGloveWeaponGripCurl()));
@@ -1171,7 +1237,33 @@ bool BmVrGloves::DrawForEye(
                     summary.flFingerCurl[4] = fold;
                 }
             }
-            const bool pinch = !rightHand && LeftGlovePinch();
+            // Reload-clip hand pose (VrClipHandPose): Black Mesa's own left
+            // fingers around the held magazine / bolt / slide, baked. The
+            // palette depends only on the pose and the glove, so it is built
+            // once per pose and reused.
+            bool clipPose = false;
+            const int clipId = rightHand ? ClipHandPose::kNone : MagReload::WantedClipHandPose();
+            if (clipId >= 0 && clipId < ClipHandPose::kCount)
+            {
+                static const VrHandMeshAsset* s_clipAsset = nullptr;
+                static int s_clipId = -1;
+                static std::vector<VrHandMatrixRows3x4> s_clipPalette;
+                if (s_clipAsset == &hand.asset && s_clipId == clipId && !s_clipPalette.empty())
+                {
+                    hand.palette = s_clipPalette;
+                    clipPose = true;
+                }
+                else if (BuildStockPosePalette(hand.asset, hand.rig, ClipHandPose::kPoses[clipId].fingers, hand.palette))
+                {
+                    s_clipAsset = &hand.asset;
+                    s_clipId = clipId;
+                    s_clipPalette = hand.palette;
+                    clipPose = true;
+                }
+                hand.rig.paletteValid = false;
+            }
+            drawnClip = clipPose ? clipId : ClipHandPose::kNone;
+            const bool pinch = !clipPose && !rightHand && LeftGlovePinch();
             if (pinch)
             {
                 summary.flFingerCurl[0] = bmvr::g_VrPinchThumb;
@@ -1181,20 +1273,24 @@ bool BmVrGloves::DrawForEye(
                 gmanThumb = 0.f;
             }
             float stockRel[15][12];
-            const bool stockPose = !pinch && !rightHand && gripCurl && bmvr::g_VrStockHandPose
+            const bool stockPose = !clipPose && !pinch && !rightHand && gripCurl && bmvr::g_VrStockHandPose
                 && g_Game->m_VR->GetStockOffhandFingers(stockRel)
                 && BuildStockPosePalette(hand.asset, hand.rig, stockRel, hand.palette);
             {
                 static int s_lastMode = -1;
-                const int mode = pinch ? 2 : (stockPose ? 1 : (gripCurl ? 3 : 0));
+                const int mode = clipPose ? 10 + clipId : pinch ? 2 : (stockPose ? 1 : (gripCurl ? 3 : 0));
                 if (!rightHand && mode != s_lastMode)
                 {
                     s_lastMode = mode;
-                    Game::logMsg("Stock hand pose: left glove %s", mode == 2 ? "pinch" : mode == 1 ? "stock fingers"
-                        : mode == 3 ? "grip curl (no stock pose)" : "controller curls");
+                    if (clipPose)
+                        Game::logMsg("Stock hand pose: left glove clip pose (%s: %s @ %.2f)", ClipHandPose::kPoses[clipId].name,
+                            ClipHandPose::kPoses[clipId].clip, ClipHandPose::kPoses[clipId].cycle);
+                    else
+                        Game::logMsg("Stock hand pose: left glove %s", mode == 2 ? "pinch" : mode == 1 ? "stock fingers"
+                            : mode == 3 ? "grip curl (no stock pose)" : "controller curls");
                 }
             }
-            if (!stockPose
+            if (!stockPose && !clipPose
                 && !BuildSummaryCurlPalette(hand.asset, hand.rig, summary, hand.palette,
                     (gripCurl && !pinch) ? 0.40f : 0.f, gmanThumb, pinch ? 0.f : straightMiddle))
                 BuildBindPosePalette(hand.asset, hand.palette);
@@ -1253,6 +1349,8 @@ bool BmVrGloves::DrawForEye(
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
         if (i == 0 && !gripCurl)
             StoreLeftFistCentre(hand.asset, hand.palette, world, *origins[0], *angles[0]);
+        if (i == 0)
+            StoreLeftClipWrist(hand.asset, world, *origins[0], *angles[0], drawnClip);
 
         // GetLightForPoint + flashlight cone once per hand per frame; the
         // second eye reuses it (same palm position, same Present tick).

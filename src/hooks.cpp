@@ -5539,6 +5539,61 @@ namespace
                 magAnchor = base + out * (bmvr::g_VrShellOut * 4.27f * vmScale);
             }
         }
+        // Reload-clip hand pose (VrClipHandPose): the magazine where Black
+        // Mesa's own hand holds it in the reload clip, from the drawn
+        // glove's wrist (MagReload::g_LeftClipWrist): wrist * the baked
+        // wrist -> magazine pose. The palm point scales with the glove,
+        // the magazine's own extent with the gun, so a glove size that
+        // differs from the viewmodel scale keeps it in the fingers.
+        if (!def.tube && (weapon == MagReload::kWeaponMp5 || weapon == MagReload::kWeaponGlock))
+        {
+            const int want = weapon == MagReload::kWeaponMp5 ? ClipHandPose::kMp5Mag : ClipHandPose::kGlockMag;
+            const unsigned clipMs = MagReload::g_LeftClipMs.load(std::memory_order_relaxed);
+            const float unit = MagReload::g_LeftClipUnit.load(std::memory_order_relaxed);
+            if (MagReload::g_LeftClipPose.load(std::memory_order_relaxed) == want && clipMs != 0 && now - clipMs < 500
+                && unit > 1e-4f)
+            {
+                float W[12];
+                for (int k = 0; k < 12; ++k)
+                    W[k] = MagReload::g_LeftClipWrist[k].load(std::memory_order_relaxed);
+                Vector ax[3];
+                for (int c = 0; c < 3; ++c)
+                    ax[c] = hf * W[0 * 4 + c] + hr * W[1 * 4 + c] + hu * W[2 * 4 + c];
+                const Vector wo = hand + hf * W[3] + hr * W[7] + hu * W[11];
+                const float* O = ClipHandPose::kPoses[want].object;
+                for (int j = 0; j < 3; ++j)
+                {
+                    const float len = std::sqrt(m[0 * 4 + j] * m[0 * 4 + j] + m[1 * 4 + j] * m[1 * 4 + j]
+                        + m[2 * 4 + j] * m[2 * 4 + j]);
+                    const Vector col = (ax[0] * O[0 * 4 + j] + ax[1] * O[1 * 4 + j] + ax[2] * O[2 * 4 + j]) * len;
+                    m[0 * 4 + j] = col.x;
+                    m[1 * 4 + j] = col.y;
+                    m[2 * 4 + j] = col.z;
+                }
+                float centre[3], grasp[3];
+                const float (*fing)[12] = ClipHandPose::kPoses[want].fingers;
+                for (int i = 0; i < 3; ++i)
+                {
+                    centre[i] = O[i * 4 + 3] + O[i * 4 + 0] * def.magCenter[0] + O[i * 4 + 1] * def.magCenter[1]
+                        + O[i * 4 + 2] * def.magCenter[2];
+                    // Palm: the wrist and the middle finger's joints (6..8).
+                    grasp[i] = (fing[6][i * 4 + 3] + fing[7][i * 4 + 3] + fing[8][i * 4 + 3]) * 0.25f;
+                }
+                Vector v;
+                v.x = grasp[0] * unit + (centre[0] - grasp[0]) * vmScale;
+                v.y = grasp[1] * unit + (centre[1] - grasp[1]) * vmScale;
+                v.z = grasp[2] * unit + (centre[2] - grasp[2]) * vmScale;
+                magAnchor = wo + ax[0] * v.x + ax[1] * v.y + ax[2] * v.z;
+                static thread_local DWORD s_clipLogMs = 0;
+                if (now - s_clipLogMs > 2000)
+                {
+                    s_clipLogMs = now;
+                    const Vector d = magAnchor - hand;
+                    Game::logMsg("Clip hand pose: %s magazine centre %.1f fwd %.1f right %.1f up of the controller (unit %.3f, vm %.3f)",
+                        def.name, d.Dot(hf), d.Dot(hr), d.Dot(hu), unit, vmScale);
+                }
+            }
+        }
         // Magazine centre in the palm.
         m[3] = m[7] = m[11] = 0.f;
         const Vector c0 = local(m, def.magCenter);

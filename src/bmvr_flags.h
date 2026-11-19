@@ -801,6 +801,9 @@ namespace bmvr
     // Small "PUMP IT" / "PULL THE CHARGING HANDLE" toasts on a dead trigger
     // (twice each per game start). On by default.
     extern bool g_VrReloadHints;
+    // Left glove takes Black Mesa's own reload-clip hand pose on a held magazine, the MP5 bolt
+    // and the glock slide (vr_clip_hand_poses.h); the magazine sits where that hand holds it.
+    extern bool g_VrClipHandPose;
     // Manual reloads: rounds left in an ejected magazine / an opened .357
     // cylinder are lost (not topped up again); a chambered MP5/glock round
     // stays. Only while there is reserve ammo (user, 2026-11-18).

@@ -1,4 +1,5 @@
 #pragma once
+#include "vr_clip_hand_poses.h"
 
 #include <atomic>
 
@@ -91,6 +92,20 @@ namespace MagReload
     // frame as g_LeftPalmLocal: where a pinched shotgun shell is held.
     extern std::atomic<float> g_LeftPinchLocal[3];
     extern std::atomic<unsigned> g_LeftPinchMs;
+    // VrClipHandPose: the reload-clip hand pose (ClipHandPose::Id) the left
+    // glove drew last, when (GetTickCount), and Black Mesa's L_Wrist frame on
+    // that glove in the same controller frame as g_LeftPalmLocal (rows =
+    // forward, right, up; columns = the wrist's x, y, z axes, unit length,
+    // then its origin) plus game units per viewmodel model unit at the
+    // glove's size. The held magazine is placed from it.
+    extern std::atomic<int> g_LeftClipPose;
+    extern std::atomic<unsigned> g_LeftClipMs;
+    extern std::atomic<float> g_LeftClipWrist[12];
+    extern std::atomic<float> g_LeftClipUnit;
+    // Which reload-clip hand pose the left glove should take now
+    // (ClipHandPose::Id, -1 = none): magazine in the hand, MP5 bolt or
+    // glock slide held.
+    int WantedClipHandPose();
     // GetTickCount of the last viewmodel draw that showed the gun's own
     // left hand as the support hand (VrSupportHandLock): the glove skips it.
     extern std::atomic<unsigned> g_SupportHandFromGunMs;

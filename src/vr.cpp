@@ -21296,6 +21296,10 @@ std::atomic<float> MagReload::g_LeftPalmLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPalmMs{ 0 };
 std::atomic<float> MagReload::g_LeftPinchLocal[3]{};
 std::atomic<unsigned> MagReload::g_LeftPinchMs{ 0 };
+std::atomic<int> MagReload::g_LeftClipPose{ -1 };
+std::atomic<unsigned> MagReload::g_LeftClipMs{ 0 };
+std::atomic<float> MagReload::g_LeftClipWrist[12]{};
+std::atomic<float> MagReload::g_LeftClipUnit{ 0.f };
 std::atomic<unsigned> MagReload::g_SupportHandFromGunMs{ 0 };
 std::atomic<unsigned> MagReload::g_SatchelRadioMs{ 0 };
 std::atomic<unsigned> MagReload::g_EjectTick{ 0 };
@@ -21583,6 +21587,20 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
           { -1.46f, 0.f, 0.f }, { 0, 0, 0 }, false, nullptr, { 0, 0, 0 }, nullptr },
     };
     return kDefs[(weapon >= 0 && weapon < kWeaponCount) ? weapon : 0];
+}
+
+int MagReload::WantedClipHandPose()
+{
+    if (!bmvr::g_VrClipHandPose || !bmvr::g_VrStockHandPose || !bmvr::g_PhysicalWeapons || bmvr::g_LeftHanded)
+        return ClipHandPose::kNone;
+    const int w = g_Weapon.load(std::memory_order_relaxed);
+    if (w != kWeaponMp5 && w != kWeaponGlock)
+        return ClipHandPose::kNone;
+    if (g_BoltGrab.load(std::memory_order_relaxed))
+        return w == kWeaponMp5 ? ClipHandPose::kMp5Bolt : ClipHandPose::kGlockSlide;
+    if (g_State.load(std::memory_order_relaxed) == kInHand)
+        return w == kWeaponMp5 ? ClipHandPose::kMp5Mag : ClipHandPose::kGlockMag;
+    return ClipHandPose::kNone;
 }
 
 bool VR::OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const
