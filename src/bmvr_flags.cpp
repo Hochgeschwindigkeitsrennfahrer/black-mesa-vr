@@ -373,7 +373,7 @@ namespace bmvr
     bool g_PauseCaptureArm = false;
     bool g_DesktopMouseGuard = true;
     bool g_GunHandCuffCap = true;
-    float g_PauseSkipPaints = 2.f;
+    float g_PauseSkipPaints = 0.f;
     float g_VrRecoilScale = 1.f;
     float g_VrRecoilTwoHand = 0.3f;
     bool g_RpgRocketShown = true;

@@ -19844,13 +19844,20 @@ void VR::StampPauseOverlayCursor()
         return;
     // Title layer (intro logo / chapter text): no frame colour, no pointer.
     const bool title = m_HudPaintTitle.load(std::memory_order_acquire);
-    if (bmvr::g_PauseMenuColourFromFrame && !title)
-        PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
+    // Alpha first, from the menu's own paint; then the colour from the
+    // presented frame (which keeps that alpha). The other way round the
+    // alpha boost (8 x brightness) ran on the frame's colour, and for the
+    // ~0.7 s Black Mesa's pause backdrop takes to fade in that frame is the
+    // bright world: a window-sized opaque picture of it fading out over the
+    // view (pause capture 2026-11-19: layer alpha mean 0.98 -> 0.02 over
+    // 0.7 s; the eye images were clean).
     const int alphaPasses = static_cast<int>(bmvr::g_PauseMenuAlphaPasses + 0.5f);
     if (title)
         TitleLayerPremultiplied(device, m_D9HUDSurface);
     else if (alphaPasses > 0)
         FixPauseLayerAlpha(device, m_D9HUDSurface, alphaPasses > 6 ? 6 : alphaPasses);
+    if (bmvr::g_PauseMenuColourFromFrame && !title)
+        PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
     if (!title)
         DrawMenuCursorOnSurface(device, m_D9HUDSurface);
     device->Release();
