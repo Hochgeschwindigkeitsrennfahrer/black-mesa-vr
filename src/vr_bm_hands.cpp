@@ -911,6 +911,75 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
         out.indices.push_back(c->second);
     }
 
+    // Close the cuff. The glove is cut out of the first-person arm at the
+    // wrist, which leaves the HEV glove's cuff open (bare hands come out
+    // closed): wherever the wrist faced the eye, the glove looked hollow
+    // (user, 2026-11-18/19). Open edges = edges of one triangle after
+    // welding the seam-split vertices by position; those near the wrist get
+    // a fan to their centre, weighted like the ring, winding continuing the
+    // mesh's own (back-face shading stays right).
+    {
+        std::map<std::array<int, 3>, int> weld;
+        std::vector<int> wid(out.vertices.size());
+        for (size_t v = 0; v < out.vertices.size(); ++v)
+        {
+            const std::array<int, 3> k = { static_cast<int>(std::lround(out.vertices[v].position[0] * 1e4f)),
+                static_cast<int>(std::lround(out.vertices[v].position[1] * 1e4f)),
+                static_cast<int>(std::lround(out.vertices[v].position[2] * 1e4f)) };
+            auto it = weld.find(k);
+            if (it == weld.end())
+                it = weld.emplace(k, static_cast<int>(v)).first;
+            wid[v] = it->second;
+        }
+        struct E { int n = 0; std::uint16_t a = 0, b = 0; };
+        std::map<std::pair<int, int>, E> edges;
+        for (size_t t = 0; t + 2 < out.indices.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+            {
+                const std::uint16_t a = out.indices[t + e], b = out.indices[t + (e + 1) % 3];
+                int u = wid[a], w = wid[b];
+                if (u > w) std::swap(u, w);
+                E& x = edges[{ u, w }];
+                ++x.n;
+                x.a = a;
+                x.b = b;
+            }
+        std::vector<std::pair<std::uint16_t, std::uint16_t>> ring;
+        int openElsewhere = 0;
+        for (const auto& kv : edges)
+        {
+            if (kv.second.n != 1)
+                continue;
+            const float z = 0.5f * (out.vertices[kv.second.a].position[2] + out.vertices[kv.second.b].position[2]);
+            if (maxZ > 1e-4f && z < 0.3f * maxZ)
+                ring.push_back({ kv.second.a, kv.second.b });
+            else
+                ++openElsewhere;
+        }
+        if (ring.size() >= 3 && out.vertices.size() < 65535)
+        {
+            VrHandVertex c = out.vertices[ring[0].first];
+            float sum[3] = {};
+            for (const auto& r : ring)
+                for (int k = 0; k < 3; ++k)
+                    sum[k] += out.vertices[r.first].position[k] + out.vertices[r.second].position[k];
+            for (int k = 0; k < 3; ++k)
+                c.position[k] = sum[k] / (2.f * static_cast<float>(ring.size()));
+            c.normal[0] = 0.f; c.normal[1] = 0.f; c.normal[2] = -1.f;   // out of the wrist
+            const std::uint16_t ci = static_cast<std::uint16_t>(out.vertices.size());
+            out.vertices.push_back(c);
+            for (const auto& r : ring)
+            {
+                out.indices.push_back(r.second);
+                out.indices.push_back(r.first);
+                out.indices.push_back(ci);
+            }
+        }
+        Game::logMsg("BM hands %s %c: cuff %s (%zu open edges at the wrist, %d elsewhere)",
+            variant == Variant::Hev ? "hev" : "bare", side, ring.size() >= 3 ? "capped" : "closed already",
+            ring.size(), openElsewhere);
+    }
+
     // Fingertips at the origin (the controller tracking point), wrist at -Z.
     for (auto& v : out.vertices)
         v.position[2] -= maxZ;
