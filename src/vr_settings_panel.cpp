@@ -279,11 +279,11 @@ namespace
             { "Edge threshold", RowKind::Number, "FxaaEdgeThreshold", nullptr, &bmvr::g_FxaaEdgeThreshold, 0.01f, 0.f, 0.5f, "%.3f" },
             { "Dark edge threshold", RowKind::Number, "FxaaEdgeThresholdMin", nullptr, &bmvr::g_FxaaEdgeThresholdMin, 0.005f, 0.f, 0.1f, "%.3f" },
             // Cubemap reflection strength: less = less shimmer on shiny floors/walls and props.
-            { "REFLECTIONS (SHIMMER)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "envmap" },
+            { "SHIMMER PREVENTION", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Reflections preset", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "envmap" },
             { "Walls/floors (cubemap)", RowKind::Number, "EnvmapScaleWorld", nullptr, &bmvr::g_EnvmapScaleWorld, 0.1f, 0.f, 1.f, "%.1f" },
             { "Props/NPCs (cubemap)", RowKind::Number, "EnvmapScaleModels", nullptr, &bmvr::g_EnvmapScaleModels, 0.1f, 0.f, 1.f, "%.1f" },
-            { "IMAGE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "LIGHTING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Bloom and auto-exposure", RowKind::Toggle, "EyeBloom", &bmvr::g_EyeBloom, nullptr, 0, 0, 0, nullptr },
             // Mip LOD bias in the 3D views (experimental): + = softer textures;
             // foliage and fences look more solid, at the cost of detail. Does
@@ -313,6 +313,7 @@ namespace
             // whether a scene is CPU- or GPU-limited.
             { "GPU timing in log", RowKind::Toggle, "GpuPassTiming", &bmvr::g_GpuPassTiming, nullptr, 0, 0, 0, nullptr },
             // Shows the DevSection groups below (A/B switches, tests, engine cvars); saved.
+            { "Blank eye", RowKind::Choice, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "Off|Left|Right" },
             { "Show developer rows", RowKind::Toggle, "VrPanelDevRows", &bmvr::g_PanelDevRows, nullptr, 0, 0, 0, nullptr },
             // Every row of this tab back to its built-in default (logs, A/B fixes, tests, engine rows;
             // god/noclip/notarget off). "Show developer rows" stays as it is.
@@ -330,7 +331,6 @@ namespace
             // Skips Black Mesa's Xen fog (Xog) draws by material: global = __gbxog0,
             // volumes = the local fog volumes. Draw hooks run while on.
             { "Hide Xen fog", RowKind::Choice, nullptr, nullptr, &bmvr::g_DebugHideXog, 1.f, 0.f, 3.f, "Off|Global|Volumes|Both" },
-            { "Blank eye", RowKind::Choice, nullptr, nullptr, &bmvr::g_DebugBlankEye, 1.f, 0.f, 2.f, "Off|Left|Right" },
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
@@ -338,7 +338,7 @@ namespace
             { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
             // Engine cvars: "cvar:" keys go to the console on the game thread
             // (never saved); the shown value is read back while the panel is open.
-            { "ENGINE (CONSOLE)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "ENGINE (CONSOLE)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "sv_cheats", RowKind::Toggle, "cvar:sv_cheats", &g_EngSvCheats, nullptr, 0, 0, 0, nullptr },
             { "r_occlusion", RowKind::Toggle, "cvar:r_occlusion", &g_EngOcclusion, nullptr, 0, 0, 0, nullptr },
             // Black Mesa's GPU-query occlusion (engine/occlusionproxy draws + query readback, per eye).
