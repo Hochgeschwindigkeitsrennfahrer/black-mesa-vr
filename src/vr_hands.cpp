@@ -60,6 +60,27 @@ namespace
         return out;
     }
 
+    // Rotation (column vectors) turning unit vector a towards unit vector b
+    // by `weight` of the angle between them.
+    VrHandMatrix4 MakeTurnTowards(const float a[3], const float b[3], float weight)
+    {
+        VrHandMatrix4 out = VrHandMath::Identity();
+        float axis[3] = { a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+        const float s = std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+        const float c = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        if (s < 1e-6f)
+            return out;
+        for (float& v : axis)
+            v /= s;
+        const float ang = std::atan2(s, c) * weight;
+        const float ca = std::cos(ang), sa = std::sin(ang), t = 1.f - ca;
+        const float x = axis[0], y = axis[1], z = axis[2];
+        VrHandMath::Set(out, 0, 0, t * x * x + ca);     VrHandMath::Set(out, 0, 1, t * x * y - sa * z); VrHandMath::Set(out, 0, 2, t * x * z + sa * y);
+        VrHandMath::Set(out, 1, 0, t * x * y + sa * z); VrHandMath::Set(out, 1, 1, t * y * y + ca);     VrHandMath::Set(out, 1, 2, t * y * z - sa * x);
+        VrHandMath::Set(out, 2, 0, t * x * z - sa * y); VrHandMath::Set(out, 2, 1, t * y * z + sa * x); VrHandMath::Set(out, 2, 2, t * z * z + ca);
+        return out;
+    }
+
     VrHandMatrix4 MakeLocalZRotation(float radians)
     {
         VrHandMatrix4 out = VrHandMath::Identity();
@@ -132,6 +153,7 @@ namespace
         float lastCurl[vr::VRFinger_Count]{};
         float lastGripCurlMin = -1.f;
         float lastGmanThumb[3]{};
+        float lastStraight = 0.f;
     };
 
     void BuildHandRig(const VrHandMeshAsset& asset, HandRig& rig)
@@ -215,7 +237,8 @@ namespace
         const vr::VRSkeletalSummaryData_t& summary,
         std::vector<VrHandMatrixRows3x4>& outPalette,
         float gripCurlMin,
-        float gmanThumb = 0.f)
+        float gmanThumb = 0.f,
+        float straightMiddle = 0.f)
     {
         if (!rig.built)
             BuildHandRig(asset, rig);
@@ -250,7 +273,8 @@ namespace
         const size_t n = asset.jointNames.size();
         if (rig.paletteValid && outPalette.size() == n && rig.lastGripCurlMin == gripCurlMin
             && std::memcmp(curls, rig.lastCurl, sizeof(curls)) == 0
-            && std::memcmp(gmanThumbState, rig.lastGmanThumb, sizeof(gmanThumbState)) == 0)
+            && std::memcmp(gmanThumbState, rig.lastGmanThumb, sizeof(gmanThumbState)) == 0
+            && rig.lastStraight == straightMiddle)
             return true;
 
         static const float kMaxCurlRadians[vr::VRFinger_Count][3] =
@@ -290,6 +314,49 @@ namespace
             }
         }
 
+        // Straight middle finger (G-Man gesture on the Black Mesa gloves):
+        // each segment turned so it continues the one before it (the first
+        // along the wrist -> knuckle line). Bending back about the curl axis
+        // made it zig-zag sideways on these rigs, whose joint axes are not
+        // square to the finger (user 2026-11-19: "crooked").
+        if (straightMiddle > 0.f)
+        {
+            auto trans = [&](size_t j, float out[3]) {
+                for (int r = 0; r < 3; ++r)
+                    out[r] = VrHandMath::Get(rig.bindLocal[j], r, 3);
+            };
+            auto norm = [](float v[3]) {
+                const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                if (l < 1e-6f)
+                    return false;
+                v[0] /= l; v[1] /= l; v[2] /= l;
+                return true;
+            };
+            const int* fj = rig.fingerJoint[2];
+            for (int segment = 0; segment < 3; ++segment)
+            {
+                const size_t joint = static_cast<size_t>(fj[segment]);
+                // Bone direction in the joint's own frame: towards the next
+                // joint; the tip has none, so it reuses the previous
+                // segment's (same joint-frame convention along the finger).
+                float bone[3];
+                trans(static_cast<size_t>(fj[segment < 2 ? segment + 1 : 2]), bone);
+                // Where it should point, in the parent frame: along this
+                // joint's offset from the parent (the parent's bone).
+                float want[3];
+                trans(joint, want);
+                if (!norm(bone) || !norm(want))
+                    continue;
+                // Into the joint frame (rotation part of the bind local, transposed).
+                float a[3];
+                for (int r = 0; r < 3; ++r)
+                    a[r] = VrHandMath::Get(rig.bindLocal[joint], 0, r) * want[0]
+                        + VrHandMath::Get(rig.bindLocal[joint], 1, r) * want[1]
+                        + VrHandMath::Get(rig.bindLocal[joint], 2, r) * want[2];
+                localMatrices[joint] = VrHandMath::Multiply(rig.bindLocal[joint], MakeTurnTowards(bone, a, straightMiddle));
+            }
+        }
+
         for (const int j : rig.order)
         {
             const size_t joint = static_cast<size_t>(j);
@@ -308,6 +375,7 @@ namespace
         }
         std::memcpy(rig.lastCurl, curls, sizeof(curls));
         std::memcpy(rig.lastGmanThumb, gmanThumbState, sizeof(gmanThumbState));
+        rig.lastStraight = straightMiddle;
         rig.lastGripCurlMin = gripCurlMin;
         rig.paletteValid = true;
         return true;
@@ -707,6 +775,19 @@ struct BmVrGloves::Impl
         }
         for (Hand* h : { &hev[0], &hev[1], &bare[0], &bare[1] })
             BuildBindPosePalette(h->asset, h->palette);
+        // Mesh size per glove (user 2026-11-19: right glove looked bigger).
+        for (Hand* h : { &hev[0], &hev[1], &bare[0], &bare[1] })
+        {
+            float lo[3] = { 1e9f, 1e9f, 1e9f }, hi[3] = { -1e9f, -1e9f, -1e9f };
+            for (const auto& v : h->asset.vertices)
+                for (int k = 0; k < 3; ++k)
+                {
+                    lo[k] = (std::min)(lo[k], v.position[k]);
+                    hi[k] = (std::max)(hi[k], v.position[k]);
+                }
+            Game::logMsg("VR glove %s mesh size x %.3f y %.3f z %.3f m (z from %.3f)", h->asset.sourcePath.c_str(),
+                hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], lo[2]);
+        }
         hev[0].fileName = "bm:hev_left";
         hev[1].fileName = "bm:hev_right";
         bare[0].fileName = "bm:bare_left";
@@ -1068,6 +1149,7 @@ bool BmVrGloves::DrawForEye(
             // over the first half of the pull, then the thumb comes over
             // them: moved together, it passes through them on the way.
             float gmanThumb = 0.f;
+            float straightMiddle = 0.f;
             if (!gripCurl && g_Game && g_Game->m_VR && (g_Game->m_VR->GmanGestureActive() || bmvr::g_VrGmanGestureForce))
             {
                 const float grip = std::max({ summary.flFingerCurl[2], summary.flFingerCurl[3], summary.flFingerCurl[4] });
@@ -1079,6 +1161,12 @@ bool BmVrGloves::DrawForEye(
                     // Negative curl = bent back past the rest pose's
                     // natural bend (BuildSummaryCurlPalette allows it).
                     summary.flFingerCurl[2] = -bmvr::g_VrGmanFingerStraight * fold;
+                    // Black Mesa gloves: straightened along the finger instead.
+                    if (hand.asset.sourcePath.rfind("bm:", 0) == 0)
+                    {
+                        summary.flFingerCurl[2] = 0.f;
+                        straightMiddle = fold;
+                    }
                     summary.flFingerCurl[3] = fold;
                     summary.flFingerCurl[4] = fold;
                 }
@@ -1108,7 +1196,7 @@ bool BmVrGloves::DrawForEye(
             }
             if (!stockPose
                 && !BuildSummaryCurlPalette(hand.asset, hand.rig, summary, hand.palette,
-                    (gripCurl && !pinch) ? 0.40f : 0.f, gmanThumb))
+                    (gripCurl && !pinch) ? 0.40f : 0.f, gmanThumb, pinch ? 0.f : straightMiddle))
                 BuildBindPosePalette(hand.asset, hand.palette);
         }
         else if (hand.palette.empty())

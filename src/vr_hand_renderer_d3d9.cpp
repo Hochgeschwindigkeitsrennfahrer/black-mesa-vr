@@ -93,7 +93,7 @@ namespace
         device->SetIndices(nullptr);
         static const float kZero[4 * (kBoneConstantStart + kMaxShaderBones * 3)]{};
         device->SetVertexShaderConstantF(0, kZero, kBoneConstantStart + kMaxShaderBones * 3);
-        device->SetPixelShaderConstantF(0, kZero, 4);
+        device->SetPixelShaderConstantF(0, kZero, 5);
         D3DVIEWPORT9 vp{};
         vp.Width = 1;
         vp.Height = 1;
@@ -207,16 +207,24 @@ float4 gEyePosition : register(c1);
 float4 gLightDirectionAmbient : register(c2);
 float4 gEnvAmount : register(c3);
 
+float4 gFace : register(c4);
+
 struct PS_INPUT
 {
     float2 uv : TEXCOORD0;
     float3 worldNormal : TEXCOORD1;
     float3 worldPos : TEXCOORD2;
+    float face : VFACE;
 };
 
 float4 main(PS_INPUT input) : COLOR0
 {
     float4 color = tex2D(gTexture, input.uv);
+    // Inside of the glove (seen through the open cuff): back faces, drawn
+    // dark instead of lit like the outside (user 2026-11-19: hollow hands).
+    // gFace.x = sign of a front face's VFACE, 0 = off.
+    if (gFace.x != 0.0 && input.face * gFace.x < 0.0)
+        return float4(color.rgb * gSceneLightRgb.xyz * 0.12, 1.0);
     float3 N = normalize(input.worldNormal);
     float3 V = normalize(gEyePosition.xyz - input.worldPos);
     float3 L = normalize(-gLightDirectionAmbient.xyz);
@@ -909,6 +917,15 @@ bool VrHandRendererD3D9::Draw(
     device->SetPixelShaderConstantF(1, eyeConst, 1);
     device->SetPixelShaderConstantF(2, lightConst, 1);
     device->SetPixelShaderConstantF(3, envAmt, 1);
+    // Glove inside dark (back faces); not for standalone meshes. Front faces
+    // have VFACE > 0 with these meshes' winding (BMVR_TEST_HAND_FACE=-1/0
+    // flips / disables, for checking).
+    static const float s_faceSign = [] {
+        char buf[16]{};
+        return GetEnvironmentVariableA("BMVR_TEST_HAND_FACE", buf, sizeof(buf)) ? static_cast<float>(atof(buf)) : 1.f;
+    }();
+    const float faceConst[4] = { opaqueStandaloneMesh ? 0.f : s_faceSign, 0.f, 0.f, 0.f };
+    device->SetPixelShaderConstantF(4, faceConst, 1);
 
     D3DVIEWPORT9 oldViewport{};
     const bool haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));

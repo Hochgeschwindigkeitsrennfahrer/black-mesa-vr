@@ -767,6 +767,13 @@ bool BmHands::Build(Variant variant, int hand, float scale, VrHandMeshAsset& out
         palm = { 0, 0, 1 };
     if (Dot(palm, { 0, 0, 1 }) < 0.f)
         palm = palm * -1.f;
+    {
+        const V3 tip = pos(2 * 3 + 1 + 2) - wristP;   // finger_middle_2
+        const V3 idx = pos(1 * 3 + 1 + 0) - wristP;   // finger_index_0
+        const V3 pky = pos(4 * 3 + 1 + 0) - wristP;   // finger_pinky_0
+        Game::logMsg("BM hands %s %c: wrist->middle tip joint %.2f, index-pinky knuckles %.2f units",
+            vi == 0 ? "hev" : "bare", side, Len(tip), Len(idx - pky));
+    }
     M4 align = LookBasis(finger, palm);
     SetCol(align, 3, wristP);
     const M4 toModel = Inv(align);
