@@ -226,7 +226,7 @@ namespace bmvr
     bool g_CrouchStickHold = true;
     float g_StickJumpCrouchThreshold = 0.8f;
     float g_StickJumpCrouchAngle = 30.f;
-    bool g_TurnBlocksJumpCrouch = true;
+    bool g_TurnBlocksJumpCrouch = false; // user 2026-11-20: on was near unplayable (next release)
     float g_ButtonHoldMs = 500.f;
     bool g_ButtonMapping = true;
     bool g_ControlsPicture = true;

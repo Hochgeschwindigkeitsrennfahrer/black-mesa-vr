@@ -122,7 +122,7 @@ ScopeEye=right
 # until the stick is centred again (false = hold the click).
 # Right stick up/down: how far (0.3..0.95) it must go before it jumps/crouches; it also has
 # to point within 30 degrees of straight up/down. TurnBlocksJumpCrouch: after the stick went
-# sideways to turn, no jump/crouch until it is back near the centre.
+# sideways to turn, no jump/crouch until it is back near the centre (default false).
 # Two-handed guns: squeezing the support grip on the gun latches the hold (no need to
 # keep squeezing); squeeze again, or take the hand away from the gun, to let go.
 # Frag grenade: thrown from the hand at the hand's speed (smoothed over ~66 ms around the
