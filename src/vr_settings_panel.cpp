@@ -402,6 +402,8 @@ namespace
             { "Rocket up", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandUpCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
             { "Rocket side (+ = to the right of the hand)", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandSideCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
             { "GLOCK MAGAZINE IN THE HAND (NOT SAVED)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Glock mag hand frame", RowKind::Choice, nullptr, nullptr, &bmvr::g_GlockMagCarryFrame, 1.f, 0.f, 1.f, "Pushing in (0.45)|Carrying (0.40)" },
+            { "Thumb curl (+ = closes toward the palm)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockThumbCurl, 5.f, -60.f, 90.f, "%+.0f deg" },
             { "Mag turn (top toward / away)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagTurn, 5.f, -180.f, 180.f, "%+.0f deg" },
             { "Mag roll (around the knuckles)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagRoll, 5.f, -180.f, 180.f, "%+.0f deg" },
             { "Mag spin (around vertical)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagSpin, 5.f, -180.f, 180.f, "%+.0f deg" },

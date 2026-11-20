@@ -22124,7 +22124,7 @@ int MagReload::InHandClipPose(int weapon)
     switch (weapon)
     {
     case kWeaponMp5: return ClipHandPose::kMp5Mag;
-    case kWeaponGlock: return ClipHandPose::kGlockMag;
+    case kWeaponGlock: return bmvr::g_GlockMagCarryFrame >= 0.5f ? ClipHandPose::kGlockMagCarry : ClipHandPose::kGlockMag;
     case kWeaponCrossbow: return ClipHandPose::kXbowMag;
     case kWeapon357: return ClipHandPose::k357Loader;
     case kWeaponShotgun: return ClipHandPose::kShell;

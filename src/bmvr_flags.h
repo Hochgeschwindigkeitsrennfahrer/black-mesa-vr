@@ -868,7 +868,7 @@ namespace bmvr
     extern float g_SatchelBagDepth;
     extern float g_RpgFistCurl, g_RpgFistOutCm;
     extern float g_RpgHandTurn, g_RpgHandRoll, g_RpgHandSpin, g_RpgHandFwdCm, g_RpgHandUpCm, g_RpgHandSideCm; // RPG rocket in the left hand: finger curl, rocket out of the palm (cm)
-    extern float g_GlockMagTurn, g_GlockMagRoll, g_GlockMagSpin, g_GlockMagFwdCm, g_GlockMagUpCm, g_GlockMagSideCm; // glock magazine in the left hand: tuning on top of the reload-clip pose
+    extern float g_GlockMagTurn, g_GlockMagRoll, g_GlockMagSpin, g_GlockMagFwdCm, g_GlockMagUpCm, g_GlockMagSideCm, g_GlockThumbCurl, g_GlockMagCarryFrame; // glock magazine in the left hand: tuning on top of the reload-clip pose
     extern float g_SatchelBagTurn, g_SatchelBagInCm, g_SatchelBagUpCm; // satchel bag hand tuning
     extern float g_SatchelBagRoll, g_SatchelBagSpin, g_SatchelBagSideCm; // satchel bag top this far into the fist (units at scale 1)
     extern float g_SatchelGripCurl; // left glove fist round the satchel bag top
