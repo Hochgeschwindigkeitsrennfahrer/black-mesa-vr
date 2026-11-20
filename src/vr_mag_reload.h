@@ -153,7 +153,7 @@ namespace MagReload
     extern std::atomic<float> g_PinPull;    // model units at scale 1 since the grab
     extern std::atomic<bool> g_PinThrown;   // set by the frag spawn hook: next grenade has its pin
 
-    // TwoHandGripToggle on the shotgun: the latched support hand holds the
-    // pump (no squeeze needed to work it).
-    bool PumpFollowsLatch();
+    // Shotgun: the attached support hand holds the pump and works it (toggle
+    // hold: no squeeze needed; hold mode: while the grip is held).
+    bool PumpFollowsSupportHand();
 }

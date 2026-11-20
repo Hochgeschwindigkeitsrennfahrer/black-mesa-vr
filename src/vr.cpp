@@ -15188,16 +15188,25 @@ void VR::ApplyTwoHandWeaponAim()
     }
     else if ((bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
         && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kInHand
-        // Toggle hold on the shotgun: the latched support hand works the
-        // pump (UpdateMagReload), so a squeeze on a pump that needs racking
-        // latches as usual instead of being a held pump grab.
-        && (MagReload::PumpFollowsLatch()
+        // Shotgun: the attached support hand works the pump
+        // (UpdateMagReload), so a squeeze on a pump that needs racking
+        // attaches as usual instead of being a separate pump grab.
+        && (MagReload::PumpFollowsSupportHand()
             || (!MagReload::g_BoltGrab.load(std::memory_order_relaxed)
                 && !(MagReload::g_NeedRack.load(std::memory_order_relaxed) && MagReload::g_NearBolt.load(std::memory_order_relaxed)))))
     {
         bool onPoint = pistol
             ? (distToGrip < enterR)
             : (lat < enterR && along >= alongMin && along <= alongMax);
+        // A squeeze where the old held pump grab caught the pump (its
+        // lenient grab radius) attaches too.
+        if (!onPoint && MagReload::PumpFollowsSupportHand()
+            && MagReload::g_NeedRack.load(std::memory_order_relaxed)
+            && MagReload::g_NearBolt.load(std::memory_order_relaxed))
+        {
+            onPoint = true;
+            Game::logMsg("Two-hand shotgun: attached at the pump (lat %.1f)", lat);
+        }
         if (pistol)
         {
             // Under the grip (cupping hand). From the live miss log (user
@@ -22068,9 +22077,13 @@ void VR::UpdateGrenadePin(uint32_t& buttons)
     g_PinState.store(s_state);
 }
 
-bool MagReload::PumpFollowsLatch()
+bool MagReload::PumpFollowsSupportHand()
 {
-    return bmvr::g_TwoHandGripToggle && g_Weapon.load(std::memory_order_relaxed) == kWeaponShotgun;
+    // Both grip modes (user 2026-11-20): the hold-mode grab without the
+    // two-hand attach left the glove off the pump and dropped the grab when
+    // the hand left the pump's grab radius mid-stroke (back sound, no
+    // forward stroke, gun still needing a pump).
+    return g_Weapon.load(std::memory_order_relaxed) == kWeaponShotgun;
 }
 
 const MagReload::WeaponDef& MagReload::Def(int weapon)
@@ -22507,16 +22520,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
         // The pump only moves when it needs working (after a shot); else it
         // stays locked forward, so a hand resting on it never pulls it back,
         // plays the pump sound or blocks the trigger (user, 2026-11-17).
-        // Toggle hold: the latched support hand works it by moving, without
-        // a held squeeze. Hold mode: while the grip is held on it.
-        const bool latchedPump = PumpFollowsLatch() && TwoHandGripActive();
-        const bool handOnPump = latchedPump
-            || (!PumpFollowsLatch() && gripDown && (TwoHandGripActive() || g_NearBolt.load()));
+        // The attached support hand works it by moving: toggle hold without
+        // a held squeeze, hold mode while the grip (and so the attach) is held.
+        const bool handOnPump = PumpFollowsSupportHand() && TwoHandGripActive();
         if (!boltGrab && w.needPump && handOnPump && w.mag != kInHand)
         {
             boltGrab = true;
             s_boltFull = false;
-            Game::logMsg("Mag reload: shotgun pump grabbed (%s)", latchedPump ? "latched support hand" : "grip held");
+            Game::logMsg("Mag reload: shotgun pump grabbed (support hand, %s)", bmvr::g_TwoHandGripToggle ? "toggle" : "hold");
         }
         else if (!boltGrab && gripEdge && w.mag != kInHand && w.shells < def.maxClip && atLeftHip()
             && gameRounds >= 0 && w.shells >= gameRounds)
@@ -22593,7 +22604,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 if (!w.needPump)
                     boltGrab = false;
             }
-            if (!handOnPump || (!latchedPump && released))
+            if (!handOnPump)
             {
                 boltGrab = false;
                 s_boltFull = false;
