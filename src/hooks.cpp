@@ -6104,9 +6104,11 @@ namespace
                 // then sat there without the hand (user 2026-11-19). Now 2.5
                 // units / ~25 deg to engage, off again past 4 units / ~40 deg.
                 const float tol = 2.5f * vmScale;
+                static thread_local float s_engageAlong = 0.f;
                 if (!s_engaged && along > 0.4f * len && along < 0.95f * len && radial < tol && align > 0.9f)
                 {
                     s_engaged = true;
+                    s_engageAlong = along;
                     Game::logMsg("Mag reload: rpg rocket engaged at the muzzle (along %.1f radial %.1f align %.2f)",
                         along / vmScale, radial / vmScale, align);
                 }
@@ -6126,8 +6128,12 @@ namespace
                 }
                 MagReload::g_RpgInsert.store(s_engaged ? std::clamp(1.f - along / (0.95f * len), 0.f, 1.f) : -1.f);
                 // Seats by itself 70 % in (user, 2026-11-18: had to push
-                // further than expected; was along <= 1.5 units = all the way).
-                MagReload::g_NearWell.store(s_engaged && along <= 0.3f * 0.95f * len);
+                // further than expected; was along <= 1.5 units = all the way),
+                // or once pushed a tenth of its length past where it engaged
+                // (user 2026-11-20: pushing on, the hand went through the gun;
+                // take it a little after the buzz).
+                MagReload::g_NearWell.store(s_engaged
+                    && (along <= 0.3f * 0.95f * len || along <= s_engageAlong - 0.1f * len));
                 static thread_local DWORD s_rpgLogMs = 0;
                 if (now - s_rpgLogMs > 1000)
                 {

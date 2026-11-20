@@ -370,8 +370,9 @@ namespace bmvr
     float g_LadderTuneOutCm = 0.f, g_LadderTuneUpCm = 0.f, g_LadderTuneCurl = 0.7f;
     float g_SatchelGripCurl = 0.75f;
     float g_SatchelBagDepth = 1.5f;
-    float g_RpgFistCurl = 0.45f, g_RpgFistOutCm = 2.f;
-    float g_RpgHandTurn = 0.f, g_RpgHandRoll = 0.f, g_RpgHandSpin = 0.f, g_RpgHandFwdCm = 0.f, g_RpgHandUpCm = 0.f, g_RpgHandSideCm = 0.f;
+    // User's headset tuning 2026-11-20 (was curl 0.45, out 2, rest 0).
+    float g_RpgFistCurl = 0.f, g_RpgFistOutCm = 0.f;
+    float g_RpgHandTurn = -15.f, g_RpgHandRoll = 0.f, g_RpgHandSpin = 15.f, g_RpgHandFwdCm = 6.f, g_RpgHandUpCm = 15.f, g_RpgHandSideCm = -12.5f;
     // User's tuning in the headset 2026-11-19: turn 0, roll 0, spin 90, in -3.5, up 13.5, side 14.5.
     float g_SatchelBagTurn = 0.f, g_SatchelBagInCm = -3.5f, g_SatchelBagUpCm = 13.5f;
     float g_SatchelBagRoll = 0.f, g_SatchelBagSpin = 90.f, g_SatchelBagSideCm = 14.5f;
