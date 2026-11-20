@@ -4,7 +4,6 @@
 #include "game.h"
 #include "sdk.h"
 #include "bmvr_seh.h"
-#include "bmvr_crashinfo.h"
 #include "vr.h"
 #include "offsets.h"
 
@@ -7322,38 +7321,12 @@ namespace
     void RestoreArmBodypartMeshes()
     {
         int n = 0, stale = 0;
-        // Crash hunt (2026-11-20): heap state around the restore, and each
-        // patch with its model and whether it was still ours.
-        const bool any = g_ArmHdrPatchCount > 0;
-        if (any)
-            bmvr::crashinfo::CheckHeaps("before header patch restore");
         for (int i = 0; i < g_ArmHdrPatchCount; ++i)
         {
             StudioHdrPatch& e = g_ArmHdrPatches[i];
             if (e.p)
             {
-                const bool hdrReadable = e.hdr && bmvr::seh::IsReadable(e.hdr, 76);
-                int now = 0, sum = 0;
-                char nowName[65]{};
-                if (hdrReadable)
-                {
-                    BMVR_TRY
-                    {
-                        sum = *reinterpret_cast<int*>(e.hdr + 8);
-                        std::memcpy(nowName, e.hdr + 12, 64);
-                        if (bmvr::seh::IsReadable(e.p, sizeof(int)))
-                            now = *e.p;
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER) {}
-                }
-                const bool ours = HdrPatchStillOurs(e);
-                char name[65]{};
-                std::memcpy(name, e.name, 64);
-                Game::logMsg("Header patch %d: %s hdr %p +%d: %s (readable %d, checksum %s, name now '%s', value %d, ours %d)",
-                    i, name, e.hdr, static_cast<int>(reinterpret_cast<unsigned char*>(e.p) - e.hdr),
-                    ours ? "restored" : "LEFT ALONE", hdrReadable ? 1 : 0,
-                    !hdrReadable ? "-" : (sum == e.checksum ? "same" : "CHANGED"), nowName, now, ours ? 1 : 0);
-                if (ours)
+                if (HdrPatchStillOurs(e))
                 {
                     PokeInt(e.p, e.original);
                     ++n;
@@ -7363,8 +7336,6 @@ namespace
             }
             e = {};
         }
-        if (any)
-            bmvr::crashinfo::CheckHeaps("after header patch restore");
         if (g_ArmHdrPatchCount)
             Game::logMsg("HideViewmodelArms restored %d studiohdr patches (%d left alone: header gone or changed)", n, stale);
         g_ArmHdrPatchCount = 0;

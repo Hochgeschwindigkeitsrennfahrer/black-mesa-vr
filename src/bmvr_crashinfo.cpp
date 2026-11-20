@@ -48,23 +48,6 @@ namespace
         return g_PrevFilter ? g_PrevFilter(info) : EXCEPTION_CONTINUE_SEARCH;
     }
 
-    struct CheckJob { char map[64]; };
-    DWORD WINAPI HeapCheckThread(LPVOID p)
-    {
-        CheckJob* job = static_cast<CheckJob*>(p);
-        static const DWORD kAt[] = { 1000, 3000, 6000, 10000 };
-        DWORD slept = 0;
-        for (DWORD at : kAt)
-        {
-            Sleep(at - slept);
-            slept = at;
-            char where[96];
-            snprintf(where, sizeof(where), "%s +%lu s", job->map, at / 1000);
-            bmvr::crashinfo::CheckHeaps(where);
-        }
-        delete job;
-        return 0;
-    }
 }
 
 namespace bmvr::crashinfo
@@ -120,45 +103,6 @@ namespace bmvr::crashinfo
         snprintf(line, sizeof(line), "minidump (%s): %ls %s\n", why ? why : "?", path.c_str(),
             ok ? "written" : (write ? "FAILED" : "no dbghelp"));
         AppendLine(L"bmvr_fault.txt", line);
-    }
-
-    bool CheckHeaps(const char* where)
-    {
-        HANDLE heaps[64];
-        const DWORD n = GetProcessHeaps(64, heaps);
-        const ULONGLONG t0 = GetTickCount64();
-        DWORD bad = 0, firstBad = 0;
-        for (DWORD i = 0; i < n && i < 64; ++i)
-        {
-            if (!HeapValidate(heaps[i], 0, nullptr))
-            {
-                if (!bad)
-                    firstBad = i;
-                ++bad;
-            }
-        }
-        const unsigned long ms = static_cast<unsigned long>(GetTickCount64() - t0);
-        if (bad)
-        {
-            bmvr::Log("Heap check %s: %lu of %lu heaps CORRUPT (first #%lu) (%lu ms)", where ? where : "?", bad, n, firstBad, ms);
-            char line[200];
-            snprintf(line, sizeof(line), "heap check %s: %lu of %lu heaps CORRUPT tick=%lu\n", where ? where : "?", bad, n, GetTickCount());
-            AppendLine(L"bmvr_fault.txt", line);
-        }
-        else
-            bmvr::Log("Heap check %s: %lu heaps ok (%lu ms)", where ? where : "?", n, ms);
-        return bad == 0;
-    }
-
-    void ScheduleHeapChecks(const char* map)
-    {
-        CheckJob* job = new CheckJob{};
-        strncpy_s(job->map, map ? map : "?", _TRUNCATE);
-        HANDLE t = CreateThread(nullptr, 0, HeapCheckThread, job, 0, nullptr);
-        if (t)
-            CloseHandle(t);
-        else
-            delete job;
     }
 
     void NoteDetach(bool processExit)
