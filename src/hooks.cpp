@@ -3186,6 +3186,47 @@ namespace
         }
     }
 
+    // Holds the named sequence at cycle 0 (ForceViewmodelIdlePose with a
+    // chosen clip); falls back to the idle when the model has no such clip.
+    void ForceViewmodelSequencePose(void* viewmodel, unsigned char* hdr, const char* seqName)
+    {
+        if (!viewmodel)
+            return;
+        static unsigned char* s_hdr = nullptr;
+        static char s_name[32]{};
+        static int s_seq = -1;
+        if (s_hdr != hdr || std::strcmp(s_name, seqName) != 0)
+        {
+            s_hdr = hdr;
+            strncpy_s(s_name, seqName, _TRUNCATE);
+            s_seq = -1;
+            int numSeq = 0;
+            BMVR_TRY { numSeq = hdr ? *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq) : 0; }
+            __except (EXCEPTION_EXECUTE_HANDLER) { numSeq = 0; }
+            for (int i = 0; i < numSeq && i < 256; ++i)
+            {
+                const char* l = StudioSequenceLabel(hdr, i);
+                if (l && _stricmp(l, seqName) == 0)
+                {
+                    s_seq = i;
+                    break;
+                }
+            }
+        }
+        if (s_seq < 0)
+        {
+            ForceViewmodelIdlePose(viewmodel, hdr);
+            return;
+        }
+        BMVR_TRY
+        {
+            *reinterpret_cast<int*>(static_cast<char*>(viewmodel) + kViewmodelSequence) = s_seq;
+            *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelCycle) = 0.f;
+            *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelPlaybackRate) = 0.f;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+
     // Crowbar / MP5 viewmodel tests moved to VR::ClassifyViewmodel
     // (kVmFlagCrowbar / kVmFlagMp5); callers read the atomic flags.
 
@@ -3510,6 +3551,22 @@ namespace
                 lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
             const bool shotgunClip = MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponShotgun
                 && (std::strstr(lb, "shell") || std::strstr(lb, "pump"));
+            // Crossbow without a loaded magazine (fired dry, magazine out or
+            // in the hand): the unloaded idle, string forward, instead of the
+            // cocked idle the hidden refill leaves (user 2026-11-20: the
+            // string went back before the new magazine was in).
+            const bool crossbowUnloaded = MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponCrossbow
+                && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kLoaded;
+            const bool idleClip = std::strncmp(lb, "idle", 4) == 0 && std::strcmp(lb, "idle_unloaded") != 0;
+            if (crossbowUnloaded && (idleClip || std::strstr(lb, "reload")))
+            {
+                static int s_unlLog;
+                if (s_unlLog++ < 10)
+                    Game::logMsg("Mag reload: crossbow unloaded, '%s' shown as idle_unloaded", label);
+                Hooks::m_VR->NoteViewmodelBeamHidden(false);
+                ForceViewmodelSequencePose(viewmodel, hdr, "idle_unloaded");
+                return;
+            }
             if (std::strstr(lb, "reload") || shotgunClip)
             {
                 static int s_log;
@@ -6798,6 +6855,124 @@ namespace
         Game::logMsg("Mag reload: 357 gun_reload1 brass + reload sound events %s (%d)", mute ? "off (bullets drawn from the cylinder)" : "restored", changed);
     }
 
+    // Manual magazines: the game's own reload clips (hidden; they still run
+    // for the refill after firing dry) played their whole stock reload
+    // sound from an AE_CL_PLAYSOUND at cycle 0 (user 2026-11-20: the
+    // crossbow sounded its reload when emptied, before any hand reload).
+    // The hands' own clips come from UpdateMagReload. Same one-time header
+    // patch as above; only the sound events move.
+    struct ReloadHdrState { unsigned char* hdr; bool muted; };
+    ReloadHdrState g_ReloadHdrs[6]{};
+    unsigned g_ReloadHdrNext = 0;
+
+    void ApplyStockReloadSoundMute(unsigned char* hdr)
+    {
+        const bool mute = bmvr::PhysicalWeapon(bmvr::g_VrMagReload);
+        if (!hdr)
+            return;
+        ReloadHdrState* slot = nullptr;
+        for (auto& st : g_ReloadHdrs)
+            if (st.hdr == hdr)
+                slot = &st;
+        if (slot && slot->muted == mute)
+            return;
+        if (!slot)
+            slot = &g_ReloadHdrs[g_ReloadHdrNext++ % 6];
+        slot->hdr = hdr;
+        slot->muted = mute;
+        // Sequences per model (v_*.mdl events, checked 2026-11-20).
+        static const struct { const char* model; const char* seqs[3]; } kGuns[] = {
+            { "models/weapons/v_crossbow.mdl", { "reload", "reload_long", nullptr } },
+            { "models/weapons/v_glock.mdl", { "gun_reload", "gun_reload_empty", nullptr } },
+            { "models/weapons/v_mp5.mdl", { "reload", "reload_long", nullptr } },
+        };
+        const char* const* seqs = nullptr;
+        for (const auto& g : kGuns)
+            if (StudioHdrMatchesModel(hdr, g.model))
+                seqs = g.seqs;
+        if (!seqs)
+            return;
+        int numSeq = 0, seqIndex = 0;
+        BMVR_TRY
+        {
+            numSeq = *reinterpret_cast<int*>(hdr + kStudioHdrNumLocalSeq);
+            seqIndex = *reinterpret_cast<int*>(hdr + kStudioHdrLocalSeqIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        if (numSeq <= 0 || numSeq > 256 || seqIndex <= 0)
+            return;
+        int changed = 0;
+        for (int s = 0; s < numSeq; ++s)
+        {
+            const char* label = StudioSequenceLabel(hdr, s);
+            bool want = false;
+            for (int k = 0; label && k < 3 && seqs[k]; ++k)
+                want = want || _stricmp(label, seqs[k]) == 0;
+            if (!want)
+                continue;
+            unsigned char* desc = hdr + seqIndex + s * kStudioSeqDescSize;
+            int numEv = 0, evIndex = 0;
+            BMVR_TRY
+            {
+                numEv = *reinterpret_cast<int*>(desc + kStudioSeqNumEvents);
+                evIndex = *reinterpret_cast<int*>(desc + kStudioSeqEventIndex);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                continue;
+            }
+            if (numEv <= 0 || numEv > 64 || evIndex <= 0)
+                continue;
+            for (int e = 0; e < numEv; ++e)
+            {
+                unsigned char* ev = desc + evIndex + e * kStudioEventSize;
+                float cycle = 0.f;
+                bool sound = false;
+                BMVR_TRY
+                {
+                    cycle = *reinterpret_cast<float*>(ev);
+                    const int type = *reinterpret_cast<int*>(ev + 8);
+                    const int nameOff = *reinterpret_cast<int*>(ev + kStudioEventNameIndex);
+                    sound = (type & kStudioEventNewStyle) && nameOff > 0
+                        && std::strncmp(reinterpret_cast<const char*>(ev + nameOff), "AE_CL_PLAYSOUND", 16) == 0;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    continue;
+                }
+                if (!sound)
+                    continue;
+                int* p = reinterpret_cast<int*>(ev);
+                if (mute && cycle <= 1.f)
+                {
+                    RememberHdrPatch(p, FloatBits(cycle));
+                    if (PokeInt(p, FloatBits(kMutedEventCycle)))
+                        ++changed;
+                }
+                else if (!mute && cycle == kMutedEventCycle)
+                {
+                    for (int i = 0; i < g_ArmHdrPatchCount; ++i)
+                    {
+                        if (g_ArmHdrPatches[i].p == p)
+                        {
+                            if (PokeInt(p, g_ArmHdrPatches[i].original))
+                                ++changed;
+                            g_ArmHdrPatches[i].p = nullptr;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        char name[65]{};
+        BMVR_TRY { std::memcpy(name, hdr + 12, 64); }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        Game::logMsg("Mag reload: stock reload sound events %s on %s (%d)", mute ? "muted" : "restored", name, changed);
+    }
+
     int WeaponRootScore(const char* n)
     {
         if (!n || !n[0])
@@ -7049,6 +7224,7 @@ namespace
             g_LastViewmodelStudioHdr = hdr;
             ApplyFidgetSoundMute(hdr);
             Apply357BrassMute(hdr);
+            ApplyStockReloadSoundMute(hdr);
         }
         static char s_lastVm[260]{};
         if (modelName && modelName[0] && _stricmp(s_lastVm, modelName) != 0)
