@@ -136,6 +136,8 @@ namespace bmvr
     bool g_VrShootFromMuzzle = true;
     bool g_TwoHandHoldWhileGrip = true;
     bool g_TwoHandGripToggle = false;
+    bool g_VrPistolSemiAuto = false;
+    bool g_VrGlockRapidAlt = false;
     float g_FlashlightFrom = 0.f;
     static bool g_FlashlightFromSeen = false;
     bool g_FlashlightOnSquare = false;
@@ -901,6 +903,10 @@ namespace bmvr
                 g_WeaponMenuTilt = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrPistolSemiAuto") == 0)
+                g_VrPistolSemiAuto = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrGlockRapidAlt") == 0)
+                g_VrGlockRapidAlt = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PauseMenuColourFromFrame") == 0)
                 g_PauseMenuColourFromFrame = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PauseMenuAlphaPasses") == 0)

@@ -10327,6 +10327,83 @@ namespace
     }
 }
 
+namespace
+{
+    // Pistol trigger (user 2026-11-20, a player asked for HL2VR's pistol
+    // rapid fire). HL2VR lets a fresh trigger pull skip the pistol's fire-rate
+    // wait (hlvr_weapon_pistol.cpp ItemPostFrame); Black Mesa's glock has that
+    // trade-off as its alt-fire instead (scripts/gameplay/weapons/weapon_glock.dmx:
+    // primary 0.32 s spread 1, secondary 0.18 s spread 6), so input only:
+    //  - VrPistolSemiAuto (glock, .357): a pull sends its fire bit until the
+    //    clip drops (the shot) or a timeout below the gun's cycle; holding on
+    //    fires no more until the trigger is let go.
+    //  - VrGlockRapidAlt (glock): a pull within kRapidWindow s of the previous
+    //    pull sends IN_ATTACK2 instead of IN_ATTACK.
+    // Runs on the final usercmd buttons (after the original CreateMove).
+    void ApplyPistolTrigger(Game* game, VR* vr, CUserCmd* cmd)
+    {
+        constexpr double kRapidWindow = 0.40;   // s between pull starts
+        static bool s_prevPull = false;
+        static double s_pullT = 0.0, s_lastPullT = -10.0;
+        static bool s_alt = false, s_shot = false;
+        static int s_clipAtPull = -1;
+        static int s_logs = 0;
+        if (!game || !vr || !cmd)
+            return;
+        const bool semi = bmvr::g_VrPistolSemiAuto, rapid = bmvr::g_VrGlockRapidAlt;
+        const char* wm = (semi || rapid) ? game->GetActiveWeaponModelName() : nullptr;
+        const bool glock = wm && std::strstr(wm, "glock");
+        const bool magnum = wm && std::strstr(wm, "357");
+        if (!glock && !magnum)
+        {
+            s_prevPull = false;
+            return;
+        }
+        const bool pull = (vr->HeldButtons() & IN_ATTACK) != 0;
+        const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        auto readClip = [&]() {
+            int hp, ar, clip, res, sec, air;
+            return game->ReadWristHudValues(hp, ar, clip, res, sec, air) ? clip : -1;
+        };
+        if (pull && !s_prevPull)
+        {
+            s_alt = rapid && glock && (now - s_lastPullT) < kRapidWindow;
+            s_lastPullT = s_pullT = now;
+            s_shot = false;
+            s_clipAtPull = readClip();
+            if (s_logs++ < 30)
+                Game::logMsg("Pistol trigger: %s pull -> %s (clip %d, semi=%d rapid=%d)",
+                    glock ? "glock" : ".357", s_alt ? "alt-fire" : "primary", s_clipAtPull, semi ? 1 : 0, rapid ? 1 : 0);
+        }
+        s_prevPull = pull;
+        if (!pull)
+            return;
+        if (semi && !s_shot)
+        {
+            // Timeouts: below each cycle (glock 0.32, .357 0.75), so a missed
+            // clip read cannot let a held pull fire twice. Alt-fire waits
+            // longer: the glock's primary shot may still hold it back.
+            const double maxHold = s_alt ? 0.30 : (glock ? 0.29 : 0.70);
+            const int clip = readClip();
+            if (clip >= 0 && s_clipAtPull >= 0 && clip < s_clipAtPull)
+            {
+                s_shot = true;
+                if (s_logs < 30)
+                    Game::logMsg("Pistol trigger: shot after %.0f ms (clip %d -> %d)", (now - s_pullT) * 1000.0, s_clipAtPull, clip);
+            }
+            else if (now - s_pullT > maxHold)
+            {
+                s_shot = true;
+                if (s_logs < 30)
+                    Game::logMsg("Pistol trigger: no shot seen in %.0f ms (clip %d), fire bit released", maxHold * 1000.0, clip);
+            }
+        }
+        cmd->buttons &= ~IN_ATTACK;
+        if (!(semi && s_shot))
+            cmd->buttons |= s_alt ? IN_ATTACK2 : IN_ATTACK;
+    }
+}
+
 bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime, CUserCmd* cmd)
 {
     TraceThrownSnark();
@@ -10761,6 +10838,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
         }
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
+        if (!m_VR->OnMountedGun())
+            ApplyPistolTrigger(m_Game, m_VR, cmd);
     }
     applyLadderButtons();
 
