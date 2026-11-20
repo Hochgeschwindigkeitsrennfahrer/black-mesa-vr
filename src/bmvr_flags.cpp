@@ -373,7 +373,7 @@ namespace bmvr
     // User's headset tuning 2026-11-20 (was curl 0.45, out 2, rest 0).
     float g_RpgFistCurl = 0.f, g_RpgFistOutCm = 0.f;
     // User 2026-11-20 (headset): glock magazine in the hand.
-    float g_GlockMagTurn = 30.f, g_GlockMagRoll = -55.f, g_GlockMagSpin = -90.f, g_GlockMagFwdCm = -2.f, g_GlockMagUpCm = -1.5f, g_GlockMagSideCm = 0.f, g_GlockThumbCurl = 0.f, g_GlockThumbBase = 0.f;
+    float g_GlockMagTurn = 30.f, g_GlockMagRoll = -55.f, g_GlockMagSpin = -90.f, g_GlockMagFwdCm = -2.f, g_GlockMagUpCm = 0.f, g_GlockMagSideCm = 0.f, g_GlockThumbCurl = 20.f, g_GlockThumbBase = 25.f;
     float g_RpgHandTurn = -15.f, g_RpgHandRoll = 0.f, g_RpgHandSpin = 15.f, g_RpgHandFwdCm = 6.f, g_RpgHandUpCm = 15.f, g_RpgHandSideCm = -12.5f;
     // User's tuning in the headset 2026-11-19: turn 0, roll 0, spin 90, in -3.5, up 13.5, side 14.5.
     float g_SatchelBagTurn = 0.f, g_SatchelBagInCm = -3.5f, g_SatchelBagUpCm = 13.5f;
