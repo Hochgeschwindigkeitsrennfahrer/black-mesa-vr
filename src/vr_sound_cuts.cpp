@@ -119,6 +119,14 @@ namespace
         std::vector<int16_t> s((b - a) * p.channels);
         std::memcpy(s.data(), p.data + static_cast<size_t>(a) * frame, s.size() * 2);
         const uint32_t n = b - a;
+        // Same in both ears: the gun is in front (user 2026-11-20: the HL2
+        // MP5 bolt sound came from the left; the glock wav leans right).
+        if (p.channels == 2)
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                const int16_t m = static_cast<int16_t>((static_cast<int>(s[i * 2]) + s[i * 2 + 1]) / 2);
+                s[i * 2] = s[i * 2 + 1] = m;
+            }
         const uint32_t fin = p.rate / 100, fout = p.rate / 40;
         for (uint32_t i = 0; i < n; ++i)
         {
@@ -176,6 +184,9 @@ namespace
         // Crossbow reload.wav: magazine out 0.12-0.22 s, in 1.36-1.54.
         { "sound/weapons/crossbow/reload.wav", 0.05, 0.34, "bmvr/crossbow_magout.wav" },
         { "sound/weapons/crossbow/reload.wav", 1.30, 1.62, "bmvr/crossbow_magin.wav" },
+        // MP5 reload_long.wav: charging handle back 0.16-0.46 s (then
+        // magazine out 1.0, in 1.7, handle slapped 2.3).
+        { "sound/weapons/mp5/reload_long.wav", 0.10, 0.52, "bmvr/mp5_bolt.wav" },
     };
     bool g_Made[bmvr::soundcuts::kClipCount]{};
     bool g_Tried = false;

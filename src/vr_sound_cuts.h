@@ -12,6 +12,7 @@ namespace bmvr::soundcuts
         kMp5MagIn,
         kCrossbowMagOut,
         kCrossbowMagIn,
+        kMp5Bolt,       // MP5 reload_long.wav: charging handle pulled back
         kClipCount
     };
     // Sample name for PlayUiSound ("bmvr/..."), or fallback when the clip

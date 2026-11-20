@@ -22871,8 +22871,12 @@ void VR::UpdateMagReload(uint32_t& buttons)
             w.chambered = (w.mag == kLoaded) && clip > 0;
             // Glock: the slide part of its reload.wav (user 2026-11-20:
             // reload_roundchambered went on 1.6 s past the hand).
+            // MP5: Black Mesa's own charging handle (HL2's smg1 switch was
+            // louder on the left).
             if (weapon == kWeaponGlock)
                 sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kGlockSlide, def.boltSound));
+            else if (weapon == kWeaponMp5)
+                sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kMp5Bolt, def.boltSound));
             else
                 sound(def.boltSound);
             ReloadHaptic(ReloadFeel::Chamber);
