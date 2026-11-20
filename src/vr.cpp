@@ -8399,11 +8399,9 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     constexpr float kRungTouchHu = 12.f;
     constexpr float kNoRungTouchHu = 20.f;
     constexpr float kRungPropNearHu = 48.f;
+    constexpr float kFlashGuardHu = 24.f;   // hand this close to a rung: grip is no flashlight
     bool touch[2]{};
     bool lineTouch[2]{};
-    // Last time on / climbing / mounting a ladder (set below, read next tick).
-    static ULONGLONG s_lastOnLadderMs = 0;
-    const bool recentLadder = s_lastOnLadderMs != 0 && GetTickCount64() - s_lastOnLadderMs < 3000;
     for (int h = 0; h < 2; ++h)
     {
         float d = 0.f, yaw = 0.f;
@@ -8433,12 +8431,31 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
                 || (h != gunHand && m_SupportNearGun.load(std::memory_order_acquire)));
         if (blocked)
             touch[h] = lineTouch[h] = false;
-        // Flashlight guard: for 3 s after being on a ladder a grip within the
-        // old line reach (36 u) is a missed ladder grab, not the flashlight
-        // (user 2026-11-19: re-grabs 26-37 u from the rung after letting go
-        // toggled it). Not for grabbing; standing at a ladder otherwise
-        // keeps the flashlight grip.
-        m_LadderTouch[h].store(touch[h] || (recentLadder && lineTouch[h]), std::memory_order_release);
+        // Flashlight guard: a grip with the hand within kFlashGuardHu of a
+        // rung is a ladder grab (or a near miss), never the flashlight.
+        // Wider than the grab reach because the mapper judges the press
+        // from the last tick's flag while the hand is still closing in
+        // (user 2026-11-20, bm_c1a0b: grabs 8-11 u from the rung and misses
+        // at 14 u toggled it). The old mount-line reach was dropped: on
+        // that ladder the line is 24 u behind the rungs, so it added
+        // nothing. Ladders without rung props keep a line reach. Not for
+        // grabbing; a hand away from the rungs keeps the flashlight grip.
+        bool nearRung = false;
+        if (valid[h] && !blocked)
+        {
+            Vector r{};
+            float rd = 1e9f;
+            if (bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kFlashGuardHu, r, &rd))
+                nearRung = true;
+            else if (lineTouch[h])
+            {
+                float dl = 0.f, yl = 0.f;
+                Vector r2{};
+                nearRung = !bmvr::ladders::NearestRung(m_CurrentMapName.c_str(), world[h], kRungPropNearHu, r2)
+                    && nearestLadder(world[h], dl, yl) >= 0 && dl < kNoRungTouchHu + 8.f;
+            }
+        }
+        m_LadderTouch[h].store(touch[h] || nearRung, std::memory_order_release);
     }
     // Grips on a ladder are ladder grabs, not the mapped action
     // (flashlight): on it, climbing, mounting, and for a moment after
@@ -8451,7 +8468,6 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         if (onLadder || s_climbHand >= 0 || s_mountUntil != 0)
         {
             s_activeUntil = tNow + 500;
-            s_lastOnLadderMs = tNow;
         }
         m_LadderActive.store(tNow < s_activeUntil, std::memory_order_release);
     }
@@ -15559,6 +15575,8 @@ namespace ladder_tune
         if (g_Loaded)
             return;
         g_Loaded = true;
+        // Built-in tuning (the user's headset values); the file overrides.
+        g_Grip["props_c17/metalladder001.mdl"] = Grip{ 1.f, -2.f, 0.15f };   // bm_c1a0b test chamber, 2026-11-20
         std::ifstream in(Path());
         std::string line;
         int n = 0;
