@@ -3195,7 +3195,11 @@ namespace
         static unsigned char* s_hdr = nullptr;
         static char s_name[32]{};
         static int s_seq = -1;
-        if (s_hdr != hdr || std::strcmp(s_name, seqName) != 0)
+        // Re-found when the header changes, or when the cached index is not
+        // that clip in this header any more (a freed header's address reused
+        // by another model).
+        const char* cachedLabel = s_seq >= 0 ? StudioSequenceLabel(hdr, s_seq) : nullptr;
+        if (s_hdr != hdr || std::strcmp(s_name, seqName) != 0 || !cachedLabel || _stricmp(cachedLabel, seqName) != 0)
         {
             s_hdr = hdr;
             strncpy_s(s_name, seqName, _TRUNCATE);
@@ -3555,7 +3559,12 @@ namespace
             // in the hand): the unloaded idle, string forward, instead of the
             // cocked idle the hidden refill leaves (user 2026-11-20: the
             // string went back before the new magazine was in).
-            const bool crossbowUnloaded = MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponCrossbow
+            // Only on the crossbow's own header: around a load g_Weapon / the
+            // cached header can still be the previous gun's, and a crossbow
+            // sequence index written into another model crashed the game.
+            const bool crossbowHdr = MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponCrossbow
+                && StudioHdrMatchesModel(hdr, "models/weapons/v_crossbow.mdl");
+            const bool crossbowUnloaded = crossbowHdr
                 && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kLoaded;
             const bool idleClip = std::strncmp(lb, "idle", 4) == 0 && std::strcmp(lb, "idle_unloaded") != 0;
             if (crossbowUnloaded && (idleClip || std::strstr(lb, "reload")))
@@ -3571,8 +3580,7 @@ namespace
             // the client until the game next changes the sequence (user
             // 2026-11-20: the string went back only a while after the
             // magazine was in). Back to the running idle at once.
-            if (!crossbowUnloaded && MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponCrossbow
-                && std::strcmp(lb, "idle_unloaded") == 0)
+            if (!crossbowUnloaded && crossbowHdr && std::strcmp(lb, "idle_unloaded") == 0)
             {
                 const int idle = FindIdleSequence(hdr);
                 BMVR_TRY
@@ -11185,6 +11193,10 @@ void __fastcall Hooks::dLevelInit(void* ecx, void* edx, const char* newmap)
     (void)edx;
     // server.dll is loaded by now; check its offsets before the server hooks patch them.
     bmvr::VerifyGameOffsets();
+    // The cached gun header belongs to the previous map's model, which a
+    // load frees (user 2026-11-20: crash loading a save after the crossbow;
+    // the last faults were reads of it). The next draw sets it again.
+    g_LastViewmodelStudioHdr = nullptr;
     EnsureServerFlashlightHook();
     EnsureClientFlashlightHook();
     EnsureFogColorPatch();
@@ -11200,6 +11212,7 @@ void __fastcall Hooks::dLevelInit(void* ecx, void* edx, const char* newmap)
 void __fastcall Hooks::dLevelShutdown(void* ecx, void* edx)
 {
     (void)edx;
+    g_LastViewmodelStudioHdr = nullptr;
     if (m_VR)
         m_VR->OnLevelShutdown();
     if (hkLevelShutdown.fOriginal)
