@@ -706,11 +706,9 @@ static void FlareLogPosition(const float* world, const float* size, const float*
 }
 
 // Screen angle of the world horizontal through the light, perpendicular to the
-// line of sight. Straight above or below, the horizon has no direction; the turn
-// fades out there. The angle is taken in NDC, where the quad draw turns: an eye's
-// projection scales x and y differently (and is off centre), so an angle measured
-// in camera space came out short (~13 deg at 100 deg of head roll).
-static float FlareLevelRoll(const float* world, const float* view, const float* proj)
+// line of sight. Rows 0 and 1 of the view matrix are the camera's right and up.
+// Straight above or below, the horizon has no direction; the turn fades out there.
+static float FlareLevelRoll(const float* world, const float* view)
 {
     const float cam[3] = {
         -(view[0] * view[3] + view[4] * view[7] + view[8] * view[11]),
@@ -722,27 +720,10 @@ static float FlareLevelRoll(const float* world, const float* view, const float* 
     const float hLen = std::sqrt(h[0] * h[0] + h[1] * h[1]);
     if (dLen < 1.f || hLen < 1e-3f)
         return 0.f;
-    // World point -> NDC through the pass's own view and projection (row major).
-    auto toNdc = [&](const float* p, float& nx, float& ny) {
-        float v[3];
-        for (int r = 0; r < 3; ++r)
-            v[r] = view[r * 4] * p[0] + view[r * 4 + 1] * p[1] + view[r * 4 + 2] * p[2] + view[r * 4 + 3];
-        float c[4];
-        for (int r = 0; r < 4; ++r)
-            c[r] = proj[r * 4] * v[0] + proj[r * 4 + 1] * v[1] + proj[r * 4 + 2] * v[2] + proj[r * 4 + 3];
-        if (c[3] <= 1e-3f)
-            return false;
-        nx = c[0] / c[3];
-        ny = c[1] / c[3];
-        return true;
-    };
-    const float step = 0.01f * dLen / hLen;
-    const float side[3] = { world[0] + h[0] * step, world[1] + h[1] * step, world[2] };
-    float x0, y0, x1, y1;
-    if (!toNdc(world, x0, y0) || !toNdc(side, x1, y1))
-        return 0.f;
-    // Counter-clockwise on screen (NDC y up), as the quad draw turns a positive angle.
-    float a = std::atan2(y1 - y0, x1 - x0);
+    const float hx = view[0] * h[0] + view[1] * h[1] + view[2] * h[2];
+    const float hy = view[4] * h[0] + view[5] * h[1] + view[6] * h[2];
+    // Counter-clockwise on screen, as the quad draw turns a positive angle.
+    float a = std::atan2(hy, hx);
     // A streak looks the same turned half way round.
     const float pi = 3.14159265f;
     while (a > pi * 0.5f) a -= pi;
@@ -800,7 +781,7 @@ static void __cdecl FlareWorldToScreenHook(const float* world, const float* size
     // the eye's image rolls with the head, a quad drawn level in it does too.
     g_FlareRoll = 0.f;
     if (bmvr::g_FlareLevel && Hooks::m_VR && Hooks::m_VR->m_StereoEye != 0)
-        g_FlareRoll = FlareLevelRoll(world, view, proj);
+        g_FlareRoll = FlareLevelRoll(world, view);
     // Fade by the angle off the view axis, seen from between the eyes.
     g_FlareAngleFade = 1.f;
     if (bmvr::g_FlareFadeAngle > 0.f && proj[0] > 0.01f && proj[5] > 0.01f && size[0] > 0.f && size[1] > 0.f)
