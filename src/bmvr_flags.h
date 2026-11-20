@@ -439,6 +439,8 @@ namespace bmvr
     extern float g_GestureWeaponShoulder;  // right shoulder (default crowbar)
     extern float g_GestureWeaponHipRight;  // right hip (default pistol)
     extern float g_GestureWeaponHipLeft;   // above the left hip, cross draw (default MP5)
+    // Grip in a weapon's own zone while holding that weapon puts it away (empty hands). Off = the grip there does nothing.
+    extern bool g_VrHolsterBack;
     constexpr int kGestureWeaponCount = 11;
     const char* GestureWeaponName(int index);
     // Name parts matched against the inventory's network / model names (nullptr-terminated).

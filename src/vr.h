@@ -1594,6 +1594,7 @@ private:
     bool EngineDrawingLoadingImage();
     void UpdateVrPhase(bool inGame);
     VrPhase m_VrPhase = VrPhase::Unknown;
+    unsigned m_LoadEpoch = 0;   // +1 each time the Loading phase starts (map change, save load, death reload)
     DWORD m_VrPhaseSinceMs = 0;
     bool m_PauseFromLoading = false;   // this pause phase came straight from loading (load end)
     // In-game load without the game's loading dialog (trigger changelevel,

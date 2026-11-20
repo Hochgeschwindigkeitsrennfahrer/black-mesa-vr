@@ -3973,6 +3973,8 @@ void VR::UpdateVrPhase(bool inGame)
         if (std::strcmp(m_ToastText, "LOADING") == 0)
             m_ToastUntilMs = 0;
     }
+    if (phase == VrPhase::Loading && prev != VrPhase::Loading)
+        ++m_LoadEpoch;
     if (prev == VrPhase::Loading && phase != VrPhase::Loading)
         m_PoseDiagUntilMs = now + 30000;   // pose diagnostic after every load
     m_PauseFromLoading = prev == VrPhase::Loading && phase == VrPhase::Pause;
@@ -15477,6 +15479,16 @@ bool VR::UpdateShoulderGestures(bool paused)
                 Game::logMsg("Grab gesture: %s already active, hands -> weapon", label);
                 return;
             }
+            // VrHolsterBack (off by default, user 2026-11-20): the grip in
+            // the zone of the weapon in the hand puts it back there, like
+            // the right-stick tap (that tap then draws it again).
+            if (bmvr::g_VrHolsterBack)
+            {
+                ToggleEmptyHands();
+                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
+                Game::logMsg("Holster gesture: %s put back, empty hands", label);
+                return;
+            }
             Game::logMsg("Grab gesture: %s already held", label);
             return;
         }
@@ -22251,11 +22263,22 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // dry, alt-fire still fired off the game's background refill).
     const bool attack2 = (buttons & IN_ATTACK2) != 0;
     static bool s_attack2Was = false;
-    if (s_level != m_CurrentMapName)
+    // Also on every load of the same map (save load, reload after death):
+    // the hands' counts follow the restored game, else a shotgun that died
+    // with 2 shells kept 2 after a load of a full gun, and one that died
+    // empty stayed blocked (tester log 2026-11-20).
+    static unsigned s_loadEpoch = 0;
+    if (s_level != m_CurrentMapName || s_loadEpoch != m_LoadEpoch)
     {
+        if (s_loadEpoch != m_LoadEpoch && s_level == m_CurrentMapName)
+            Game::logMsg("Mag reload: load, hands' weapon state reset to the game's");
         s_level = m_CurrentMapName;
+        s_loadEpoch = m_LoadEpoch;
         for (auto& w : s_w)
             w = WeaponState{};
+        s_boltFull = false;
+        s_pulseReload = false;
+        g_BoltGrab.store(false);
     }
     const int weapon = MagReloadWeaponNow();
     if (weapon != s_lastWeapon)
@@ -22481,7 +22504,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
         if (!canFire)
         {
             if (attack && !s_attackWas)
+            {
                 sound(def.emptyClick);
+                Game::logMsg("Mag reload: rpg fire blocked (rocket state %d, game clip %d)", w.mag, clip);
+            }
             buttons &= ~IN_ATTACK;
         }
         if (s_pulseReload)
@@ -22620,6 +22646,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 sound(def.emptyClick);
                 if (w.shells > 0 && w.needPump)
                     ShowReloadHint(2, "PUMP IT");
+                Game::logMsg("Mag reload: shotgun fire blocked (tube %d, game %d, needPump %d, pull %.2f, pump grabbed %d)",
+                    w.shells, clip, w.needPump ? 1 : 0, pull, boltGrab ? 1 : 0);
             }
             buttons &= ~(IN_ATTACK | IN_ATTACK2);
         }
@@ -22853,7 +22881,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
         if (!canFire)
         {
             if (attack && !s_attackWas)
+            {
                 sound(def.emptyClick);
+                Game::logMsg("Mag reload: 357 fire blocked (cylinder state %d, phase %d, game clip %d)", w.mag, s_phase, clip);
+            }
             buttons &= ~IN_ATTACK;
         }
         if (s_pulseReload)
@@ -23012,6 +23043,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
         if (attack && !s_attackWas)
         {
             sound(def.emptyClick);
+            Game::logMsg("Mag reload: %s fire blocked (mag state %d, chambered %d, bolt grabbed %d, game clip %d)",
+                def.name, w.mag, w.chambered ? 1 : 0, boltGrab ? 1 : 0, clip);
             // Loaded but nothing chambered: the step people miss.
             if (w.mag == kLoaded && !w.chambered && clip > 0)
                 ShowReloadHint(weapon == kWeaponGlock ? 1 : 0,

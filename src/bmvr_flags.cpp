@@ -194,6 +194,7 @@ namespace bmvr
     float g_GestureWeaponShoulder = 0.f;
     float g_GestureWeaponHipRight = 1.f;
     float g_GestureWeaponHipLeft = 3.f;
+    bool g_VrHolsterBack = false;
     namespace
     {
         struct GestureWeapon { const char* name; const char* parts[4]; };
@@ -906,6 +907,8 @@ namespace bmvr
                 g_WeaponMenuTilt = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrHolsterBack") == 0)
+                g_VrHolsterBack = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrPistolSemiAuto") == 0)
                 g_VrPistolSemiAuto = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGlockRapidAlt") == 0)
