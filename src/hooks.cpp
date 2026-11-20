@@ -10416,6 +10416,54 @@ namespace
         if (!(semi && s_shot))
             cmd->buttons |= s_alt ? IN_ATTACK2 : IN_ATTACK;
     }
+
+    // VrPistolSemiAuto for the glock's alt-fire button too (user 2026-11-20):
+    // one shot per press, same rule as the trigger. Runs after
+    // ApplyPistolTrigger (its rapid alt-fire bit is left alone).
+    void ApplyPistolAltButton(Game* game, VR* vr, CUserCmd* cmd)
+    {
+        static bool s_prev = false, s_shot = false;
+        static double s_pressT = 0.0;
+        static int s_clipAtPress = -1;
+        if (!game || !vr || !cmd || !bmvr::g_VrPistolSemiAuto)
+        {
+            s_prev = false;
+            return;
+        }
+        const char* wm = game->GetActiveWeaponModelName();
+        if (!wm || !std::strstr(wm, "glock"))
+        {
+            s_prev = false;
+            return;
+        }
+        const bool press = (vr->HeldButtons() & IN_ATTACK2) != 0;
+        const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        auto readClip = [&]() {
+            int hp, ar, clip, res, sec, air;
+            return game->ReadWristHudValues(hp, ar, clip, res, sec, air) ? clip : -1;
+        };
+        if (press && !s_prev)
+        {
+            s_pressT = now;
+            s_shot = false;
+            s_clipAtPress = readClip();
+        }
+        s_prev = press;
+        if (!press || s_shot)
+        {
+            if (press)
+                cmd->buttons &= ~IN_ATTACK2;
+            return;
+        }
+        const int clip = readClip();
+        if ((clip >= 0 && s_clipAtPress >= 0 && clip < s_clipAtPress) || now - s_pressT > 0.30)
+        {
+            // Shot seen, or none in 0.30 s (as the trigger's alt-fire: the
+            // primary's cycle may still hold it back).
+            s_shot = true;
+            cmd->buttons &= ~IN_ATTACK2;
+        }
+    }
 }
 
 bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime, CUserCmd* cmd)
@@ -10853,7 +10901,10 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         }
         cmd->buttons |= static_cast<int>(m_VR->HeldButtons());
         if (!m_VR->OnMountedGun())
+        {
             ApplyPistolTrigger(m_Game, m_VR, cmd);
+            ApplyPistolAltButton(m_Game, m_VR, cmd);
+        }
     }
     applyLadderButtons();
 

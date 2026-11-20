@@ -579,6 +579,71 @@ void Game::PlayUiSound(const char* sample)
     }
 }
 
+namespace
+{
+    struct UiSoundCut { const char* sample; DWORD at; };
+    UiSoundCut g_UiCuts[4]{};
+}
+
+void Game::PlayUiSoundCut(const char* sample, unsigned ms)
+{
+    PlayUiSound(sample);
+    if (!sample)
+        return;
+    const DWORD at = GetTickCount() + ms;
+    for (auto& c : g_UiCuts)
+        if (!c.sample || c.sample == sample)
+        {
+            c = { sample, at ? at : 1 };
+            return;
+        }
+    g_UiCuts[0] = { sample, at ? at : 1 };
+}
+
+void Game::ServiceUiSoundCuts()
+{
+    const DWORD now = GetTickCount();
+    for (auto& c : g_UiCuts)
+    {
+        if (!c.sample || static_cast<int32_t>(now - c.at) < 0)
+            continue;
+        const char* sample = c.sample;
+        c.sample = nullptr;
+        if (!m_EngineSound)
+            continue;
+        // Source 2013 IEngineSoundClient003 slot 7: StopSound(entity,
+        // channel, sample). EmitAmbientSound plays on CHAN_STATIC (6) from
+        // the local player / world, so both sources are stopped.
+        using StopFn = void(__thiscall*)(void*, int, int, const char*);
+        static int s_logged;
+        BMVR_TRY
+        {
+            void** vt = *reinterpret_cast<void***>(m_EngineSound);
+            auto stop = vt ? reinterpret_cast<StopFn>(vt[7]) : nullptr;
+            if (stop)
+            {
+                stop(m_EngineSound, -1, 6, sample);
+                stop(m_EngineSound, 0, 6, sample);
+                if (m_EngineClient)
+                    stop(m_EngineSound, m_EngineClient->GetLocalPlayer(), 6, sample);
+            }
+            if (s_logged < 4)
+            {
+                ++s_logged;
+                Game::logMsg("PlayUiSoundCut: stopped '%s'", sample);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            if (s_logged < 4)
+            {
+                ++s_logged;
+                Game::logMsg("PlayUiSoundCut: StopSound SEH for '%s'", sample);
+            }
+        }
+    }
+}
+
 const char* Game::GetEntityNetworkName(int entityIndex)
 {
     if (!m_ClientEntityList || entityIndex <= 0)

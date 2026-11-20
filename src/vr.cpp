@@ -22127,8 +22127,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
     static int s_lastWeaponForRpg = kWeaponNone;
     static std::string s_level;
     const DWORD now = GetTickCount();
+    if (m_Game)
+        m_Game->ServiceUiSoundCuts();
     const bool reload = (buttons & IN_RELOAD) != 0;
     const bool attack = (buttons & IN_ATTACK) != 0;
+    // Glock alt-fire uses the same magazine (user 2026-11-20: with the gun
+    // dry, alt-fire still fired off the game's background refill).
+    const bool attack2 = (buttons & IN_ATTACK2) != 0;
+    static bool s_attack2Was = false;
     if (s_level != m_CurrentMapName)
     {
         s_level = m_CurrentMapName;
@@ -22785,7 +22791,17 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_pulseReload = true;
             s_pulseUntil = now + 200;
         }
-        sound("weapons/ar2/ar2_reload_rotate.wav");
+        // The gun's own reload sound, only its magazine-out start (was
+        // HL2's AR2 rotate: user 2026-11-20, an odd electric sound).
+        if (m_Game)
+        {
+            if (weapon == kWeaponGlock)
+                m_Game->PlayUiSoundCut("weapons/glock/reload.wav", 300);
+            else if (weapon == kWeaponCrossbow)
+                m_Game->PlayUiSoundCut("weapons/crossbow/reload.wav", 400);
+            else
+                m_Game->PlayUiSoundCut("weapons/mp5/reload.wav", 650);
+        }
         PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.5f);
         Game::logMsg("Mag reload: %s ejected (clip %d, chambered %d)", def.name, clip, w.chambered ? 1 : 0);
     }
@@ -22850,7 +22866,13 @@ void VR::UpdateMagReload(uint32_t& buttons)
             boltGrab = false;
             s_boltFull = false;
             w.chambered = (w.mag == kLoaded) && clip > 0;
-            sound(def.boltSound);
+            // Glock: only the slide-back click of reload_roundchambered
+            // (its slide-forward comes 1.6 s later: user 2026-11-20, it
+            // went on far longer than the hand).
+            if (weapon == kWeaponGlock && m_Game)
+                m_Game->PlayUiSoundCut(def.boltSound, 350);
+            else
+                sound(def.boltSound);
             ReloadHaptic(ReloadFeel::Chamber);
             Game::logMsg("Mag reload: %s bolt pulled back, chambered %d", def.name, w.chambered ? 1 : 0);
         }
@@ -22875,7 +22897,14 @@ void VR::UpdateMagReload(uint32_t& buttons)
                     weapon == kWeaponGlock ? "RACK THE SLIDE" : "PULL THE CHARGING HANDLE");
         }
         buttons &= ~IN_ATTACK;
+        if (weapon == kWeaponGlock)
+        {
+            if (attack2 && !s_attack2Was && !(attack && !s_attackWas))
+                sound(def.emptyClick);
+            buttons &= ~IN_ATTACK2;
+        }
     }
+    s_attack2Was = attack2;
     if (s_pulseReload)
     {
         if (now < s_pulseUntil)

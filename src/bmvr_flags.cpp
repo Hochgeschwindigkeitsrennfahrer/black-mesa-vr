@@ -364,7 +364,7 @@ namespace bmvr
     bool g_LadderBodyFollowsArms = true;
     float g_LadderGunHand = 1.f;
     bool g_LadderStickClimb = false;
-    float g_LadderHandBack = 3.f;
+    float g_LadderHandBack = 1.5f;   // user 2026-11-20 (was 3)
     bool g_LadderHandWrap = true;
     float g_LadderGripCurl = 0.7f;
     float g_LadderTuneOutCm = 0.f, g_LadderTuneUpCm = 0.f, g_LadderTuneCurl = 0.7f;
