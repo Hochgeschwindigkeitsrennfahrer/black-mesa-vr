@@ -6033,6 +6033,37 @@ namespace
                 v.y = grasp[1] * unit + (centre[1] - grasp[1]) * vmScale;
                 v.z = grasp[2] * unit + (centre[2] - grasp[2]) * vmScale;
                 magAnchor = wo + ax[0] * v.x + ax[1] * v.y + ax[2] * v.z;
+                // Glock (DEBUG "GLOCK MAGAZINE IN THE HAND"): BM's glock reload
+                // shows little of its left hand, so the baked pose is tuned by
+                // hand: turned about the left controller's right / forward / up
+                // axes round the grip (palm), then moved forward / up / side (cm).
+                if (weapon == MagReload::kWeaponGlock)
+                {
+                    const Vector grip = wo + ax[0] * (grasp[0] * unit) + ax[1] * (grasp[1] * unit) + ax[2] * (grasp[2] * unit);
+                    auto rotateMag = [&](const Vector& axis, float deg) {
+                        if (deg == 0.f)
+                            return;
+                        const float a = deg * (3.14159265f / 180.f);
+                        const float ca = std::cos(a), sa = std::sin(a);
+                        auto rv = [&](const Vector& q) {
+                            return q * ca + CrossProduct(axis, q) * sa + axis * (axis.Dot(q) * (1.f - ca));
+                        };
+                        for (int j = 0; j < 3; ++j)
+                        {
+                            const Vector col = rv(Vector(m[0 * 4 + j], m[1 * 4 + j], m[2 * 4 + j]));
+                            m[0 * 4 + j] = col.x;
+                            m[1 * 4 + j] = col.y;
+                            m[2 * 4 + j] = col.z;
+                        }
+                        magAnchor = grip + rv(magAnchor - grip);
+                    };
+                    rotateMag(hr, bmvr::g_GlockMagTurn);
+                    rotateMag(hf, bmvr::g_GlockMagRoll);
+                    rotateMag(hu, bmvr::g_GlockMagSpin);
+                    const float ucm = (vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f) * 0.01f;
+                    magAnchor = magAnchor + hf * (bmvr::g_GlockMagFwdCm * ucm) + hu * (bmvr::g_GlockMagUpCm * ucm)
+                        + hr * (bmvr::g_GlockMagSideCm * ucm);
+                }
                 static thread_local DWORD s_clipLogMs = 0;
                 if (now - s_clipLogMs > 2000)
                 {
