@@ -14,4 +14,7 @@ namespace bmvr::sampler
     void NoteRenderPaceWait(double ms);
     // Wall time the main thread spent in the per-frame pose wait (OpenXR WaitFrame pacing).
     void NoteMainPoseWait(double ms);
+    // Headset refresh (nominal Hz, from the frame cap's measured/reported rate) for the
+    // "Frame times" on-time share; 0 = not known yet (90 Hz assumed).
+    void NoteHeadsetHz(int hz);
 }

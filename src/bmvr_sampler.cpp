@@ -28,6 +28,12 @@
 
 namespace bmvr::sampler
 {
+    static std::atomic<int> g_HeadsetHz{ 0 };
+    void NoteHeadsetHz(int hz)
+    {
+        if (hz >= 60 && hz <= 240)
+            g_HeadsetHz.store(hz, std::memory_order_relaxed);
+    }
     namespace
     {
         struct Module
@@ -679,19 +685,26 @@ namespace bmvr::sampler
             if (s_nIntervals >= 20)
             {
                 // Ignore hitches longer than 250 ms (loads, alt-tab) for the percentiles' sake.
+                // On time = within the headset's frame plus ~4 % slack (11.6 ms
+                // at 90 Hz, as before); it was fixed at 90 Hz, so a 72 Hz Quest
+                // read as ~10 % on time while locked at its refresh.
+                const int hz = g_HeadsetHz.load(std::memory_order_relaxed);
+                const int refHz = hz > 0 ? hz : 90;
+                const float onTimeMs = 1000.f / refHz * 1.044f;
                 int n = 0, fast = 0;
                 for (int i = 0; i < s_nIntervals; ++i)
                     if (s_intervals[i] < 250.f)
                     {
                         s_intervals[n++] = s_intervals[i];
-                        if (s_intervals[i] <= 11.6f)
+                        if (s_intervals[i] <= onTimeMs)
                             ++fast;
                     }
                 if (n >= 20)
                 {
                     std::sort(s_intervals, s_intervals + n);
-                    Game::logMsg("Frame times (%.0f s): %d frames, %.1f %% <= 11.6 ms (90 Hz), p50 %.2f, p95 %.2f, p99 %.2f, max %.1f ms",
-                        (now - s_startMs) / 1000.0, n, 100.0 * fast / n, s_intervals[n / 2], s_intervals[n * 95 / 100],
+                    Game::logMsg("Frame times (%.0f s): %d frames, %.1f %% <= %.1f ms (%d Hz%s), p50 %.2f, p95 %.2f, p99 %.2f, max %.1f ms",
+                        (now - s_startMs) / 1000.0, n, 100.0 * fast / n, onTimeMs, refHz, hz > 0 ? " headset" : ", headset rate not known yet",
+                        s_intervals[n / 2], s_intervals[n * 95 / 100],
                         s_intervals[n * 99 / 100], s_intervals[n - 1]);
                 }
             }

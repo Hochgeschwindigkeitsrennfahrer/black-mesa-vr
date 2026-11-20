@@ -17122,6 +17122,7 @@ void VR::TickOpenXrHelperWatchdog()
 // set fps_max since 2026-10-27.
 void VR::ApplyFrameCap(int nominalHz, float sourceHz, const char* source)
 {
+    bmvr::sampler::NoteHeadsetHz(nominalHz);
     if (!m_Game)
         return;
     const int mode = static_cast<int>(bmvr::g_FrameCapMode + 0.5f);
