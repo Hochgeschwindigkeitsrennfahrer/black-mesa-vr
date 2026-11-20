@@ -2855,6 +2855,10 @@ namespace
     {
         int* p = nullptr;
         int original = 0;
+        int patched = 0;           // what the mod wrote there
+        unsigned char* hdr = nullptr;
+        int checksum = 0;          // studiohdr_t checksum (+8) when patched
+        char name[64]{};           // studiohdr_t name (+12) when patched
     };
     constexpr int kMaxStudioHdrPatches = 96;
     StudioHdrPatch g_ArmHdrPatches[kMaxStudioHdrPatches]{};
@@ -6622,18 +6626,55 @@ namespace
         return ok;
     }
 
-    void RememberHdrPatch(int* p, int original)
+    void RememberHdrPatch(int* p, int original, int patched, unsigned char* hdr)
     {
-        if (!p || g_ArmHdrPatchCount >= kMaxStudioHdrPatches)
+        if (!p || !hdr || g_ArmHdrPatchCount >= kMaxStudioHdrPatches)
             return;
         for (int i = 0; i < g_ArmHdrPatchCount; ++i)
         {
             if (g_ArmHdrPatches[i].p == p)
                 return;
         }
-        g_ArmHdrPatches[g_ArmHdrPatchCount].p = p;
-        g_ArmHdrPatches[g_ArmHdrPatchCount].original = original;
+        StudioHdrPatch& e = g_ArmHdrPatches[g_ArmHdrPatchCount];
+        BMVR_TRY
+        {
+            e.checksum = *reinterpret_cast<int*>(hdr + 8);
+            std::memcpy(e.name, hdr + 12, sizeof(e.name));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        e.p = p;
+        e.original = original;
+        e.patched = patched;
+        e.hdr = hdr;
         ++g_ArmHdrPatchCount;
+    }
+
+    // A remembered patch may only be undone while its model header is still
+    // there: headers from earlier maps get freed (a map transition unloads
+    // models), and writing the old value back then corrupted the heap (user
+    // 2026-11-20: crash a few frames into a save loaded from the pause menu
+    // after a ladder map transition; LevelShutdown restores every patch).
+    // Same header (readable, same checksum and name) and our own value still
+    // in place, or nothing is written.
+    bool HdrPatchStillOurs(const StudioHdrPatch& e)
+    {
+        if (!e.p || !e.hdr || !bmvr::seh::IsReadable(e.hdr, 76) || !bmvr::seh::IsReadable(e.p, sizeof(int)))
+            return false;
+        bool same = false;
+        BMVR_TRY
+        {
+            same = *reinterpret_cast<int*>(e.hdr + 8) == e.checksum
+                && std::memcmp(e.hdr + 12, e.name, sizeof(e.name)) == 0
+                && *e.p == e.patched;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            same = false;
+        }
+        return same;
     }
 
     // Fidget sounds: the fidget clips (tau coil spin, MP5 check...) play
@@ -6742,7 +6783,7 @@ namespace
                 int* p = reinterpret_cast<int*>(ev);
                 if (mute && cycle <= 1.f)
                 {
-                    RememberHdrPatch(p, FloatBits(cycle));
+                    RememberHdrPatch(p, FloatBits(cycle), FloatBits(kMutedEventCycle), hdr);
                     if (PokeInt(p, FloatBits(kMutedEventCycle)))
                         ++changed;
                 }
@@ -6752,7 +6793,7 @@ namespace
                     {
                         if (g_ArmHdrPatches[i].p == p)
                         {
-                            if (PokeInt(p, g_ArmHdrPatches[i].original))
+                            if (HdrPatchStillOurs(g_ArmHdrPatches[i]) && PokeInt(p, g_ArmHdrPatches[i].original))
                                 ++changed;
                             g_ArmHdrPatches[i].p = nullptr;
                             break;
@@ -6860,7 +6901,7 @@ namespace
                 int* p = reinterpret_cast<int*>(ev);
                 if (mute && cycle <= 1.f)
                 {
-                    RememberHdrPatch(p, FloatBits(cycle));
+                    RememberHdrPatch(p, FloatBits(cycle), FloatBits(kMutedEventCycle), hdr);
                     if (PokeInt(p, FloatBits(kMutedEventCycle)))
                         ++changed;
                 }
@@ -6870,7 +6911,7 @@ namespace
                     {
                         if (g_ArmHdrPatches[i].p == p)
                         {
-                            if (PokeInt(p, g_ArmHdrPatches[i].original))
+                            if (HdrPatchStillOurs(g_ArmHdrPatches[i]) && PokeInt(p, g_ArmHdrPatches[i].original))
                                 ++changed;
                             g_ArmHdrPatches[i].p = nullptr;
                             break;
@@ -6975,7 +7016,7 @@ namespace
                 int* p = reinterpret_cast<int*>(ev);
                 if (mute && cycle <= 1.f)
                 {
-                    RememberHdrPatch(p, FloatBits(cycle));
+                    RememberHdrPatch(p, FloatBits(cycle), FloatBits(kMutedEventCycle), hdr);
                     if (PokeInt(p, FloatBits(kMutedEventCycle)))
                         ++changed;
                 }
@@ -6985,7 +7026,7 @@ namespace
                     {
                         if (g_ArmHdrPatches[i].p == p)
                         {
-                            if (PokeInt(p, g_ArmHdrPatches[i].original))
+                            if (HdrPatchStillOurs(g_ArmHdrPatches[i]) && PokeInt(p, g_ArmHdrPatches[i].original))
                                 ++changed;
                             g_ArmHdrPatches[i].p = nullptr;
                             break;
@@ -7224,7 +7265,7 @@ namespace
                 }
                 if (!hideMeshes)
                     continue;
-                RememberHdrPatch(pMeshes, nMesh);
+                RememberHdrPatch(pMeshes, nMesh, 0, hdr);
                 if (PokeInt(pMeshes, 0))
                     ++r.meshesZeroed;
             }
@@ -7279,22 +7320,28 @@ namespace
 
     void RestoreArmBodypartMeshes()
     {
-        int n = 0;
+        int n = 0, stale = 0;
         for (int i = 0; i < g_ArmHdrPatchCount; ++i)
         {
             if (g_ArmHdrPatches[i].p)
             {
-                PokeInt(g_ArmHdrPatches[i].p, g_ArmHdrPatches[i].original);
-                ++n;
+                if (HdrPatchStillOurs(g_ArmHdrPatches[i]))
+                {
+                    PokeInt(g_ArmHdrPatches[i].p, g_ArmHdrPatches[i].original);
+                    ++n;
+                }
+                else
+                    ++stale;
             }
             g_ArmHdrPatches[i] = {};
         }
         if (g_ArmHdrPatchCount)
-            Game::logMsg("HideViewmodelArms restored %d studiohdr nummeshes", n);
+            Game::logMsg("HideViewmodelArms restored %d studiohdr patches (%d left alone: header gone or changed)", n, stale);
         g_ArmHdrPatchCount = 0;
         // The event moves above were undone too: walk those headers again.
         std::memset(g_FidgetHdrs, 0, sizeof(g_FidgetHdrs));
         std::memset(g_BrassHdrs, 0, sizeof(g_BrassHdrs));
+        std::memset(g_ReloadHdrs, 0, sizeof(g_ReloadHdrs));
     }
 
     struct SourceRenderQueueBuildScope
