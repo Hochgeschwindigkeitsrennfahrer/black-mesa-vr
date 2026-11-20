@@ -8400,7 +8400,11 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
     constexpr float kRungTouchHu = 12.f;
     constexpr float kNoRungTouchHu = 20.f;
     constexpr float kRungPropNearHu = 48.f;
-    constexpr float kFlashGuardHu = 24.f;   // hand this close to a rung: grip is no flashlight
+    // Hand this close to a rung: grip is no flashlight. 24 u still let
+    // catches after a fall toggle it (the hand closes in several units per
+    // tick); user 2026-11-20: fine to have no grip flashlight anywhere in
+    // the ladder's grab zone.
+    constexpr float kFlashGuardHu = 40.f;
     bool touch[2]{};
     bool lineTouch[2]{};
     for (int h = 0; h < 2; ++h)
