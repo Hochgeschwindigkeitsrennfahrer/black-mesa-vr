@@ -175,3 +175,16 @@ Huge thanks to:
 
 Custom models:
 - [HEV gloves](https://steamcommunity.com/sharedfiles/filedetails/?id=2969302231)
+
+## Disclaimer
+
+This is an **unofficial, free fan project** and is not affiliated with, endorsed by,
+or supported by Crowbar Collective or Valve Corporation.
+
+- **You need a legitimate copy of Black Mesa** (e.g. on Steam) to use this mod.
+- This mod does **not** include or distribute any Black Mesa or Valve game files, code, or assets.
+- This mod is **not sold** and never will be. It's made purely for the love of the game.
+- Please don't report problems with this mod to Crowbar Collective or Valve.
+  Use our [issue tracker](https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr/issues) instead.
+
+Black Mesa is a trademark of Crowbar Collective. Half-Life is a trademark of Valve Corporation.
