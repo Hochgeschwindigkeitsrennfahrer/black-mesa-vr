@@ -13116,7 +13116,35 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
     s.aimBeamHit = m_AimBeamHit;
     s.aimCrosshairValid = m_AimCrosshairValid;
     s.aimCrosshairWorld = m_AimCrosshairWorld;
+    {
+        const unsigned ms = MagReload::g_GunWristMs[1].load(std::memory_order_acquire);
+        const DWORD now = GetTickCount();
+        s.gunWristOk = ms != 0 && now - ms <= 100;
+        if (s.gunWristOk)
+            for (int k = 0; k < 12; ++k)
+                s.gunWrist[k] = MagReload::g_GunWrist[1][k].load(std::memory_order_relaxed);
+    }
     s.valid = true;
+}
+
+bool VR::GunCapWristForDraw(float out[12]) const
+{
+    // MC: the render thread draws frame N while the game thread already
+    // publishes frame N+1's bones; the cap must use the wrist of the gun it
+    // closes (user 2026-11-20: the plate lagged the hand on heavy frames).
+    if (const HandDrawSnap* snap = t_HandSnap)
+    {
+        if (!snap->gunWristOk)
+            return false;
+        std::memcpy(out, snap->gunWrist, sizeof(snap->gunWrist));
+        return true;
+    }
+    const unsigned ms = MagReload::g_GunWristMs[1].load(std::memory_order_acquire);
+    if (ms == 0 || GetTickCount() - ms > 100)
+        return false;
+    for (int k = 0; k < 12; ++k)
+        out[k] = MagReload::g_GunWrist[1][k].load(std::memory_order_relaxed);
+    return true;
 }
 
 bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, bool drawOverlays, bool drawGloves)

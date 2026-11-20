@@ -1571,15 +1571,14 @@ bool BmVrGloves::DrawForEye(
     // wrist side). Bare hands are closed.
     if (bmvr::g_GunHandCuffCap && pair == m_Impl->hev)
     {
-        const DWORD now = GetTickCount();
         // Right only: the left one (support-hand lock) sat off the hand and
         // that cuff was not seen open (user 2026-11-19). Never with the
         // right glove showing (switch to empty hands: the cap stayed a frame).
         const bool rightGlove = g_Game && g_Game->m_VR && g_Game->m_VR->WantsRightGloveVisible();
         for (int h = 1; h < 2 && !rightGlove; ++h)
         {
-            const unsigned ms = MagReload::g_GunWristMs[h].load(std::memory_order_acquire);
-            if (ms == 0 || now - ms > 100)
+            float W[12];
+            if (!g_Game || !g_Game->m_VR || !g_Game->m_VR->GunCapWristForDraw(W))
                 continue;
             if (!m_Impl->gunCapLoaded[h])
             {
@@ -1590,9 +1589,6 @@ bool BmVrGloves::DrawForEye(
                 else
                     continue;
             }
-            float W[12];
-            for (int k = 0; k < 12; ++k)
-                W[k] = MagReload::g_GunWrist[h][k].load(std::memory_order_relaxed);
             VrHandMatrix4 world;
             for (int r = 0; r < 3; ++r)
                 for (int c = 0; c < 4; ++c)

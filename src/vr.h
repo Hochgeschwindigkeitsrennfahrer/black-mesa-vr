@@ -1211,8 +1211,16 @@ public:
         bool aimBeamValid = false, aimBeamHit = false, aimCrosshairValid = false;
         int aimStage = 0;
         Vector aimCrosshairWorld{};
+        // Gun's own right wrist as drawn in this frame (cuff cap), from
+        // MagReload::g_GunWrist when the snapshot was taken.
+        bool gunWristOk = false;
+        float gunWrist[12]{};
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
+    // Right wrist of the gun's own hands for the cuff cap: the drawing
+    // frame's snapshot while one is drawn (MC), else the latest published
+    // (within 100 ms). False = no cap.
+    bool GunCapWristForDraw(float out[12]) const;
     void McCompositeEyesToRing(uint32_t band, const L4D2VROpenXrPoseDesc* pose, const HandDrawSnap* hands = nullptr);
     bool CopyEyesToOpenXrPublishSlot(IDirect3DSurface9* left, IDirect3DSurface9* right,
         const OpenXrPendingPublish& pend);
