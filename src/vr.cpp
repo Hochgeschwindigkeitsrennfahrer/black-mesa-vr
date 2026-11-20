@@ -15435,11 +15435,65 @@ bool VR::UpdateShoulderGestures(bool paused)
                 return true;
         return false;
     };
+    // Dynamic holsters (VrHolsterDynamic, needs VrHolsterBack; user 2026-11-20):
+    // the weapon in the hand, as a zone weapon index (-1 = empty hands or a
+    // weapon no zone can take). A zone set to another weapon then also counts,
+    // and the grip there puts the held one away in it (storeHeld below).
+    int heldW = -1;
+    if (bmvr::g_VrHolsterBack && bmvr::g_VrHolsterDynamic && !m_EmptyHands && !m_LastViewmodelModel.empty())
+    {
+        for (int w = 0; w < bmvr::kGestureWeaponCount && heldW < 0; ++w)
+            for (const char* const* part = bmvr::GestureWeaponParts(w); *part; ++part)
+                if (strstr(m_LastViewmodelModel.c_str(), *part))
+                {
+                    heldW = w;
+                    break;
+                }
+    }
+    auto storesHere = [&](int zoneW) { return heldW >= 0 && zoneW >= 0 && zoneW != heldW; };
+    auto zoneLive = [&](int zoneW) { return carries(zoneW) || storesHere(zoneW); };
+    // The zone's weapon becomes the held one, saved to config.txt; a zone that
+    // took the held weapon before gets this zone's old one (swap), so every
+    // weapon keeps one place. Then empty hands, as the holster in its own zone.
+    auto storeHeld = [&](const char* where) {
+        struct ZoneRef { float* value; const char* key; };
+        const ZoneRef zones[] = {
+            { &bmvr::g_GestureWeaponShoulder, "GestureWeaponShoulder" },
+            { &bmvr::g_GestureWeaponHipRight, "GestureWeaponHipRight" },
+            { &bmvr::g_GestureWeaponHipLeft, "GestureWeaponHipLeft" },
+        };
+        const ZoneRef* target = nullptr;
+        for (const ZoneRef& z : zones)
+            if (std::strcmp(z.key + 13, where) == 0)
+                target = &z;
+        if (!target)
+            return;
+        const int oldW = static_cast<int>(std::lround(*target->value));
+        std::vector<std::pair<std::string, std::string>> kv;
+        const char* swappedKey = nullptr;
+        for (const ZoneRef& z : zones)
+        {
+            if (&z != target && static_cast<int>(std::lround(*z.value)) == heldW)
+            {
+                *z.value = static_cast<float>(oldW);
+                kv.emplace_back(z.key, std::to_string(oldW));
+                swappedKey = z.key;
+            }
+        }
+        *target->value = static_cast<float>(heldW);
+        kv.emplace_back(target->key, std::to_string(heldW));
+        const bool ok = bmvr::WriteVrConfigValues(kv, {});
+        ToggleEmptyHands();
+        PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
+        Game::logMsg("Dynamic holster: %s put away in %s (was %s%s%s), config %s",
+            bmvr::GestureWeaponName(heldW), target->key, oldW >= 0 ? bmvr::GestureWeaponName(oldW) : "off",
+            swappedKey ? ", that weapon moves to " : "", swappedKey ? swappedKey : "", ok ? "saved" : "SAVE FAILED");
+    };
     const bool leftIn = leftAction >= 0 && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
     m_GestureZoneLeft = leftIn;
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = shoulderW >= 0 && m_PhysicalRightTrackingValid && !m_TwoHandActive
-        && inZone(m_PhysicalRightPosAbs, 1.f) && carries(shoulderW);
+        && inZone(m_PhysicalRightPosAbs, 1.f) && zoneLive(shoulderW);
     if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
     {
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
@@ -15511,7 +15565,10 @@ bool VR::UpdateShoulderGestures(bool paused)
     const float rightGrip = gripValue(m_ActionFlashlight);
     if (step(s_right, rightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        grabWeapon(bmvr::GestureWeaponName(shoulderW), bmvr::GestureWeaponParts(shoulderW));
+        if (storesHere(shoulderW))
+            storeHeld("Shoulder");
+        else
+            grabWeapon(bmvr::GestureWeaponName(shoulderW), bmvr::GestureWeaponParts(shoulderW));
     }
 
     // Hip holsters (right hand only): right hip = pistol, a bit above the
@@ -15530,16 +15587,22 @@ bool VR::UpdateShoulderGestures(bool paused)
     // (2026-11-14: it took the pistol 5-10 cm too far forward and too high;
     // 2026-11-16 headset: still 10 cm too far forward).
     const bool hipRightIn = hipsOn && hipRightW >= 0 && inHip(m_PhysicalRightPosAbs, 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f)
-        && carries(hipRightW);
+        && zoneLive(hipRightW);
     const bool hipLeftIn = hipsOn && hipLeftW >= 0 && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f)
-        && carries(hipLeftW);
+        && zoneLive(hipLeftW);
     if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        grabWeapon(bmvr::GestureWeaponName(hipRightW), bmvr::GestureWeaponParts(hipRightW));
+        if (storesHere(hipRightW))
+            storeHeld("HipRight");
+        else
+            grabWeapon(bmvr::GestureWeaponName(hipRightW), bmvr::GestureWeaponParts(hipRightW));
     }
     if (step(s_hipLeft, hipLeftIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        grabWeapon(bmvr::GestureWeaponName(hipLeftW), bmvr::GestureWeaponParts(hipLeftW));
+        if (storesHere(hipLeftW))
+            storeHeld("HipLeft");
+        else
+            grabWeapon(bmvr::GestureWeaponName(hipLeftW), bmvr::GestureWeaponParts(hipLeftW));
     }
 
     // Also for 1 s after leaving a zone, so the grip squeeze that took the

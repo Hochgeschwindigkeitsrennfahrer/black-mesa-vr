@@ -441,6 +441,10 @@ namespace bmvr
     extern float g_GestureWeaponHipLeft;   // above the left hip, cross draw (default MP5)
     // Grip in a weapon's own zone while holding that weapon puts it away (empty hands). Off = the grip there does nothing.
     extern bool g_VrHolsterBack;
+    // With VrHolsterBack: the grip in another weapon zone while holding a zone
+    // weapon puts it away there and makes that zone take it from then on
+    // (saved to config.txt; the zone that took it before gets the old weapon).
+    extern bool g_VrHolsterDynamic;
     constexpr int kGestureWeaponCount = 11;
     const char* GestureWeaponName(int index);
     // Name parts matched against the inventory's network / model names (nullptr-terminated).

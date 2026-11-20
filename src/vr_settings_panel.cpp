@@ -182,6 +182,8 @@ namespace
             { "Left hip takes", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureWeaponHipLeft, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Right hip takes", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureWeaponHipRight, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Allow holstering", RowKind::Toggle, "VrHolsterBack", &bmvr::g_VrHolsterBack, nullptr, 0, 0, 0, nullptr },
+            // Put a weapon away in another zone = that zone takes it from then on (user 2026-11-20).
+            { "Dynamic holsters", RowKind::Toggle, "VrHolsterDynamic", &bmvr::g_VrHolsterDynamic, nullptr, 0, 0, 0, nullptr },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
             { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -320,6 +322,9 @@ namespace
             { "Missing hooks", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "missing_hooks" },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Screenshot (eyes only)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "screenshot" },
+            // Back (user 2026-11-20, Xen plant glow that follows the hand): 20 s of every
+            // light glow's world position + brightness into VR/glowtrace-*.csv.
+            { "Record glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
             // One shot: the next Pause press saves 12 eye pairs + 12 menu layers (VR/pausecap-*).
             { "Capture next pause", RowKind::Toggle, nullptr, &bmvr::g_PauseCaptureArm, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
@@ -1327,6 +1332,8 @@ namespace
             return g_SnapTurning;
         if (is({ "LadderBodyFollowsArms", "LadderGunHand", "LadderHandBack", "LadderHandWrap", "LadderStickClimb" }))
             return !g_PhysicalLadders;
+        if (is({ "VrHolsterDynamic" }))
+            return !g_VrHolsterBack;
         if (is({ "DamageFlashStrength" }))
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
