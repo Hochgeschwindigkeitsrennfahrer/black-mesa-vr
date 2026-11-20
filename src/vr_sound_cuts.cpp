@@ -171,13 +171,13 @@ namespace
         double t0, t1;
         const char* sample;   // below sound/
     };
-    // Glock reload.wav (2.06 s, measured 2026-11-20): magazine out 0-0.22 s
-    // with its slide-out rattle to 0.62, new magazine at 1.16-1.24 and seated
-    // 1.56-1.68, slide 1.74-1.94.
+    // Glock reload.wav (2.06 s, measured 2026-11-20; parts named by the
+    // user by ear): magazine out 0-0.22 s, new magazine slid in 0.48-0.62
+    // (short), slide pulled back and let go 1.56-1.94.
     const CutDef kCuts[bmvr::soundcuts::kClipCount] = {
-        { "sound/weapons/glock/reload.wav", 0.00, 0.68, "bmvr/glock_magout.wav" },
-        { "sound/weapons/glock/reload.wav", 1.45, 1.72, "bmvr/glock_magin.wav" },
-        { "sound/weapons/glock/reload.wav", 1.72, 2.06, "bmvr/glock_slide.wav" },
+        { "sound/weapons/glock/reload.wav", 0.00, 0.40, "bmvr/glock_magout.wav" },
+        { "sound/weapons/glock/reload.wav", 0.44, 0.70, "bmvr/glock_magin.wav" },
+        { "sound/weapons/glock/reload.wav", 1.45, 2.06, "bmvr/glock_slide.wav" },
         // MP5 reload.wav: magazine out 0.38-0.50 s, in 0.96-1.10.
         { "sound/weapons/mp5/reload.wav", 0.30, 0.62, "bmvr/mp5_magout.wav" },
         { "sound/weapons/mp5/reload.wav", 0.88, 1.22, "bmvr/mp5_magin.wav" },
