@@ -2336,8 +2336,10 @@ void VR::CloseSettingsPanel(const char* why)
 
 void VR::SettingsPanelFrame(Vector& origin, Vector& fwd, Vector& right, Vector& up) const
 {
-    const Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
-    const float yawDelta = m_RotationOffsetY.load(std::memory_order_acquire) - m_SettingsLatchYaw;
+    Vector body;
+    float rotY = 0.f;
+    MenuDrawBody(body, rotY);
+    const float yawDelta = rotY - m_SettingsLatchYaw;
     const float a = yawDelta * (kPi / 180.f), c = cosf(a), s = sinf(a);
     auto yaw = [&](const Vector& v) { return Vector(v.x * c - v.y * s, v.x * s + v.y * c, v.z); };
     origin = body + yaw(m_SettingsLatchDelta);

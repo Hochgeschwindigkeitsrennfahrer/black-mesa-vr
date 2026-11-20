@@ -2134,9 +2134,10 @@ void VR::ApplyWeaponMenuWorldPose()
 {
     if (!m_WeaponMenuLatched)
         return;
-    const Vector body = MenuPlayerBody(this);
-    const float yawDelta = m_RotationOffsetY.load(std::memory_order_acquire)
-        - m_WeaponMenuLatchYaw;
+    Vector body;
+    float rotY = 0.f;
+    MenuDrawBody(body, rotY);
+    const float yawDelta = rotY - m_WeaponMenuLatchYaw;
     Vector delta = m_WeaponMenuLatchDelta;
     YawAroundZ(delta, yawDelta);
     m_WeaponMenuOrigin = body + delta;

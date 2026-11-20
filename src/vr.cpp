@@ -13118,6 +13118,7 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
     s.aimBeamHit = m_AimBeamHit;
     s.aimCrosshairValid = m_AimCrosshairValid;
     s.aimCrosshairWorld = m_AimCrosshairWorld;
+    s.rotationOffsetY = m_RotationOffsetY.load(std::memory_order_acquire);
     {
         const unsigned ms = MagReload::g_GunWristMs[1].load(std::memory_order_acquire);
         const DWORD now = GetTickCount();
@@ -13127,6 +13128,21 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
                 s.gunWrist[k] = MagReload::g_GunWrist[1][k].load(std::memory_order_relaxed);
     }
     s.valid = true;
+}
+
+void VR::MenuDrawBody(Vector& body, float& rotationOffsetY) const
+{
+    // MC: the render thread draws frame N while the game thread has moved the
+    // body to frame N+1; eyes come from the snapshot, so the latched weapon
+    // menu must too (user 2026-11-20: menu trailed/jittered while walking).
+    if (const HandDrawSnap* snap = t_HandSnap)
+    {
+        body = snap->body;
+        rotationOffsetY = snap->rotationOffsetY;
+        return;
+    }
+    body = (m_HasStereoBodyOrigin && m_StereoBodyOrigin.LengthSqr() > 1.f) ? m_StereoBodyOrigin : m_SetupOrigin;
+    rotationOffsetY = m_RotationOffsetY.load(std::memory_order_acquire);
 }
 
 bool VR::GunCapWristForDraw(float out[12]) const

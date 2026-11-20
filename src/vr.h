@@ -1215,8 +1215,14 @@ public:
         // MagReload::g_GunWrist when the snapshot was taken.
         bool gunWristOk = false;
         float gunWrist[12]{};
+        // Turn offset of this frame: world-latched menus (weapon menu, VR
+        // panel) rebuild their pose from body + turn at draw time.
+        float rotationOffsetY = 0.f;
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
+    // Body origin + turn offset for drawing world-latched menus: the drawing
+    // frame's snapshot while one is drawn (MC), else the live values.
+    void MenuDrawBody(Vector& body, float& rotationOffsetY) const;
     // Right wrist of the gun's own hands for the cuff cap: the drawing
     // frame's snapshot while one is drawn (MC), else the latest published
     // (within 100 ms). False = no cap.
