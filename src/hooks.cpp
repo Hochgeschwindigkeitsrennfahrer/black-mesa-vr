@@ -6156,8 +6156,14 @@ namespace
         // magazine's frame in the hand and in the gun (shotgun / .357: 180 =
         // not checked).
         const float unitsPerM = vr->m_VRScale > 1.f ? vr->m_VRScale : 39.37f;
+        constexpr float kShellPortLeftCm = 2.f;
         // Shotgun: the shell's leading tip at the port (user 2026-11-19: held
         // upright under the port it did not load; its centre was measured).
+        // Port centre 2 cm to the gun's left of the measured point (user
+        // 2026-11-20: gun held level, the zone sat a little to the right;
+        // height was right).
+        if (def.tube)
+            well = well - r * (kShellPortLeftCm * 0.01f * unitsPerM);
         float dist = ((haveShellTip ? shellTip : magAnchor) - well).Length();
         // Glock: the seated magazine's centre is up inside the grip, inside
         // the right fist, so the left hand stopped 7-9 cm short below it
@@ -6216,6 +6222,14 @@ namespace
             s_logMs = now;
             s_angleLogged = angleOnly;
             const Vector d = well - magAnchor;
+            if (def.tube)
+            {
+                // Shell tip relative to the port in the gun's frame, cm.
+                const Vector t = (haveShellTip ? shellTip : magAnchor) - well;
+                const float k = 100.f / unitsPerM;
+                Game::logMsg("Mag reload: shell tip - port: %.1f fwd %.1f right %.1f up cm in the gun frame",
+                    t.Dot(f) * k, t.Dot(r) * k, t.Dot(u) * k);
+            }
             Game::logMsg("Mag reload: magazine %.1f cm from the well, %.0f deg off the seated pose (seats within %.1f cm, %.0f deg)%s (well - hand: %.1f fwd %.1f right %.1f up units in the hand frame)",
                 distCm, angleDeg, maxCm, maxDeg, angleOnly ? " - angle keeps it out" : "", d.Dot(hf), d.Dot(hr), d.Dot(hu));
         }

@@ -15740,9 +15740,11 @@ namespace vm_numpad
         else if (key == "shotgun")
         {
             // Was 15 cm from the shell's centre: too eager (user 2026-11-19).
-            // Now the shell's leading tip within 5 cm of the port, any angle
+            // Then the shell's leading tip within 5 cm of the port, any angle
             // (it goes in upright from below; along the tube was wrong).
-            cm = 5.f;
+            // 7 cm (user 2026-11-20: misses at 6-7.5 cm it should take; the
+            // port also moved 2 cm left, hooks.cpp kShellPortLeftCm).
+            cm = 7.f;
             deg = 180.f;
         }
         else if (key == "357")
