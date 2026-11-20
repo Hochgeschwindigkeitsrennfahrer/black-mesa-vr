@@ -7333,6 +7333,7 @@ void VR::ProcessInput()
     static bool s_flashLatched = false;
     static DWORD s_flashImpulseMs = 0;
     static int s_flashReleasePolls = 0;
+    static DWORD s_flashWaitSince = 0;   // near-ladder press waiting (see below)
     const bool flashOk = GetDigitalActionData(m_ActionFlashlight, flash);
     if (flashOk || squareSetting)
     {
@@ -7357,7 +7358,38 @@ void VR::ProcessInput()
             // the hand comes forward: that press must not toggle the light.
             if (rightGripGrab)
                 s_flashLatched = true;
-            if (!paused && !m_GameUiVisible && !s_flashLatched && !rightGripGrab && (nowTick - s_flashImpulseMs) > 300)
+            // Near a ladder a right-grip press waits kLadderFlashWaitMs: a
+            // ladder grab / mount starting meanwhile takes it (user
+            // 2026-11-20: catching a rung while falling toggled it every
+            // time; the touch flag alone missed those presses).
+            constexpr DWORD kLadderFlashWaitMs = 100;
+            const unsigned long long nearMs = m_LadderNearMs.load(std::memory_order_relaxed);
+            const bool nearLadder = !squareFlash && bmvr::g_PhysicalLadders && nearMs != 0
+                && GetTickCount64() - nearMs < 1500;
+            bool flashGo = !paused && !m_GameUiVisible && !s_flashLatched && !rightGripGrab && (nowTick - s_flashImpulseMs) > 300;
+            if (rightGripGrab)
+            {
+                if (s_flashWaitSince != 0)
+                    Game::logMsg("Flashlight press near a ladder became a ladder grab after %lu ms: no flashlight",
+                        static_cast<unsigned long>(nowTick - s_flashWaitSince));
+                s_flashWaitSince = 0;
+            }
+            else if (flashGo && nearLadder)
+            {
+                if (s_flashWaitSince == 0)
+                {
+                    s_flashWaitSince = nowTick ? nowTick : 1;
+                    // Why the touch flag did not catch it (diagnostic).
+                    Game::logMsg("Flashlight press near a ladder: waiting %lu ms (touch %d active %d onLadder-move %d)",
+                        static_cast<unsigned long>(kLadderFlashWaitMs), m_LadderTouch[1].load() ? 1 : 0,
+                        m_LadderActive.load() ? 1 : 0, m_Game && m_Game->LocalPlayerMoveType() == 9 ? 1 : 0);
+                }
+                if (nowTick - s_flashWaitSince < kLadderFlashWaitMs)
+                    flashGo = false;
+            }
+            if (flashGo)
+                s_flashWaitSince = 0;
+            if (flashGo)
             {
                 m_PendingImpulse.store(100, std::memory_order_release);
                 s_flashImpulseMs = nowTick;
@@ -7367,8 +7399,21 @@ void VR::ProcessInput()
                     static_cast<unsigned long long>(m_ActionFlashlight));
             }
         }
-        else if (++s_flashReleasePolls >= 3)
-            s_flashLatched = false;
+        else
+        {
+            // A short tap near a ladder let go before the wait ran out, with
+            // no grab: still a flashlight press.
+            if (s_flashWaitSince != 0 && !rightGripGrab && !s_flashLatched && !paused && !m_GameUiVisible)
+            {
+                m_PendingImpulse.store(100, std::memory_order_release);
+                s_flashImpulseMs = nowTick;
+                s_flashLatched = true;
+                Game::logMsg("Flashlight queued impulse 100 (tap near a ladder, no grab)");
+            }
+            s_flashWaitSince = 0;
+            if (++s_flashReleasePolls >= 3)
+                s_flashLatched = false;
+        }
     }
     if (!paused && !MenuGameplayBlocked() && !menuStick && nextHeld && !s_next)
     {
@@ -8383,6 +8428,11 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         return best;
     };
     const ULONGLONG now = GetTickCount64();
+    {
+        float dn = 0.f, yn = 0.f;
+        if (nearestLadder(origin, dn, yn) >= 0 && dn < 96.f)
+            m_LadderNearMs.store(now, std::memory_order_relaxed);
+    }
     bool grip[2];
     for (int h = 0; h < 2; ++h)
         grip[h] = m_LadderGrip[h].load(std::memory_order_acquire) && valid[h];
