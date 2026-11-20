@@ -3567,6 +3567,25 @@ namespace
                 ForceViewmodelSequencePose(viewmodel, hdr, "idle_unloaded");
                 return;
             }
+            // Magazine seated: the frozen idle_unloaded written above stays on
+            // the client until the game next changes the sequence (user
+            // 2026-11-20: the string went back only a while after the
+            // magazine was in). Back to the running idle at once.
+            if (!crossbowUnloaded && MagReload::g_Weapon.load(std::memory_order_relaxed) == MagReload::kWeaponCrossbow
+                && std::strcmp(lb, "idle_unloaded") == 0)
+            {
+                const int idle = FindIdleSequence(hdr);
+                BMVR_TRY
+                {
+                    if (idle >= 0)
+                        *reinterpret_cast<int*>(static_cast<char*>(viewmodel) + kViewmodelSequence) = idle;
+                    *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelCycle) = 0.f;
+                    *reinterpret_cast<float*>(static_cast<char*>(viewmodel) + kViewmodelPlaybackRate) = 1.f;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {}
+                Game::logMsg("Mag reload: crossbow loaded, idle_unloaded -> idle");
+                return;
+            }
             if (std::strstr(lb, "reload") || shotgunClip)
             {
                 static int s_log;
