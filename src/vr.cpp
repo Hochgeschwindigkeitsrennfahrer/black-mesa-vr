@@ -7210,7 +7210,24 @@ void VR::ProcessInput()
         // without any weapon.
         // Hold to hold a pickup; release pulses a second Use to drop.
         m_UseFireHeld = (buttons & (IN_ATTACK | IN_ATTACK2)) != 0;
-        const bool rightUse = !menuOwnsButtons && (emptyHands || gunGripRight) && primaryHeld;
+        bool rightUse = !menuOwnsButtons && (emptyHands || gunGripRight) && primaryHeld;
+        // Hands-only ladders: on / climbing / mounting a ladder the triggers
+        // are no Use at all. A whole-hand squeeze on a rung also pulls the
+        // trigger; f05009d dropped that IN_USE for the game, but the Use grab
+        // below still latched on it and turned the view to the grab hand
+        // instead of the ladder's vertical view, and HL2's ladder move then
+        // floated the player off toward a dismount (user 2026-11-20: pushed
+        // off after a couple of rungs, the hand left its rung).
+        if (bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb
+            && (m_LadderActive.load(std::memory_order_acquire)
+                || (m_Game && m_Game->LocalPlayerMoveType() == 9)))
+        {
+            static bool s_ladderUseLogged = false;
+            if ((leftUse || rightUse) && !s_ladderUseLogged)
+                Game::logMsg("Ladder: trigger Use ignored while climbing (hands-only ladders)");
+            s_ladderUseLogged = leftUse || rightUse;
+            leftUse = rightUse = false;
+        }
         m_GunHeldLeft = leftUse;
         m_GunHeldRight = rightUse;
         UpdateUseGrab(buttons, leftUse, rightUse);
