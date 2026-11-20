@@ -388,15 +388,19 @@ namespace
     // from the glove's source bones (asset.sourceBoneBind: BM bone frames
     // in glove space), so units and per-model bind differences drop out.
     // Extra thumb bend on a wrist-relative finger pose (rows 3x4, joints
-    // thumb1..3 first): Thumb2 and Thumb3 each turned by deg about their own
-    // z (BM bend axis; + closes the left thumb toward the palm, checked on
-    // the glock clip pose), joints further out carried along.
-    void CurlThumb(float rel[15][12], float deg)
+    // thumb1..3 first), each about the joint's own z (BM bend axis; + closes
+    // the left thumb toward the palm, checked on the glock clip pose), joints
+    // further out carried along: Thumb1 (root: the whole thumb) by baseDeg,
+    // Thumb2 and Thumb3 by tipDeg.
+    void CurlThumb(float rel[15][12], float baseDeg, float tipDeg)
     {
-        const float a = deg * (3.14159265f / 180.f);
-        const float ca = std::cos(a), sa = std::sin(a);
-        for (int seg = 1; seg < 3; ++seg)
+        for (int seg = 0; seg < 3; ++seg)
         {
+            const float deg = seg == 0 ? baseDeg : tipDeg;
+            if (deg == 0.f)
+                continue;
+            const float a = deg * (3.14159265f / 180.f);
+            const float ca = std::cos(a), sa = std::sin(a);
             const float* pj = rel[seg];
             const float ax[3] = { pj[2], pj[6], pj[10] };
             const float len = std::sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
@@ -1451,15 +1455,18 @@ bool BmVrGloves::DrawForEye(
             {
                 static const VrHandMeshAsset* s_clipAsset = nullptr;
                 static int s_clipId = -1;
-                static float s_clipThumb = 0.f;
+                static float s_clipThumb = 0.f, s_clipThumbBase = 0.f;
                 static std::vector<VrHandMatrixRows3x4> s_clipPalette;
                 // Glock magazine: thumb curl tuning (DEBUG "GLOCK MAGAZINE IN THE HAND").
-                const float thumb = (clipId == ClipHandPose::kGlockMag || clipId == ClipHandPose::kGlockMagCarry) ? bmvr::g_GlockThumbCurl : 0.f;
+                const bool glockMag = clipId == ClipHandPose::kGlockMag;
+                const float thumb = glockMag ? bmvr::g_GlockThumbCurl : 0.f;
+                const float thumbBase = glockMag ? bmvr::g_GlockThumbBase : 0.f;
                 float fingers[15][12];
                 std::memcpy(fingers, ClipHandPose::kPoses[clipId].fingers, sizeof(fingers));
-                if (thumb != 0.f)
-                    CurlThumb(fingers, thumb);
-                if (s_clipAsset == &hand.asset && s_clipId == clipId && s_clipThumb == thumb && !s_clipPalette.empty())
+                if (thumb != 0.f || thumbBase != 0.f)
+                    CurlThumb(fingers, thumbBase, thumb);
+                if (s_clipAsset == &hand.asset && s_clipId == clipId && s_clipThumb == thumb
+                    && s_clipThumbBase == thumbBase && !s_clipPalette.empty())
                 {
                     hand.palette = s_clipPalette;
                     clipPose = true;
@@ -1469,6 +1476,7 @@ bool BmVrGloves::DrawForEye(
                     s_clipAsset = &hand.asset;
                     s_clipId = clipId;
                     s_clipThumb = thumb;
+                    s_clipThumbBase = thumbBase;
                     s_clipPalette = hand.palette;
                     clipPose = true;
                 }

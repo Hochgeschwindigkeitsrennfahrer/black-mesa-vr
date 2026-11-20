@@ -23,9 +23,6 @@ PICKS = [
     ("kRpgRocket", "rpg rocket", "gun_reload1", "0.300", "RPG_Projectile"),
     ("kPinHold", "grenade pin held", "pinpullthrow", "0.450", "Grenad_Pin1"),
     ("kPinPulled", "grenade pin pulled", "pinpullthrow", "0.600", "Grenad_Pin1"),
-    # Glock magazine carried up (hand closed round its base) vs 0.45 pushing it in;
-    # VR panel "Glock mag hand frame" picks (user 2026-11-20).
-    ("kGlockMagCarry", "glock magazine carried", "gun_reload", "0.400", "bone_clip"),
 ]
 FINGERS = [f"L_{f}{s}" for f in ("Thumb", "Index", "Middle", "Ring", "Pinky") for s in (1, 2, 3)]
 
