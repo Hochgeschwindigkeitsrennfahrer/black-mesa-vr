@@ -82,10 +82,6 @@ public:
     void EmitPlayerSound(const char* soundName);
     void EmitEntitySound(C_BaseEntity* entity, const char* soundName);
     void PlayUiSound(const char* sample);
-    // PlayUiSound, cut off after ms (only the first part of a longer wav).
-    void PlayUiSoundCut(const char* sample, unsigned ms);
-    // Stops cut sounds whose time is up; call every tick.
-    void ServiceUiSoundCuts();
     // Shotgun pump in two parts, cut from the game's own pump.wav on first
     // use (bms/sound/bmvr/pump_back.wav, pump_forward.wav). Returns the
     // sample to play, or nullptr if the split is not available.

@@ -1,5 +1,6 @@
 #include "vr.h"
 #include "vr_ladder_rungs.h"
+#include "vr_sound_cuts.h"
 #include "vr_mag_reload.h"
 #include "bmvr_prof.h"
 #include "bmvr_sampler.h"
@@ -22127,8 +22128,6 @@ void VR::UpdateMagReload(uint32_t& buttons)
     static int s_lastWeaponForRpg = kWeaponNone;
     static std::string s_level;
     const DWORD now = GetTickCount();
-    if (m_Game)
-        m_Game->ServiceUiSoundCuts();
     const bool reload = (buttons & IN_RELOAD) != 0;
     const bool attack = (buttons & IN_ATTACK) != 0;
     // Glock alt-fire uses the same magazine (user 2026-11-20: with the gun
@@ -22793,14 +22792,12 @@ void VR::UpdateMagReload(uint32_t& buttons)
         }
         // The gun's own reload sound, only its magazine-out start (was
         // HL2's AR2 rotate: user 2026-11-20, an odd electric sound).
-        if (m_Game)
+        // (Cut from the wav at start: StopSound on the full one did not
+        // stop it.)
         {
-            if (weapon == kWeaponGlock)
-                m_Game->PlayUiSoundCut("weapons/glock/reload.wav", 300);
-            else if (weapon == kWeaponCrossbow)
-                m_Game->PlayUiSoundCut("weapons/crossbow/reload.wav", 400);
-            else
-                m_Game->PlayUiSoundCut("weapons/mp5/reload.wav", 650);
+            using namespace bmvr::soundcuts;
+            const Clip c = weapon == kWeaponGlock ? kGlockMagOut : (weapon == kWeaponCrossbow ? kCrossbowMagOut : kMp5MagOut);
+            sound(Sample(c, "weapons/ar2/ar2_reload_rotate.wav"));
         }
         PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.5f);
         Game::logMsg("Mag reload: %s ejected (clip %d, chambered %d)", def.name, clip, w.chambered ? 1 : 0);
@@ -22832,7 +22829,13 @@ void VR::UpdateMagReload(uint32_t& buttons)
             w.dryRefill = false;
             s_pulseReload = clip >= 0 && clip < def.maxClip;
             s_pulseUntil = now + 200;
-            sound("weapons/ar2/ar2_reload_push.wav");
+            {
+                // The gun's own magazine-in (was HL2's AR2 push, user
+                // 2026-11-20: electric).
+                using namespace bmvr::soundcuts;
+                const Clip c = weapon == kWeaponGlock ? kGlockMagIn : (weapon == kWeaponCrossbow ? kCrossbowMagIn : kMp5MagIn);
+                sound(Sample(c, "weapons/ar2/ar2_reload_push.wav"));
+            }
             ReloadHaptic(ReloadFeel::Seat);
             Game::logMsg("Mag reload: %s seated (%.1f cm, %.0f deg; clip %d, game reload %d, chambered %d)",
                 def.name, g_SeatDistCm.load(), g_SeatAngleDeg.load(), clip, s_pulseReload ? 1 : 0, w.chambered ? 1 : 0);
@@ -22866,11 +22869,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
             boltGrab = false;
             s_boltFull = false;
             w.chambered = (w.mag == kLoaded) && clip > 0;
-            // Glock: only the slide-back click of reload_roundchambered
-            // (its slide-forward comes 1.6 s later: user 2026-11-20, it
-            // went on far longer than the hand).
-            if (weapon == kWeaponGlock && m_Game)
-                m_Game->PlayUiSoundCut(def.boltSound, 350);
+            // Glock: the slide part of its reload.wav (user 2026-11-20:
+            // reload_roundchambered went on 1.6 s past the hand).
+            if (weapon == kWeaponGlock)
+                sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kGlockSlide, def.boltSound));
             else
                 sound(def.boltSound);
             ReloadHaptic(ReloadFeel::Chamber);
