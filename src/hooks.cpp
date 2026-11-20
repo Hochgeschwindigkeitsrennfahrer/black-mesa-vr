@@ -10912,6 +10912,59 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             ApplyPistolAltButton(m_Game, m_VR, cmd);
         }
     }
+    // Hands-only physical ladders: a Use press near a ladder (left trigger,
+    // or the empty right hand) made HL2's LadderMove mount it and pull the
+    // player on (user 2026-11-20). Not on a ladder and not during a hand
+    // mount, Use within reach of a ladder is dropped unless the view aims
+    // at an entity (a door, button or charger beside the ladder still works).
+    // The hand mount's own IN_USE is added after this (applyLadderButtons).
+    static bool s_ladderUseLogged = false;
+    if (!(cmd->buttons & IN_USE))
+        s_ladderUseLogged = false;
+    if (m_VR && m_Game && (cmd->buttons & IN_USE) && bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb
+        && !onLadderNow && !m_VR->m_LadderMountActive.load(std::memory_order_relaxed)
+        && m_Game->m_EngineTrace && m_VR->m_SetupOrigin.LengthSqr() > 1.f)
+    {
+        Vector origin{};
+        Vector bottoms[32], tops[32];
+        const int n = m_Game->LocalPlayerAbsOrigin(origin) ? m_Game->CollectLadders(bottoms, tops, 32) : 0;
+        bool nearLadder = false;
+        for (int i = 0; i < n && !nearLadder; ++i)
+        {
+            const Vector axis = tops[i] - bottoms[i];
+            const float len2 = axis.LengthSqr();
+            float t = len2 > 1.f ? (origin - bottoms[i]).Dot(axis) / len2 : 0.f;
+            t = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
+            const Vector c = bottoms[i] + axis * t;
+            const float dx = c.x - origin.x, dy = c.y - origin.y;
+            const float zLo = (std::min)(bottoms[i].z, tops[i].z) - 72.f;
+            const float zHi = (std::max)(bottoms[i].z, tops[i].z) + 72.f;
+            nearLadder = dx * dx + dy * dy < 120.f * 120.f && origin.z > zLo && origin.z < zHi;
+        }
+        if (nearLadder)
+        {
+            Vector dir{};
+            QAngle::AngleVectors(cmd->viewangles, &dir, nullptr, nullptr);
+            C_BaseEntity* player = m_Game->GetLocalPlayerEntity();
+            C_BaseEntity* vm = m_Game->GetViewModelEntity();
+            CTraceFilterSkipTwoEntities filter(player, vm, 0);
+            Ray_t ray;
+            ray.Init(m_VR->m_SetupOrigin, m_VR->m_SetupOrigin + dir * 96.f);
+            CGameTrace tr{};
+            tr.m_pEnt = nullptr;
+            m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
+            C_BaseEntity* world = m_Game->GetClientEntity(0);
+            const bool atEntity = tr.fraction < 1.f && tr.m_pEnt && tr.m_pEnt != world;
+            if (!atEntity)
+            {
+                if (!s_ladderUseLogged)
+                    Game::logMsg("Ladder: Use near a ladder dropped (hands-only ladders; aim hits %s)",
+                        tr.fraction < 1.f ? "the world" : "nothing");
+                cmd->buttons &= ~IN_USE;
+            }
+            s_ladderUseLogged = true;
+        }
+    }
     applyLadderButtons();
 
     EnsureServerFlashlightHook();
