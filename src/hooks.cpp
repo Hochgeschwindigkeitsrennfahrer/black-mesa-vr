@@ -11097,6 +11097,17 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     static bool s_ladderUseLogged = false;
     if (!(cmd->buttons & IN_USE))
         s_ladderUseLogged = false;
+    // On a ladder, Use (a trigger) let go of it (HL2: +use = get off; user
+    // 2026-11-20): hands-only climbing drops it there too; letting go with
+    // both hands still gets off (the drop's IN_USE comes from
+    // applyLadderButtons below).
+    if (m_VR && m_Game && (cmd->buttons & IN_USE) && bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb && onLadderNow)
+    {
+        if (!s_ladderUseLogged)
+            Game::logMsg("Ladder: Use on the ladder dropped (hands-only ladders: let go with both hands to get off)");
+        s_ladderUseLogged = true;
+        cmd->buttons &= ~IN_USE;
+    }
     if (m_VR && m_Game && (cmd->buttons & IN_USE) && bmvr::g_PhysicalLadders && !bmvr::g_LadderStickClimb
         && !onLadderNow && !m_VR->m_LadderMountActive.load(std::memory_order_relaxed)
         && m_Game->m_EngineTrace && m_VR->m_SetupOrigin.LengthSqr() > 1.f)
