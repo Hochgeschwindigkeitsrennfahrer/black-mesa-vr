@@ -8867,10 +8867,20 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
             if (!ok)
                 continue;
             const Vector hand = ControllerTrackingToWorld(body, tracking);
+            // Only toward / away from the ladder: along the rung's normal
+            // (horizontal, perpendicular to the rung). The eye-to-rung line
+            // used before is diagonal for a hand out to the side, so each
+            // hand-over swayed the head left / right (user 2026-11-20).
             Vector dir = m_LadderPin[h].world - eye;
             dir.z = 0.f;
             if (VectorNormalize(dir) < 1.f)
                 continue;
+            if (m_LadderPin[h].hasAxis)
+            {
+                Vector nrm(-m_LadderPin[h].axis.y, m_LadderPin[h].axis.x, 0.f);
+                if (VectorNormalize(nrm) > 0.1f)
+                    dir = nrm.Dot(dir) >= 0.f ? nrm : nrm * -1.f;
+            }
             const float gap = (m_LadderPin[h].world - hand).Dot(dir);
             want += dir * gap;
             ++n;
