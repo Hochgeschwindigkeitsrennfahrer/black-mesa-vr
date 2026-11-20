@@ -39,6 +39,7 @@ set(BMVR_SOURCES
   src/vr_crowbar.cpp
   src/vr_ladder_rungs.cpp
   src/vr_sound_cuts.cpp
+  src/bmvr_crashinfo.cpp
   src/vr_weapon_menu.cpp
   src/vr_settings_panel.cpp
   src/vr_hands.cpp

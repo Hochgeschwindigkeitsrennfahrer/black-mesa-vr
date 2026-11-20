@@ -5,29 +5,42 @@
 #include <cstdint>
 #include <cstring>
 #include "bmvr_seh.h"
+#include "bmvr_crashinfo.h"
 
 static LONG CALLBACK FaultVeh(PEXCEPTION_POINTERS info)
 {
     if (!info || !info->ExceptionRecord || !info->ContextRecord)
         return EXCEPTION_CONTINUE_SEARCH;
     const DWORD code = info->ExceptionRecord->ExceptionCode;
-    if (code != 0xC0000005 && code != 0xC000001D && code != 0xC0000094)
+    // Fatal codes too (heap corruption, fail fast, stack overflow): those
+    // end the process and were never written (user 2026-11-20: a crash on a
+    // save load left no fault line). They also get a minidump.
+    const bool fatal = bmvr::crashinfo::IsFatalCode(code);
+    if (code != 0xC0000005 && code != 0xC000001D && code != 0xC0000094 && !fatal)
         return EXCEPTION_CONTINUE_SEARCH;
-    static DWORD seen[8];
+    if (fatal)
+        bmvr::crashinfo::DumpNow(info, "fatal exception code");
+    // 32 distinct addresses per process (was 8: a run's real crash could be
+    // past the cap behind caught faults).
+    static DWORD seen[32];
     static volatile LONG count = 0;
     const DWORD eip = info->ContextRecord->Eip;
     const LONG n = InterlockedIncrement(&count);
-    if (n > 8)
+    if (n > 32 && !fatal)
         return EXCEPTION_CONTINUE_SEARCH;
-    seen[n - 1] = eip;
-    for (LONG i = 0; i < n - 1; ++i)
+    if (n > 32)
+        InterlockedExchange(&count, 32);
+    const LONG slot = n > 32 ? 31 : n - 1;
+    seen[slot] = eip;
+    for (LONG i = 0; i < slot; ++i)
     {
         if (seen[i] == eip)
             return EXCEPTION_CONTINUE_SEARCH;
     }
 
     char body[1600];
-    int used = snprintf(body, sizeof(body), "fault eip=%08X code=%08X\n", eip, code);
+    int used = snprintf(body, sizeof(body), "fault eip=%08X code=%08X tid=%lu tick=%lu\n", eip, code,
+        GetCurrentThreadId(), GetTickCount());
     HMODULE mod = nullptr;
     if (GetModuleHandleExA(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -215,7 +228,7 @@ static DWORD WINAPI InitBMVR(LPVOID param)
     return 0;
 }
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
     switch (reason)
     {
@@ -228,11 +241,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         bmvr::SetDllModule(hModule);
         AddVectoredExceptionHandler(1, FaultVeh);
         AddVectoredExceptionHandler(1, CountFaults);
+        bmvr::crashinfo::Install();
         bmvr::StartWatchdog();
         bmvr::SetStage("dll_attach");
         CreateThread(nullptr, 0, InitBMVR, hModule, 0, nullptr);
         break;
     case DLL_PROCESS_DETACH:
+        bmvr::crashinfo::NoteDetach(reserved != nullptr);
         RestoreDesktopDisplayModes();
         L4D2VR_ShutdownReShadeVRBridge();
         L4D2VR_ShutdownSystemMouseInputSuppression();

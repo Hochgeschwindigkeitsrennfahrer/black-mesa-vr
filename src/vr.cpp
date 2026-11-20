@@ -1,6 +1,7 @@
 #include "vr.h"
 #include "vr_ladder_rungs.h"
 #include "vr_sound_cuts.h"
+#include "bmvr_crashinfo.h"
 #include "vr_mag_reload.h"
 #include "bmvr_prof.h"
 #include "bmvr_sampler.h"
@@ -3827,6 +3828,12 @@ void VR::PollMapFromEngine()
 void VR::OnLevelInit(const char* newmap)
 {
     m_CurrentMapName = newmap ? newmap : "";
+    Hooks::ForgetViewmodelStudioHdr();
+    // Crash hunt (2026-11-20): heap state at each level start and a few
+    // seconds into it (the crash came a few frames into the loaded map).
+    // Temporary: HeapValidate locks the heap while it walks it.
+    bmvr::crashinfo::CheckHeaps(newmap && newmap[0] ? newmap : "level start");
+    bmvr::crashinfo::ScheduleHeapChecks(newmap);
     g_EyeRtReset = true;   // RTs may be recreated with the map: drop the per-eye copies (SkyWaterPerEye)
     m_GameplayEligible = IsGameplayMapName(newmap);
     bmvr::NoteEngineMapName(newmap);
@@ -4046,6 +4053,10 @@ void VR::OnLevelShutdown()
     m_StereoRenderViewActive = false;
     m_PassThroughMainViews = 0;
     Hooks::RestoreViewmodelArmHides();
+    // The LevelInit / LevelShutdown hooks are skipped on this build: the map
+    // poll lands here, so the cached gun header (previous map's model) is
+    // dropped here (efb556f put it in the hooks only).
+    Hooks::ForgetViewmodelStudioHdr();
     {
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
         m_HasViewmodelBake = false;
