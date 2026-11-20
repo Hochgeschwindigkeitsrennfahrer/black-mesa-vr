@@ -6,6 +6,7 @@
 #include "vr_sound_cuts.h"
 #include "game.h"
 #include "bmvr_seh.h"
+#include "bmvr_flags.h"
 #include <windows.h>
 #include <cstdint>
 #include <algorithm>
@@ -189,6 +190,11 @@ namespace
         { "sound/weapons/mp5/reload_long.wav", 0.10, 0.52, "bmvr/mp5_bolt.wav" },
     };
     bool g_Made[bmvr::soundcuts::kClipCount]{};
+    // Played name: "<sample minus .wav>_<t0 ms>_<t1 ms>.wav". A changed cut
+    // gets a new file: Source's sound cache keeps a sound's length by name,
+    // so a shorter clip under an old name played on past its end (user
+    // 2026-11-20: electric noise after the glock magazine-out).
+    std::string g_Names[bmvr::soundcuts::kClipCount];
     bool g_Tried = false;
 
     void MakeAll()
@@ -200,7 +206,9 @@ namespace
         const size_t slash = dir.find_last_of(L"\\/");
         if (slash != std::wstring::npos)
             dir.resize(slash);
-        dir += L"\\bms\\sound";
+        // The running game's folder (Blue Shift / Azure Sheep run from their
+        // own), as the shotgun pump split (Game::ShotgunPumpSample).
+        dir += bmvr::g_IsBlueShift ? L"\\bshift\\sound" : bmvr::g_IsAzureSheep ? L"\\asheep\\sound" : L"\\bms\\sound";
         CreateDirectoryW(dir.c_str(), nullptr);
         dir += L"\\bmvr";
         CreateDirectoryW(dir.c_str(), nullptr);
@@ -223,14 +231,24 @@ namespace
             }
             if (!parsed)
                 continue;
-            const char* name = std::strrchr(c.sample, '/');
+            std::string sample(c.sample);
+            sample.resize(sample.size() - 4);   // ".wav"
+            char tag[32];
+            sprintf_s(tag, "_%d_%d.wav", static_cast<int>(c.t0 * 1000.0 + 0.5), static_cast<int>(c.t1 * 1000.0 + 0.5));
+            sample += tag;
+            g_Names[i] = sample;
+            const size_t slash = sample.find_last_of('/');
             std::wstring path = dir + L"\\";
-            for (const char* q = name ? name + 1 : c.sample; *q; ++q)
+            for (const char* q = sample.c_str() + (slash == std::string::npos ? 0 : slash + 1); *q; ++q)
                 path += static_cast<wchar_t>(*q);
-            g_Made[i] = WriteCut(pcm, c.t0, c.t1, path);
+            // Written once; the same cut keeps its file (and its cache entry).
+            if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
+                g_Made[i] = true;
+            else
+                g_Made[i] = WriteCut(pcm, c.t0, c.t1, path);
             made += g_Made[i] ? 1 : 0;
         }
-        Game::logMsg("Sound cuts: %d/%d clips written to bms\\sound\\bmvr", made, static_cast<int>(bmvr::soundcuts::kClipCount));
+        Game::logMsg("Sound cuts: %d/%d clips ready in sound\\bmvr", made, static_cast<int>(bmvr::soundcuts::kClipCount));
     }
 }
 
@@ -240,6 +258,6 @@ namespace bmvr::soundcuts
     {
         if (!g_Tried)
             MakeAll();
-        return (clip >= 0 && clip < kClipCount && g_Made[clip]) ? kCuts[clip].sample : fallback;
+        return (clip >= 0 && clip < kClipCount && g_Made[clip]) ? g_Names[clip].c_str() : fallback;
     }
 }
