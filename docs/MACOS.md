@@ -33,7 +33,7 @@ The CPU texture transport is selected automatically when Wine reports the Darwin
 
 ## Building and validation
 
-Build the DLL with the existing Win32 CMake target and the helper with its x64 target. SPIRV-Tools is linked statically. Its pinned source archives are fetched during configuration.
+Build the DLL with the existing Win32 CMake target and the helper with its x64 target. The Windows workflow selects clang-cl with the Visual Studio ClangCL toolset. SPIRV-Tools is linked statically. Its pinned source archives are fetched during configuration.
 
 The existing `cmake/clang-cl-xwin-x86.cmake` and `cmake/clang-cl-xwin-x64.cmake` also allow cross-compilation with a Windows SDK/MSVC CRT splat selected by `XWIN`.
 
