@@ -5738,7 +5738,13 @@ namespace
             const float handStroke = (std::max)(travel, 2.4f);
             if (MagReload::g_BoltGrab.load() && handOk)
             {
-                const float along = (anchor - gunOrigin).Dot(f);
+                // Stroke measured at the controller itself, not at the grab
+                // anchor: the anchor sits ~4 units off the controller in its
+                // own frame, so wrist tilt during the stroke (which differs
+                // with how far forward the hand holds the pump) added to or
+                // took from the pull (user 2026-11-21: pump sometimes harder,
+                // depending on where the hand snapped on).
+                const float along = (hand - gunOrigin).Dot(f);
                 // Re-anchored forward: a hand that rests on the pump/handle
                 // and drifts forward does not then read as pulled.
                 if (!s_grabbing || along > s_startAlong)

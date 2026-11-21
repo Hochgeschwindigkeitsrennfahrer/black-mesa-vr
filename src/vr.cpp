@@ -22017,7 +22017,11 @@ void VR::ReloadHaptic(ReloadFeel feel)
 
 bool VR::SatchelHandsActive() const
 {
-    return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
+    // Not with empty hands: the viewmodel class stays "satchel" after
+    // holstering it, which kept L2 as throw (haptic) and the left grip as
+    // Use ("cannot use" sound) on bare hands (user, 2026-11-21).
+    return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel()
+        && !m_EmptyHands && m_HasHeldWeapon;
 }
 
 void VR::UpdateSnarkThrow(uint32_t& buttons)
@@ -22674,7 +22678,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
         if (boltGrab)
         {
             pull = g_BoltPull.load();
-            if (pull >= 0.85f && !s_boltFull)
+            // Back stroke at 3/4 of the hand stroke (was 0.85, user
+            // 2026-11-21: more lenient).
+            if (pull >= 0.75f && !s_boltFull)
             {
                 s_boltFull = true;
                 // Back stroke: first half of pump.wav (whole wav if the split
