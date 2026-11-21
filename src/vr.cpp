@@ -8908,9 +8908,10 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
     // the view along the horizontal line to the held rung by what the real
     // hand is short of / past that rung, so pulling the arms in brings the
     // player closer and stretching them pushes away (user idea, 2026-11-18).
-    // Capped at 8 units (~20 cm) each way: LadderMove keeps the hull ~16
-    // units off the ladder, so the eye never reaches the ladder or a shaft
-    // wall behind.
+    // Capped at 8 units (~20 cm) each way on normal ladders: LadderMove
+    // keeps the hull ~16 units off the ladder, so the eye never reaches the
+    // ladder or a shaft wall behind (more where the rungs stand further
+    // out, see maxShift).
     LadderViewState& v = m_LadderView;
     static ULONGLONG s_lastMs = 0;
     const ULONGLONG now = GetTickCount64();
@@ -8920,6 +8921,14 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
         dt = 0.1f;
     Vector want(0.f, 0.f, 0.f);
     int n = 0;
+    // Cap: 8 units for the usual ladders (rungs ~24 units in front of the
+    // body). Ladders whose rungs stand further out (bm_c4a1a Xen scaffold:
+    // ~33 units) get the extra on top, so the eye ends up as close to the
+    // rungs as on a normal ladder (user 2026-11-21: hard to reach, pushed
+    // away; log showed the shift pinned at 8).
+    constexpr float kBaseMax = 8.f;
+    constexpr float kStdRungHu = 24.f;
+    float maxShift = kBaseMax;
     if (v.active && bmvr::g_PhysicalLadders && bmvr::g_LadderBodyFollowsArms && body.LengthSqr() > 1.f)
     {
         Vector eye{};
@@ -8966,6 +8975,10 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
             const float gap = (m_LadderPin[h].world - hand).Dot(dir);
             want += dir * gap;
             ++n;
+            const float rungOut = (m_LadderPin[h].world - body).Dot(dir) + bmvr::g_LadderHandBack;
+            const float cap = kBaseMax + (rungOut > kStdRungHu ? rungOut - kStdRungHu : 0.f);
+            if (cap > maxShift)
+                maxShift = cap < 24.f ? cap : 24.f;
         }
     }
     if (n > 0)
@@ -8973,9 +8986,8 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
         want = want * (1.f / static_cast<float>(n));
         want.z = 0.f;
         const float len = want.Length();
-        constexpr float kMax = 8.f;
-        if (len > kMax)
-            want = want * (kMax / len);
+        if (len > maxShift)
+            want = want * (maxShift / len);
     }
     // Follows in ~60 ms; eases back onto the body in ~150 ms when let go.
     const float tau = n > 0 ? 0.06f : 0.15f;
@@ -8989,8 +9001,8 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
     {
         s_logMs = now;
         ++s_log;
-        Game::logMsg("Ladder arms: view shift %.1f units (want %.1f, %d hand%s)",
-            v.shift.Length(), want.Length(), n, n == 1 ? "" : "s");
+        Game::logMsg("Ladder arms: view shift %.1f units (want %.1f, cap %.1f, %d hand%s)",
+            v.shift.Length(), want.Length(), maxShift, n, n == 1 ? "" : "s");
     }
     return v.shift;
 }

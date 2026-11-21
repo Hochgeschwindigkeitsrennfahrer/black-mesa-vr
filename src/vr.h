@@ -979,7 +979,8 @@ public:
     float PhysicalLadderViewOffset(float renderZ);
     // RenderView: horizontal view shift towards / away from the ladder so the
     // real hands reach the rungs they hold (arms pulled in = closer to the
-    // ladder, stretched = further). LadderBodyFollowsArms; +-8 units.
+    // ladder, stretched = further). LadderBodyFollowsArms; +-8 units (more
+    // where the rungs stand further out than 24 units, up to 24).
     Vector PhysicalLadderViewShift(const Vector& body);
     struct LadderViewState
     {
