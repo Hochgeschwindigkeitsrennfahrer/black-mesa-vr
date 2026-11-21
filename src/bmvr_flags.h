@@ -237,11 +237,13 @@ namespace bmvr
     uint32_t NormalizeMsaa(int samples);
     extern bool g_Haptics;
     // Last round out of the gun (LastShotHaptic): 0 = the normal shot buzz, 1 = a double
-    // buzz (default), 2 = one longer, weaker buzz.
+    // buzz (default), 2 = one longer buzz. Amplitude = LastShotHapticStrength (0.05-1).
     extern float g_LastShotHaptic;
-    // Trigger pulled on an empty gun (DryFireHaptic): 0 = no buzz, 1 = a weak tick (default),
-    // 2 = a weak quick double tick. Both far weaker than a shot.
+    extern float g_LastShotHapticStrength;
+    // Trigger pulled on an empty gun (DryFireHaptic): 0 = no buzz, 1 = one tick,
+    // 2 = a quick "nope" double tick (default). Amplitude = DryFireHapticStrength (0.05-1).
     extern float g_DryFireHaptic;
+    extern float g_DryFireHapticStrength;
     extern bool g_HideCrosshair;
     extern bool g_MatchHmdHz;
     extern bool g_DisableViewBob;

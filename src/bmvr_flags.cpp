@@ -140,7 +140,9 @@ namespace bmvr
     bool g_VrGlockRapidAlt = false;
     float g_FlashlightFrom = 0.f;
     float g_LastShotHaptic = 1.f;
-    float g_DryFireHaptic = 1.f;
+    float g_DryFireHaptic = 2.f;
+    float g_LastShotHapticStrength = 1.f;
+    float g_DryFireHapticStrength = 0.8f;
     static bool g_FlashlightFromSeen = false;
     bool g_FlashlightOnSquare = false;
     float g_PauseMenuAlphaPasses = 3.f;
@@ -949,6 +951,10 @@ namespace bmvr
                 if (v >= 0 && v <= 2)
                     g_DryFireHaptic = static_cast<float>(v);
             }
+            else if (std::strcmp(n, "LastShotHapticStrength") == 0)
+                g_LastShotHapticStrength = std::clamp(static_cast<float>(atof(val)), 0.05f, 1.f);
+            else if (std::strcmp(n, "DryFireHapticStrength") == 0)
+                g_DryFireHapticStrength = std::clamp(static_cast<float>(atof(val)), 0.05f, 1.f);
             else if (std::strcmp(n, "FlashlightOnSquare") == 0)
             {
                 g_FlashlightOnSquare = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);

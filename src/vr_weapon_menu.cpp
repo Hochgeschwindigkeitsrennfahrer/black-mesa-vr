@@ -2450,35 +2450,51 @@ bool VR::UpdateWeaponFireHaptics()
 void VR::StartLastShotHaptic()
 {
     constexpr auto hand = vr::TrackedControllerRole_RightHand;
-    if (static_cast<int>(bmvr::g_LastShotHaptic + 0.5f) == 2)
+    const float amp = std::clamp(bmvr::g_LastShotHapticStrength, 0.05f, 1.f);
+    const int mode = static_cast<int>(bmvr::g_LastShotHaptic + 0.5f);
+    static int s_log;
+    if (s_log < 20)
     {
-        // One longer, weaker buzz.
+        Game::logMsg("Last shot haptic mode=%d amp=%.2f bridge=%d", mode, amp, m_OpenXrHelperBridgeActive ? 1 : 0);
+        ++s_log;
+    }
+    if (mode == 2)
+    {
+        // One longer buzz.
         m_HapticFollowUpMs = 0;
-        PulseHandHapticSeconds(hand, 0.22f, 0.4f);
+        PulseHandHapticSeconds(hand, 0.22f, amp);
         return;
     }
-    // Double: the normal shot buzz, then a second one right after it.
-    PulseHandHaptic(hand, 2500, 0.85f);
-    m_HapticFollowUpMs = GetTickCount() + 110;
-    m_HapticFollowUpSec = 0.045f;
-    m_HapticFollowUpAmp = 0.85f;
+    // Double: the shot buzz, then a second one right after it.
+    PulseHandHapticSeconds(hand, 0.06f, amp);
+    m_HapticFollowUpMs = GetTickCount() + 120;
+    m_HapticFollowUpSec = 0.06f;
+    m_HapticFollowUpAmp = amp;
 }
 
 void VR::StartDryFireHaptic()
 {
     constexpr auto hand = vr::TrackedControllerRole_RightHand;
+    const float amp = std::clamp(bmvr::g_DryFireHapticStrength, 0.05f, 1.f);
     const int mode = static_cast<int>(bmvr::g_DryFireHaptic + 0.5f);
+    static int s_log;
+    if (s_log < 20 && mode != 0)
+    {
+        Game::logMsg("Dry fire haptic mode=%d amp=%.2f bridge=%d", mode, amp, m_OpenXrHelperBridgeActive ? 1 : 0);
+        ++s_log;
+    }
     if (mode == 1)
     {
         m_HapticFollowUpMs = 0;
-        PulseHandHapticSeconds(hand, 0.045f, 0.22f);
+        PulseHandHapticSeconds(hand, 0.045f, amp);
     }
     else if (mode == 2)
     {
-        PulseHandHapticSeconds(hand, 0.035f, 0.2f);
-        m_HapticFollowUpMs = GetTickCount() + 90;
+        // "Nope": the use-deny click (0.045 s), shorter and twice in quick succession.
+        PulseHandHapticSeconds(hand, 0.035f, amp);
+        m_HapticFollowUpMs = GetTickCount() + 85;
         m_HapticFollowUpSec = 0.035f;
-        m_HapticFollowUpAmp = 0.2f;
+        m_HapticFollowUpAmp = amp;
     }
 }
 

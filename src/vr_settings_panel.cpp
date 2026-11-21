@@ -201,8 +201,10 @@ namespace
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
             { "AMMO FEEDBACK", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Last shot buzz", RowKind::Choice, "LastShotHaptic", nullptr, &bmvr::g_LastShotHaptic, 1.f, 0.f, 2.f, "Off|Double|Longer, weaker" },
-            { "Empty trigger buzz", RowKind::Choice, "DryFireHaptic", nullptr, &bmvr::g_DryFireHaptic, 1.f, 0.f, 2.f, "Off|Weak tick|Weak double tick" },
+            { "Last shot buzz", RowKind::Choice, "LastShotHaptic", nullptr, &bmvr::g_LastShotHaptic, 1.f, 0.f, 2.f, "Off|Double|Long" },
+            { "Last shot strength", RowKind::Number, "LastShotHapticStrength", nullptr, &bmvr::g_LastShotHapticStrength, 0.05f, 0.05f, 1.f, "%.2f" },
+            { "Empty trigger buzz", RowKind::Choice, "DryFireHaptic", nullptr, &bmvr::g_DryFireHaptic, 1.f, 0.f, 2.f, "Off|Tick|Nope (double)" },
+            { "Empty trigger strength", RowKind::Number, "DryFireHapticStrength", nullptr, &bmvr::g_DryFireHapticStrength, 0.05f, 0.05f, 1.f, "%.2f" },
             { "PISTOLS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "One shot per trigger pull", RowKind::Toggle, "VrPistolSemiAuto", &bmvr::g_VrPistolSemiAuto, nullptr, 0, 0, 0, nullptr },
             { "Glock: fast pulls = alt-fire", RowKind::Toggle, "VrGlockRapidAlt", &bmvr::g_VrGlockRapidAlt, nullptr, 0, 0, 0, nullptr },
@@ -1352,6 +1354,10 @@ namespace
             return !g_VrCrosshair;
         if (is({ "VrLaserWidth" }))
             return !g_VrLaserBeam;
+        if (is({ "LastShotHapticStrength" }))
+            return g_LastShotHaptic < 0.5f;
+        if (is({ "DryFireHapticStrength" }))
+            return g_DryFireHaptic < 0.5f;
         if (is({ "ThrowScale", "ThrowStroke" }))
             return !g_VrHandThrow;
         if (is({ "FoveatedInner", "FoveatedMid" }))

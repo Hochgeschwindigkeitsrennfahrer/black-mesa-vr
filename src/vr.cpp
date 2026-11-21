@@ -7557,7 +7557,15 @@ void VR::ProcessInput()
         m_WeaponActionAnimUntilMs = GetTickCount() + 2800;
     }
     if (use && !s_use)
-        PulseAimHaptic(900);
+    {
+        // The hand that pressed: Use is the off hand's trigger; bare hands also use
+        // with the aim hand's trigger. (Always went to the aim hand before.)
+        const bool offHandUse = PressedDigitalAction(m_ActionUse);
+        const auto aimRole = AimControllerRole();
+        const auto offRole = aimRole == vr::TrackedControllerRole_LeftHand
+            ? vr::TrackedControllerRole_RightHand : vr::TrackedControllerRole_LeftHand;
+        PulseHandHaptic(offHandUse ? offRole : aimRole, 900, 0.6f);
+    }
     if (nextHeld && !s_next)
         PulseAimHaptic(800);
     if (prevHeld && !s_prevItem)
