@@ -1,3 +1,5 @@
+#include "openxr_cpu_bridge.h"
+#include "openxr_cpu_gpu_bridge.h"
 #include "openxr_helper_bridge.h"
 
 #ifndef NOMINMAX
@@ -25,6 +27,7 @@
 namespace
 {
     std::atomic<bool> g_OpenXrHelperStarted{ false };
+    std::atomic<bool> g_OpenXrLoading{ false };
     std::mutex g_OpenXrBridgeStateMutex;
     L4D2VROpenXrBridgeState* g_OpenXrBridgeState = nullptr;
 
@@ -320,6 +323,7 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
     if (!g_OpenXrHelperStarted.compare_exchange_strong(expected, true))
         return true;
 
+    BMVR_ConfigureMacVulkan();
     auto moduleDirectory = []() -> std::wstring
         {
             HMODULE module = nullptr;
@@ -374,7 +378,9 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
         helperDir = moduleDir + L"\\..\\VR\\openxr_helper64";
         helperExe = helperDir + L"\\OpenXRHelper64.exe";
     }
-    const std::wstring helperLog = helperDir + L"\\openxr_helper64_from_game.log";
+    char quiet[8]{};
+    const bool quietLaunch = GetEnvironmentVariableA("BMVR_QUIET", quiet, sizeof(quiet)) == 1 && quiet[0] == '1';
+    const std::wstring helperLog = quietLaunch ? L"NUL" : helperDir + L"\\openxr_helper64_from_game.log";
 
     if (GetFileAttributesW(helperExe.c_str()) == INVALID_FILE_ATTRIBUTES)
     {
@@ -417,6 +423,8 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
 
     *state = L4D2VROpenXrBridgeState{};
     state->gamePid = GetCurrentProcessId();
+    state->reservedTail0 = 0;
+    state->loadingState = g_OpenXrLoading.load(std::memory_order_acquire) ? 1u : 0u;
     state->status = static_cast<uint32_t>(L4D2VROpenXrBridgeStatus::Starting);
     state->heartbeatTickMs = GetTickCount64();
 
@@ -453,6 +461,20 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
+    // Read the same VR config as the bridge, including config2 overrides.
+    // Explicitly disable inherited FSR unless the user enabled it here.
+    const auto fsrValues = ReadConfigValues();
+    const auto fsrIt = fsrValues.find("FSR");
+    const bool fsrEnabled = fsrIt != fsrValues.end() && ParseBool(fsrIt->second, false);
+    if (!SetEnvironmentVariableA("BMVR_FSR", fsrEnabled ? "1" : "0"))
+    {
+        Game::logMsg("[VR][OpenXRHelper] Cannot set FSR environment err=%lu", GetLastError());
+        UnmapViewOfFile(state);
+        CloseHandle(mapping);
+        { std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex); g_OpenXrBridgeState = nullptr; }
+        g_OpenXrHelperStarted.store(false);
+        return false;
+    }
     if (!CreateProcessW(
         nullptr,
         commandLineText.data(),
@@ -518,7 +540,7 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
                 if (state)
                 {
                     status = state->status;
-                    submittedFrames = state->submittedFrames;
+                    submittedFrames = L4D2VR_OpenXrAtomicLoad(state->submittedFrames);
                     std::snprintf(detailCopy, sizeof(detailCopy), "%s", state->detail);
                 }
                 if (g_OpenXrBridgeState == state)
@@ -554,8 +576,8 @@ bool L4D2VR_OpenXrHelperHasSubmittedFrame()
     if (!state)
         return false;
 
-    return state->submittedFrames > 0 &&
-        state->status == static_cast<uint32_t>(L4D2VROpenXrBridgeStatus::SubmittedFrame);
+    return L4D2VR_OpenXrAtomicLoad(state->submittedFrames) > 0 &&
+        L4D2VR_OpenXrAtomicLoad(state->status) == static_cast<uint32_t>(L4D2VROpenXrBridgeStatus::SubmittedFrame);
 }
 
 bool L4D2VR_ReadOpenXrHelperSubmittedFrames(uint32_t& submittedFrames)
@@ -565,8 +587,18 @@ bool L4D2VR_ReadOpenXrHelperSubmittedFrames(uint32_t& submittedFrames)
     if (!state)
         return false;
 
-    submittedFrames = state->submittedFrames;
+    submittedFrames = L4D2VR_OpenXrAtomicLoad(state->submittedFrames);
     return true;
+}
+
+bool L4D2VR_ReadOpenXrSharedGpuCapability(uint32_t& helperPid)
+{
+    std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+    const auto* state = g_OpenXrBridgeState;
+    if (!state || state->gamePid != GetCurrentProcessId()) return false;
+    helperPid = L4D2VR_OpenXrAtomicLoad(state->helperPid);
+    return helperPid != 0 &&
+        (L4D2VR_OpenXrAtomicLoad(state->reservedTail0) & bmvr_shared_gpu::HelperCapability) != 0;
 }
 
 bool L4D2VR_ReadOpenXrHelperConsumedFrame(uint32_t& consuming, uint32_t& consumed, uint32_t& consumedCount)
@@ -576,13 +608,10 @@ bool L4D2VR_ReadOpenXrHelperConsumedFrame(uint32_t& consuming, uint32_t& consume
     if (!state)
         return false;
 
-    // count is published after the frame id. An acquire after these loads
-    // does not pair with the helper's release, so a new count could be
-    // sampled with the previous frame id and a slot reused too early.
-    consumedCount = state->helperConsumedCount;
-    L4D2VR_SeqlockAcquire();
-    consuming = state->helperConsumingFrameId;
-    consumed = state->helperConsumedFrameId;
+    consuming = L4D2VR_OpenXrAtomicLoad(state->helperConsumingFrameId);
+    consumed = L4D2VR_OpenXrAtomicLoad(state->helperConsumedFrameId);
+    consumedCount = L4D2VR_OpenXrAtomicLoad(state->helperConsumedCount);
+    std::atomic_thread_fence(std::memory_order_acquire);
     return true;
 }
 
@@ -593,26 +622,8 @@ bool L4D2VR_ReadOpenXrHmdPose(L4D2VROpenXrPoseDesc& pose, uint32_t* generation)
     if (!state)
         return false;
 
-    for (int attempt = 0; attempt < 3; ++attempt)
-    {
-        const uint32_t gen0 = state->trackingPoseGeneration;
-        if (gen0 == 0 || (gen0 & 1u))
-            continue;
-
-        L4D2VR_SeqlockAcquire();
-        L4D2VROpenXrPoseDesc snapshot = state->hmdPose;
-        L4D2VR_SeqlockAcquire();
-        const uint32_t gen1 = state->trackingPoseGeneration;
-        if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
-        {
-            pose = snapshot;
-            if (generation)
-                *generation = gen1;
-            return true;
-        }
-    }
-
-    return false;
+    return L4D2VR_OpenXrReadSnapshot(state->trackingPoseGeneration, state->hmdPose,
+        pose, generation) && pose.valid != 0;
 }
 
 bool L4D2VR_ReadOpenXrRuntimeViewConfig(L4D2VROpenXrRuntimeViewConfigDesc& config, uint32_t* generation)
@@ -622,26 +633,8 @@ bool L4D2VR_ReadOpenXrRuntimeViewConfig(L4D2VROpenXrRuntimeViewConfigDesc& confi
     if (!state)
         return false;
 
-    for (int attempt = 0; attempt < 3; ++attempt)
-    {
-        const uint32_t gen0 = state->runtimeViewConfigGeneration;
-        if (gen0 == 0 || (gen0 & 1u))
-            continue;
-
-        L4D2VR_SeqlockAcquire();
-        L4D2VROpenXrRuntimeViewConfigDesc snapshot = state->runtimeViewConfig;
-        L4D2VR_SeqlockAcquire();
-        const uint32_t gen1 = state->runtimeViewConfigGeneration;
-        if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
-        {
-            config = snapshot;
-            if (generation)
-                *generation = gen1;
-            return true;
-        }
-    }
-
-    return false;
+    return L4D2VR_OpenXrReadSnapshot(state->runtimeViewConfigGeneration, state->runtimeViewConfig,
+        config, generation) && config.valid != 0;
 }
 
 bool L4D2VR_PeekOpenXrVisibilityMaskGeneration(uint32_t* generation)
@@ -651,7 +644,7 @@ bool L4D2VR_PeekOpenXrVisibilityMaskGeneration(uint32_t* generation)
     if (!state || !generation)
         return false;
 
-    const uint32_t gen = state->visibilityMaskGeneration;
+    const uint32_t gen = L4D2VR_OpenXrAtomicLoad(state->visibilityMaskGeneration);
     if (gen == 0 || (gen & 1u))
         return false;
 
@@ -666,26 +659,8 @@ bool L4D2VR_ReadOpenXrVisibilityMask(L4D2VROpenXrVisibilityMaskDesc& mask, uint3
     if (!state)
         return false;
 
-    for (int attempt = 0; attempt < 3; ++attempt)
-    {
-        const uint32_t gen0 = state->visibilityMaskGeneration;
-        if (gen0 == 0 || (gen0 & 1u))
-            continue;
-
-        L4D2VR_SeqlockAcquire();
-        L4D2VROpenXrVisibilityMaskDesc snapshot = state->visibilityMask;
-        L4D2VR_SeqlockAcquire();
-        const uint32_t gen1 = state->visibilityMaskGeneration;
-        if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
-        {
-            mask = snapshot;
-            if (generation)
-                *generation = gen1;
-            return true;
-        }
-    }
-
-    return false;
+    return L4D2VR_OpenXrReadSnapshot(state->visibilityMaskGeneration, state->visibilityMask,
+        mask, generation) && mask.valid != 0;
 }
 
 bool L4D2VR_ReadOpenXrInputState(L4D2VROpenXrInputStateDesc& inputState, uint32_t* generation)
@@ -695,26 +670,8 @@ bool L4D2VR_ReadOpenXrInputState(L4D2VROpenXrInputStateDesc& inputState, uint32_
     if (!state)
         return false;
 
-    for (int attempt = 0; attempt < 3; ++attempt)
-    {
-        const uint32_t gen0 = state->inputStateGeneration;
-        if (gen0 == 0 || (gen0 & 1u))
-            continue;
-
-        L4D2VR_SeqlockAcquire();
-        L4D2VROpenXrInputStateDesc snapshot = state->inputState;
-        L4D2VR_SeqlockAcquire();
-        const uint32_t gen1 = state->inputStateGeneration;
-        if (gen0 == gen1 && !(gen1 & 1u) && snapshot.valid)
-        {
-            inputState = snapshot;
-            if (generation)
-                *generation = gen1;
-            return true;
-        }
-    }
-
-    return false;
+    return L4D2VR_OpenXrReadSnapshot(state->inputStateGeneration, state->inputState,
+        inputState, generation) && inputState.valid != 0;
 }
 
 bool L4D2VR_ReadOpenXrEyeGaze(L4D2VROpenXrEyeGazeDesc& gaze)
@@ -753,9 +710,9 @@ void L4D2VR_PublishOpenXrGameRenderPose(const L4D2VROpenXrPoseDesc& pose)
     if (!state)
         return;
 
-    L4D2VR_SeqlockBegin(state->gameRenderPoseGeneration);
+    const uint32_t publishSequence = L4D2VR_OpenXrBeginPublish(state->gameRenderPoseGeneration);
     state->gameRenderPose = pose;
-    L4D2VR_SeqlockEnd(state->gameRenderPoseGeneration);
+    L4D2VR_OpenXrEndPublish(state->gameRenderPoseGeneration, publishSequence);
     state->heartbeatTickMs = GetTickCount64();
 }
 
@@ -770,9 +727,9 @@ void L4D2VR_PublishOpenXrMenuQuad(const L4D2VROpenXrMenuQuadDesc& menu)
         && cur.distanceMeters == menu.distanceMeters && cur.widthMeters == menu.widthMeters
         && cur.offsetYMeters == menu.offsetYMeters && cur.contentScale == menu.contentScale)
         return;
-    L4D2VR_SeqlockBegin(state->menuQuadGeneration);
+    const uint32_t sequence = L4D2VR_OpenXrBeginPublish(state->menuQuadGeneration);
     state->menuQuad = menu;
-    L4D2VR_SeqlockEnd(state->menuQuadGeneration);
+    L4D2VR_OpenXrEndPublish(state->menuQuadGeneration, sequence);
 }
 
 void L4D2VR_PublishOpenXrHapticRequest(uint32_t handIndex, float durationSeconds, float frequency, float amplitude)
@@ -792,16 +749,12 @@ void L4D2VR_PublishOpenXrHapticRequest(uint32_t handIndex, float durationSeconds
         return;
 
     L4D2VROpenXrHapticRequestDesc& request = state->hapticRequests[handIndex];
-    uint32_t seq = request.sequence;
-    if (seq & 1u)
-        ++seq;
-
-    request.sequence = seq + 1u;
+    const uint32_t publishSequence = L4D2VR_OpenXrBeginPublish(request.sequence);
     request.valid = 1;
     request.durationSeconds = durationSeconds;
     request.frequency = frequency;
     request.amplitude = amplitude;
-    request.sequence = seq + 2u;
+    L4D2VR_OpenXrEndPublish(request.sequence, publishSequence);
     state->heartbeatTickMs = GetTickCount64();
 }
 
@@ -822,12 +775,14 @@ void L4D2VR_PublishOpenXrSharedTexturePair(
     if (!state)
         return;
 
-    L4D2VR_SeqlockBegin(state->sharedTextureGeneration);
+    const uint32_t publishSequence = L4D2VR_OpenXrBeginPublish(state->sharedTextureGeneration);
+    std::atomic_thread_fence(std::memory_order_release);
     state->eyeTextures[L4D2VR_OPENXR_EYE_LEFT] = left;
     state->eyeTextures[L4D2VR_OPENXR_EYE_RIGHT] = right;
     state->sharedTexturesReadyMask |=
         (1u << L4D2VR_OPENXR_EYE_LEFT) | (1u << L4D2VR_OPENXR_EYE_RIGHT);
-    L4D2VR_SeqlockEnd(state->sharedTextureGeneration);
+    std::atomic_thread_fence(std::memory_order_release);
+    L4D2VR_OpenXrEndPublish(state->sharedTextureGeneration, publishSequence);
     state->heartbeatTickMs = GetTickCount64();
 }
 
@@ -849,10 +804,10 @@ void L4D2VR_PublishOpenXrSharedTexture(uint32_t eyeIndex, const L4D2VROpenXrShar
         return;
     }
 
-    L4D2VR_SeqlockBegin(state->sharedTextureGeneration);
+    const uint32_t publishSequence = L4D2VR_OpenXrBeginPublish(state->sharedTextureGeneration);
     state->eyeTextures[eyeIndex] = texture;
     state->sharedTexturesReadyMask |= readyBit;
-    L4D2VR_SeqlockEnd(state->sharedTextureGeneration);
+    L4D2VR_OpenXrEndPublish(state->sharedTextureGeneration, publishSequence);
     state->heartbeatTickMs = GetTickCount64();
 
     Game::logMsg(
@@ -913,9 +868,9 @@ void L4D2VR_PublishOpenXrSharedTextureFrame(uint32_t frameId)
     if ((state->sharedTexturesReadyMask & L4D2VR_OPENXR_EYES_READY_MASK) != L4D2VR_OPENXR_EYES_READY_MASK)
         return;
 
-    L4D2VR_SeqlockBegin(state->sharedTextureFrameGeneration);
+    const uint32_t publishSequence = L4D2VR_OpenXrBeginPublish(state->sharedTextureFrameGeneration);
     state->sharedTextureFrameId = frameId;
-    L4D2VR_SeqlockEnd(state->sharedTextureFrameGeneration);
+    L4D2VR_OpenXrEndPublish(state->sharedTextureFrameGeneration, publishSequence);
     state->heartbeatTickMs = GetTickCount64();
 
     {
@@ -960,13 +915,14 @@ void L4D2VR_PublishOpenXrOverlay(uint32_t overlayIndex, const L4D2VROpenXrOverla
         return;
     }
 
-    L4D2VR_SeqlockBegin(state->overlayGeneration);
+    const uint32_t publishSequence = L4D2VR_OpenXrBeginPublish(state->overlayGeneration);
     state->overlays[overlayIndex] = overlay;
     if (overlay.valid && overlay.visible && overlay.texture.valid)
         state->overlayReadyMask |= readyBit;
     else
         state->overlayReadyMask &= ~readyBit;
-    L4D2VR_SeqlockEnd(state->overlayGeneration);
+
+    L4D2VR_OpenXrEndPublish(state->overlayGeneration, publishSequence);
     state->heartbeatTickMs = GetTickCount64();
 }
 
@@ -980,8 +936,31 @@ void L4D2VR_PublishOpenXrOverlayFrame(uint32_t frameId)
     if (!state)
         return;
 
-    L4D2VR_SeqlockBegin(state->overlayFrameGeneration);
+    const uint32_t publishSequence = L4D2VR_OpenXrBeginPublish(state->overlayFrameGeneration);
     state->overlayFrameId = frameId;
-    L4D2VR_SeqlockEnd(state->overlayFrameGeneration);
+    L4D2VR_OpenXrEndPublish(state->overlayFrameGeneration, publishSequence);
     state->heartbeatTickMs = GetTickCount64();
+}
+
+void L4D2VR_PublishOpenXrMenuPointer(const L4D2VROpenXrMenuPointerDesc& pointer)
+{
+    std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+    auto* state = g_OpenXrBridgeState;
+    if (!state) return;
+    const uint32_t sequence = L4D2VR_OpenXrBeginPublish(state->menuPointerGeneration);
+    state->menuPointer = pointer;
+    L4D2VR_OpenXrEndPublish(state->menuPointerGeneration, sequence);
+}
+
+void L4D2VR_PublishOpenXrLoadingState(bool loading)
+{
+    g_OpenXrLoading.store(loading, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+    if (g_OpenXrBridgeState)
+        InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_OpenXrBridgeState->loadingState), loading ? 1 : 0);
+}
+
+uint32_t L4D2VR_OpenXrReferenceSpaceEpoch() {
+    std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+    return g_OpenXrBridgeState ? L4D2VR_OpenXrAtomicLoad(g_OpenXrBridgeState->referenceSpaceEpoch) : 0;
 }

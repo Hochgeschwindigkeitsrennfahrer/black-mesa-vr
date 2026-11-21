@@ -1,4 +1,5 @@
 #include "vr_hand_renderer_d3d9.h"
+#include "vr_d3d9_stream_snapshot.h"
 
 #include "vr_hand_math.h"
 
@@ -442,7 +443,9 @@ float4 main(PS_INPUT input) : COLOR0
         *outTexture = nullptr;
 
         const HRESULT hrCo = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        const bool needUninit = (hrCo == S_OK);
+        // S_FALSE is a successful nested COM initialization and increments
+        // the thread's initialization count just like S_OK.
+        const bool needUninit = SUCCEEDED(hrCo);
         if (FAILED(hrCo) && hrCo != RPC_E_CHANGED_MODE)
             return false;
 
@@ -558,14 +561,17 @@ bool VrHandRendererD3D9::EnsureSharedResources(IDirect3DDevice9* device, std::st
         D3DDECL_END()
     };
 
-    if (FAILED(device->CreateVertexDeclaration(elements, &m_VertexDeclaration)) || !m_VertexDeclaration)
+    // Retain resources already created when a later stage failed. Recreating
+    // them on every retry overwrote their COM pointers without releasing them.
+    if (!m_VertexDeclaration &&
+        (FAILED(device->CreateVertexDeclaration(elements, &m_VertexDeclaration)) || !m_VertexDeclaration))
     {
         outError = "CreateVertexDeclaration failed for VR hands";
         return false;
     }
-    if (!CompileVertexShader(device, &m_VertexShader, outError))
+    if (!m_VertexShader && !CompileVertexShader(device, &m_VertexShader, outError))
         return false;
-    if (!CompilePixelShader(device, &m_PixelShader, outError))
+    if (!m_PixelShader && !CompilePixelShader(device, &m_PixelShader, outError))
         return false;
     return true;
 }
@@ -702,10 +708,16 @@ bool VrHandRendererD3D9::ClearViewmodelOcclusionStencil(IDirect3DDevice9* device
         return false;
     }
 
+    VrD3D9StreamSnapshot streamSnapshot;
+    // These hand passes only modify stream 0 (including DrawPrimitiveUP).
+    if(!streamSnapshot.Capture(device,1)) {outError="Could not snapshot hand vertex stream";return false;}
+    IDirect3DVertexDeclaration9* savedDecl=nullptr;
+    device->GetVertexDeclaration(&savedDecl);
     bool ownedBlock = false;
     IDirect3DStateBlock9* stateBlock = BeginHandStateScope(device, m_VertexDeclaration, ownedBlock);
     if (!stateBlock)
     {
+        if(savedDecl)savedDecl->Release();
         outError = "CreateStateBlock failed before VR hand stencil-bit clear";
         return false;
     }
@@ -756,6 +768,9 @@ bool VrHandRendererD3D9::ClearViewmodelOcclusionStencil(IDirect3DDevice9* device
     }
 
     EndHandStateScope(stateBlock, ownedBlock);
+    streamSnapshot.Restore();
+    device->SetVertexDeclaration(savedDecl);
+    if(savedDecl)savedDecl->Release();
     if (!haveViewport || FAILED(drawResult))
     {
         outError = "D3D9 reserved stencil-bit clear failed before VR hand world-depth mask";
@@ -788,10 +803,16 @@ bool VrHandRendererD3D9::Draw(
     if (!EnsureSharedResources(device, outError) || !EnsureMeshResources(device, handIndex, asset, outError))
         return false;
 
+    VrD3D9StreamSnapshot streamSnapshot;
+    // These hand passes only modify stream 0 (including DrawPrimitiveUP).
+    if(!streamSnapshot.Capture(device,1)) {outError="Could not snapshot hand vertex stream";return false;}
+    IDirect3DVertexDeclaration9* savedDecl=nullptr;
+    device->GetVertexDeclaration(&savedDecl);
     bool ownedBlock = false;
     IDirect3DStateBlock9* stateBlock = BeginHandStateScope(device, m_VertexDeclaration, ownedBlock);
     if (!stateBlock)
     {
+        if(savedDecl)savedDecl->Release();
         outError = "CreateStateBlock failed before VR hand draw";
         return false;
     }
@@ -1016,6 +1037,9 @@ bool VrHandRendererD3D9::Draw(
         device->SetViewport(&oldViewport);
 
     EndHandStateScope(stateBlock, ownedBlock);
+    streamSnapshot.Restore();
+    device->SetVertexDeclaration(savedDecl);
+    if(savedDecl)savedDecl->Release();
     if (FAILED(drawResult))
     {
         outError = "DrawIndexedPrimitive failed for VR hands";

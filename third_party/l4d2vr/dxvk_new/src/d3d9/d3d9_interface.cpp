@@ -385,6 +385,17 @@ namespace dxvk {
     if (unlikely(pPresentationParameters == nullptr))
       return D3DERR_INVALIDCALL;
 
+    char windowClass[128]{};
+    GetClassNameA(hFocusWindow,windowClass,sizeof(windowClass));
+    const bool auxiliary = (pPresentationParameters->BackBufferWidth > 0 && pPresentationParameters->BackBufferWidth <= 16
+        && pPresentationParameters->BackBufferHeight > 0 && pPresentationParameters->BackBufferHeight <= 16)
+        || std::strncmp(windowClass,"Qt",2)==0;
+    if (auxiliary) {
+      Logger::info(str::format("[BMVR UI v53] auxiliary device, no VR binding: ",windowClass," ",
+        pPresentationParameters->BackBufferWidth,"x",pPresentationParameters->BackBufferHeight));
+      return this->CreateDeviceEx(Adapter,DeviceType,hFocusWindow,BehaviorFlags,pPresentationParameters,nullptr,
+        reinterpret_cast<IDirect3DDevice9Ex**>(ppReturnedDeviceInterface));
+    }
     // L4D2VR: VR_Init here so the swapchain can be created at the HMD
     // recommended size. Do not ExitProcess if SteamVR is off — the game must
     // still launch; VR::InitOpenVR retries on the Game thread.
@@ -476,7 +487,12 @@ namespace dxvk {
     if (SUCCEEDED(result)
      && ppReturnedDeviceInterface != nullptr
      && *ppReturnedDeviceInterface != nullptr)
+    {
+      if (g_D3DVR9) g_D3DVR9->Release();
+      g_BmvrSourceDevice9 = *ppReturnedDeviceInterface;
       Direct3DCreateVRImpl(*ppReturnedDeviceInterface, &g_D3DVR9);
+      Logger::info(str::format("[BMVR UI v53] Source device bound: ",windowClass));
+    }
 
     return result;
   }

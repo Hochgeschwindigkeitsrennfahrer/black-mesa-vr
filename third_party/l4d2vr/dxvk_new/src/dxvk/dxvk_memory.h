@@ -653,6 +653,10 @@ namespace dxvk {
     DxvkResourceAllocation*     m_prevInChunk = nullptr;
     DxvkResourceAllocation*     m_nextInChunk = nullptr;
 
+    // External host memory must outlive command-list resource references.
+    // Default empty for existing imports and regular allocations.
+    std::shared_ptr<void>        m_importOwner;
+
     void destroyBufferViews();
 
     void free();
@@ -957,6 +961,8 @@ namespace dxvk {
     VkDeviceSize offset = 0;
     /// Pointer to mapped memory region
     void* mapPtr = nullptr;
+    /// Optional owner retained through GPU command-list allocation references.
+    std::shared_ptr<void> owner;
   };
 
 

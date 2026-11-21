@@ -1352,6 +1352,9 @@ namespace dxvk {
 
     void DrawQueuedEyeSubmitOverlays(VR* vr);
     void UpdateReShadeVrDepthAtlas(VR* vr);
+    // v50: ordinary ordered CS, not InjectCs's high-priority queue.
+    HRESULT CopyHostReadbackPair(IDirect3DSurface9* left, IDirect3DSurface9* right,
+      const Rc<DxvkBuffer>& target, UINT width, UINT height, VkDeviceSize eyeBytes);
 
   private:
 

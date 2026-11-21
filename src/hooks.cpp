@@ -2692,15 +2692,21 @@ namespace
             || std::strstr(name, "\\V_") != nullptr;
     }
 
+    std::atomic<uint32_t> g_ModelClassEpoch{1};
     bool CachedModelIsViewmodel(void* pModel)
     {
         struct Entry { void* model; bool isVm; bool filled; };
-        static Entry cache[256]{};
+        thread_local Entry cache[256]{};
+        thread_local uint32_t seenEpoch=0;
+        const uint32_t epoch=g_ModelClassEpoch.load(std::memory_order_acquire);
+        if(seenEpoch!=epoch) { std::memset(cache,0,sizeof(cache));seenEpoch=epoch; }
         if (!pModel)
             return false;
         const unsigned i = (static_cast<unsigned>(reinterpret_cast<uintptr_t>(pModel) >> 4)) & 255u;
-        if (cache[i].filled && cache[i].model == pModel)
-            return cache[i].isVm;
+        // Positive entries must be revalidated: Source can recycle a model
+        // address without a map change. Never deform props on cached identity.
+        if (cache[i].filled && cache[i].model == pModel && !cache[i].isVm)
+            return false;
         const char* name = nullptr;
         if (Hooks::m_Game && Hooks::m_Game->m_ModelInfo)
             name = SafeModelName(Hooks::m_Game->m_ModelInfo, pModel);
@@ -3832,6 +3838,33 @@ namespace
         out[0][0] = f.x; out[0][1] = r.x; out[0][2] = u.x; out[0][3] = origin.x;
         out[1][0] = f.y; out[1][1] = r.y; out[1][2] = u.y; out[1][3] = origin.y;
         out[2][0] = f.z; out[2][1] = r.z; out[2][2] = u.z; out[2][3] = origin.z;
+    }
+
+    // Source AngleMatrix uses [forward,left,up]. The old helper uses right,
+    // so both reconstructed matrices must flip column 1 together.
+    void BuildSourceModelMatrix(float out[3][4],const Vector& origin,const QAngle& angles)
+    {
+        BuildMatrix3x4FromOrgAngles(out,origin,angles);
+        for (int row=0;row<3;row++) out[row][1] = -out[row][1];
+    }
+
+    bool SehCopyRigidModelMatrix(float out[3][4],const void* pointer)
+    {
+        if (!pointer) return false;
+        float m[3][4]{};
+        BMVR_TRY { std::memcpy(m,pointer,sizeof(m)); }
+        __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+        for (int row=0;row<3;row++) for (int col=0;col<4;col++)
+            if (!std::isfinite(m[row][col])) return false;
+        const Vector x(m[0][0],m[1][0],m[2][0]);
+        const Vector y(m[0][1],m[1][1],m[2][1]);
+        const Vector z(m[0][2],m[1][2],m[2][2]);
+        if (fabsf(x.LengthSqr()-1.f)>.003f || fabsf(y.LengthSqr()-1.f)>.003f
+            || fabsf(z.LengthSqr()-1.f)>.003f || fabsf(x.Dot(y))>.003f
+            || fabsf(x.Dot(z))>.003f || fabsf(y.Dot(z))>.003f
+            || CrossProduct(x,y).Dot(z)<.997f) return false;
+        std::memcpy(out,m,sizeof(m));
+        return true;
     }
 
     void InvertMatrix3x4TR(const float in[3][4], float out[3][4])
@@ -9647,6 +9680,8 @@ namespace
             return;
         if (!vr->AppActivated())
             return;
+        if (!vr->AppActivated())
+            return;
         if (vr->HudPaintedThisFrame())
             return;
 
@@ -9849,7 +9884,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         setup.origin.y += shift.y;
     }
     if (m_VR && mainView)
+    {
+        // A previous CPU capture may already be ready. Publish it before
+        // spending another full stereo pair on the game render thread.
+        {
+            m_VR->PumpCpuReadbacks();
+        }
         m_VR->m_SetupOrigin = setup.origin;
+    }
     {
         // Headless diagnostic (BMVR_VIEW_TRACE=1): the engine's view for the
         // main pass ~4x per second, to compare scripted cameras with ours.
@@ -10379,7 +10421,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
                 rightEyeView.width, rightEyeView.height);
             ++s_eyeRvLog;
         }
-        g_Cost.eye = 2;
+        // Another nonblocking opportunity after the left eye; pixels keep
+        // their captured pose/FOV even though the current frame pose is newer.
+        {
+            m_VR->PumpCpuReadbacks();
+        }
         g_Cost.eye = 2;
         m_VR->m_StereoEye = 2;
         if (!mc)
@@ -11174,6 +11220,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else if (vguiAteAttack || (m_VR && m_VR->WorldVguiSuppressAttack()))
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+    else if (vguiAteAttack || (m_VR && m_VR->WorldVguiSuppressAttack()))
+        cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     else
     {
         // Desktop mouse fire is not used in VR (user 2026-11-19: after an
@@ -11591,6 +11639,7 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 strncpy_s(modelNameBuf, modelName, _TRUNCATE);
                 modelName = modelNameBuf;
             }
+            isViewmodel=ModelNameIsViewmodel(modelName);
         }
         static int s_dmeEnter;
         if (s_dmeEnter < 6)
@@ -11789,9 +11838,13 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 float origEntity[3][4]{};
                 float origInv[3][4]{};
                 float targetEntity[3][4]{};
-                BuildMatrix3x4FromOrgAngles(origEntity, info.origin, info.angles);
+                // Source permits OnInternalDrawModel to override pModelToWorld.
+                // Use that authoritative rigid basis when present, rather than
+                // undoing a reconstructed transform that the palette never used.
+                if (!SehCopyRigidModelMatrix(origEntity,info.pModelToWorld))
+                    BuildSourceModelMatrix(origEntity,info.origin,info.angles);
                 InvertMatrix3x4TR(origEntity, origInv);
-                BuildMatrix3x4FromOrgAngles(targetEntity, targetOrigin, targetAng);
+                BuildSourceModelMatrix(targetEntity,targetOrigin,targetAng);
                 MulMatrix3x4(targetEntity, origInv, rigidDelta);
                 rigidPtr = &rigidDelta[0][0];
             }
@@ -12006,6 +12059,20 @@ void* __cdecl Hooks::dLightcacheFindNearest(int x, int y, int z, int flags)
     void* found = LightcacheFindNearestImpl(x, y, z, flags);
     LeaveCriticalSection(&g_LcLock);
     return found;
+}
+
+void Hooks::InvalidateLevelModelCaches()
+{
+    g_ModelClassEpoch.fetch_add(1,std::memory_order_acq_rel);
+    g_LastViewmodelStudioHdr=nullptr;
+    g_LastViewmodelIdleHdr=nullptr;
+    g_LastViewmodelIdleSeq=-1;
+    g_HaveCachedLocalPlayer=false;
+    // PollMapFromEngine notices a transition after the engine may have
+    // unloaded the prior studio data. Forget old patch addresses; do not write
+    // saved mesh counts back into potentially recycled allocations.
+    for(int i=0;i<g_ArmHdrPatchCount;++i)g_ArmHdrPatches[i]={};
+    g_ArmHdrPatchCount=0;
 }
 
 void Hooks::RestoreViewmodelArmHides()

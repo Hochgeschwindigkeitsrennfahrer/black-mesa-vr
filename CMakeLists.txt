@@ -9,6 +9,21 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 
+# Freeze pipeline specialization constants before MoltenVK translates aliased
+# D3D9 color/depth sampler declarations to Metal resources.
+include(FetchContent)
+set(SPIRV_SKIP_TESTS ON CACHE BOOL "" FORCE)
+set(SPIRV_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
+set(SPIRV_TOOLS_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(SPIRV_TOOLS_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(bmvr_spirv_headers
+  URL https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.3.296.0.tar.gz)
+FetchContent_MakeAvailable(bmvr_spirv_headers)
+set(SPIRV-Headers_SOURCE_DIR "${bmvr_spirv_headers_SOURCE_DIR}" CACHE PATH "" FORCE)
+FetchContent_Declare(bmvr_spirv_tools
+  URL https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-1.3.296.0.tar.gz)
+FetchContent_MakeAvailable(bmvr_spirv_tools)
+
 set(ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(DXVK "${ROOT}/third_party/l4d2vr/dxvk_new")
 set(SRC_LIST "${ROOT}/tools/dxvk_sources.txt")
@@ -184,3 +199,6 @@ if(MSVC)
     COMPILE_DEFINITIONS "static_array=;ssize_t=intptr_t"
   )
 endif()
+
+# Specialize MoltenVK fragment modules without an additional runtime DLL.
+target_link_libraries(d3d9 PRIVATE SPIRV-Tools-opt)
