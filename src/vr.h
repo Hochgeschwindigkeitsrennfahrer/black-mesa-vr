@@ -1970,6 +1970,7 @@ private:
     DWORD m_GmanScanMs = 0;
     int m_GmanEntities[4] = {};
     int m_GmanEntityCount = 0;
+    unsigned m_GmanLoadEpoch = 0;      // m_LoadEpoch the model indexes belong to
     std::atomic<bool> m_GmanGestureActive{ false };
     bool m_OnGun = false;
     int m_GunPropIndex = 0;

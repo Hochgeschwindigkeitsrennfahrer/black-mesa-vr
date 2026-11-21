@@ -16527,6 +16527,26 @@ void VR::UpdateGmanGesture()
         setActive(false);
         return;
     }
+    // A save load on the same map does not change the map name, so LevelInit
+    // does not reset us, but the precache table is rebuilt and his model
+    // index can change (2026-11-21, bm_c1a3a: armed, quick load, never again).
+    // Wait for the load to finish, then look the index up again; the entity
+    // lump result (m_GmanMapListed) still holds for the same map.
+    if (m_VrPhase == VrPhase::Loading)
+    {
+        setActive(false);
+        return;
+    }
+    if (m_GmanLoadEpoch != m_LoadEpoch)
+    {
+        m_GmanLoadEpoch = m_LoadEpoch;
+        m_GmanModelIndex[0] = m_GmanModelIndex[1] = -1;
+        m_GmanMapState = 0;
+        m_GmanMapChecks = 0;
+        m_GmanMapCheckMs = 0;
+        m_GmanScanMs = 0;
+        m_GmanEntityCount = 0;
+    }
     const DWORD now = GetTickCount();
 
     // Is a G-Man model precached? Maps whose entity lump lists him ask once
