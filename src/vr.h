@@ -2011,6 +2011,8 @@ private:
     DWORD m_WeaponMenuClickStartMs = 0;
     int m_WeaponMenuHover = -1;
     uint32_t m_PrevHeldButtons = 0;
+    std::atomic<bool> m_TriggerBeforeMagFilter{ false };
+    bool m_PrevTriggerBeforeMagFilter = false;
     int m_WeaponMenuCount = 0;
     Vector m_WeaponMenuOrigin{};
     Vector m_WeaponMenuFwd{};

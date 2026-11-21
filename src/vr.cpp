@@ -7313,6 +7313,9 @@ void VR::ProcessInput()
         else if (nx < -sideThreshold)
             buttons |= IN_MOVELEFT;
     }
+    // Before the manual-magazine filter drops a pull on an empty gun: the
+    // empty-trigger buzz (AfterCreateMoveFireHaptics) needs that pull.
+    m_TriggerBeforeMagFilter.store((buttons & IN_ATTACK) != 0, std::memory_order_release);
     UpdateMagReload(buttons);
     UpdateGrenadePin(buttons);
     UpdateSnarkThrow(buttons);

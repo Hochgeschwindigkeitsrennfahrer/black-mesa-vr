@@ -2513,10 +2513,15 @@ void VR::AfterCreateMoveFireHaptics()
     const uint32_t held = HeldButtons();
     const bool attackEdge = (held & IN_ATTACK) && !(m_PrevHeldButtons & IN_ATTACK);
     m_PrevHeldButtons = held;
+    // Physical weapons drop IN_ATTACK on an empty gun (UpdateMagReload), so the
+    // empty-trigger buzz takes the pull from before that filter.
+    const bool rawTrigger = m_TriggerBeforeMagFilter.load(std::memory_order_acquire);
+    const bool rawEdge = rawTrigger && !m_PrevTriggerBeforeMagFilter;
+    m_PrevTriggerBeforeMagFilter = rawTrigger;
     // Do not consume clip/parity here — ProcessInput on the Present thread
     // is the path that used to rumble each shot. Only latch energy-weapon
     // trigger edges that never decrement clip.
-    if (!attackEdge || EmptyHands())
+    if ((!attackEdge && !rawEdge) || EmptyHands())
         return;
     bool melee = false;
     {
@@ -2534,11 +2539,12 @@ void VR::AfterCreateMoveFireHaptics()
     {
         if (const int shown = MagReload::g_DisplayClip.load(std::memory_order_relaxed); shown >= 0)
             clip = shown;
-        if (clip == 0)
+        if (clip == 0 && rawEdge)
             m_PendingFireHaptic.store(2, std::memory_order_release);
         return;
     }
-    m_PendingFireHaptic.store(1, std::memory_order_release);
+    if (attackEdge)
+        m_PendingFireHaptic.store(1, std::memory_order_release);
 }
 
 void VR::PulseHandHapticSeconds(vr::ETrackedControllerRole hand, float seconds, float amplitude)
