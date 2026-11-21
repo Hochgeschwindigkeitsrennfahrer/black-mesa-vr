@@ -1739,6 +1739,68 @@ static void InstallTranslucentPassHooks(uintptr_t client)
     Game::logMsg("translucent pass: hooks %s", ok ? "on" : "FAILED");
 }
 
+// Sound listener. The engine builds it from IBaseClientDLL::GetPlayerView,
+// a copy of the client's player CViewSetup. That view carries the engine view
+// angles, which CreateMove sets to the aim hand, so sounds panned with the
+// right controller (a waterfall on the right came from the left ear when
+// pointing at it). In VR gameplay the copy gets the head pose instead: HMD
+// angles (scripted camera + head inside point_viewcontrol) and the centre-eye
+// origin, as the mono path of applyL4d2VrHead in RenderView.
+namespace
+{
+    using GetPlayerViewFn = bool(__thiscall*)(void* self, CViewSetup& view);
+    GetPlayerViewFn g_OrigGetPlayerView = nullptr;
+
+    bool __fastcall GetPlayerViewHmd(void* ecx, void* edx, CViewSetup& view)
+    {
+        (void)edx;
+        const bool ok = g_OrigGetPlayerView(ecx, view);
+        VR* vr = Hooks::m_VR;
+        if (!ok || !vr || !vr->m_IsVREnabled || !vr->m_HmdPoseValid || !vr->IsGameplayEligible())
+            return ok;
+        if (!std::isfinite(view.origin.x) || !std::isfinite(view.origin.y) || !std::isfinite(view.origin.z))
+            return ok;
+        static int s_logged;
+        const Vector before = view.angles;
+        Vector camRight;
+        if (vr->ScriptedCameraActive() && vr->ScriptedCameraView(view.angles, camRight))
+        {
+            // origin stays the camera's
+        }
+        else
+        {
+            view.angles = vr->GetViewAngle();
+            view.origin = vr->GetViewOrigin(view.origin);
+        }
+        if (s_logged < 3 && fabsf(before.y - view.angles.y) > 5.f)
+        {
+            ++s_logged;
+            Game::logMsg("Sound listener: player view yaw %.1f -> head %.1f (caller engine+0x%X)", before.y,
+                view.angles.y, static_cast<unsigned>(reinterpret_cast<uintptr_t>(_ReturnAddress())
+                    - reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"))));
+        }
+        return ok;
+    }
+}
+
+static void InstallSoundListenerHmd(uintptr_t client)
+{
+    // push ebp; mov ebp,esp; mov ecx,[view]; mov eax,[ecx]; call [eax+0x30]
+    auto* fn = reinterpret_cast<unsigned char*>(client + Offsets::kClientGetPlayerViewRva);
+    static const unsigned char kHead[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x0D };
+    static const unsigned char kTail[] = { 0x8B, 0x01, 0xFF, 0x50, 0x30, 0x8B, 0x4D, 0x08 };
+    if (std::memcmp(fn, kHead, sizeof(kHead)) != 0 || std::memcmp(fn + 9, kTail, sizeof(kTail)) != 0)
+    {
+        Game::logMsg("Sound listener: GetPlayerView MISMATCH (not hooked; sounds pan with the aim hand)");
+        Game::noteMissingOffset("GetPlayerView (sound listener follows the head)");
+        return;
+    }
+    const bool ok = MH_CreateHook(fn, reinterpret_cast<LPVOID>(&GetPlayerViewHmd),
+                        reinterpret_cast<LPVOID*>(&g_OrigGetPlayerView)) == MH_OK
+        && MH_EnableHook(fn) == MH_OK;
+    Game::logMsg("Sound listener: GetPlayerView hook %s", ok ? "on" : "FAILED");
+}
+
 static void InstallParticleLevel(uintptr_t client)
 {
     {
@@ -1867,6 +1929,7 @@ static void InstallPixelVisPerEye()
     g_PerfLogApplied = bmvr::g_PerfLog;
     InstallPixelVisStats(client);
     InstallParticleLevel(client);
+    InstallSoundListenerHmd(client);
     InstallTranslucentPassHooks(client);
     InstallRenderLightShadowHook(client);
     InstallEngineWorldBatchStats();

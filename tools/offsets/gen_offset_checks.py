@@ -52,7 +52,7 @@ MODULES = {
         kCSpriteRenderer_DrawSprite kCSpriteRenderable_Draw kCEnvLaserDot_Draw kSpriteQuad kGetSpriteAxes
         kCurrentViewOriginGlobal kCViewRenderBeams_DrawBeam kClientCurrentViewIdRva kPixelVisQueryAgeCmpRva
         kPixelVisSetAgeCmpRva kPixelVisQueryFractionRva kSaveShotWriterRva kSaveShotNowRva
-        kPixelVisGetFractionRva kPixelVisQueryForViewRva kClientFrameStartRva kClientSetupBonesRva
+        kPixelVisGetFractionRva kPixelVisQueryForViewRva kClientFrameStartRva kClientGetPlayerViewRva kClientSetupBonesRva
         kClientBuildTransformationsRva kClientParticleCollectionSimulateRva kClientParticleRenderStartRva kClientDrawTranslucentARva kClientDrawTranslucentBRva kClientDrawTranslucentRenderableRva kClientRenderLightShadowRva
         kClientPrecipRenderRva kClientPcfCameraFacingRva kClientParticleMgrSimulateRva
         kLensflareWorldToScreenRva kClientFrameFrustumRva kGeneratePerspectiveFrustumRva
@@ -73,7 +73,7 @@ MODULE_OF = {n: m for m, names in MODULES.items() for n in names.split()}
 # logs): a failed check goes to the VR panel's Debug tab instead of the "VR MOD OUT OF DATE"
 # toast, since players lose nothing. Anything a player sees or feels stays out of this list.
 DEBUG_ONLY = set('''kEngineWorldBatchRva kEngineWorldStaticMeshesRva kPixelVisGetFractionRva
-    kPixelVisQueryForViewRva kClientFrameStartRva kClientSetupBonesRva kClientBuildTransformationsRva
+    kPixelVisQueryForViewRva kClientFrameStartRva kClientGetPlayerViewRva kClientSetupBonesRva kClientBuildTransformationsRva
     kClientParticleCollectionSimulateRva kClientParticleMgrSimulateRva kLensflareFractionRva'''.split())
 # Mid-function addresses (an instruction or a return address, not a function start).
 MID = re.compile(r'(Return|Insn|Cmp|Call)')

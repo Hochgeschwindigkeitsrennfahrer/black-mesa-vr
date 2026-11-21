@@ -621,6 +621,9 @@ public:
     // VPROF labels). Frame start (FRAME_RENDER_START work: bone cache
     // invalidation, threaded bone setup, ParticleMgr()->Simulate), cdecl, no args.
     static constexpr uint32_t kClientFrameStartRva = 0xF3530; // beta 26627981 (26234270: 0xF34C0)
+    // CHLClient::GetPlayerView(CViewSetup&) (IBaseClientDLL slot 61, ret 4): copies
+    // view->GetPlayerViewSetup(). The engine builds the sound listener from it.
+    static constexpr uint32_t kClientGetPlayerViewRva = 0xF2310; // beta 26627981
     // C_BaseAnimating::SetupBones (IClientRenderable this, 4 args, ret 0x10).
     static constexpr uint32_t kClientSetupBonesRva = 0x903C0; // beta 26627981 (26234270: 0x90350)
     // C_BaseAnimating::BuildTransformations (6 args, ret 0x18): runs only when
