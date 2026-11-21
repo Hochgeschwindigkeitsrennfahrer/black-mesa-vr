@@ -3,6 +3,7 @@
 #include "in_buttons.h"
 #include "bmvr_flags.h"
 #include "vr_hud_icons.h"
+#include "vr_mag_reload.h"
 #include "openxr_helper_bridge.h"
 
 #include <algorithm>
@@ -2378,7 +2379,11 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
 bool VR::UpdateWeaponFireHaptics()
 {
     if (!m_Game || !m_GameplayEligible || PauseUiActive())
+    {
+        m_HapticFollowUpMs = 0;
         return false;
+    }
+    PumpHapticFollowUp();
     C_BaseEntity* vm = m_Game->GetViewModelEntity();
     C_BaseEntity* weapon = m_Game->GetActiveWeaponEntity();
     if (weapon != m_LastFireWeapon)
@@ -2389,6 +2394,7 @@ bool VR::UpdateWeaponFireHaptics()
     }
 
     bool fired = false;
+    bool lastShot = false;
     if (vm)
     {
         const int parity = ReadMuzzleFlashParity(vm);
@@ -2406,7 +2412,11 @@ bool VR::UpdateWeaponFireHaptics()
         if (clip >= 0)
         {
             if (m_LastFireClip >= 0 && clip < m_LastFireClip)
+            {
                 fired = true;
+                // The round that emptied the gun (not a weapon without a clip: those read -1).
+                lastShot = clip == 0;
+            }
             m_LastFireClip = clip;
         }
     }
@@ -2422,8 +2432,64 @@ bool VR::UpdateWeaponFireHaptics()
     }
     if (melee)
         return false;
+    const DWORD now = GetTickCount();
+    if (lastShot && bmvr::g_LastShotHaptic >= 0.5f)
+    {
+        StartLastShotHaptic();
+        m_LastShotHapticMs = now;
+        return true;
+    }
+    // The muzzle-flash flip of that same round can land a frame after the clip
+    // drop: it must not cut the pattern short.
+    if (m_LastShotHapticMs != 0 && now - m_LastShotHapticMs < 300 && m_LastFireClip == 0)
+        return true;
     PulseHandHaptic(vr::TrackedControllerRole_RightHand, 2500, 0.85f);
     return true;
+}
+
+void VR::StartLastShotHaptic()
+{
+    constexpr auto hand = vr::TrackedControllerRole_RightHand;
+    if (static_cast<int>(bmvr::g_LastShotHaptic + 0.5f) == 2)
+    {
+        // One longer, weaker buzz.
+        m_HapticFollowUpMs = 0;
+        PulseHandHapticSeconds(hand, 0.22f, 0.4f);
+        return;
+    }
+    // Double: the normal shot buzz, then a second one right after it.
+    PulseHandHaptic(hand, 2500, 0.85f);
+    m_HapticFollowUpMs = GetTickCount() + 110;
+    m_HapticFollowUpSec = 0.045f;
+    m_HapticFollowUpAmp = 0.85f;
+}
+
+void VR::StartDryFireHaptic()
+{
+    constexpr auto hand = vr::TrackedControllerRole_RightHand;
+    const int mode = static_cast<int>(bmvr::g_DryFireHaptic + 0.5f);
+    if (mode == 1)
+    {
+        m_HapticFollowUpMs = 0;
+        PulseHandHapticSeconds(hand, 0.045f, 0.22f);
+    }
+    else if (mode == 2)
+    {
+        PulseHandHapticSeconds(hand, 0.035f, 0.2f);
+        m_HapticFollowUpMs = GetTickCount() + 90;
+        m_HapticFollowUpSec = 0.035f;
+        m_HapticFollowUpAmp = 0.2f;
+    }
+}
+
+void VR::PumpHapticFollowUp()
+{
+    if (m_HapticFollowUpMs == 0)
+        return;
+    if (static_cast<long>(GetTickCount() - m_HapticFollowUpMs) < 0)
+        return;
+    m_HapticFollowUpMs = 0;
+    PulseHandHapticSeconds(vr::TrackedControllerRole_RightHand, m_HapticFollowUpSec, m_HapticFollowUpAmp);
 }
 
 void VR::AfterCreateMoveFireHaptics()
@@ -2442,8 +2508,36 @@ void VR::AfterCreateMoveFireHaptics()
         melee = m_LastViewmodelModel.find("crowbar") != std::string::npos
             || m_LastViewmodelModel.find("wrench") != std::string::npos;
     }
-    if (!melee)
-        m_PendingFireHaptic.store(1, std::memory_order_release);
+    if (melee)
+        return;
+    // Guns with a clip buzz from the clip drop / muzzle flash (UpdateWeaponFireHaptics);
+    // a pull on an empty one gets the weak empty-trigger buzz instead of a shot's.
+    // Manual magazines: what is really in the gun (no magazine = 0).
+    int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
+    if (clip >= 0)
+    {
+        if (const int shown = MagReload::g_DisplayClip.load(std::memory_order_relaxed); shown >= 0)
+            clip = shown;
+        if (clip == 0)
+            m_PendingFireHaptic.store(2, std::memory_order_release);
+        return;
+    }
+    m_PendingFireHaptic.store(1, std::memory_order_release);
+}
+
+void VR::PulseHandHapticSeconds(vr::ETrackedControllerRole hand, float seconds, float amplitude)
+{
+    if (!bmvr::g_Haptics || IsMenuUp())
+        return;
+    if (m_OpenXrHelperBridgeActive)
+    {
+        const uint32_t openXrHand = (hand == vr::TrackedControllerRole_LeftHand)
+            ? L4D2VR_OPENXR_HAND_LEFT : L4D2VR_OPENXR_HAND_RIGHT;
+        L4D2VR_PublishOpenXrHapticRequest(openXrHand, std::clamp(seconds, 0.02f, 0.5f), 160.0f, amplitude);
+        return;
+    }
+    // OpenVR has no amplitude; its click length follows the same 0.07 s scale.
+    PulseHandHaptic(hand, static_cast<unsigned short>(std::clamp(seconds / 0.07f * 3999.f, 1.f, 3999.f)), amplitude);
 }
 
 void VR::PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short durationUs, float amplitude)

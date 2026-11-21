@@ -139,6 +139,8 @@ namespace bmvr
     bool g_VrPistolSemiAuto = false;
     bool g_VrGlockRapidAlt = false;
     float g_FlashlightFrom = 0.f;
+    float g_LastShotHaptic = 1.f;
+    float g_DryFireHaptic = 1.f;
     static bool g_FlashlightFromSeen = false;
     bool g_FlashlightOnSquare = false;
     float g_PauseMenuAlphaPasses = 3.f;
@@ -934,6 +936,18 @@ namespace bmvr
                     g_FlashlightFrom = static_cast<float>(v);
                     g_FlashlightFromSeen = true;
                 }
+            }
+            else if (std::strcmp(n, "LastShotHaptic") == 0)
+            {
+                const int v = atoi(val);
+                if (v >= 0 && v <= 2)
+                    g_LastShotHaptic = static_cast<float>(v);
+            }
+            else if (std::strcmp(n, "DryFireHaptic") == 0)
+            {
+                const int v = atoi(val);
+                if (v >= 0 && v <= 2)
+                    g_DryFireHaptic = static_cast<float>(v);
             }
             else if (std::strcmp(n, "FlashlightOnSquare") == 0)
             {

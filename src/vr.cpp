@@ -7077,7 +7077,10 @@ void VR::ProcessInput()
     if (!paused)
     {
         UpdateWeaponFireHaptics();
-        if (m_PendingFireHaptic.exchange(0, std::memory_order_acq_rel))
+        const uint32_t pendingFire = m_PendingFireHaptic.exchange(0, std::memory_order_acq_rel);
+        if (pendingFire == 2)
+            StartDryFireHaptic();
+        else if (pendingFire)
             PulseHandHaptic(vr::TrackedControllerRole_RightHand, 2500, 0.85f);
     }
 
@@ -14618,9 +14621,10 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             const float smallCell = lowerH / 7.f;
             const bool showClip = clip >= 0 && clip <= 999;
             const int primary = showClip ? clip : reserve;
+            // Nothing left in the gun: the count goes red, as low health does.
             if (primary >= 0 && primary <= 999)
                 layoutRow(weaponPanel, pad, pad, primaryH, cell, primary,
-                    theme, themeBack, ammoIcon);
+                    primary == 0 ? red : theme, primary == 0 ? redBack : themeBack, ammoIcon);
 
             const bool showRes = showClip && reserve >= 0 && reserve <= 999;
             const bool showSec = secondary >= 0 && secondary <= 999;

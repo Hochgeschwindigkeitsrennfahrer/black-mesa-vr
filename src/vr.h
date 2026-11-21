@@ -1659,6 +1659,13 @@ private:
     void ReclaimCompositorFocus(const char* reason);
     void PulseAimHaptic(unsigned short durationUs = 2500);
     void PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short durationUs, float amplitude = 0.6f);
+    // Real vibration time (OpenXR); OpenVR maps it to its 1-3999 us click.
+    void PulseHandHapticSeconds(vr::ETrackedControllerRole hand, float seconds, float amplitude);
+    // Last-shot / empty-trigger buzz patterns (LastShotHaptic, DryFireHaptic); the second
+    // pulse of a double is queued and sent by PumpHapticFollowUp (ProcessInput thread).
+    void StartLastShotHaptic();
+    void StartDryFireHaptic();
+    void PumpHapticFollowUp();
     // Reload feel (user, 2026-11-18: "doable by touch"): distinct patterns,
     // felt in both hands where the gun takes something in. The second tick
     // of a pattern is queued and sent by PumpHapticQueue (game thread).
@@ -2042,6 +2049,10 @@ private:
     WeaponMenuSlot m_WeaponMenuSlots[20]{};
     int m_LastMuzzleFlashParity = -1;
     int m_LastFireClip = -1;
+    unsigned long m_LastShotHapticMs = 0;   // GetTickCount of the last-shot pattern
+    unsigned long m_HapticFollowUpMs = 0;   // 0 = none queued
+    float m_HapticFollowUpSec = 0.f;
+    float m_HapticFollowUpAmp = 0.f;
     void* m_LastFireWeapon = nullptr;
     bool m_StereoEyeBlitOk = false;
     int m_StereoEyeBlitRank = 0;
