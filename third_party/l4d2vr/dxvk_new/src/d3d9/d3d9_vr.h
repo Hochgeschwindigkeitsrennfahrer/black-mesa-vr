@@ -11,6 +11,8 @@ class D3D9DeviceEx;
 class SharedTextureHolder;
 class VR;
 inline IDirect3DVR9* g_D3DVR9;
+// Qt/ANGLE may create an auxiliary 1x1 D3D9 device. Never bind VR to it.
+inline IDirect3DDevice9* g_BmvrSourceDevice9 = nullptr;
 
 struct D3D9_TEXTURE_VR_DESC {
   uint64_t         Image;
@@ -30,6 +32,14 @@ struct D3D9_TEXTURE_VR_DESC {
   uint32_t         SharedHandleType;
   uint32_t         SharedHandleValid;
 };
+
+struct D3D9_HOST_READBACK_LAYOUT {
+  uint32_t Width = 0, Height = 0;
+  uint64_t EyeBytes = 0, AllocationBytes = 0;
+};
+
+MIDL_INTERFACE("ec2dc113-ff34-4b93-b93d-0ea8b88f4250")
+IDirect3DHostReadback9 : public IUnknown { };
 
 MIDL_INTERFACE("7e272b32-a49c-46c7-b1a4-ef52936bec87")
 IDirect3DVR9 : public IUnknown {
@@ -55,6 +65,13 @@ IDirect3DVR9 : public IUnknown {
   // is guaranteed to reach the GPU this frame. Appended last: method indices
   // above stay stable.
   virtual HRESULT STDMETHODCALLTYPE FlushCommands() = 0;
+  // Appended v50 private API. Target owns imported pixel mapping through DXVK
+  // command-list retirement; caller must prove its EVENT complete before idle.
+  virtual HRESULT STDMETHODCALLTYPE CreateHostReadbackPair(const wchar_t* name, uint32_t width, uint32_t height,
+      D3D9_HOST_READBACK_LAYOUT* layout, IDirect3DHostReadback9** target) = 0;
+  virtual HRESULT STDMETHODCALLTYPE QueueHostReadbackPair(IDirect3DSurface9* left, IDirect3DSurface9* right,
+      IDirect3DHostReadback9* target) = 0;
+  virtual HRESULT STDMETHODCALLTYPE IsHostReadbackIdle(IDirect3DHostReadback9* target) = 0;
 };
 
 #ifdef _MSC_VER

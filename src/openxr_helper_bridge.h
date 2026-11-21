@@ -40,6 +40,8 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config);
 bool L4D2VR_OpenXrHelperBridgeIsStarted();
 bool L4D2VR_OpenXrHelperHasSubmittedFrame();
 bool L4D2VR_ReadOpenXrHelperSubmittedFrames(uint32_t& submittedFrames);
+// Optional v50 CPU-pixel transport capability in the existing v14 reserved tail.
+bool L4D2VR_ReadOpenXrSharedGpuCapability(uint32_t& helperPid);
 // Helper blit progress (bridge v14): frame id being blitted and the last one
 // whose blit finished on the GPU, plus a count of finished blits. False when
 // the bridge is not mapped.
@@ -60,6 +62,12 @@ void L4D2VR_PublishOpenXrSharedTexturePair(
 void L4D2VR_PublishOpenXrSharedTextureFrame(uint32_t frameId);
 void L4D2VR_PublishOpenXrOverlay(uint32_t overlayIndex, const L4D2VROpenXrOverlayDesc& overlay);
 void L4D2VR_PublishOpenXrOverlayFrame(uint32_t frameId);
+
+void L4D2VR_PublishOpenXrMenuPointer(const L4D2VROpenXrMenuPointerDesc& pointer);
+
+void L4D2VR_PublishOpenXrLoadingState(bool loading);
+
+uint32_t L4D2VR_OpenXrReferenceSpaceEpoch();
 void L4D2VR_PublishOpenXrMenuQuad(const L4D2VROpenXrMenuQuadDesc& menu);
 
 // VRRuntimeBackend=fake (vr_fake_helper.cpp): runs the helper's side of the

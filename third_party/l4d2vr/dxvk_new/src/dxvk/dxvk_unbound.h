@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <map>
 
 #include "dxvk_buffer.h"
 #include "dxvk_image.h"
@@ -44,7 +45,16 @@ namespace dxvk {
      */
     VkSampler samplerHandle();
     
+    // D3D9 sampled textures and constant buffers only; unsupported unbound
+    // storage/texel descriptors fail explicitly rather than sending null handles.
+    VkDescriptorImageInfo imageDescriptor(VkImageViewType type);
+
   private:
+    struct DummyImage {
+      Rc<DxvkImage> image;
+      Rc<DxvkImageView> view;
+    };
+    std::map<VkImageViewType, DummyImage> m_dummyImages;
     
     DxvkDevice*             m_device;
 

@@ -6951,6 +6951,42 @@ namespace dxvk {
               /* nothing to do */;
           }
         }
+
+        if (!m_device->features().extRobustness2.nullDescriptor) {
+          switch (binding.getDescriptorType()) {
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+              if (!descriptorInfo.image.imageView) {
+                if (binding.isMultisampled())
+                  throw DxvkError("BMVR unbound multisampled texture needs a fallback");
+                const auto sampler = descriptorInfo.image.sampler;
+                descriptorInfo.image = m_common->dummyResources().imageDescriptor(binding.getViewType());
+                descriptorInfo.image.sampler = sampler;
+              }
+              break;
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+              if (!descriptorInfo.buffer.buffer) {
+                descriptorInfo.buffer.buffer = m_common->dummyResources().bufferHandle();
+                descriptorInfo.buffer.offset = 0;
+                descriptorInfo.buffer.range = MaxUniformBufferSize;
+              }
+              break;
+            case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+              if (!descriptorInfo.buffer.buffer)
+                throw DxvkError("BMVR unbound storage buffer needs a fallback");
+              break;
+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+              if (!descriptorInfo.image.imageView)
+                throw DxvkError("BMVR unbound storage image needs a fallback");
+              break;
+            case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+            case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+              if (!descriptorInfo.bufferView)
+                throw DxvkError("BMVR unbound texel buffer needs a fallback");
+              break;
+            default: break;
+          }
+        }
       }
 
       if (m_features.test(DxvkContextFeature::DescriptorTemplates)) {

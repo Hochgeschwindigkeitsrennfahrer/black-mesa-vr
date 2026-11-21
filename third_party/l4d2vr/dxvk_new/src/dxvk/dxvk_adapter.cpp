@@ -1,3 +1,4 @@
+#include "../../../../../src/openxr_cpu_gpu_bridge.h"
 #include <cstring>
 #include <unordered_set>
 
@@ -281,6 +282,8 @@ namespace dxvk {
     const Rc<DxvkInstance>&   instance,
           DxvkDeviceFeatures  enabledFeatures) {
     DxvkDeviceExtensions devExtensions;
+    if (bmvr_shared_gpu::Requested())
+      devExtensions.extExternalMemoryHost.setMode(DxvkExtMode::Optional);
     auto devExtensionList = getExtensionList(devExtensions);
 
     // Only enable Cuda interop extensions in winevulkan and 64-bit builds in
@@ -491,6 +494,19 @@ namespace dxvk {
     // Enable raw access chains for shader backends
     enabledFeatures.nvRawAccessChains.shaderRawAccessChains =
       m_deviceFeatures.nvRawAccessChains.shaderRawAccessChains;
+
+    // BMVR macOS: D3D9 does not require geometry shaders when the meta
+    // pipelines can write Layer in the vertex shader. Keep other drivers unchanged.
+    if (m_deviceInfo.vk12.driverID == VK_DRIVER_ID_MOLTENVK) {
+      if (!m_deviceFeatures.core.features.geometryShader
+       && !enabledFeatures.vk12.shaderOutputLayer)
+        throw DxvkError("BMVR MoltenVK: neither geometryShader nor shaderOutputLayer is supported");
+      enabledFeatures.core.features.geometryShader = m_deviceFeatures.core.features.geometryShader;
+      enabledFeatures.core.features.shaderCullDistance = m_deviceFeatures.core.features.shaderCullDistance;
+      enabledFeatures.extRobustness2.robustBufferAccess2 = m_deviceFeatures.extRobustness2.robustBufferAccess2;
+      enabledFeatures.extRobustness2.nullDescriptor = m_deviceFeatures.extRobustness2.nullDescriptor;
+      Logger::info("BMVR MoltenVK compatibility: supported features and unbound-resource fallback");
+    }
 
     // Create pNext chain for additional device features
     initFeatureChain(enabledFeatures, devExtensions, instance->extensions());
@@ -1153,6 +1169,7 @@ namespace dxvk {
       &devExtensions.extGraphicsPipelineLibrary,
       &devExtensions.extHdrMetadata,
       &devExtensions.extLineRasterization,
+      &devExtensions.extExternalMemoryHost,
       &devExtensions.extMemoryBudget,
       &devExtensions.extMemoryPriority,
       &devExtensions.extMultiDraw,
