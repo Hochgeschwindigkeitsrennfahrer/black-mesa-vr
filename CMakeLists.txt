@@ -202,3 +202,14 @@ endif()
 
 # Specialize MoltenVK fragment modules without an additional runtime DLL.
 target_link_libraries(d3d9 PRIVATE SPIRV-Tools-opt)
+
+
+# Match the xwin toolchain's guarded-read behavior when using clang-cl through
+# the native Visual Studio generator as well.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND MSVC)
+  target_compile_options(d3d9 PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:/EHa>"
+    "$<$<COMPILE_LANGUAGE:CXX>:-Xclang>"
+    "$<$<COMPILE_LANGUAGE:CXX>:-disable-lifetime-markers>"
+  )
+endif()
