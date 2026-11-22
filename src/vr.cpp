@@ -7141,6 +7141,7 @@ void VR::ProcessInput()
         // fires it on IN_ATTACK only.
         UpdateMountedGun();
         const bool gunGripRight = m_OnGun || m_GunRightNear;
+        static bool s_detWas = false;
         if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped() && !gunGripRight)
         {
             buttons |= satchelHands ? IN_ATTACK2 : IN_ATTACK;
@@ -7148,8 +7149,16 @@ void VR::ProcessInput()
             {
                 const DWORD nowMs = GetTickCount();
                 MagReload::g_DetonateHeldMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
+                // Detonator click (user 2026-11-22): a buzz on the press.
+                if (!s_detWas)
+                    PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.7f);
+                s_detWas = true;
             }
+            else
+                s_detWas = true;
         }
+        else
+            s_detWas = false;
         if (!menuOwnsButtons && m_OnGun)
         {
             if (PressedDigitalAction(m_ActionSecondaryAttack))
@@ -15190,6 +15199,18 @@ void VR::ApplyTwoHandWeaponAim()
     m_SupportNearGun.store(m_TwoHandActive || distToGrip < stayR + slop
         || (!pistol && lat < stayR && along >= alongMin - slop && along <= alongMax + slop),
         std::memory_order_release);
+
+    // One light buzz in the support hand when it reaches the spot where a
+    // squeeze takes the gun (user 2026-11-22; like the MP5 bolt buzz).
+    {
+        static bool s_wasInZone = false;
+        const bool inZone = !m_TwoHandActive
+            && (pistol ? (distToGrip < enterR)
+                       : (lat < enterR && along >= alongMin && along <= alongMax));
+        if (inZone && !s_wasInZone)
+            PulseHandHaptic(leftHanded ? vr::TrackedControllerRole_RightHand : vr::TrackedControllerRole_LeftHand, 600, 0.3f);
+        s_wasInZone = inZone;
+    }
 
     const bool was = m_TwoHandActive;
     if (m_TwoHandActive && bmvr::g_TwoHandGripToggle)

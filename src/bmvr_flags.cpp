@@ -288,7 +288,7 @@ namespace bmvr
     bool g_LoadingCard = true;
     bool g_TitleLevel = true;
     bool g_ParticlesLast = true;
-    float g_GlowProxyScale = 1.5f;
+    float g_GlowProxyScale = 1.0f;
     float g_PoseHoldDeg = 0.f;
     float g_PoseHoldMm = 0.f;
     float g_GlowTraceSeconds = 0.f;

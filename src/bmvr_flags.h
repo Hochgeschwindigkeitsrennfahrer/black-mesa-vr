@@ -658,7 +658,7 @@ namespace bmvr
     extern float g_GlowSmooth;
     extern float g_GlowHideMs;
     // Tests (VR panel Debug -> TESTS, developer rows), default off:
-    // GlowProxyScale (bmvr_glow_proxy_scale, default 1.5 since 2026-11-11,
+    // GlowProxyScale (bmvr_glow_proxy_scale, default 1 since 2026-11-22 (was 1.5),
     // 1 = stock): the glow occlusion test area is this many times wider, so a query counts more pixels and
     // its visible fraction moves in finer steps.
     // PoseHoldDeg / PoseHoldMm (bmvr_pose_hold_deg / _mm, 0 = off): the game
