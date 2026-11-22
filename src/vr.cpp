@@ -15421,13 +15421,16 @@ bool VR::UpdateShoulderGestures(bool paused)
     // Returns true while the right hand is in its shoulder or hip zone, so
     // the right grip does not also toggle the flashlight there.
     struct Zone { DWORD enteredMs = 0; bool armed = false; bool gripDown = true; };
-    static Zone s_left, s_right, s_hipRight, s_hipLeft;
+    static Zone s_left, s_right, s_hipRight, s_hipLeft, s_head;
     // Zone settings: -1 = off (user 2026-11-19: one row per zone).
     const int leftAction = static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder));
     const int shoulderW = static_cast<int>(std::lround(bmvr::g_GestureWeaponShoulder));
     const int hipRightW = static_cast<int>(std::lround(bmvr::g_GestureWeaponHipRight));
     const int hipLeftW = static_cast<int>(std::lround(bmvr::g_GestureWeaponHipLeft));
-    const bool active = (leftAction >= 0 || shoulderW >= 0 || hipRightW >= 0 || hipLeftW >= 0)
+    // Forehead zone: on by itself while the flashlight comes from the head
+    // (FlashlightFrom 2), no row of its own (user 2026-11-22).
+    const bool headFlash = static_cast<int>(bmvr::g_FlashlightFrom + 0.5f) == 2;
+    const bool active = (leftAction >= 0 || shoulderW >= 0 || hipRightW >= 0 || hipLeftW >= 0 || headFlash)
         && m_GameplayEligible && !paused && !MenuGameplayBlocked()
         && !m_WeaponMenuOpen && !m_SettingsOpen && m_HmdPoseValid;
     if (!active)
@@ -15436,6 +15439,8 @@ bool VR::UpdateShoulderGestures(bool paused)
         s_right = Zone{};
         s_hipRight = Zone{};
         s_hipLeft = Zone{};
+        s_head = Zone{};
+        m_GestureZoneLeft = false;
         return false;
     }
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
@@ -15571,7 +15576,26 @@ bool VR::UpdateShoulderGestures(bool paused)
             swappedKey ? ", that weapon moves to " : "", swappedKey ? swappedKey : "", ok ? "saved" : "SAVE FAILED");
     };
     const bool leftIn = leftAction >= 0 && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
-    m_GestureZoneLeft = leftIn;
+    // Left hand at the forehead: just ahead of the eyes (the headset front
+    // is ~8 cm ahead of them), above eye level, within 20 cm of the middle.
+    // Starts where the shoulder zone ends (along 0.04), so they never overlap.
+    bool headIn = false;
+    if (headFlash && m_LeftControllerTrackingValid)
+    {
+        const Vector d = m_LeftControllerPosAbs - m_HmdPosAbs;
+        const float along = d.Dot(fwd) / scale;
+        const float lateral = d.Dot(right) / scale;
+        const float height = d.z / scale;
+        headIn = along > 0.04f && along < 0.25f && std::fabs(lateral) < 0.20f
+            && height > -0.03f && height < 0.25f;
+    }
+    m_GestureZoneLeft = leftIn || headIn;
+    if (step(s_head, headIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
+    {
+        PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
+        m_PendingImpulse.store(100, std::memory_order_release);
+        Game::logMsg("Forehead gesture: flashlight");
+    }
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = shoulderW >= 0 && m_PhysicalRightTrackingValid && !m_TwoHandActive
         && inZone(m_PhysicalRightPosAbs, 1.f) && zoneLive(shoulderW);
