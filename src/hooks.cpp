@@ -13319,9 +13319,7 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
             QAngle dir = m_VR->GetAimAngles();
             if (leftHand && !m_VR->TwoHandGripActive())
             {
-                // Same sample the gun hand aims with (aim pose + Gun angle), so
-                // both hands at one angle shine the same way.
-                dir = m_VR->GetLeftAimAbsAngle();
+                dir = m_VR->GetLeftControllerAbsAngle();
                 dir.x -= bmvr::g_AimPitchOffset;
                 dir.z = 0.f;
             }
@@ -13341,7 +13339,7 @@ void __fastcall Hooks::dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, vo
             }
             Vector hand{};
             if (poseFresh)
-                hand = leftHand ? m_VR->GetLeftAimAbsPos(body) : m_VR->GetRightControllerAbsPos(body);
+                hand = leftHand ? m_VR->GetLeftControllerAbsPos(body) : m_VR->GetRightControllerAbsPos(body);
             // The flag can still flip between this check and the conversion:
             // a 'hand' on the head view point is that fallback, not a hand.
             if (poseFresh && (hand - m_VR->GetViewOrigin(body)).LengthSqr() > 1.5f * 1.5f)

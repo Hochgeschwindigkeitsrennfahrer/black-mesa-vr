@@ -10003,18 +10003,6 @@ QAngle VR::GetRightControllerAbsAngle() const
     return m_RightControllerAngAbs;
 }
 
-Vector VR::GetLeftAimAbsPos(const Vector& eyePosition) const
-{
-    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    return ControllerTrackingToWorld(eyePosition, m_LeftAimPosAbs);
-}
-
-QAngle VR::GetLeftAimAbsAngle() const
-{
-    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    return m_LeftAimAngAbs;
-}
-
 QAngle VR::GetLeftControllerAbsAngle() const
 {
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
@@ -12929,8 +12917,6 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
     {
         m_LeftControllerPosAbs = physLeft.pos;
         m_LeftControllerAngAbs = physLeft.ang;
-        m_LeftAimPosAbs = weaponLeft.valid ? weaponLeft.pos : physLeft.pos;
-        m_LeftAimAngAbs = weaponLeft.valid ? weaponLeft.ang : physLeft.ang;
         m_LeftControllerTracking = physLeft.pose.mDeviceToAbsoluteTracking;
     }
     m_PhysicalRightTrackingValid = physRight.valid;
