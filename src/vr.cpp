@@ -15252,7 +15252,10 @@ void VR::ApplyTwoHandWeaponAim()
                 : (holdingSqueeze && lat <= stayR
                     && along >= (alongMin - slop) && along <= (alongMax + slop));
     }
-    else if ((bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
+    // Press edge in both modes: a grip held since a mag/shell feed (or any
+    // squeeze made away from the gun) must not snap onto the gun when the
+    // hand drifts into the zone (user 2026-11-22).
+    else if (squeezeEdge
         && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kInHand
         // Shotgun: the attached support hand works the pump
         // (UpdateMagReload), so a squeeze on a pump that needs racking
