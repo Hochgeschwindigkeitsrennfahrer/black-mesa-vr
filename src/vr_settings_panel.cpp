@@ -345,7 +345,7 @@ namespace
             { "SAVINGS (SAME IMAGE)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Post copies: swap, no copy", RowKind::Toggle, "PostCopySwap", &bmvr::g_PostCopySwap, nullptr, 0, 0, 0, nullptr },
             { "Light shadows: once per frame", RowKind::Toggle, "ShadowsOncePerFrame", &bmvr::g_ShadowsOncePerFrame, nullptr, 0, 0, 0, nullptr },
-            { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
+            { "Limit glass refraction copies", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
             // Copies per eye the row above lets through (1 = once); more = glass behind glass refracts again.
             { "Refraction copies per eye", RowKind::Number, "RefractCopiesPerEye", nullptr, &bmvr::g_RefractCopiesPerEye, 1.f, 1.f, 8.f, "%.0f" },
             // Capture/view tests are not saved (no key): always off after a restart.
