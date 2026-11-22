@@ -11161,6 +11161,24 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             const Vector wish = hmdF * analogF + hmdR * analogS;
             cmd->forwardmove += DotProduct2D(wish, cF);
             cmd->sidemove += DotProduct2D(wish, cR);
+            // Swimming: the engine's WaterMove goes along the full 3D view
+            // (forward * fmove + right * smove, upmove added to z), and the
+            // view is the weapon aim, so a two-handed gun aimed up/down made
+            // the player swim up/down (user 2026-11-22). Send the stick as
+            // the head's 3D direction expressed in the aim's basis instead.
+            if (!ladderMode && m_Game && m_Game->LocalPlayerWaterLevel() >= 2)
+            {
+                Vector hF, hR, hU, aF, aR, aU;
+                QAngle::AngleVectors(QAngle(hmdVa.x, hmdVa.y, 0.f), &hF, &hR, &hU);
+                QAngle::AngleVectors(QAngle(aim.x, aim.y, 0.f), &aF, &aR, &aU);
+                const Vector w = hF * analogF + hR * analogS;
+                const float f = DotProduct(w, aF);
+                const float s = DotProduct(w, aR);
+                cmd->forwardmove += f - DotProduct2D(wish, cF);
+                cmd->sidemove += s - DotProduct2D(wish, cR);
+                // z the aim's forward/right do not give (+ stick-held jump/duck adds its own upmove)
+                cmd->upmove += w.z - (aF.z * f + aR.z * s);
+            }
         }
         else
         {
