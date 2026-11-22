@@ -182,6 +182,7 @@ namespace bmvr
     int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
+    float g_QuickDrawSec = 0.12f;
     bool g_SkipDrawAnim = true;
     bool g_DeltaSeqIdle = true;
     bool g_ScopeClipIdle = true;
@@ -1027,6 +1028,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "SprintAimedPose") == 0)
                 g_SprintAimedPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "QuickDrawSec") == 0)
+                g_QuickDrawSec = static_cast<float>(atof(val));
             else if (std::strcmp(n, "SkipDrawAnim") == 0)
                 g_SkipDrawAnim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "DeltaSeqIdle") == 0)

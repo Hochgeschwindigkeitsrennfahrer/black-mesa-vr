@@ -11117,6 +11117,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     }
     if (m_VR && m_VR->EmptyHands() && !m_VR->OnMountedGun())
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+    // Quick draw: the deploy wait after a weapon switch (about 0.5 s) cut short.
+    if (m_Game && bmvr::g_QuickDrawSec >= 0.f)
+        m_Game->ClampServerWeaponDeploy(bmvr::g_QuickDrawSec);
     // Predicted FireBullets add m_vecPunchAngle on the client. That punch
     // resets on map load and then walks the visible hit off the crosshair.
     // Zero it for every weapon, not only the MP5.

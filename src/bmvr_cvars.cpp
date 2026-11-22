@@ -233,6 +233,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrCrosshairDot, nullptr },
             { "bmvr_skip_draw_anim", "VR: guns appear in the hand in their idle pose (no draw/holster/pickup animation)",
               Kind::Bool, 0.f, 1.f, &g_SkipDrawAnim, nullptr },
+            { "bmvr_quick_draw_sec", "VR: after a weapon switch the gun can fire after this many seconds (the game's own draw wait is ~0.5 s; -1 = game default)",
+              Kind::Float, -1.f, 1.f, nullptr, &g_QuickDrawSec },
             { "bmvr_throw_stroke", "VR: frag throw speed and direction from the whole throwing stroke, far point of the hold to the release (0 = strongest ~66 ms fit, default)",
               Kind::Bool, 0.f, 1.f, &g_ThrowStroke, nullptr },
             { "bmvr_delta_seq_idle", "VR: tau/crossbow show idle instead of the sideways reference pose after a fast weapon-menu switch",

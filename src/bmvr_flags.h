@@ -427,6 +427,7 @@ namespace bmvr
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
+    extern float g_QuickDrawSec;         // after a weapon switch the draw wait is cut to this many seconds (< 0 = off)
     extern bool g_SkipDrawAnim;          // draw/holster/pickup animations show the idle pose
     extern bool g_ThrowStroke;           // frag throw velocity from the throwing stroke (far point of the hold -> release)
     extern bool g_DeltaSeqIdle;          // a delta layer as the main viewmodel sequence shows idle (tau/crossbow)

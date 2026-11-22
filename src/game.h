@@ -142,6 +142,10 @@ public:
     // own count). Only when the server clip equals expectClip. Returns false
     // (nothing written) when the server weapon cannot be reached safely.
     bool SetServerActiveWeaponClip(int expectClip, int newClip);
+    // Quick draw: right after the active weapon changed, cuts the server weapon's
+    // next primary / secondary attack time (the deploy wait) to curtime + capSec.
+    // Call every usercmd; returns true on the tick it shortened a timer.
+    bool ClampServerWeaponDeploy(float capSec);
     bool WeaponHasNoAmmo(C_BaseEntity* weapon);
     // m_nBody (bodygroups) of a client entity; -1 if unknown.
     int ReadEntityBody(void* entity);
