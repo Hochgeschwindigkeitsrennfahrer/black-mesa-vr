@@ -15577,8 +15577,10 @@ bool VR::UpdateShoulderGestures(bool paused)
     };
     const bool leftIn = leftAction >= 0 && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
     // Left hand at the forehead: just ahead of the eyes (the headset front
-    // is ~8 cm ahead of them), above eye level, within 20 cm of the middle.
-    // Starts where the shoulder zone ends (along 0.04), so they never overlap.
+    // is ~8 cm ahead of them), from just below eye level up, within 25 cm of
+    // the middle. Reaches 40 cm ahead and 15 cm down so the hand need not hit
+    // the headset (user 2026-11-22). Starts where the shoulder zone ends
+    // (along 0.04), so they never overlap.
     bool headIn = false;
     if (headFlash && m_LeftControllerTrackingValid)
     {
@@ -15586,8 +15588,8 @@ bool VR::UpdateShoulderGestures(bool paused)
         const float along = d.Dot(fwd) / scale;
         const float lateral = d.Dot(right) / scale;
         const float height = d.z / scale;
-        headIn = along > 0.04f && along < 0.25f && std::fabs(lateral) < 0.20f
-            && height > -0.03f && height < 0.25f;
+        headIn = along > 0.04f && along < 0.40f && std::fabs(lateral) < 0.25f
+            && height > -0.15f && height < 0.25f;
     }
     m_GestureZoneLeft = leftIn || headIn;
     if (step(s_head, headIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
