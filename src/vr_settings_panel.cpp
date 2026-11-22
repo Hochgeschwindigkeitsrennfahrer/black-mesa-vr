@@ -1443,7 +1443,15 @@ namespace
             return BindRowAction(r) != BindRowAction(r, true);
         if (r.kind != RowKind::Toggle && r.kind != RowKind::Number && r.kind != RowKind::Choice)
             return false;
-        return r.key && !IsDefault(r);
+        // Key-less rows (bmvr_* fixes, tests, tuning) count too: "Reset tab" puts them back,
+        // so they must be marked and counted (user 2026-11-22: render fixes were not).
+        if (r.f && (r.f == &bmvr::g_VmTuneSeatCm || r.f == &bmvr::g_VmTuneSeatDeg))
+        {
+            float cm = 0.f, deg = 0.f;
+            bmvr::HeldWeaponSeatDefaults(cm, deg);   // per weapon, as ResetTabRows
+            return std::fabs(*r.f - (r.f == &bmvr::g_VmTuneSeatCm ? cm : deg)) > 1e-4f;
+        }
+        return !IsDefault(r);
     }
     // Changed developer rows of tab `tab` that are hidden ("Show developer rows"
     // off): shown as a note beside "Reset tab", which leaves them alone.
