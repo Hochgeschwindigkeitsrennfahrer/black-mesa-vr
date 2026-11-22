@@ -309,6 +309,10 @@ public:
     // filled from AimControllerRole(). Independent hand meshes use these.
     Vector m_LeftControllerPosAbs{};
     QAngle m_LeftControllerAngAbs{};
+    // The left controller's weapon-style (aim pose) sample: what the right
+    // hand's aim uses, for a left-hand flashlight that matches the gun hand.
+    Vector m_LeftAimPosAbs{};
+    QAngle m_LeftAimAngAbs{};
     vr::HmdMatrix34_t m_LeftControllerTracking{};
     vr::TrackedDeviceIndex_t m_LeftControllerDevice = vr::k_unTrackedDeviceIndexInvalid;
     bool m_LeftControllerTrackingValid = false;
@@ -937,6 +941,8 @@ public:
     QAngle GetRightControllerAbsAngle() const;
     Vector GetLeftControllerAbsPos(const Vector& eyePosition) const;
     QAngle GetLeftControllerAbsAngle() const;
+    Vector GetLeftAimAbsPos(const Vector& eyePosition) const;
+    QAngle GetLeftAimAbsAngle() const;
     QAngle GetAimAngles() const;
     QAngle GetUseAimAngles() const;
     // Angles from the engine eye (m_SetupOrigin, where the server's +use
