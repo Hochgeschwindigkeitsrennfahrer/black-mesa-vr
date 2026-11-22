@@ -162,6 +162,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_DesktopMouseGuard, nullptr },
             { "bmvr_gun_hand_cuff_cap", "VR: cap the open HEV glove cuff of the gun's own hands (seen from the wrist side)",
               Kind::Bool, 0.f, 1.f, &g_GunHandCuffCap, nullptr },
+            { "bmvr_pump_stroke_controller", "VR: A/B: bolt/pump stroke measured at the controller, shotgun back stroke at 0.75 (0 = before 99c2b29: grab anchor, 0.85)",
+              Kind::Bool, 0.f, 1.f, &g_PumpStrokeAtController, nullptr },
             { "bmvr_pause_skip_paints", "VR: pause-menu paints dropped at the start of each pause (the first carry the flat menu background)",
               Kind::Float, 0.f, 10.f, nullptr, &g_PauseSkipPaints },
             { "bmvr_clip_hand_pose", "VR: left glove takes Black Mesa's reload-clip hand pose on a held magazine, the MP5 bolt and the glock slide",

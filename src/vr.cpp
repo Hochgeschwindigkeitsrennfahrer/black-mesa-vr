@@ -22751,7 +22751,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             pull = g_BoltPull.load();
             // Back stroke at 3/4 of the hand stroke (was 0.85, user
             // 2026-11-21: more lenient).
-            if (pull >= 0.75f && !s_boltFull)
+            if (pull >= (bmvr::g_PumpStrokeAtController ? 0.75f : 0.85f) && !s_boltFull)
             {
                 s_boltFull = true;
                 // Back stroke: first half of pump.wav (whole wav if the split

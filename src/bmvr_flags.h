@@ -891,6 +891,7 @@ namespace bmvr
     extern bool g_TripmineFaceAim;
     extern bool g_PauseCaptureArm; // DEBUG: capture the next pause (not saved)
     extern bool g_DesktopMouseGuard; // VR: no desktop mouse fire, stuck desktop buttons released
+    extern bool g_PumpStrokeAtController; // bolt/pump stroke measured at the controller, back stroke at 0.75 (99c2b29); off = grab anchor, 0.85
     extern bool g_GunHandCuffCap; // cap the open HEV cuff of the gun's own hands // tripmine placed along the mine face (controller up)
     extern float g_GunHandCuff; // gun's own right hand: forearm folds this far behind the wrist (units at scale 1)
     extern float g_VrRecoilScale;

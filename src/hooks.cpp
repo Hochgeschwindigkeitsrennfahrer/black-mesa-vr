@@ -5820,7 +5820,9 @@ namespace
                 // with how far forward the hand holds the pump) added to or
                 // took from the pull (user 2026-11-21: pump sometimes harder,
                 // depending on where the hand snapped on).
-                const float along = (hand - gunOrigin).Dot(f);
+                // Dev A/B ("Pump stroke at the controller"): off = the old grab
+                // anchor point.
+                const float along = ((bmvr::g_PumpStrokeAtController ? hand : anchor) - gunOrigin).Dot(f);
                 // Re-anchored forward: a hand that rests on the pump/handle
                 // and drifts forward does not then read as pulled.
                 if (!s_grabbing || along > s_startAlong)
