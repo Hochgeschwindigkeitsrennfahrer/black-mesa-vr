@@ -1739,6 +1739,81 @@ static void InstallTranslucentPassHooks(uintptr_t client)
     Game::logMsg("translucent pass: hooks %s", ok ? "on" : "FAILED");
 }
 
+// Sound listener. CViewRender::SetUpView hands the engine the player view as
+// the listener (engine->SetAudioState). That view carries the engine view
+// angles, which CreateMove sets to the aim hand, so sounds panned with the
+// right controller (a waterfall on the right came from the left ear when
+// pointing at it). In VR gameplay the listener gets the head pose instead:
+// HMD angles (scripted camera + head inside point_viewcontrol) and the
+// centre-eye origin, as the mono path of applyL4d2VrHead in RenderView.
+namespace
+{
+    struct AudioStateBm
+    {
+        Vector origin;
+        Vector angles;
+        bool underwater;
+    };
+    static_assert(sizeof(AudioStateBm) == 28, "Host_SetAudioState copies 7 dwords");
+    using SetAudioStateFn = void(__thiscall*)(void* self, const AudioStateBm& state);
+    SetAudioStateFn g_OrigSetAudioState = nullptr;
+
+    void __fastcall SetAudioStateHmd(void* ecx, void* edx, const AudioStateBm& in)
+    {
+        (void)edx;
+        VR* vr = Hooks::m_VR;
+        if (!vr || !vr->m_IsVREnabled || !vr->m_HmdPoseValid || !vr->IsGameplayEligible()
+            || !std::isfinite(in.origin.x) || !std::isfinite(in.origin.y) || !std::isfinite(in.origin.z))
+        {
+            g_OrigSetAudioState(ecx, in);
+            return;
+        }
+        AudioStateBm st = in;
+        Vector camRight;
+        if (!(vr->ScriptedCameraActive() && vr->ScriptedCameraView(st.angles, camRight)))
+        {
+            st.angles = vr->GetViewAngle();
+            st.origin = vr->GetViewOrigin(in.origin);
+        }
+        static int s_logged;
+        if (s_logged < 3 && fabsf(in.angles.y - st.angles.y) > 5.f)
+        {
+            ++s_logged;
+            Game::logMsg("Sound listener: view yaw %.1f -> head yaw %.1f", in.angles.y, st.angles.y);
+        }
+        g_OrigSetAudioState(ecx, st);
+    }
+}
+
+static void InstallSoundListenerHmd()
+{
+    const auto engine = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
+    if (!engine)
+        return;
+    // push ebp; mov ebp,esp; push [ebp+8]; call Host_SetAudioState, whose body is
+    // push ebp; mov ebp,esp; push esi; mov esi,[ebp+8]; mov ecx,7
+    auto* fn = reinterpret_cast<unsigned char*>(engine + Offsets::kEngineSetAudioStateRva);
+    static const unsigned char kWrap[] = { 0x55, 0x8B, 0xEC, 0xFF, 0x75, 0x08, 0xE8 };
+    static const unsigned char kHost[] = { 0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0xB9, 0x07, 0x00, 0x00, 0x00 };
+    bool match = std::memcmp(fn, kWrap, sizeof(kWrap)) == 0;
+    if (match)
+    {
+        int32_t rel;
+        std::memcpy(&rel, fn + 7, 4);
+        match = std::memcmp(fn + 11 + rel, kHost, sizeof(kHost)) == 0;
+    }
+    if (!match)
+    {
+        Game::logMsg("Sound listener: SetAudioState MISMATCH (not hooked; sounds pan with the aim hand)");
+        Game::noteMissingOffset("SetAudioState (sound listener follows the head)");
+        return;
+    }
+    const bool ok = MH_CreateHook(fn, reinterpret_cast<LPVOID>(&SetAudioStateHmd),
+                        reinterpret_cast<LPVOID*>(&g_OrigSetAudioState)) == MH_OK
+        && MH_EnableHook(fn) == MH_OK;
+    Game::logMsg("Sound listener: SetAudioState hook %s", ok ? "on" : "FAILED");
+}
+
 static void InstallParticleLevel(uintptr_t client)
 {
     {
@@ -1867,6 +1942,7 @@ static void InstallPixelVisPerEye()
     g_PerfLogApplied = bmvr::g_PerfLog;
     InstallPixelVisStats(client);
     InstallParticleLevel(client);
+    InstallSoundListenerHmd();
     InstallTranslucentPassHooks(client);
     InstallRenderLightShadowHook(client);
     InstallEngineWorldBatchStats();
@@ -5738,7 +5814,15 @@ namespace
             const float handStroke = (std::max)(travel, 2.4f);
             if (MagReload::g_BoltGrab.load() && handOk)
             {
-                const float along = (anchor - gunOrigin).Dot(f);
+                // Stroke measured at the controller itself, not at the grab
+                // anchor: the anchor sits ~4 units off the controller in its
+                // own frame, so wrist tilt during the stroke (which differs
+                // with how far forward the hand holds the pump) added to or
+                // took from the pull (user 2026-11-21: pump sometimes harder,
+                // depending on where the hand snapped on).
+                // Dev A/B ("Pump stroke at the controller"): off = the old grab
+                // anchor point.
+                const float along = ((bmvr::g_PumpStrokeAtController ? hand : anchor) - gunOrigin).Dot(f);
                 // Re-anchored forward: a hand that rests on the pump/handle
                 // and drifts forward does not then read as pulled.
                 if (!s_grabbing || along > s_startAlong)
@@ -11035,6 +11119,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     }
     if (m_VR && m_VR->EmptyHands() && !m_VR->OnMountedGun())
         cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+    // Quick draw: the deploy wait after a weapon switch (about 0.5 s) cut short.
+    if (m_Game && bmvr::g_QuickDrawSec >= 0.f)
+        m_Game->ClampServerWeaponDeploy(bmvr::g_QuickDrawSec);
     // Predicted FireBullets add m_vecPunchAngle on the client. That punch
     // resets on map load and then walks the visible hit off the crosshair.
     // Zero it for every weapon, not only the MP5.
@@ -11079,6 +11166,24 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             const Vector wish = hmdF * analogF + hmdR * analogS;
             cmd->forwardmove += DotProduct2D(wish, cF);
             cmd->sidemove += DotProduct2D(wish, cR);
+            // Swimming: the engine's WaterMove goes along the full 3D view
+            // (forward * fmove + right * smove, upmove added to z), and the
+            // view is the weapon aim, so a two-handed gun aimed up/down made
+            // the player swim up/down (user 2026-11-22). Send the stick as
+            // the head's 3D direction expressed in the aim's basis instead.
+            if (!ladderMode && m_Game && m_Game->LocalPlayerWaterLevel() >= 2)
+            {
+                Vector hF, hR, hU, aF, aR, aU;
+                QAngle::AngleVectors(QAngle(hmdVa.x, hmdVa.y, 0.f), &hF, &hR, &hU);
+                QAngle::AngleVectors(QAngle(aim.x, aim.y, 0.f), &aF, &aR, &aU);
+                const Vector w = hF * analogF + hR * analogS;
+                const float f = DotProduct(w, aF);
+                const float s = DotProduct(w, aR);
+                cmd->forwardmove += f - DotProduct2D(wish, cF);
+                cmd->sidemove += s - DotProduct2D(wish, cR);
+                // z the aim's forward/right do not give (+ stick-held jump/duck adds its own upmove)
+                cmd->upmove += w.z - (aF.z * f + aR.z * s);
+            }
         }
         else
         {
@@ -12794,7 +12899,7 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             SafeTextureName(texture), destW, destH, srcName, srcW, srcH,
             srcRect ? srcRect->x : -1, srcRect ? srcRect->y : -1, srcRect ? srcRect->width : -1, srcRect ? srcRect->height : -1,
             dstRect ? dstRect->x : -1, dstRect ? dstRect->y : -1, dstRect ? dstRect->width : -1, dstRect ? dstRect->height : -1, grew);
-    // Glass refraction once per eye (VR panel, default off): Source refreshes
+    // Limit refractions per eye (VR panel, default on, key RefractOncePerEye): Source refreshes
     // _rt_PowerOfTwoFB for every refractive object it draws (up to ~50 per eye
     // per frame behind the train windows). With this on, only the first copy of
     // each eye's frame runs; later glass refracts that copy (glass behind glass
@@ -12813,12 +12918,22 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             IDirect3DSurface9* eyeNow = m_VR->ThreadEyeSurface();
             if (eyeNow && srcEye)
             {
-                if (m_VR->m_RefractEyeDone == eyeNow && !(m_Game && m_Game->LocalPlayerWaterLevel() == 3))
+                // RefractCopiesPerEye (dev row, 1..20, default 6): this many copies per eye run.
+                const int maxCopies = (std::max)(1, static_cast<int>(bmvr::g_RefractCopiesPerEye + 0.5f));
+                if (m_VR->m_RefractEyeDone == eyeNow)
                 {
-                    ++m_VR->m_RefractCopiesSkipped;
-                    return;
+                    if (m_VR->m_RefractEyeCopies >= maxCopies && !(m_Game && m_Game->LocalPlayerWaterLevel() == 3))
+                    {
+                        ++m_VR->m_RefractCopiesSkipped;
+                        return;
+                    }
+                    ++m_VR->m_RefractEyeCopies;
                 }
-                m_VR->m_RefractEyeDone = eyeNow;
+                else
+                {
+                    m_VR->m_RefractEyeDone = eyeNow;
+                    m_VR->m_RefractEyeCopies = 1;
+                }
             }
             else
                 m_VR->m_RefractEyeDone = nullptr;

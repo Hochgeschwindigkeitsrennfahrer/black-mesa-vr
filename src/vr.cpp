@@ -7077,7 +7077,10 @@ void VR::ProcessInput()
     if (!paused)
     {
         UpdateWeaponFireHaptics();
-        if (m_PendingFireHaptic.exchange(0, std::memory_order_acq_rel))
+        const uint32_t pendingFire = m_PendingFireHaptic.exchange(0, std::memory_order_acq_rel);
+        if (pendingFire == 2)
+            StartDryFireHaptic();
+        else if (pendingFire)
             PulseHandHaptic(vr::TrackedControllerRole_RightHand, 2500, 0.85f);
     }
 
@@ -7138,6 +7141,7 @@ void VR::ProcessInput()
         // fires it on IN_ATTACK only.
         UpdateMountedGun();
         const bool gunGripRight = m_OnGun || m_GunRightNear;
+        static bool s_detWas = false;
         if (!menuOwnsButtons && primaryHeld && !emptyHands && !IsCrowbarEquipped() && !gunGripRight)
         {
             buttons |= satchelHands ? IN_ATTACK2 : IN_ATTACK;
@@ -7145,8 +7149,16 @@ void VR::ProcessInput()
             {
                 const DWORD nowMs = GetTickCount();
                 MagReload::g_DetonateHeldMs.store(nowMs ? nowMs : 1, std::memory_order_relaxed);
+                // Detonator click (user 2026-11-22): a buzz on the press.
+                if (!s_detWas)
+                    PulseHandHaptic(vr::TrackedControllerRole_RightHand, 1500, 0.7f);
+                s_detWas = true;
             }
+            else
+                s_detWas = true;
         }
+        else
+            s_detWas = false;
         if (!menuOwnsButtons && m_OnGun)
         {
             if (PressedDigitalAction(m_ActionSecondaryAttack))
@@ -7310,6 +7322,9 @@ void VR::ProcessInput()
         else if (nx < -sideThreshold)
             buttons |= IN_MOVELEFT;
     }
+    // Before the manual-magazine filter drops a pull on an empty gun: the
+    // empty-trigger buzz (AfterCreateMoveFireHaptics) needs that pull.
+    m_TriggerBeforeMagFilter.store((buttons & IN_ATTACK) != 0, std::memory_order_release);
     UpdateMagReload(buttons);
     UpdateGrenadePin(buttons);
     UpdateSnarkThrow(buttons);
@@ -7554,7 +7569,15 @@ void VR::ProcessInput()
         m_WeaponActionAnimUntilMs = GetTickCount() + 2800;
     }
     if (use && !s_use)
-        PulseAimHaptic(900);
+    {
+        // The hand that pressed: Use is the off hand's trigger; bare hands also use
+        // with the aim hand's trigger. (Always went to the aim hand before.)
+        const bool offHandUse = PressedDigitalAction(m_ActionUse);
+        const auto aimRole = AimControllerRole();
+        const auto offRole = aimRole == vr::TrackedControllerRole_LeftHand
+            ? vr::TrackedControllerRole_RightHand : vr::TrackedControllerRole_LeftHand;
+        PulseHandHaptic(offHandUse ? offRole : aimRole, 900, 0.6f);
+    }
     if (nextHeld && !s_next)
         PulseAimHaptic(800);
     if (prevHeld && !s_prevItem)
@@ -8905,9 +8928,10 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
     // the view along the horizontal line to the held rung by what the real
     // hand is short of / past that rung, so pulling the arms in brings the
     // player closer and stretching them pushes away (user idea, 2026-11-18).
-    // Capped at 8 units (~20 cm) each way: LadderMove keeps the hull ~16
-    // units off the ladder, so the eye never reaches the ladder or a shaft
-    // wall behind.
+    // Capped at 8 units (~20 cm) each way on normal ladders: LadderMove
+    // keeps the hull ~16 units off the ladder, so the eye never reaches the
+    // ladder or a shaft wall behind (more where the rungs stand further
+    // out, see maxShift).
     LadderViewState& v = m_LadderView;
     static ULONGLONG s_lastMs = 0;
     const ULONGLONG now = GetTickCount64();
@@ -8917,6 +8941,14 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
         dt = 0.1f;
     Vector want(0.f, 0.f, 0.f);
     int n = 0;
+    // Cap: 8 units for the usual ladders (rungs ~24 units in front of the
+    // body). Ladders whose rungs stand further out (bm_c4a1a Xen scaffold:
+    // ~33 units) get the extra on top, so the eye ends up as close to the
+    // rungs as on a normal ladder (user 2026-11-21: hard to reach, pushed
+    // away; log showed the shift pinned at 8).
+    constexpr float kBaseMax = 8.f;
+    constexpr float kStdRungHu = 24.f;
+    float maxShift = kBaseMax;
     if (v.active && bmvr::g_PhysicalLadders && bmvr::g_LadderBodyFollowsArms && body.LengthSqr() > 1.f)
     {
         Vector eye{};
@@ -8963,6 +8995,10 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
             const float gap = (m_LadderPin[h].world - hand).Dot(dir);
             want += dir * gap;
             ++n;
+            const float rungOut = (m_LadderPin[h].world - body).Dot(dir) + bmvr::g_LadderHandBack;
+            const float cap = kBaseMax + (rungOut > kStdRungHu ? rungOut - kStdRungHu : 0.f);
+            if (cap > maxShift)
+                maxShift = cap < 24.f ? cap : 24.f;
         }
     }
     if (n > 0)
@@ -8970,9 +9006,8 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
         want = want * (1.f / static_cast<float>(n));
         want.z = 0.f;
         const float len = want.Length();
-        constexpr float kMax = 8.f;
-        if (len > kMax)
-            want = want * (kMax / len);
+        if (len > maxShift)
+            want = want * (maxShift / len);
     }
     // Follows in ~60 ms; eases back onto the body in ~150 ms when let go.
     const float tau = n > 0 ? 0.06f : 0.15f;
@@ -8986,8 +9021,8 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
     {
         s_logMs = now;
         ++s_log;
-        Game::logMsg("Ladder arms: view shift %.1f units (want %.1f, %d hand%s)",
-            v.shift.Length(), want.Length(), n, n == 1 ? "" : "s");
+        Game::logMsg("Ladder arms: view shift %.1f units (want %.1f, cap %.1f, %d hand%s)",
+            v.shift.Length(), want.Length(), maxShift, n, n == 1 ? "" : "s");
     }
     return v.shift;
 }
@@ -13118,6 +13153,7 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
     s.aimBeamHit = m_AimBeamHit;
     s.aimCrosshairValid = m_AimCrosshairValid;
     s.aimCrosshairWorld = m_AimCrosshairWorld;
+    s.rotationOffsetY = m_RotationOffsetY.load(std::memory_order_acquire);
     {
         const unsigned ms = MagReload::g_GunWristMs[1].load(std::memory_order_acquire);
         const DWORD now = GetTickCount();
@@ -13127,6 +13163,21 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
                 s.gunWrist[k] = MagReload::g_GunWrist[1][k].load(std::memory_order_relaxed);
     }
     s.valid = true;
+}
+
+void VR::MenuDrawBody(Vector& body, float& rotationOffsetY) const
+{
+    // MC: the render thread draws frame N while the game thread has moved the
+    // body to frame N+1; eyes come from the snapshot, so the latched weapon
+    // menu must too (user 2026-11-20: menu trailed/jittered while walking).
+    if (const HandDrawSnap* snap = t_HandSnap)
+    {
+        body = snap->body;
+        rotationOffsetY = snap->rotationOffsetY;
+        return;
+    }
+    body = (m_HasStereoBodyOrigin && m_StereoBodyOrigin.LengthSqr() > 1.f) ? m_StereoBodyOrigin : m_SetupOrigin;
+    rotationOffsetY = m_RotationOffsetY.load(std::memory_order_acquire);
 }
 
 bool VR::GunCapWristForDraw(float out[12]) const
@@ -14602,9 +14653,10 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             const float smallCell = lowerH / 7.f;
             const bool showClip = clip >= 0 && clip <= 999;
             const int primary = showClip ? clip : reserve;
+            // Nothing left in the gun: the count goes red, as low health does.
             if (primary >= 0 && primary <= 999)
                 layoutRow(weaponPanel, pad, pad, primaryH, cell, primary,
-                    theme, themeBack, ammoIcon);
+                    primary == 0 ? red : theme, primary == 0 ? redBack : themeBack, ammoIcon);
 
             const bool showRes = showClip && reserve >= 0 && reserve <= 999;
             const bool showSec = secondary >= 0 && secondary <= 999;
@@ -15148,6 +15200,18 @@ void VR::ApplyTwoHandWeaponAim()
         || (!pistol && lat < stayR && along >= alongMin - slop && along <= alongMax + slop),
         std::memory_order_release);
 
+    // One light buzz in the support hand when it reaches the spot where a
+    // squeeze takes the gun (user 2026-11-22; like the MP5 bolt buzz).
+    {
+        static bool s_wasInZone = false;
+        const bool inZone = !m_TwoHandActive
+            && (pistol ? (distToGrip < enterR)
+                       : (lat < enterR && along >= alongMin && along <= alongMax));
+        if (inZone && !s_wasInZone)
+            PulseHandHaptic(leftHanded ? vr::TrackedControllerRole_RightHand : vr::TrackedControllerRole_LeftHand, 600, 0.3f);
+        s_wasInZone = inZone;
+    }
+
     const bool was = m_TwoHandActive;
     if (m_TwoHandActive && bmvr::g_TwoHandGripToggle)
     {
@@ -15188,7 +15252,10 @@ void VR::ApplyTwoHandWeaponAim()
                 : (holdingSqueeze && lat <= stayR
                     && along >= (alongMin - slop) && along <= (alongMax + slop));
     }
-    else if ((bmvr::g_TwoHandGripToggle ? squeezeEdge : squeezing)
+    // Press edge in both modes: a grip held since a mag/shell feed (or any
+    // squeeze made away from the gun) must not snap onto the gun when the
+    // hand drifts into the zone (user 2026-11-22).
+    else if (squeezeEdge
         && MagReload::g_State.load(std::memory_order_relaxed) != MagReload::kInHand
         // Shotgun: the attached support hand works the pump
         // (UpdateMagReload), so a squeeze on a pump that needs racking
@@ -15340,13 +15407,16 @@ bool VR::UpdateShoulderGestures(bool paused)
     // Returns true while the right hand is in its shoulder or hip zone, so
     // the right grip does not also toggle the flashlight there.
     struct Zone { DWORD enteredMs = 0; bool armed = false; bool gripDown = true; };
-    static Zone s_left, s_right, s_hipRight, s_hipLeft;
+    static Zone s_left, s_right, s_hipRight, s_hipLeft, s_head;
     // Zone settings: -1 = off (user 2026-11-19: one row per zone).
     const int leftAction = static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder));
     const int shoulderW = static_cast<int>(std::lround(bmvr::g_GestureWeaponShoulder));
     const int hipRightW = static_cast<int>(std::lround(bmvr::g_GestureWeaponHipRight));
     const int hipLeftW = static_cast<int>(std::lround(bmvr::g_GestureWeaponHipLeft));
-    const bool active = (leftAction >= 0 || shoulderW >= 0 || hipRightW >= 0 || hipLeftW >= 0)
+    // Forehead zone: on by itself while the flashlight comes from the head
+    // (FlashlightFrom 2), no row of its own (user 2026-11-22).
+    const bool headFlash = static_cast<int>(bmvr::g_FlashlightFrom + 0.5f) == 2;
+    const bool active = (leftAction >= 0 || shoulderW >= 0 || hipRightW >= 0 || hipLeftW >= 0 || headFlash)
         && m_GameplayEligible && !paused && !MenuGameplayBlocked()
         && !m_WeaponMenuOpen && !m_SettingsOpen && m_HmdPoseValid;
     if (!active)
@@ -15355,6 +15425,8 @@ bool VR::UpdateShoulderGestures(bool paused)
         s_right = Zone{};
         s_hipRight = Zone{};
         s_hipLeft = Zone{};
+        s_head = Zone{};
+        m_GestureZoneLeft = false;
         return false;
     }
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
@@ -15435,12 +15507,90 @@ bool VR::UpdateShoulderGestures(bool paused)
                 return true;
         return false;
     };
+    // Dynamic holsters (VrHolsterDynamic, needs VrHolsterBack; user 2026-11-20):
+    // the weapon in the hand, as a zone weapon index (-1 = empty hands or a
+    // weapon no zone can take). A zone set to another weapon then also counts,
+    // and the grip there puts the held one away in it (storeHeld below).
+    int heldW = -1;
+    if (bmvr::g_VrHolsterBack && bmvr::g_VrHolsterDynamic && !m_EmptyHands && !m_LastViewmodelModel.empty())
+    {
+        for (int w = 0; w < bmvr::kGestureWeaponCount && heldW < 0; ++w)
+            for (const char* const* part = bmvr::GestureWeaponParts(w); *part; ++part)
+                if (strstr(m_LastViewmodelModel.c_str(), *part))
+                {
+                    heldW = w;
+                    break;
+                }
+    }
+    auto storesHere = [&](int zoneW) { return heldW >= 0 && zoneW >= 0 && zoneW != heldW; };
+    auto zoneLive = [&](int zoneW) { return carries(zoneW) || storesHere(zoneW); };
+    // The zone's weapon becomes the held one, saved to config.txt; a zone that
+    // took the held weapon before gets this zone's old one (swap), so every
+    // weapon keeps one place. Then empty hands, as the holster in its own zone.
+    auto storeHeld = [&](const char* where) {
+        struct ZoneRef { float* value; const char* key; };
+        const ZoneRef zones[] = {
+            { &bmvr::g_GestureWeaponShoulder, "GestureWeaponShoulder" },
+            { &bmvr::g_GestureWeaponHipRight, "GestureWeaponHipRight" },
+            { &bmvr::g_GestureWeaponHipLeft, "GestureWeaponHipLeft" },
+        };
+        const ZoneRef* target = nullptr;
+        for (const ZoneRef& z : zones)
+            if (std::strcmp(z.key + 13, where) == 0)
+                target = &z;
+        if (!target)
+            return;
+        const int oldW = static_cast<int>(std::lround(*target->value));
+        std::vector<std::pair<std::string, std::string>> kv;
+        const char* swappedKey = nullptr;
+        for (const ZoneRef& z : zones)
+        {
+            if (&z != target && static_cast<int>(std::lround(*z.value)) == heldW)
+            {
+                *z.value = static_cast<float>(oldW);
+                kv.emplace_back(z.key, std::to_string(oldW));
+                swappedKey = z.key;
+            }
+        }
+        *target->value = static_cast<float>(heldW);
+        kv.emplace_back(target->key, std::to_string(heldW));
+        const bool ok = bmvr::WriteVrConfigValues(kv, {});
+        ToggleEmptyHands();
+        PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
+        Game::logMsg("Dynamic holster: %s put away in %s (was %s%s%s), config %s",
+            bmvr::GestureWeaponName(heldW), target->key, oldW >= 0 ? bmvr::GestureWeaponName(oldW) : "off",
+            swappedKey ? ", that weapon moves to " : "", swappedKey ? swappedKey : "", ok ? "saved" : "SAVE FAILED");
+    };
     const bool leftIn = leftAction >= 0 && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
-    m_GestureZoneLeft = leftIn;
+    // Left hand at the forehead: just ahead of the eyes (the headset front
+    // is ~8 cm ahead of them), from just below eye level up, within 25 cm of
+    // the middle. Reaches 40 cm ahead and 15 cm down so the hand need not hit
+    // the headset (user 2026-11-22). Starts where the shoulder zone ends
+    // (along 0.04), so they never overlap.
+    bool headIn = false;
+    if (headFlash && m_LeftControllerTrackingValid)
+    {
+        const Vector d = m_LeftControllerPosAbs - m_HmdPosAbs;
+        const float along = d.Dot(fwd) / scale;
+        const float lateral = d.Dot(right) / scale;
+        const float height = d.z / scale;
+        headIn = along > 0.04f && along < 0.40f && std::fabs(lateral) < 0.25f
+            && height > -0.15f && height < 0.25f;
+    }
+    m_GestureZoneLeft = leftIn || headIn;
+    if (step(s_head, headIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
+    {
+        PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
+        m_PendingImpulse.store(100, std::memory_order_release);
+        Game::logMsg("Forehead gesture: flashlight");
+    }
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = shoulderW >= 0 && m_PhysicalRightTrackingValid && !m_TwoHandActive
-        && inZone(m_PhysicalRightPosAbs, 1.f) && carries(shoulderW);
-    if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
+        && inZone(m_PhysicalRightPosAbs, 1.f) && zoneLive(shoulderW);
+    // Ammo (leftAction 2): no gesture here, the manual-reload ammo grab takes
+    // this zone as a second ammo pouch (atLeftHip); the grip stays out of the
+    // flashlight via m_GestureZoneLeft.
+    if (leftAction != 2 && step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
     {
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
         if (leftAction == 1)
@@ -15511,7 +15661,10 @@ bool VR::UpdateShoulderGestures(bool paused)
     const float rightGrip = gripValue(m_ActionFlashlight);
     if (step(s_right, rightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        grabWeapon(bmvr::GestureWeaponName(shoulderW), bmvr::GestureWeaponParts(shoulderW));
+        if (storesHere(shoulderW))
+            storeHeld("Shoulder");
+        else
+            grabWeapon(bmvr::GestureWeaponName(shoulderW), bmvr::GestureWeaponParts(shoulderW));
     }
 
     // Hip holsters (right hand only): right hip = pistol, a bit above the
@@ -15530,16 +15683,22 @@ bool VR::UpdateShoulderGestures(bool paused)
     // (2026-11-14: it took the pistol 5-10 cm too far forward and too high;
     // 2026-11-16 headset: still 10 cm too far forward).
     const bool hipRightIn = hipsOn && hipRightW >= 0 && inHip(m_PhysicalRightPosAbs, 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f)
-        && carries(hipRightW);
+        && zoneLive(hipRightW);
     const bool hipLeftIn = hipsOn && hipLeftW >= 0 && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f)
-        && carries(hipLeftW);
+        && zoneLive(hipLeftW);
     if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        grabWeapon(bmvr::GestureWeaponName(hipRightW), bmvr::GestureWeaponParts(hipRightW));
+        if (storesHere(hipRightW))
+            storeHeld("HipRight");
+        else
+            grabWeapon(bmvr::GestureWeaponName(hipRightW), bmvr::GestureWeaponParts(hipRightW));
     }
     if (step(s_hipLeft, hipLeftIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
-        grabWeapon(bmvr::GestureWeaponName(hipLeftW), bmvr::GestureWeaponParts(hipLeftW));
+        if (storesHere(hipLeftW))
+            storeHeld("HipLeft");
+        else
+            grabWeapon(bmvr::GestureWeaponName(hipLeftW), bmvr::GestureWeaponParts(hipLeftW));
     }
 
     // Also for 1 s after leaving a zone, so the grip squeeze that took the
@@ -16448,6 +16607,26 @@ void VR::UpdateGmanGesture()
         setActive(false);
         return;
     }
+    // A save load on the same map does not change the map name, so LevelInit
+    // does not reset us, but the precache table is rebuilt and his model
+    // index can change (2026-11-21, bm_c1a3a: armed, quick load, never again).
+    // Wait for the load to finish, then look the index up again; the entity
+    // lump result (m_GmanMapListed) still holds for the same map.
+    if (m_VrPhase == VrPhase::Loading)
+    {
+        setActive(false);
+        return;
+    }
+    if (m_GmanLoadEpoch != m_LoadEpoch)
+    {
+        m_GmanLoadEpoch = m_LoadEpoch;
+        m_GmanModelIndex[0] = m_GmanModelIndex[1] = -1;
+        m_GmanMapState = 0;
+        m_GmanMapChecks = 0;
+        m_GmanMapCheckMs = 0;
+        m_GmanScanMs = 0;
+        m_GmanEntityCount = 0;
+    }
     const DWORD now = GetTickCount();
 
     // Is a G-Man model precached? Maps whose entity lump lists him ask once
@@ -17122,6 +17301,7 @@ void VR::TickOpenXrHelperWatchdog()
 // set fps_max since 2026-10-27.
 void VR::ApplyFrameCap(int nominalHz, float sourceHz, const char* source)
 {
+    bmvr::sampler::NoteHeadsetHz(nominalHz);
     if (!m_Game)
         return;
     const int mode = static_cast<int>(bmvr::g_FrameCapMode + 0.5f);
@@ -21937,7 +22117,11 @@ void VR::ReloadHaptic(ReloadFeel feel)
 
 bool VR::SatchelHandsActive() const
 {
-    return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel();
+    // Not with empty hands: the viewmodel class stays "satchel" after
+    // holstering it, which kept L2 as throw (haptic) and the left grip as
+    // Use ("cannot use" sound) on bare hands (user, 2026-11-21).
+    return bmvr::g_VrSatchelHands && !bmvr::g_LeftHanded && ViewmodelIsSatchel()
+        && !m_EmptyHands && m_HasHeldWeapon;
 }
 
 void VR::UpdateSnarkThrow(uint32_t& buttons)
@@ -22384,6 +22568,11 @@ void VR::UpdateMagReload(uint32_t& buttons)
         const float height = d.z / scale;
         const bool in = along > -0.43f && along < 0.10f && height > -1.03f && height < -0.45f
             && lateral > 0.05f && lateral < 0.45f;
+        // Left shoulder set to "Ammo": the same zone as the shoulder gesture
+        // (see UpdateShoulderGestures inZone) also takes ammo.
+        if (!in && static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder)) == 2 && along < 0.04f
+            && height > -0.20f && height < 0.30f && lateral > 0.05f && lateral < 0.50f)
+            return true;
         static int s_missLog;
         if (!in && s_missLog < 20)
         {
@@ -22594,7 +22783,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
         if (boltGrab)
         {
             pull = g_BoltPull.load();
-            if (pull >= 0.85f && !s_boltFull)
+            // Back stroke at 3/4 of the hand stroke (was 0.85, user
+            // 2026-11-21: more lenient).
+            if (pull >= (bmvr::g_PumpStrokeAtController ? 0.75f : 0.85f) && !s_boltFull)
             {
                 s_boltFull = true;
                 // Back stroke: first half of pump.wav (whole wav if the split

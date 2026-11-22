@@ -979,7 +979,8 @@ public:
     float PhysicalLadderViewOffset(float renderZ);
     // RenderView: horizontal view shift towards / away from the ladder so the
     // real hands reach the rungs they hold (arms pulled in = closer to the
-    // ladder, stretched = further). LadderBodyFollowsArms; +-8 units.
+    // ladder, stretched = further). LadderBodyFollowsArms; +-8 units (more
+    // where the rungs stand further out than 24 units, up to 24).
     Vector PhysicalLadderViewShift(const Vector& body);
     struct LadderViewState
     {
@@ -1121,6 +1122,7 @@ public:
     // Eye surface the calling thread is drawing (multicore TLS or the stereo blit).
     IDirect3DSurface9* ThreadEyeSurface() const;
     IDirect3DSurface9* m_RefractEyeDone = nullptr;   // RefractOncePerEye: eye already copied
+    int m_RefractEyeCopies = 0;                      // copies run for m_RefractEyeDone (reset with it)
     uint32_t m_RefractCopiesSkipped = 0;
     void BeginStereoEyeBlit(IDirect3DSurface9* dst);
     void ClearStereoEyeSurfaces();
@@ -1215,8 +1217,14 @@ public:
         // MagReload::g_GunWrist when the snapshot was taken.
         bool gunWristOk = false;
         float gunWrist[12]{};
+        // Turn offset of this frame: world-latched menus (weapon menu, VR
+        // panel) rebuild their pose from body + turn at draw time.
+        float rotationOffsetY = 0.f;
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
+    // Body origin + turn offset for drawing world-latched menus: the drawing
+    // frame's snapshot while one is drawn (MC), else the live values.
+    void MenuDrawBody(Vector& body, float& rotationOffsetY) const;
     // Right wrist of the gun's own hands for the cuff cap: the drawing
     // frame's snapshot while one is drawn (MC), else the latest published
     // (within 100 ms). False = no cap.
@@ -1653,6 +1661,13 @@ private:
     void ReclaimCompositorFocus(const char* reason);
     void PulseAimHaptic(unsigned short durationUs = 2500);
     void PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short durationUs, float amplitude = 0.6f);
+    // Real vibration time (OpenXR); OpenVR maps it to its 1-3999 us click.
+    void PulseHandHapticSeconds(vr::ETrackedControllerRole hand, float seconds, float amplitude);
+    // Last-shot / empty-trigger buzz patterns (LastShotHaptic, DryFireHaptic); the second
+    // pulse of a double is queued and sent by PumpHapticFollowUp (ProcessInput thread).
+    void StartLastShotHaptic();
+    void StartDryFireHaptic();
+    void PumpHapticFollowUp();
     // Reload feel (user, 2026-11-18: "doable by touch"): distinct patterns,
     // felt in both hands where the gun takes something in. The second tick
     // of a pattern is queued and sent by PumpHapticQueue (game thread).
@@ -1964,6 +1979,7 @@ private:
     DWORD m_GmanScanMs = 0;
     int m_GmanEntities[4] = {};
     int m_GmanEntityCount = 0;
+    unsigned m_GmanLoadEpoch = 0;      // m_LoadEpoch the model indexes belong to
     std::atomic<bool> m_GmanGestureActive{ false };
     bool m_OnGun = false;
     int m_GunPropIndex = 0;
@@ -1996,6 +2012,8 @@ private:
     DWORD m_WeaponMenuClickStartMs = 0;
     int m_WeaponMenuHover = -1;
     uint32_t m_PrevHeldButtons = 0;
+    std::atomic<bool> m_TriggerBeforeMagFilter{ false };
+    bool m_PrevTriggerBeforeMagFilter = false;
     int m_WeaponMenuCount = 0;
     Vector m_WeaponMenuOrigin{};
     Vector m_WeaponMenuFwd{};
@@ -2035,6 +2053,10 @@ private:
     WeaponMenuSlot m_WeaponMenuSlots[20]{};
     int m_LastMuzzleFlashParity = -1;
     int m_LastFireClip = -1;
+    unsigned long m_LastShotHapticMs = 0;   // GetTickCount of the last-shot pattern
+    unsigned long m_HapticFollowUpMs = 0;   // 0 = none queued
+    float m_HapticFollowUpSec = 0.f;
+    float m_HapticFollowUpAmp = 0.f;
     void* m_LastFireWeapon = nullptr;
     bool m_StereoEyeBlitOk = false;
     int m_StereoEyeBlitRank = 0;

@@ -64,7 +64,7 @@ MODULES = {
         kBlackMesaPlayer_GetShootAngles_Server kGrenadeCreate_Server kGrenadeThrowPosition_Server
         kProjectileCreate_Server kCBasePlayer_ImpulseCommands kServerWeaponFireOriginReturnRvas
         kSnarkThrow_Server kSnarkPlace_Server kSetAbsVelocity_Server''',
-    'engine': '''kAreaPortalComputeViewReturnRva kEngineWorldBatchRva kEngineWorldStaticMeshesRva
+    'engine': '''kEngineSetAudioStateRva kAreaPortalComputeViewReturnRva kEngineWorldBatchRva kEngineWorldStaticMeshesRva
         kMixPlayInsnRva''',
     'materialsystem': 'kCreateNamedRTExRva',
 }

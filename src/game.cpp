@@ -311,6 +311,110 @@ bool Game::SetServerActiveWeaponClip(int expectClip, int newClip)
     return ok;
 }
 
+bool Game::ClampServerWeaponDeploy(float capSec)
+{
+    static uint32_t s_lastHandle = 0;
+    static int s_ticksLeft = 0;
+    static float s_switchTime = -1.f;
+    static int s_switchClip = 0;
+    void* player = GetLocalPlayerEntity();
+    if (!player || !m_BaseClient)
+        return false;
+    static void* s_engineServer = nullptr;
+    if (!s_engineServer)
+        s_engineServer = GetInterfaceAny("engine.dll", { "VEngineServer021" });
+    if (!s_engineServer)
+        return false;
+    bool changed = false;
+    BMVR_TRY
+    {
+        constexpr int kActiveWeapon = 0xFA4;
+        const uint32_t h = *reinterpret_cast<const uint32_t*>(reinterpret_cast<uintptr_t>(player) + kActiveWeapon);
+        if (h != s_lastHandle)
+        {
+            s_lastHandle = h;
+            s_ticksLeft = 4; // the deploy timer is set in the switch, a tick or two before/after the handle shows
+            s_switchTime = -1.f;
+        }
+        const int index = static_cast<int>(h & 0xFFF);
+        if (index > 0 && index < 0xFFF && s_ticksLeft == 0 && s_switchTime >= 0.f)
+        {
+            // Log how long after the switch the first shot left (clip dropped).
+            void** vt0 = *reinterpret_cast<void***>(s_engineServer);
+            using tPEnt0 = void*(__thiscall*)(void*, int);
+            void* ed0 = reinterpret_cast<tPEnt0>(vt0[Offsets::kEngineServer_PEntityOfEntIndexVt])(s_engineServer, index);
+            char* en0 = ed0 ? *reinterpret_cast<char**>(static_cast<char*>(ed0) + Offsets::kEdict_Unknown) : nullptr;
+            const uintptr_t gp0 = *reinterpret_cast<uintptr_t*>(m_BaseClient + Offsets::kClientGpGlobalsPtr);
+            if (en0 && gp0)
+            {
+                const float t = *reinterpret_cast<float*>(gp0 + Offsets::kCGlobalVars_curtime);
+                if (*reinterpret_cast<int*>(en0 + Offsets::kServerWeapon_Clip1) < s_switchClip)
+                {
+                    Game::logMsg("Quick draw: first shot %.3f s after the switch", t - s_switchTime);
+                    s_switchTime = -1.f;
+                }
+                else if (t - s_switchTime > 3.f)
+                    s_switchTime = -1.f;
+            }
+        }
+        if (s_ticksLeft > 0 && index > 0 && index < 0xFFF)
+        {
+            --s_ticksLeft;
+            const uintptr_t gp = *reinterpret_cast<uintptr_t*>(m_BaseClient + Offsets::kClientGpGlobalsPtr);
+            void** vt = *reinterpret_cast<void***>(s_engineServer);
+            using tPEntityOfEntIndex = void*(__thiscall*)(void*, int);
+            auto pEnt = reinterpret_cast<tPEntityOfEntIndex>(vt[Offsets::kEngineServer_PEntityOfEntIndexVt]);
+            void* edict = pEnt(s_engineServer, index);
+            char* entity = edict ? *reinterpret_cast<char**>(static_cast<char*>(edict) + Offsets::kEdict_Unknown) : nullptr;
+            if (gp && entity)
+            {
+                const float now = *reinterpret_cast<float*>(gp + Offsets::kCGlobalVars_curtime);
+                const float limit = now + capSec;
+                float* nextPri = reinterpret_cast<float*>(entity + Offsets::kServerWeapon_NextPrimaryAttack);
+                float* nextSec = reinterpret_cast<float*>(entity + Offsets::kServerWeapon_NextSecondaryAttack);
+                const float oldPri = *nextPri, oldSec = *nextSec;
+                if (s_switchTime < 0.f)
+                {
+                    s_switchTime = now;
+                    s_switchClip = *reinterpret_cast<int*>(entity + Offsets::kServerWeapon_Clip1);
+                }
+                if (oldPri > limit && oldPri < now + 5.f)
+                {
+                    *nextPri = limit;
+                    changed = true;
+                }
+                if (oldSec > limit && oldSec < now + 5.f)
+                {
+                    *nextSec = limit;
+                    changed = true;
+                }
+                {
+                    const int lp = m_EngineClient ? m_EngineClient->GetLocalPlayer() : 0;
+                    void* edp = lp > 0 ? pEnt(s_engineServer, lp) : nullptr;
+                    char* sp = edp ? *reinterpret_cast<char**>(static_cast<char*>(edp) + Offsets::kEdict_Unknown) : nullptr;
+                    if (sp)
+                    {
+                        float* pn = reinterpret_cast<float*>(sp + Offsets::kServerPlayer_NextAttack);
+                        if (*pn > limit && *pn < now + 5.f)
+                        {
+                            *pn = limit;
+                            changed = true;
+                        }
+                    }
+                }
+                if (changed)
+                    Game::logMsg("Quick draw: next attack %.2f/%.2f s -> %.2f s after the switch", oldPri - now,
+                        oldSec - now, capSec);
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        changed = false;
+    }
+    return changed;
+}
+
 C_BaseEntity* Game::GetActiveWeaponEntity()
 {
     void* player = GetLocalPlayerEntity();

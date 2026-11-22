@@ -9,6 +9,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <cctype>
 #include <cstdarg>
@@ -97,6 +98,7 @@ namespace bmvr
     float g_MsaaF = 0.f;
     bool g_AlphaToCoverage = true;   // no-op while Msaa is 0
     float g_LodBias = 0.f;
+    float g_RefractCopiesPerEye = 6.0f;
     bool g_RefractOncePerEye = true;   // also on at 0x: no visible cost there, big saving with MSAA
     bool g_MsaaAllowed = true;
     bool g_Haptics = true;
@@ -139,6 +141,10 @@ namespace bmvr
     bool g_VrPistolSemiAuto = false;
     bool g_VrGlockRapidAlt = false;
     float g_FlashlightFrom = 0.f;
+    float g_LastShotHaptic = 1.f;
+    float g_DryFireHaptic = 2.f;
+    float g_LastShotHapticStrength = 1.f;
+    float g_DryFireHapticStrength = 0.8f;
     static bool g_FlashlightFromSeen = false;
     bool g_FlashlightOnSquare = false;
     float g_PauseMenuAlphaPasses = 3.f;
@@ -178,6 +184,7 @@ namespace bmvr
     int g_ReflectionRtH = 0;
     int g_PassTraceFrames = 0;
     bool g_SprintAimedPose = true;
+    float g_QuickDrawSec = 0.12f;
     bool g_SkipDrawAnim = true;
     bool g_DeltaSeqIdle = true;
     bool g_ScopeClipIdle = true;
@@ -195,6 +202,7 @@ namespace bmvr
     float g_GestureWeaponHipRight = 1.f;
     float g_GestureWeaponHipLeft = 3.f;
     bool g_VrHolsterBack = false;
+    bool g_VrHolsterDynamic = false;
     namespace
     {
         struct GestureWeapon { const char* name; const char* parts[4]; };
@@ -283,7 +291,7 @@ namespace bmvr
     bool g_LoadingCard = true;
     bool g_TitleLevel = true;
     bool g_ParticlesLast = true;
-    float g_GlowProxyScale = 1.5f;
+    float g_GlowProxyScale = 1.0f;
     float g_PoseHoldDeg = 0.f;
     float g_PoseHoldMm = 0.f;
     float g_GlowTraceSeconds = 0.f;
@@ -384,6 +392,7 @@ namespace bmvr
     bool g_PauseCaptureArm = false;
     bool g_DesktopMouseGuard = true;
     bool g_GunHandCuffCap = true;
+    bool g_PumpStrokeAtController = true;
     float g_PauseSkipPaints = 0.f;
     float g_VrRecoilScale = 1.f;
     float g_VrRecoilTwoHand = 0.3f;
@@ -885,7 +894,7 @@ namespace bmvr
             else if (std::strcmp(n, "GestureLeftShoulder") == 0)
             {
                 const int v = atoi(val);
-                if (v >= -1 && v <= 1)
+                if (v >= -1 && v <= 2)
                     g_GestureLeftShoulder = static_cast<float>(v);
             }
             else if (std::strcmp(n, "GestureWeaponShoulder") == 0 || std::strcmp(n, "GestureWeaponHipRight") == 0
@@ -909,6 +918,8 @@ namespace bmvr
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHolsterBack") == 0)
                 g_VrHolsterBack = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrHolsterDynamic") == 0)
+                g_VrHolsterDynamic = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrPistolSemiAuto") == 0)
                 g_VrPistolSemiAuto = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGlockRapidAlt") == 0)
@@ -932,6 +943,22 @@ namespace bmvr
                     g_FlashlightFromSeen = true;
                 }
             }
+            else if (std::strcmp(n, "LastShotHaptic") == 0)
+            {
+                const int v = atoi(val);
+                if (v >= 0 && v <= 2)
+                    g_LastShotHaptic = static_cast<float>(v);
+            }
+            else if (std::strcmp(n, "DryFireHaptic") == 0)
+            {
+                const int v = atoi(val);
+                if (v >= 0 && v <= 2)
+                    g_DryFireHaptic = static_cast<float>(v);
+            }
+            else if (std::strcmp(n, "LastShotHapticStrength") == 0)
+                g_LastShotHapticStrength = std::clamp(static_cast<float>(atof(val)), 0.05f, 1.f);
+            else if (std::strcmp(n, "DryFireHapticStrength") == 0)
+                g_DryFireHapticStrength = std::clamp(static_cast<float>(atof(val)), 0.05f, 1.f);
             else if (std::strcmp(n, "FlashlightOnSquare") == 0)
             {
                 g_FlashlightOnSquare = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
@@ -959,6 +986,8 @@ namespace bmvr
                 g_StereoEnginePost = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RefractOncePerEye") == 0)
                 g_RefractOncePerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "RefractCopiesPerEye") == 0)
+                g_RefractCopiesPerEye = std::clamp(std::round(static_cast<float>(atof(val))), 1.f, 20.f);
             else if (std::strcmp(n, "GpuPassTiming") == 0)
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassDetail") == 0)
@@ -1004,6 +1033,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "SprintAimedPose") == 0)
                 g_SprintAimedPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "QuickDrawSec") == 0)
+                g_QuickDrawSec = static_cast<float>(atof(val));
             else if (std::strcmp(n, "SkipDrawAnim") == 0)
                 g_SkipDrawAnim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "DeltaSeqIdle") == 0)

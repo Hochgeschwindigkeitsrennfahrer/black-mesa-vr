@@ -239,6 +239,12 @@ public:
     // bounds check, EDICT_NUM, FL_EDICT_FREE; disassembled 2026-11-18) and
     // edict_t +0xC (m_pUnk = the CBaseEntity).
     static constexpr int kServerWeapon_Clip1 = 0x4E0;
+    // Server weapon datamap FIELD_TIME m_flNextPrimaryAttack / m_flNextSecondaryAttack
+    // (server.dll typedescription scan 2026-11-22: type 16, 0x49C / 0x4A0).
+    static constexpr int kServerWeapon_NextPrimaryAttack = 0x49C;
+    static constexpr int kServerWeapon_NextSecondaryAttack = 0x4A0;
+    // Server player m_flNextAttack (datamap FIELD_TIME, 0x6BC; DefaultDeploy sets it to the deploy end).
+    static constexpr int kServerPlayer_NextAttack = 0x6BC;
     static constexpr int kEngineServer_PEntityOfEntIndexVt = 19;
     static constexpr int kEdict_Unknown = 0xC;
     static constexpr int kSnarkThrow_Server = 0x48D730;
@@ -621,6 +627,10 @@ public:
     // VPROF labels). Frame start (FRAME_RENDER_START work: bone cache
     // invalidation, threaded bone setup, ParticleMgr()->Simulate), cdecl, no args.
     static constexpr uint32_t kClientFrameStartRva = 0xF3530; // beta 26627981 (26234270: 0xF34C0)
+    // engine.dll CEngineClient::SetAudioState(const AudioState_t&) (IVEngineClient
+    // slot 61, thiscall, ret 4) -> Host_SetAudioState: rep movsd 7 dwords into the
+    // sound listener. The client calls it from CViewRender::SetUpView.
+    static constexpr uint32_t kEngineSetAudioStateRva = 0xA78B0; // beta 26768221
     // C_BaseAnimating::SetupBones (IClientRenderable this, 4 args, ret 0x10).
     static constexpr uint32_t kClientSetupBonesRva = 0x903C0; // beta 26627981 (26234270: 0x90350)
     // C_BaseAnimating::BuildTransformations (6 args, ret 0x18): runs only when

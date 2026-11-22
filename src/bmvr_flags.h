@@ -207,6 +207,7 @@ namespace bmvr
     extern bool g_AlphaToCoverage;   // AlphaToCoverage (default true, needs Msaa): alpha-tested draws use the eye MSAA samples (foliage, fences)
     extern float g_LodBias;          // LodBias (default 0): extra mip LOD bias in the 3D views (softer textures; foliage/fences more solid)
     extern bool g_RefractOncePerEye; // RefractOncePerEye (default true): glass refraction copied once per eye
+    extern float g_RefractCopiesPerEye; // RefractCopiesPerEye (1..20, default 6): copies per eye RefractOncePerEye lets through
     extern float g_MsaaF;           // VR panel copy of g_Msaa (0/2/4); applied live by recreating the eyes
     extern bool g_MsaaParticles1x; // MsaaParticles1x (default true, needs Msaa): particles drawn last, on the 1x resolve (the gun too in frames with particles)
     extern bool g_MsaaPostSwitch;   // MsaaPostSwitch (default true): post chain on the 1x resolve
@@ -236,6 +237,14 @@ namespace bmvr
     extern bool g_MsaaAllowed;
     uint32_t NormalizeMsaa(int samples);
     extern bool g_Haptics;
+    // Last round out of the gun (LastShotHaptic): 0 = the normal shot buzz, 1 = a double
+    // buzz (default), 2 = one longer buzz. Amplitude = LastShotHapticStrength (0.05-1).
+    extern float g_LastShotHaptic;
+    extern float g_LastShotHapticStrength;
+    // Trigger pulled on an empty gun (DryFireHaptic): 0 = no buzz, 1 = one tick,
+    // 2 = a quick "nope" double tick (default). Amplitude = DryFireHapticStrength (0.05-1).
+    extern float g_DryFireHaptic;
+    extern float g_DryFireHapticStrength;
     extern bool g_HideCrosshair;
     extern bool g_MatchHmdHz;
     extern bool g_DisableViewBob;
@@ -419,6 +428,7 @@ namespace bmvr
     // Test aid: frames left to log every render pass (VR/trace.txt, headless runs only).
     extern int g_PassTraceFrames;
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
+    extern float g_QuickDrawSec;         // after a weapon switch the draw wait is cut to this many seconds (< 0 = off)
     extern bool g_SkipDrawAnim;          // draw/holster/pickup animations show the idle pose
     extern bool g_ThrowStroke;           // frag throw velocity from the throwing stroke (far point of the hold -> release)
     extern bool g_DeltaSeqIdle;          // a delta layer as the main viewmodel sequence shows idle (tau/crossbow)
@@ -429,7 +439,8 @@ namespace bmvr
     extern bool g_MuteFidgetSounds;      // weapon fidget clips play no sound (the pose is frozen in VR)
     // Optional features, default off:
     // Grab zones (grip with the hand there). Left shoulder (left hand):
-    // -1 off, 0 quick save (default), 1 flashlight toggle.
+    // -1 off, 0 quick save (default), 1 flashlight toggle, 2 ammo (the manual-reload
+    // ammo grab also works here, besides the left hip; no quick save / flashlight).
     extern float g_GestureLeftShoulder;
     // Weapon each right-hand zone takes (index into GestureWeaponName / parts),
     // -1 = zone off: 0 crowbar, 1 pistol, 2 .357, 3 MP5, 4 shotgun, 5 crossbow,
@@ -441,6 +452,10 @@ namespace bmvr
     extern float g_GestureWeaponHipLeft;   // above the left hip, cross draw (default MP5)
     // Grip in a weapon's own zone while holding that weapon puts it away (empty hands). Off = the grip there does nothing.
     extern bool g_VrHolsterBack;
+    // With VrHolsterBack: the grip in another weapon zone while holding a zone
+    // weapon puts it away there and makes that zone take it from then on
+    // (saved to config.txt; the zone that took it before gets the old weapon).
+    extern bool g_VrHolsterDynamic;
     constexpr int kGestureWeaponCount = 11;
     const char* GestureWeaponName(int index);
     // Name parts matched against the inventory's network / model names (nullptr-terminated).
@@ -646,7 +661,7 @@ namespace bmvr
     extern float g_GlowSmooth;
     extern float g_GlowHideMs;
     // Tests (VR panel Debug -> TESTS, developer rows), default off:
-    // GlowProxyScale (bmvr_glow_proxy_scale, default 1.5 since 2026-11-11,
+    // GlowProxyScale (bmvr_glow_proxy_scale, default 1 since 2026-11-22 (was 1.5),
     // 1 = stock): the glow occlusion test area is this many times wider, so a query counts more pixels and
     // its visible fraction moves in finer steps.
     // PoseHoldDeg / PoseHoldMm (bmvr_pose_hold_deg / _mm, 0 = off): the game
@@ -878,6 +893,7 @@ namespace bmvr
     extern bool g_TripmineFaceAim;
     extern bool g_PauseCaptureArm; // DEBUG: capture the next pause (not saved)
     extern bool g_DesktopMouseGuard; // VR: no desktop mouse fire, stuck desktop buttons released
+    extern bool g_PumpStrokeAtController; // bolt/pump stroke measured at the controller, back stroke at 0.75 (99c2b29); off = grab anchor, 0.85
     extern bool g_GunHandCuffCap; // cap the open HEV cuff of the gun's own hands // tripmine placed along the mine face (controller up)
     extern float g_GunHandCuff; // gun's own right hand: forearm folds this far behind the wrist (units at scale 1)
     extern float g_VrRecoilScale;

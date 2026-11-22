@@ -177,11 +177,13 @@ namespace
             { "GRAB GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // One row per zone, Off as a choice (user 2026-11-19). A weapon zone only
             // buzzes and takes the grip while you carry that weapon.
-            { "Left shoulder action", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeftShoulder, 1.f, -1.f, 1.f, "Off|Quick save|Flashlight" },
+            { "Left shoulder action", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeftShoulder, 1.f, -1.f, 2.f, "Off|Quick save|Flashlight|Ammo" },
             { "Right shoulder takes", RowKind::Choice, "GestureWeaponShoulder", nullptr, &bmvr::g_GestureWeaponShoulder, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Left hip takes", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureWeaponHipLeft, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Right hip takes", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureWeaponHipRight, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Allow holstering", RowKind::Toggle, "VrHolsterBack", &bmvr::g_VrHolsterBack, nullptr, 0, 0, 0, nullptr },
+            // Put a weapon away in another zone = that zone takes it from then on (user 2026-11-20).
+            { "Dynamic holsters", RowKind::Toggle, "VrHolsterDynamic", &bmvr::g_VrHolsterDynamic, nullptr, 0, 0, 0, nullptr },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
             { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -198,6 +200,11 @@ namespace
             { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
+            { "AMMO FEEDBACK", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Last shot buzz", RowKind::Choice, "LastShotHaptic", nullptr, &bmvr::g_LastShotHaptic, 1.f, 0.f, 2.f, "Off|Double|Long" },
+            { "Last shot strength", RowKind::Number, "LastShotHapticStrength", nullptr, &bmvr::g_LastShotHapticStrength, 0.05f, 0.05f, 1.f, "%.2f" },
+            { "Empty trigger buzz", RowKind::Choice, "DryFireHaptic", nullptr, &bmvr::g_DryFireHaptic, 1.f, 0.f, 2.f, "Off|Tick|Nope (double)" },
+            { "Empty trigger strength", RowKind::Number, "DryFireHapticStrength", nullptr, &bmvr::g_DryFireHapticStrength, 0.05f, 0.05f, 1.f, "%.2f" },
             { "PISTOLS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "One shot per trigger pull", RowKind::Toggle, "VrPistolSemiAuto", &bmvr::g_VrPistolSemiAuto, nullptr, 0, 0, 0, nullptr },
             { "Glock: fast pulls = alt-fire", RowKind::Toggle, "VrGlockRapidAlt", &bmvr::g_VrGlockRapidAlt, nullptr, 0, 0, 0, nullptr },
@@ -320,6 +327,9 @@ namespace
             { "Missing hooks", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "missing_hooks" },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
             { "Screenshot (eyes only)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "screenshot" },
+            // Back (user 2026-11-20, Xen plant glow that follows the hand): 20 s of every
+            // light glow's world position + brightness into VR/glowtrace-*.csv.
+            { "Record glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
             // One shot: the next Pause press saves 12 eye pairs + 12 menu layers (VR/pausecap-*).
             { "Capture next pause", RowKind::Toggle, nullptr, &bmvr::g_PauseCaptureArm, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
@@ -335,7 +345,9 @@ namespace
             { "SAVINGS (SAME IMAGE)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Post copies: swap, no copy", RowKind::Toggle, "PostCopySwap", &bmvr::g_PostCopySwap, nullptr, 0, 0, 0, nullptr },
             { "Light shadows: once per frame", RowKind::Toggle, "ShadowsOncePerFrame", &bmvr::g_ShadowsOncePerFrame, nullptr, 0, 0, 0, nullptr },
-            { "Glass refraction once per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
+            { "Limit refractions per eye", RowKind::Toggle, "RefractOncePerEye", &bmvr::g_RefractOncePerEye, nullptr, 0, 0, 0, nullptr },
+            // Copies per eye the row above lets through (1 = once); more = glass behind glass refracts again.
+            { "Refraction copies per eye", RowKind::Number, "RefractCopiesPerEye", nullptr, &bmvr::g_RefractCopiesPerEye, 6.f, 1.f, 20.f, "%.0f" },
             // Capture/view tests are not saved (no key): always off after a restart.
             { "LOGS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Lens flare positions per eye into the log; switch on when a flare sits in the wrong place.
@@ -382,6 +394,7 @@ namespace
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Gun hand cuff closed", RowKind::Toggle, nullptr, &bmvr::g_GunHandCuffCap, nullptr, 0, 0, 0, nullptr },
+            { "Pump stroke at the controller", RowKind::Toggle, nullptr, &bmvr::g_PumpStrokeAtController, nullptr, 0, 0, 0, nullptr },
             { "Tripmine placed along its face", RowKind::Toggle, nullptr, &bmvr::g_TripmineFaceAim, nullptr, 0, 0, 0, nullptr },
             // Live per-weapon angle trim for the weapon in the hand (saved in
             // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows).
@@ -730,7 +743,7 @@ namespace
                 fixedLine("Grab", grab);
             const int leftShoulder = static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder));
             if (hand == 0 && leftShoulder >= 0)
-                fixedLine("Shoulder", leftShoulder == 1 ? "Flashlight" : "Quick save");
+                fixedLine("Shoulder", leftShoulder == 2 ? "Ammo" : leftShoulder == 1 ? "Flashlight" : "Quick save");
             // Manual reloads: the left grip takes ammo at the left hip and works the bolt / slide / pump.
             if (hand == 0 && bmvr::PhysicalWeapon(bmvr::g_VrMagReload))
                 fixedLine("Left hip", "Magazine, shells, rocket");
@@ -1327,6 +1340,8 @@ namespace
             return g_SnapTurning;
         if (is({ "LadderBodyFollowsArms", "LadderGunHand", "LadderHandBack", "LadderHandWrap", "LadderStickClimb" }))
             return !g_PhysicalLadders;
+        if (is({ "VrHolsterDynamic" }))
+            return !g_VrHolsterBack;
         if (is({ "DamageFlashStrength" }))
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
@@ -1342,6 +1357,10 @@ namespace
             return !g_VrCrosshair;
         if (is({ "VrLaserWidth" }))
             return !g_VrLaserBeam;
+        if (is({ "LastShotHapticStrength" }))
+            return g_LastShotHaptic < 0.5f;
+        if (is({ "DryFireHapticStrength" }))
+            return g_DryFireHaptic < 0.5f;
         if (is({ "ThrowScale", "ThrowStroke" }))
             return !g_VrHandThrow;
         if (is({ "FoveatedInner", "FoveatedMid" }))
@@ -1427,7 +1446,15 @@ namespace
             return BindRowAction(r) != BindRowAction(r, true);
         if (r.kind != RowKind::Toggle && r.kind != RowKind::Number && r.kind != RowKind::Choice)
             return false;
-        return r.key && !IsDefault(r);
+        // Key-less rows (bmvr_* fixes, tests, tuning) count too: "Reset tab" puts them back,
+        // so they must be marked and counted (user 2026-11-22: render fixes were not).
+        if (r.f && (r.f == &bmvr::g_VmTuneSeatCm || r.f == &bmvr::g_VmTuneSeatDeg))
+        {
+            float cm = 0.f, deg = 0.f;
+            bmvr::HeldWeaponSeatDefaults(cm, deg);   // per weapon, as ResetTabRows
+            return std::fabs(*r.f - (r.f == &bmvr::g_VmTuneSeatCm ? cm : deg)) > 1e-4f;
+        }
+        return !IsDefault(r);
     }
     // Changed developer rows of tab `tab` that are hidden ("Show developer rows"
     // off): shown as a note beside "Reset tab", which leaves them alone.
@@ -2329,8 +2356,10 @@ void VR::CloseSettingsPanel(const char* why)
 
 void VR::SettingsPanelFrame(Vector& origin, Vector& fwd, Vector& right, Vector& up) const
 {
-    const Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
-    const float yawDelta = m_RotationOffsetY.load(std::memory_order_acquire) - m_SettingsLatchYaw;
+    Vector body;
+    float rotY = 0.f;
+    MenuDrawBody(body, rotY);
+    const float yawDelta = rotY - m_SettingsLatchYaw;
     const float a = yawDelta * (kPi / 180.f), c = cosf(a), s = sinf(a);
     auto yaw = [&](const Vector& v) { return Vector(v.x * c - v.y * s, v.x * s + v.y * c, v.z); };
     origin = body + yaw(m_SettingsLatchDelta);
