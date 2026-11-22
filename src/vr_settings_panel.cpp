@@ -177,7 +177,7 @@ namespace
             { "GRAB GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // One row per zone, Off as a choice (user 2026-11-19). A weapon zone only
             // buzzes and takes the grip while you carry that weapon.
-            { "Left shoulder action", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeftShoulder, 1.f, -1.f, 1.f, "Off|Quick save|Flashlight" },
+            { "Left shoulder action", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeftShoulder, 1.f, -1.f, 2.f, "Off|Quick save|Flashlight|Ammo" },
             { "Right shoulder takes", RowKind::Choice, "GestureWeaponShoulder", nullptr, &bmvr::g_GestureWeaponShoulder, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Left hip takes", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureWeaponHipLeft, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
             { "Right hip takes", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureWeaponHipRight, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
@@ -743,7 +743,7 @@ namespace
                 fixedLine("Grab", grab);
             const int leftShoulder = static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder));
             if (hand == 0 && leftShoulder >= 0)
-                fixedLine("Shoulder", leftShoulder == 1 ? "Flashlight" : "Quick save");
+                fixedLine("Shoulder", leftShoulder == 2 ? "Ammo" : leftShoulder == 1 ? "Flashlight" : "Quick save");
             // Manual reloads: the left grip takes ammo at the left hip and works the bolt / slide / pump.
             if (hand == 0 && bmvr::PhysicalWeapon(bmvr::g_VrMagReload))
                 fixedLine("Left hip", "Magazine, shells, rocket");

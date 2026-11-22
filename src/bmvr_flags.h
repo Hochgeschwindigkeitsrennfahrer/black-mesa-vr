@@ -439,7 +439,8 @@ namespace bmvr
     extern bool g_MuteFidgetSounds;      // weapon fidget clips play no sound (the pose is frozen in VR)
     // Optional features, default off:
     // Grab zones (grip with the hand there). Left shoulder (left hand):
-    // -1 off, 0 quick save (default), 1 flashlight toggle.
+    // -1 off, 0 quick save (default), 1 flashlight toggle, 2 ammo (the manual-reload
+    // ammo grab also works here, besides the left hip; no quick save / flashlight).
     extern float g_GestureLeftShoulder;
     // Weapon each right-hand zone takes (index into GestureWeaponName / parts),
     // -1 = zone off: 0 crowbar, 1 pistol, 2 .357, 3 MP5, 4 shotgun, 5 crossbow,

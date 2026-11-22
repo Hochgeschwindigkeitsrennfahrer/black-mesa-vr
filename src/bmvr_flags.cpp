@@ -894,7 +894,7 @@ namespace bmvr
             else if (std::strcmp(n, "GestureLeftShoulder") == 0)
             {
                 const int v = atoi(val);
-                if (v >= -1 && v <= 1)
+                if (v >= -1 && v <= 2)
                     g_GestureLeftShoulder = static_cast<float>(v);
             }
             else if (std::strcmp(n, "GestureWeaponShoulder") == 0 || std::strcmp(n, "GestureWeaponHipRight") == 0

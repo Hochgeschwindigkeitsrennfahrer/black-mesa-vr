@@ -15587,7 +15587,10 @@ bool VR::UpdateShoulderGestures(bool paused)
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = shoulderW >= 0 && m_PhysicalRightTrackingValid && !m_TwoHandActive
         && inZone(m_PhysicalRightPosAbs, 1.f) && zoneLive(shoulderW);
-    if (step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
+    // Ammo (leftAction 2): no gesture here, the manual-reload ammo grab takes
+    // this zone as a second ammo pouch (atLeftHip); the grip stays out of the
+    // flashlight via m_GestureZoneLeft.
+    if (leftAction != 2 && step(s_left, leftIn, gripValue(m_ActionInventoryGripLeft), vr::TrackedControllerRole_LeftHand, 250))
     {
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
         if (leftAction == 1)
@@ -22565,6 +22568,11 @@ void VR::UpdateMagReload(uint32_t& buttons)
         const float height = d.z / scale;
         const bool in = along > -0.43f && along < 0.10f && height > -1.03f && height < -0.45f
             && lateral > 0.05f && lateral < 0.45f;
+        // Left shoulder set to "Ammo": the same zone as the shoulder gesture
+        // (see UpdateShoulderGestures inZone) also takes ammo.
+        if (!in && static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder)) == 2 && along < 0.04f
+            && height > -0.20f && height < 0.30f && lateral > 0.05f && lateral < 0.50f)
+            return true;
         static int s_missLog;
         if (!in && s_missLog < 20)
         {
