@@ -98,7 +98,7 @@ namespace bmvr
     float g_MsaaF = 0.f;
     bool g_AlphaToCoverage = true;   // no-op while Msaa is 0
     float g_LodBias = 0.f;
-    float g_RefractCopiesPerEye = 1.0f;
+    float g_RefractCopiesPerEye = 6.0f;
     bool g_RefractOncePerEye = true;   // also on at 0x: no visible cost there, big saving with MSAA
     bool g_MsaaAllowed = true;
     bool g_Haptics = true;
@@ -987,7 +987,7 @@ namespace bmvr
             else if (std::strcmp(n, "RefractOncePerEye") == 0)
                 g_RefractOncePerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "RefractCopiesPerEye") == 0)
-                g_RefractCopiesPerEye = std::clamp(std::round(static_cast<float>(atof(val))), 1.f, 8.f);
+                g_RefractCopiesPerEye = std::clamp(std::round(static_cast<float>(atof(val))), 1.f, 20.f);
             else if (std::strcmp(n, "GpuPassTiming") == 0)
                 g_GpuPassTiming = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GpuPassDetail") == 0)

@@ -12899,7 +12899,7 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             SafeTextureName(texture), destW, destH, srcName, srcW, srcH,
             srcRect ? srcRect->x : -1, srcRect ? srcRect->y : -1, srcRect ? srcRect->width : -1, srcRect ? srcRect->height : -1,
             dstRect ? dstRect->x : -1, dstRect ? dstRect->y : -1, dstRect ? dstRect->width : -1, dstRect ? dstRect->height : -1, grew);
-    // Limit glass refraction copies (VR panel, default on, key RefractOncePerEye): Source refreshes
+    // Limit refractions per eye (VR panel, default on, key RefractOncePerEye): Source refreshes
     // _rt_PowerOfTwoFB for every refractive object it draws (up to ~50 per eye
     // per frame behind the train windows). With this on, only the first copy of
     // each eye's frame runs; later glass refracts that copy (glass behind glass
@@ -12918,7 +12918,7 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             IDirect3DSurface9* eyeNow = m_VR->ThreadEyeSurface();
             if (eyeNow && srcEye)
             {
-                // RefractCopiesPerEye (dev row, default 1): this many copies per eye run.
+                // RefractCopiesPerEye (dev row, 1..20, default 6): this many copies per eye run.
                 const int maxCopies = (std::max)(1, static_cast<int>(bmvr::g_RefractCopiesPerEye + 0.5f));
                 if (m_VR->m_RefractEyeDone == eyeNow)
                 {
