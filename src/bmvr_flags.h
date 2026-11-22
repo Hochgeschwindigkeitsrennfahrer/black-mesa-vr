@@ -207,6 +207,7 @@ namespace bmvr
     extern bool g_AlphaToCoverage;   // AlphaToCoverage (default true, needs Msaa): alpha-tested draws use the eye MSAA samples (foliage, fences)
     extern float g_LodBias;          // LodBias (default 0): extra mip LOD bias in the 3D views (softer textures; foliage/fences more solid)
     extern bool g_RefractOncePerEye; // RefractOncePerEye (default true): glass refraction copied once per eye
+    extern float g_RefractCopiesPerEye; // RefractCopiesPerEye (1..8, default 1): copies per eye RefractOncePerEye lets through
     extern float g_MsaaF;           // VR panel copy of g_Msaa (0/2/4); applied live by recreating the eyes
     extern bool g_MsaaParticles1x; // MsaaParticles1x (default true, needs Msaa): particles drawn last, on the 1x resolve (the gun too in frames with particles)
     extern bool g_MsaaPostSwitch;   // MsaaPostSwitch (default true): post chain on the 1x resolve

@@ -1122,6 +1122,7 @@ public:
     // Eye surface the calling thread is drawing (multicore TLS or the stereo blit).
     IDirect3DSurface9* ThreadEyeSurface() const;
     IDirect3DSurface9* m_RefractEyeDone = nullptr;   // RefractOncePerEye: eye already copied
+    int m_RefractEyeCopies = 0;                      // copies run for m_RefractEyeDone (reset with it)
     uint32_t m_RefractCopiesSkipped = 0;
     void BeginStereoEyeBlit(IDirect3DSurface9* dst);
     void ClearStereoEyeSurfaces();

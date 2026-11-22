@@ -12918,12 +12918,22 @@ void __fastcall Hooks::dCopyRenderTargetToTextureEx(void* ecx, void* edx, ITextu
             IDirect3DSurface9* eyeNow = m_VR->ThreadEyeSurface();
             if (eyeNow && srcEye)
             {
-                if (m_VR->m_RefractEyeDone == eyeNow && !(m_Game && m_Game->LocalPlayerWaterLevel() == 3))
+                // RefractCopiesPerEye (dev row, default 1): this many copies per eye run.
+                const int maxCopies = (std::max)(1, static_cast<int>(bmvr::g_RefractCopiesPerEye + 0.5f));
+                if (m_VR->m_RefractEyeDone == eyeNow)
                 {
-                    ++m_VR->m_RefractCopiesSkipped;
-                    return;
+                    if (m_VR->m_RefractEyeCopies >= maxCopies && !(m_Game && m_Game->LocalPlayerWaterLevel() == 3))
+                    {
+                        ++m_VR->m_RefractCopiesSkipped;
+                        return;
+                    }
+                    ++m_VR->m_RefractEyeCopies;
                 }
-                m_VR->m_RefractEyeDone = eyeNow;
+                else
+                {
+                    m_VR->m_RefractEyeDone = eyeNow;
+                    m_VR->m_RefractEyeCopies = 1;
+                }
             }
             else
                 m_VR->m_RefractEyeDone = nullptr;
