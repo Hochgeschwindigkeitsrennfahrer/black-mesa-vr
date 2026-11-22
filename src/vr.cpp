@@ -15269,7 +15269,7 @@ void VR::ApplyTwoHandWeaponAim()
             : (lat < enterR && along >= alongMin && along <= alongMax);
         // A squeeze where the old held pump grab caught the pump (its
         // lenient grab radius) attaches too.
-        if (!onPoint && MagReload::PumpFollowsSupportHand()
+        if (!onPoint && bmvr::g_ShotgunPumpAttach && MagReload::PumpFollowsSupportHand()
             && MagReload::g_NeedRack.load(std::memory_order_relaxed)
             && MagReload::g_NearBolt.load(std::memory_order_relaxed))
         {
@@ -22250,7 +22250,10 @@ bool MagReload::PumpFollowsSupportHand()
     // two-hand attach left the glove off the pump and dropped the grab when
     // the hand left the pump's grab radius mid-stroke (back sound, no
     // forward stroke, gun still needing a pump).
-    return g_Weapon.load(std::memory_order_relaxed) == kWeaponShotgun;
+    // Dev A/B ("Pump works with the attached hand"): off = behaviour before
+    // 95fc285 (only toggle hold; hold mode grabs the pump on its own).
+    return g_Weapon.load(std::memory_order_relaxed) == kWeaponShotgun
+        && (bmvr::g_ShotgunPumpAttach || bmvr::g_TwoHandGripToggle);
 }
 
 const MagReload::WeaponDef& MagReload::Def(int weapon)
@@ -22703,7 +22706,12 @@ void VR::UpdateMagReload(uint32_t& buttons)
         // plays the pump sound or blocks the trigger (user, 2026-11-17).
         // The attached support hand works it by moving: toggle hold without
         // a held squeeze, hold mode while the grip (and so the attach) is held.
-        const bool handOnPump = PumpFollowsSupportHand() && TwoHandGripActive();
+        const bool latchedPump = PumpFollowsSupportHand() && TwoHandGripActive();
+        // Old hold-mode path (flag off): the pump is grabbed on its own with a
+        // held squeeze on it.
+        const bool oldHeldPump = !bmvr::g_ShotgunPumpAttach && !PumpFollowsSupportHand()
+            && gripDown && (TwoHandGripActive() || g_NearBolt.load());
+        const bool handOnPump = latchedPump || oldHeldPump;
         if (!boltGrab && w.needPump && handOnPump && w.mag != kInHand)
         {
             boltGrab = true;
@@ -22787,7 +22795,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 if (!w.needPump)
                     boltGrab = false;
             }
-            if (!handOnPump)
+            if (!handOnPump || (oldHeldPump && released))
             {
                 boltGrab = false;
                 s_boltFull = false;

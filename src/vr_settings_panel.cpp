@@ -392,6 +392,7 @@ namespace
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Gun hand cuff closed", RowKind::Toggle, nullptr, &bmvr::g_GunHandCuffCap, nullptr, 0, 0, 0, nullptr },
+            { "Pump works with the attached hand", RowKind::Toggle, nullptr, &bmvr::g_ShotgunPumpAttach, nullptr, 0, 0, 0, nullptr },
             { "Tripmine placed along its face", RowKind::Toggle, nullptr, &bmvr::g_TripmineFaceAim, nullptr, 0, 0, 0, nullptr },
             // Live per-weapon angle trim for the weapon in the hand (saved in
             // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows).
