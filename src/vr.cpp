@@ -10236,10 +10236,23 @@ void VR::ApplyMenuNavigation()
     }
     else
         s_wheelStatMs = 0;
-    if (fabsf(turnY) > 0.35f && nowMs - s_wheelMs >= 70u)
+    // New game UI: some lists run sideways (Load/Save Game). Its forwarder
+    // only passes the vertical wheel to Qt, which scrolls a sideways list
+    // under the pointer too. So with the laser on the menu, the turn stick
+    // held (mostly) sideways = the same wheel (right = down = next items):
+    // same speed as up/down, no keyboard focus. Left/Right keys moved focus
+    // that the laser's hover took back (user 2026-11-23: focus fight, and
+    // much slower at 250 ms); they stay for when the laser is off the menu.
+    float turnX = 0.f;
+    if (bmvr::NewUiWindow() && GetAnalogActionData(m_ActionTurn, turn))
+        turnX = turn.x;
+    const bool sideways = fabsf(turnX) > 0.55f && fabsf(turnX) > fabsf(turnY) * 1.5f;
+    const bool pointerLive = MenuPointerLive();
+    const float scrollAxis = (sideways && pointerLive) ? -turnX : turnY;
+    if (fabsf(scrollAxis) > 0.35f && nowMs - s_wheelMs >= 70u)
     {
-        short wheel = (turnY > 0.f) ? WHEEL_DELTA : -WHEEL_DELTA;
-        if (fabsf(turnY) > 0.85f)
+        short wheel = (scrollAxis > 0.f) ? WHEEL_DELTA : -WHEEL_DELTA;
+        if (fabsf(scrollAxis) > 0.85f)
             wheel = static_cast<short>(wheel * 2);
         // Fallback: window centre (was 640,360 = a 1280x720 window's centre).
         const int cx = m_MenuCursorValid ? m_MenuCursorX : static_cast<int>(KnownWindowWidth() / 2);
@@ -10250,23 +10263,17 @@ void VR::ApplyMenuNavigation()
         static int s_wheelLog;
         if (s_wheelLog < 8)
         {
-            Game::logMsg("Menu wheel stickY=%.2f delta=%d", turnY, (int)wheel);
+            Game::logMsg("Menu wheel stick=%.2f%s delta=%d", scrollAxis,
+                scrollAxis != turnY ? " (sideways)" : "", (int)wheel);
             ++s_wheelLog;
         }
     }
-    // New game UI: some lists run sideways (Load Game). Its forwarder only
-    // passes the vertical wheel to Qt; the UI is made for pads and moves
-    // along such a list with Left/Right, which vertical lists ignore. So the
-    // turn stick held sideways = Left/Right (repeat 250 ms), only when it is
-    // mostly sideways.
-    float turnX = 0.f;
-    if (bmvr::NewUiWindow() && GetAnalogActionData(m_ActionTurn, turn))
-        turnX = turn.x;
-    const bool sideways = fabsf(turnX) > 0.55f && fabsf(turnX) > fabsf(turnY) * 1.5f;
+    // Laser off the menu: the turn stick sideways = Left/Right (repeat
+    // 250 ms), which moves along sideways lists; vertical lists ignore it.
     static bool s_tl, s_tr;
     static DWORD s_tlMs, s_trMs;
-    dpad(sideways && turnX < 0.f, VK_LEFT, s_tl, s_tlMs, "turn-left");
-    dpad(sideways && turnX > 0.f, VK_RIGHT, s_tr, s_trMs, "turn-right");
+    dpad(sideways && !pointerLive && turnX < 0.f, VK_LEFT, s_tl, s_tlMs, "turn-left");
+    dpad(sideways && !pointerLive && turnX > 0.f, VK_RIGHT, s_tr, s_trMs, "turn-right");
 
     const bool select = PressedDigitalAction(m_ActionMenuSelect);
     // While the pointer is on the menu, menus click with the trigger only
