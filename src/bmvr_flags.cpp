@@ -356,7 +356,6 @@ namespace bmvr
     bool g_LoadingCard = true;
     bool g_TitleLevel = true;
     bool g_TitleGlow = true;
-    bool g_TitleAdditive = true;
     bool g_ParticlesLast = true;
     float g_GlowProxyScale = 1.0f;
     float g_VrRpgRingScale = 0.5f;

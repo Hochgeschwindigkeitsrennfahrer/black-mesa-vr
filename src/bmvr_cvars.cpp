@@ -343,8 +343,6 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_TitleLevel, nullptr },
             { "bmvr_title_glow", "VR: intro logo / credits / chapter titles with flat Black Mesa's HUD bloom + scanlines",
               Kind::Bool, 0.f, 1.f, &g_TitleGlow, nullptr },
-            { "bmvr_title_additive", "VR: intro logo / credits / chapter titles added to the world (flat: additive fonts) instead of alpha-blended",
-              Kind::Bool, 0.f, 1.f, &g_TitleAdditive, nullptr },
             { "bmvr_glow_proxy_scale", "VR test: glow occlusion test area this many times wider (1 = stock): finer visibility steps, less flicker",
               Kind::Float, 1.f, 8.f, nullptr, &g_GlowProxyScale },
             { "bmvr_rpg_ring_scale", "VR: size of the spinning red lines around the RPG laser point (1 = flat HUD size)",

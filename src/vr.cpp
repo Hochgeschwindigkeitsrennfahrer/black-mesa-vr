@@ -20165,10 +20165,11 @@ static IDirect3DPixelShader9* TitleBloomBlurShader(IDirect3DDevice9* device)
     return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_bloom_blur.hlsl");
 }
 
-// c0 = (layer height / 2, glow on, additive, 0); c1 = (scanline influence,
-// bloom influence, scanline value, 0). Additive: alpha 0, so the
-// premultiplied layer adds to the world like BM's additive credit fonts and
-// the post pass, instead of darkening it by the text alpha.
+// c0 = (layer height / 2, glow on, 0, 0); c1 = (scanline influence,
+// bloom influence, scanline value, 0). Colour stays premultiplied; alpha =
+// max(text alpha, brightest channel) so the glow (no alpha of its own) is
+// kept. Flat is additive (alpha 0 here), but SteamVR showed nothing at all
+// for an alpha-0 premultiplied quad (user, 2026-11-23: logo and names gone).
 static IDirect3DPixelShader9* TitleCombineShader(IDirect3DDevice9* device)
 {
     static LayerShaderCache s_cache;
@@ -20182,8 +20183,9 @@ static IDirect3DPixelShader9* TitleCombineShader(IDirect3DDevice9* device)
         "  float scan = frac(uv.y * k.x) >= 0.5 ? g.z : 0.0;\n"
         "  float3 bl = tex2D(b, uv).rgb;\n"
         "  float3 rgb = c.rgb + k.y * scan * (c.rgb * g.x + bl * g.y);\n"
-        "  float a = k.z > 0.5 ? 0.0 : sqrt(c.a);\n"
-        "  return float4(saturate(rgb), a);\n"
+        "  rgb = saturate(rgb);\n"
+        "  float a = max(sqrt(c.a), max(rgb.r, max(rgb.g, rgb.b)));\n"
+        "  return float4(rgb, a);\n"
         "}\n";
     return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_combine.hlsl");
 }
@@ -20417,8 +20419,7 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
     if (!device || !surf || FAILED(surf->GetDesc(&desc)))
         return;
     const bool glow = bmvr::g_TitleGlow;
-    const bool additive = bmvr::g_TitleAdditive;
-    IDirect3DPixelShader9* ps = (glow || additive) ? TitleCombineShader(device) : TitlePremultipliedShader(device);
+    IDirect3DPixelShader9* ps = glow ? TitleCombineShader(device) : TitlePremultipliedShader(device);
     IDirect3DPixelShader9* psDown = glow ? TitleBloomDownsampleShader(device) : nullptr;
     IDirect3DPixelShader9* psBlur = glow ? TitleBloomBlurShader(device) : nullptr;
     IDirect3DTexture9* copy = ps ? PauseLayerCopy(device, desc) : nullptr;
@@ -20485,7 +20486,7 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
     device->SetPixelShader(ps);
     if (ps != TitlePremultipliedShader(device))
     {
-        const float k[4] = { desc.Height * 0.5f, doGlow ? 1.f : 0.f, additive ? 1.f : 0.f, 0.f };
+        const float k[4] = { desc.Height * 0.5f, doGlow ? 1.f : 0.f, 0.f, 0.f };
         const float g[4] = { 0.5f, 8.f, 202.f / 255.f, 0.f };
         device->SetPixelShaderConstantF(0, k, 1);
         device->SetPixelShaderConstantF(1, g, 1);
@@ -20507,13 +20508,13 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
         prevDs->Release();
     static int s_log;
     static int s_lastMode = -1;
-    const int mode = (doGlow ? 1 : 0) | (additive ? 2 : 0);
+    const int mode = doGlow ? 1 : 0;
     if (s_log < 8 && mode != s_lastMode)
     {
         ++s_log;
         s_lastMode = mode;
-        Game::logMsg("Title layer: %ux%u glow=%d additive=%d (bloom %ux%u)", desc.Width, desc.Height,
-            doGlow ? 1 : 0, additive ? 1 : 0, bw, bh);
+        Game::logMsg("Title layer: %ux%u glow=%d (bloom %ux%u)", desc.Width, desc.Height,
+            doGlow ? 1 : 0, bw, bh);
     }
 }
 

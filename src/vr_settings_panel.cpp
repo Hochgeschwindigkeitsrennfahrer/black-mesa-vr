@@ -427,7 +427,6 @@ namespace
             { "Xen ground fog off", RowKind::Toggle, nullptr, &bmvr::g_XenGlobalFogOff, nullptr, 0, 0, 0, nullptr },
             { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
             { "Titles glow + scanlines", RowKind::Toggle, nullptr, &bmvr::g_TitleGlow, nullptr, 0, 0, 0, nullptr },
-            { "Titles added to the world", RowKind::Toggle, nullptr, &bmvr::g_TitleAdditive, nullptr, 0, 0, 0, nullptr },
             { "FIXES: TRACKING, WEAPONS, GAME", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
