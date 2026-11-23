@@ -276,6 +276,10 @@ namespace
         case L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE:
             c.push_back("vr_controller_vive_1_5");
             break;
+        case L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME:
+            // SteamVR drivers/frame_controller/resources/rendermodels.
+            c.push_back("frame_controller_" + side);
+            break;
         default:
             break;
         }
@@ -291,10 +295,16 @@ namespace
         // handle), after their button_grip.
         static const std::vector<const char*> gripL = { "button_grip", "squeeze", "rgrip", "lgrip", "grip" };
         static const std::vector<const char*> gripR = { "button_grip", "squeeze", "lgrip", "rgrip", "grip" };
-        static const std::vector<const char*> f1 = { "button_a", "button_x", "a_button", "x_button" };
+        // "dpad": the Steam Frame's left hand (its four directions = face1..4).
+        static const std::vector<const char*> f1 = { "button_a", "button_x", "a_button", "x_button", "dpad" };
         static const std::vector<const char*> f2 = { "button_b", "button_y", "b_button", "y_button" };
+        // Frame right X / Y: on other controllers these names are already
+        // face1 / face2, and a component goes to the first part that names it.
+        static const std::vector<const char*> f3 = { "button_x" };
+        static const std::vector<const char*> f4 = { "button_y" };
+        static const std::vector<const char*> bumper = { "bumper" };
         static const std::vector<const char*> stick = { "thumbstick", "trackpad" };
-        static const std::vector<const char*> menu = { "button_option", "button_enter", "button", "button_menu", "enter_button" };
+        static const std::vector<const char*> menu = { "button_option", "button_enter", "button", "button_menu", "enter_button", "button_view" };
         static const std::vector<const char*> none;
         switch (part)
         {
@@ -304,6 +314,9 @@ namespace
         case bmvr::ctlmodel::kFace2: return f2;
         case bmvr::ctlmodel::kStick: return stick;
         case bmvr::ctlmodel::kMenu: return menu;
+        case bmvr::ctlmodel::kFace3: return f3;
+        case bmvr::ctlmodel::kFace4: return f4;
+        case bmvr::ctlmodel::kBumper: return bumper;
         default: return none;
         }
     }
@@ -778,11 +791,12 @@ namespace
                 toGrip(hm.deviceCenter, hm.gripCenter);
                 RenderPicture(mesh, hand, picW, picH, hm);
                 hm.ok = !hm.picture.px.empty();
-                Game::logMsg("Controller model %s: %s, %zu triangles, %zu textures, grip %s, parts%s%s%s%s%s%s",
+                Game::logMsg("Controller model %s: %s, %zu triangles, %zu textures, grip %s, parts%s%s%s%s%s%s%s%s%s",
                     hand ? "right" : "left", dir.string().c_str(), mesh.tris.size(), mesh.textures.size(),
                     hm.gripKnown ? "openxr_grip" : "device origin",
                     hm.has[0] ? " trigger" : "", hm.has[1] ? " grip" : "", hm.has[2] ? " face1" : "",
-                    hm.has[3] ? " face2" : "", hm.has[4] ? " stick" : "", hm.has[5] ? " menu" : "");
+                    hm.has[3] ? " face2" : "", hm.has[4] ? " stick" : "", hm.has[5] ? " menu" : "",
+                    hm.has[6] ? " face3" : "", hm.has[7] ? " face4" : "", hm.has[8] ? " bumper" : "");
                 return hm.ok;
             }
         return false;

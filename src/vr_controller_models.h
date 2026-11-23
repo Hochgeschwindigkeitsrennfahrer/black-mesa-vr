@@ -21,7 +21,9 @@
 
 namespace bmvr::ctlmodel
 {
-    enum Part : int { kTrigger = 0, kGrip, kFace1, kFace2, kStick, kMenu, kPartCount };
+    // kFace3 / kFace4 / kBumper: Steam Frame only (right X / Y, bumpers). The
+    // Frame's left D-pad is one mesh ("dpad"), found as kFace1.
+    enum Part : int { kTrigger = 0, kGrip, kFace1, kFace2, kStick, kMenu, kFace3, kFace4, kBumper, kPartCount };
 
     struct Picture
     {

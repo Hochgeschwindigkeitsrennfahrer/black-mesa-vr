@@ -736,16 +736,31 @@ namespace
                 case bmvr::BindInput::Grip: part = bmvr::ctlmodel::kGrip; break;
                 case bmvr::BindInput::Face1: part = bmvr::ctlmodel::kFace1; break;
                 case bmvr::BindInput::Face2: part = bmvr::ctlmodel::kFace2; break;
+                case bmvr::BindInput::Face3: part = bmvr::ctlmodel::kFace3; break;
+                case bmvr::BindInput::Face4: part = bmvr::ctlmodel::kFace4; break;
+                case bmvr::BindInput::Bumper: part = bmvr::ctlmodel::kBumper; break;
                 case bmvr::BindInput::StickClick: caption = "Click"; break;
                 case bmvr::BindInput::StickUp: caption = "Up"; break;
                 case bmvr::BindInput::StickDown: caption = "Down"; break;
                 default: break;
+                }
+                // Steam Frame left hand: the four D-pad directions are one
+                // mesh (found as kFace1): one "D-pad" card, a line per direction.
+                const bool dpad = hand == 0 && g_PanelFamily == L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME
+                    && (b.input == bmvr::BindInput::Face1 || b.input == bmvr::BindInput::Face2
+                        || b.input == bmvr::BindInput::Face3 || b.input == bmvr::BindInput::Face4);
+                if (dpad)
+                {
+                    part = bmvr::ctlmodel::kFace1;
+                    caption = b.input == bmvr::BindInput::Face1 ? "Down" : b.input == bmvr::BindInput::Face2 ? "Right"
+                        : b.input == bmvr::BindInput::Face3 ? "Left" : "Up";
                 }
                 if (b.hold)
                     caption = caption.empty() ? "Hold" : caption + " hold";
                 if (!hm.has[part])
                     part = bmvr::ctlmodel::kStick;   // drawn without a line if that is missing too
                 const std::string head = part == bmvr::ctlmodel::kStick ? (pad ? "Pad" : "Stick")
+                    : dpad ? "D-pad"
                     : bmvr::BindInputLabel(g_PanelFamily, g_PanelSystem, hand, b.input);
                 CardLine line;
                 line.row = i;
