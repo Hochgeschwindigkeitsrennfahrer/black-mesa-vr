@@ -15,6 +15,7 @@
 #include "game.h"
 #include "bmvr_flags.h"
 #include "d3d9_vr.h"
+#include "vr_ui_draw.h"
 #include "bmvr_cvars.h"
 #include "vr_button_map.h"
 #include "vr_controller_models.h"
@@ -2992,7 +2993,7 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
     device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
     device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
-    device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(MenuVertTex));
+    DrawVrUiPrimitive(device, D3DPT_TRIANGLESTRIP, 2, v, sizeof(MenuVertTex));
     device->SetTexture(0, nullptr);
     device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
     device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
@@ -3020,7 +3021,7 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
                 fan[k + 1].color = D3DCOLOR_ARGB(255, 255, 255, 255);
             }
             if (ok)
-                device->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, kSegs, fan, sizeof(MenuVert));
+                DrawVrUiPrimitive(device, D3DPT_TRIANGLEFAN, kSegs, fan, sizeof(MenuVert));
         }
     }
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);

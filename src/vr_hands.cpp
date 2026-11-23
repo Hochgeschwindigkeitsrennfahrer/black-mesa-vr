@@ -6,6 +6,8 @@
 #include "vr_bm_hands.h"
 #include "vr_hand_asset_loader.h"
 #include "vr_hand_math.h"
+#include "bmvr_grip_math.h"
+#include "openxr_cpu_bridge.h"
 #include "vr_hand_renderer_d3d9.h"
 #include "vr_mag_reload.h"
 
@@ -141,6 +143,8 @@ namespace
         bool built = false;
         bool valid = false;
         bool valveBiped = false;
+        bool gripFrameValid = false;
+        float gripFrame[3][4]{};
         bool rightHand = false;
         int fingerJoint[vr::VRFinger_Count][3]{};
         std::vector<VrHandMatrix4> bindLocal;
@@ -226,6 +230,15 @@ namespace
         rig.valveBiped = AssetUsesValveBipedCurl(asset);
         rig.scratchLocal.resize(n);
         rig.scratchModel.resize(n);
+        const int wrist = FindNameIndex(asset.jointNames, rightHand ? "wrist_r" : "wrist_l");
+        if (rig.valveBiped && wrist >= 0) {
+            auto point = [&](int j) { const auto& m=asset.bindMatrices[size_t(j)];
+                return bmvr_grip::V{VrHandMath::Get(m,0,3),VrHandMath::Get(m,1,3),VrHandMath::Get(m,2,3)}; };
+            rig.gripFrameValid = bmvr_grip::frame(point(wrist),
+                point(rig.fingerJoint[vr::VRFinger_Index][0]),
+                point(rig.fingerJoint[vr::VRFinger_Middle][0]),
+                point(rig.fingerJoint[vr::VRFinger_Pinky][0]),rig.gripFrame);
+        }
         rig.valid = true;
     }
 
@@ -1549,8 +1562,11 @@ bool BmVrGloves::DrawForEye(
         // the glove only adds the difference. Also on a hand holding the gun:
         // rolled, it sits under the gun instead of on its side.
         QAngle gloveAngles = *angles[i];
-        // Classic hands: no glove roll on any controller (Index keeps its pose roll, as originally).
-        float gloveRoll = bmvr::g_VrHandsClassicPose ? 0.f : bmvr::g_VrHandsRollDeg;
+        const bool assetGripFrame = BMVR_UseCpuBridge() && g_Game && g_Game->m_VR && g_Game->m_VR->m_OpenXrHelperBridgeActive
+            && family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH && hand.rig.gripFrameValid;
+        // The Mac Touch path already derives thumb-up orientation from the asset.
+        // Treat the author's neutral 90 degrees as zero extra roll on that path.
+        float gloveRoll = bmvr::g_VrHandsClassicPose ? 0.f : bmvr::g_VrHandsRollDeg - (assetGripFrame ? 90.f : 0.f);
         if (!bmvr::g_VrHandsClassicPose && family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES)
             gloveRoll -= bmvr::g_VrHandsIndexRollDeg;
         if (gloveRoll != 0.f)
@@ -1566,6 +1582,18 @@ bool BmVrGloves::DrawForEye(
             scale,
             posOffset,
             rotOffset);
+        if (assetGripFrame) {
+            // Asset-defined palm frame, not the legacy GLB yaw/roll calibration.
+            // Corrected frame uses knuckles->wrist for +Y (v17 used its inverse).
+            Vector f,r,u; QAngle::AngleVectors(gloveAngles,&f,&r,&u);
+            const float k=sourceUnitsPerMeter*scale;
+            const float controller[3][4]={{r.x*k,u.x*k,-f.x*k,gloveOrigin.x},
+                {r.y*k,u.y*k,-f.y*k,gloveOrigin.y},{r.z*k,u.z*k,-f.z*k,gloveOrigin.z}};
+            float inv[3][4]{},model[3][4]{};
+            bmvr_grip::inverse(hand.rig.gripFrame,inv);bmvr_grip::mul(controller,inv,model);
+            world=VrHandMath::Identity();
+            for(int row=0;row<3;row++)for(int col=0;col<4;col++)VrHandMath::Set(world,row,col,model[row][col]);
+        }
         if (rungGrip)
             WrapGloveOnRung(hand.asset, hand.palette, world, rightHand, rungPoint, rungAxis);
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));

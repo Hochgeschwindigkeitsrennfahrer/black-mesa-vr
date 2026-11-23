@@ -103,6 +103,7 @@ namespace dxvk::vk {
     VULKAN_FN(vkEnumerateDeviceExtensionProperties);
     VULKAN_FN(vkEnumeratePhysicalDevices);
     VULKAN_FN(vkGetPhysicalDeviceExternalSemaphoreProperties);
+    VULKAN_FN(vkGetPhysicalDeviceExternalBufferProperties);
     VULKAN_FN(vkGetPhysicalDeviceFeatures);
     VULKAN_FN(vkGetPhysicalDeviceFeatures2);
     VULKAN_FN(vkGetPhysicalDeviceFormatProperties);
@@ -202,6 +203,7 @@ namespace dxvk::vk {
     VULKAN_FN(vkFlushMappedMemoryRanges);
     VULKAN_FN(vkInvalidateMappedMemoryRanges);
     VULKAN_FN(vkGetDeviceMemoryCommitment);
+    VULKAN_FN(vkGetMemoryHostPointerPropertiesEXT);
     VULKAN_FN(vkBindBufferMemory);
     VULKAN_FN(vkBindImageMemory);
     VULKAN_FN(vkGetBufferMemoryRequirements);

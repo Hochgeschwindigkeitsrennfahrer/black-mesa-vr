@@ -5,6 +5,37 @@
 #include "d3d9_reshade_vr.h"
 
 #include "d3d9_annotation.h"
+#include "../../../../../src/openxr_cpu_bridge.h"
+
+namespace {
+  // Wine/Darwin execute-fault workaround, scoped to this process.
+  void BMVR_ConfigureDepOnce() {
+    static const bool configured = [] {
+      using Query = LONG (NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+      using Set = LONG (NTAPI*)(HANDLE, ULONG, PVOID, ULONG);
+      HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+      auto query = reinterpret_cast<Query>(GetProcAddress(ntdll, "NtQueryInformationProcess"));
+      auto set = reinterpret_cast<Set>(GetProcAddress(ntdll, "NtSetInformationProcess"));
+      char value[8]{};
+      const DWORD envSize = GetEnvironmentVariableA("BMVR_ENABLE_DEP", value, sizeof(value));
+      const bool enabled = envSize == 1 ? value[0] == '1' : BMVR_IsWineOnMac();
+      ULONG before = 0, after = 0;
+      LONG qs = query ? query(GetCurrentProcess(), 34, &before, sizeof(before), nullptr) : LONG(0xc0000002u);
+      LONG ss = 0;
+      if (enabled && qs >= 0 && (before & 2u)) {
+        ULONG desired = (before & ~2u) | 1u;
+        ss = set ? set(GetCurrentProcess(), 34, &desired, sizeof(desired)) : LONG(0xc0000002u);
+      }
+      LONG vs = query ? query(GetCurrentProcess(), 34, &after, sizeof(after), nullptr) : LONG(0xc0000002u);
+      dxvk::Logger::warn(dxvk::str::format("[BMVR DEP v27] pid=", GetCurrentProcessId(),
+        " gate=", enabled, " queryStatus=", qs, " before=", before,
+        " setStatus=", ss, " verifyStatus=", vs, " after=", after,
+        " permanentBitAdded=0"));
+      return true;
+    }();
+    (void)configured;
+  }
+}
 
 class D3DFE_PROCESSVERTICES;
 using PSGPERRORID = UINT;
@@ -18,6 +49,8 @@ namespace dxvk {
           IDirect3D9Ex** ppDirect3D9Ex,
     const D3D9ON12_ARGS* pOverrideList,
           uint32_t       OverrideCount) {
+    BMVR_ConfigureMacVulkan();
+    BMVR_ConfigureDepOnce();
     if (!ppDirect3D9Ex)
       return D3DERR_INVALIDCALL;
 

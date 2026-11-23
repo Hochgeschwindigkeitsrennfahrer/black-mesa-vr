@@ -921,6 +921,8 @@ namespace dxvk {
     const VkImageCreateInfo&          createInfo,
     const DxvkAllocationInfo&         allocationInfo,
     const void*                       next) {
+
+
     auto vk = m_device->vkd();
 
     VkImage image = VK_NULL_HANDLE;
@@ -1113,6 +1115,7 @@ namespace dxvk {
     allocation->m_resourceCookie = allocationInfo.resourceCookie;
     allocation->m_size = createInfo.size;
     allocation->m_mapPtr = importInfo.mapPtr;
+    allocation->m_importOwner = importInfo.owner;
     allocation->m_buffer = importInfo.buffer;
     allocation->m_bufferOffset = importInfo.offset;
 

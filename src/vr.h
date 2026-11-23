@@ -78,6 +78,10 @@ public:
     int m_OpenXrHelperRestartCount = 0;
     bool m_OpenXrSwapGameEyeOrigins = false;
     L4D2VROpenXrPoseDesc m_OpenXrLastHmdPose{};
+    // Same samples as m_WaitedPoses / m_HmdTrackingPose, respectively.
+    // Protected by the pose mutex / controller mutex, not a later bridge read.
+    L4D2VROpenXrPoseDesc m_WaitedOpenXrHmdPose{};
+    L4D2VROpenXrPoseDesc m_CameraOpenXrHmdPose{};
     uint32_t m_OpenXrLastHmdPoseGeneration = 0;
     // Pose actually used for the stereo RenderView pair. Published with the
     // eye textures so OpenXR xrEndFrame does not pair a fresh locate with a
@@ -177,6 +181,9 @@ public:
     uint32_t m_OpenXrCopyThread = 0;
     uint32_t m_OpenXrPairThread = 0;
     uint32_t m_OpenXrStereoPairs = 0;
+    // Latest helper pose latched at stereo start. Do not block the game
+    // thread on helper consume / a new displayTime (HMD 2026-09-20).
+    // Rate-log counters: synchronous copy wait, stereo pairs begun.
     // MulticoreMode eye copy per publish-rate window: functor queued on the
     // material thread, queue unavailable, copied there, Present fallback.
     uint32_t m_McCopyQueuedCount = 0;
@@ -878,6 +885,17 @@ public:
     bool m_UsedNamedRenderTargets = false;
     bool m_StereoRenderViewActive = false;
     bool m_StereoFramePoseActive = false;
+    float m_ControllerPoseYaw = 0.f;
+    float m_StereoFrameYaw = 0.f;
+    Vector m_StereoFrameZero{};
+    bool m_StereoFrameOriginLatched = false;
+    float m_StereoFrameHeight = 0.f;
+    float m_StereoFrameEyeHalf = 0.f;
+    Vector m_StereoFrameWeaponPos{};
+    QAngle m_StereoFrameWeaponAng{};
+    Vector m_StereoFrameVmForward{}, m_StereoFrameVmRight{}, m_StereoFrameVmUp{};
+    Vector m_StereoFrameVmOffset{};
+    QAngle m_StereoFrameViewAngle{};
     QAngle m_StereoFrameAngles{};
     Vector m_StereoFrameHmdPosAbs{};
     bool m_StereoFrameLeftCtrlValid = false;
@@ -913,6 +931,8 @@ public:
     void Update();
     void CreateVRTextures();
     void SubmitVRTextures();
+    // Poll completed CPU captures on their existing D3D API thread; never wait.
+    void PumpCpuReadbacks();
     void WaitPosesForStereoFrame(bool allowQueued = true);
     void BeginStereoFramePose();
     void EndStereoFramePose();
@@ -1154,14 +1174,18 @@ public:
     // GMod: queued material system writes band M of a 2W x 3H ring; helper
     // copies band (M-2). False keeps the verified single-core 1x-eye path.
     bool McPipelineEnabled() const;
-    // One log line when the gameplay render path changes (best / fallback + why).
-    void LogRenderPathIfChanged();
     bool McEyesSmallerThanWindow() const;
     // One HWND-sized RenderView + squash-blit both eyes. Not fused.
     // True when FullFrame/G-buffer stayed window-sized and either gbmatch
     // lock is on or the recommended eyes fit inside the HWND. WMR grows
     // world RTs (worldMatch=1) so this stays false and double RV still runs.
     bool ShouldHwndBlitStereo() const;
+    // One log line when the gameplay render path changes (best / fallback + why).
+    void LogRenderPathIfChanged();
+    // One HWND-sized RenderView + squash-blit both eyes. Not fused.
+    // True when FullFrame/G-buffer stayed window-sized and either gbmatch
+    // lock is on or the recommended eyes fit inside the HWND. WMR grows
+    // world RTs (worldMatch=1) so this stays false and double RV still runs.
     // True only while *this thread* is in a stereo world pass. Shared
     // StereoEyeBlitActive / McPipelineEnabled stay on during pause VGUI and
     // must not steal GameUI onto the 1x eyes or lie GetScreenSize to HMD.
@@ -1286,6 +1310,9 @@ public:
     // InternalMousePressed(MOUSE_LEFT=0). Trigger is otherwise only IN_ATTACK.
     void ApplyWorldVguiTriggerClick(CUserCmd* cmd);
     bool WorldVguiSuppressAttack() const { return m_WorldVguiSuppressAttack; }
+    // Game thread only. World vgui_screen (bm_c2a5i mortar, etc.): hover is
+    // C_VGuiScreen::ClientThink from EyeAngles, but clicks need VGUI
+    // InternalMousePressed(MOUSE_LEFT=0). Trigger is otherwise only IN_ATTACK.
     // VR pointer in screen coordinates while it hit a menu in the last
     // 250 ms (Hooks::dGetCursorPos).
     bool TryGetMenuCursorScreen(POINT& out) const;
@@ -1367,6 +1394,7 @@ public:
     void FinishPauseHudExtraPaint(IMatRenderContext* ctx);
     void StampPauseOverlayCursor();
     bool IntersectMenuPanelUv(float& u, float& v);
+    bool GetOpenXrMenuRay(float* position, float* direction) const;
     // Paint complete: copy the HUD RT to the publish surface, then flag it.
     void NoteHudPainted();
     // Pending painted HUD frame for the layer about to publish (kind 0 = pause
@@ -1702,7 +1730,6 @@ private:
     void ApplyViewmodelBasisOffsets();
     void ApplyTwoHandWeaponAim();
     float LeftSupportGripValue() const;
-    bool UpdateShoulderGestures(bool paused);
     bool ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const;
     bool m_TwoHandActive = false;
     std::atomic<bool> m_SupportNearGun{ false };   // support hand at the gun (ApplyTwoHandWeaponAim)
@@ -1721,6 +1748,7 @@ private:
     Vector m_TwoHandSmoothF{};
     Vector m_TwoHandSmoothU{};
     bool m_TwoHandSmoothValid = false;
+    bool UpdateShoulderGestures(bool paused);
     // Lowered-gun glove follow (NoteViewmodelLowerState / NoteDrawnWeaponRootLocal).
     std::atomic<int> m_VmLowerState{ kVmLowerOther };
     std::atomic<const void*> m_VmLowerHdr{ nullptr };
@@ -1899,6 +1927,9 @@ private:
     bool m_OpenXrHudOverlayPublished = false;
     std::atomic<bool> m_HudPaintedThisFrame{ false };
     bool m_MenuTriggerWasDown = false;
+    bool m_MenuMouseHeld = false;
+    DWORD m_MenuPanelReadySince = 0;
+    uint32_t m_MenuReferenceSpaceEpoch = 0;
     bool m_MenuTriggerLatch = false;   // MenuTriggerClickHeld state, menu and gameplay
     bool m_MenuCursorValid = false;
     bool m_MenuCursorSmoothValid = false;
@@ -1918,6 +1949,11 @@ private:
     Vector m_MenuPanelFwd{};
     Vector m_MenuPanelRight{};
     Vector m_MenuPanelUp{};
+    DWORD m_MenuClickMs = 0;
+    int m_MenuClickX = 0;
+    int m_MenuClickY = 0;
+    bool m_WorldVguiTriggerWasDown = false;
+    bool m_WorldVguiSuppressAttack = false;
     HWND m_MenuCursorHwnd = nullptr;
 public:
     // dGetCursorPos answers with the VR pointer / the real cursor (click log).
@@ -1944,8 +1980,6 @@ private:
     {
         return POINT{ static_cast<LONG>(static_cast<int32_t>(v >> 32)), static_cast<LONG>(static_cast<int32_t>(v & 0xffffffffu)) };
     }
-    bool m_WorldVguiTriggerWasDown = false;
-    bool m_WorldVguiSuppressAttack = false;
     bool m_WeaponMenuOpen = false;
     bool m_WeaponMenuClickHeld = false;
     bool m_WeaponMenuOpenedThisHold = false;

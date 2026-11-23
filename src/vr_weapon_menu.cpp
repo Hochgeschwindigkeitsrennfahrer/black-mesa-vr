@@ -1,5 +1,6 @@
 #include "vr.h"
 #include "game.h"
+#include "vr_ui_draw.h"
 #include "in_buttons.h"
 #include "bmvr_flags.h"
 #include "vr_hud_icons.h"
@@ -296,7 +297,7 @@ namespace
             { x, y + h, 0.f, 1.f, color },
             { x + w, y + h, 0.f, 1.f, color }
         };
-        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(MenuVert));
+        DrawVrUiPrimitive(device, D3DPT_TRIANGLESTRIP, 2, v, sizeof(MenuVert));
     }
 
     constexpr int kCircleSegs = 32;
@@ -308,7 +309,7 @@ namespace
         v[0] = { cx, cy, 0.f, 1.f, color };
         for (int i = 0; i <= kCircleSegs; ++i)
             v[i + 1] = { xs[i], ys[i], 0.f, 1.f, color };
-        device->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, kCircleSegs, v, sizeof(MenuVert));
+        DrawVrUiPrimitive(device, D3DPT_TRIANGLEFAN, kCircleSegs, v, sizeof(MenuVert));
     }
 
     void DrawCircleRingPts(IDirect3DDevice9* device, const float* xo, const float* yo,
@@ -320,7 +321,7 @@ namespace
             v[i * 2] = { xo[i], yo[i], 0.f, rhwO[i], color };
             v[i * 2 + 1] = { xi[i], yi[i], 0.f, rhwI[i], color };
         }
-        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, kCircleSegs * 2, v, sizeof(MenuVert));
+        DrawVrUiPrimitive(device, D3DPT_TRIANGLESTRIP, kCircleSegs * 2, v, sizeof(MenuVert));
     }
 
     bool ReadFileBytes(const wchar_t* path, std::vector<unsigned char>& out)
@@ -2229,7 +2230,7 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             { x2, y2, 0.f, r2, tint, mirrorU ? 1.f : 0.f, 1.f },
             { x3, y3, 0.f, r3, tint, mirrorU ? 0.f : 1.f, 1.f }
         };
-        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tv, sizeof(MenuVertTex));
+        DrawVrUiPrimitive(device, D3DPT_TRIANGLESTRIP, 2, tv, sizeof(MenuVertTex));
         device->SetTexture(0, nullptr);
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
@@ -2370,7 +2371,7 @@ void VR::DrawWeaponMenu(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             ring[k * 2 + 1] = { xi, yi, 0.f, ri, D3DCOLOR_XRGB(255, 255, 255) };
         }
         if (ok)
-            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, kCursorSegs * 2, ring, sizeof(MenuVert));
+            DrawVrUiPrimitive(device, D3DPT_TRIANGLESTRIP, kCursorSegs * 2, ring, sizeof(MenuVert));
     }
 
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);

@@ -335,6 +335,7 @@ public:
     // Returns true once every VFX hook target is resolved (installed or skipped).
     static bool EnsureWeaponVfxHooks();
     static void RestoreViewmodelArmHides();
+    static void InvalidateLevelModelCaches();
     // Level change (VR::OnLevelInit / OnLevelShutdown): drop the cached gun header.
     static void ForgetViewmodelStudioHdr();
 };

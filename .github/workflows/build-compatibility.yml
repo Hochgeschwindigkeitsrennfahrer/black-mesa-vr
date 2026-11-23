@@ -1,0 +1,29 @@
+name: Build game DLL and OpenXR helper
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Win32 game DLL
+        run: cmake -S . -B build-game -A Win32 -T ClangCL
+      - name: Build Win32 game DLL
+        run: cmake --build build-game --config Release --target d3d9 --parallel 4
+      - name: Configure x64 OpenXR helper
+        run: cmake -S OpenXRHelper64 -B build-helper -A x64 -T ClangCL
+      - name: Build x64 OpenXR helper
+        run: cmake --build build-helper --config Release --target OpenXRHelper64 --parallel 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: black-mesa-vr-matching-binaries
+          path: |
+            build-game/Release/d3d9.dll
+            build-helper/Release/OpenXRHelper64.exe
+          if-no-files-found: error
