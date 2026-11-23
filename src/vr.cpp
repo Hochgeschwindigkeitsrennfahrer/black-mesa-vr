@@ -15289,12 +15289,23 @@ void VR::ApplyTwoHandWeaponAim()
         || (!pistol && lat < stayR && along >= alongMin - slop && along <= alongMax + slop),
         std::memory_order_release);
 
+    // Pistol: second grab spot under the grip (cupping hand). From the live
+    // miss log (user 2026-11-18, "a tad too far forward"): the left
+    // controller sat at ~(-3.6, -0.4, -5.4) units (fwd, right, up) from the
+    // gun hand.
+    const float underX = -0.071f * scale + (gx - m_VmClass.offhandMetersX * scale);
+    const float underY = -0.01f * scale, underZ = -0.127f * scale;
+    const float distUnder = pistol
+        ? (d - (F0 * underX + R0 * underY + U0 * underZ)).Length() : 1e9f;
+    const float underR = 0.08f * scale;
+
     // One light buzz in the support hand when it reaches the spot where a
     // squeeze takes the gun (user 2026-11-22; like the MP5 bolt buzz).
+    // Pistols include the under-grip spot (user 2026-11-23: no buzz there).
     {
         static bool s_wasInZone = false;
         const bool inZone = !m_TwoHandActive
-            && (pistol ? (distToGrip < enterR)
+            && (pistol ? (distToGrip < enterR || distUnder < underR)
                        : (lat < enterR && along >= alongMin && along <= alongMax));
         if (inZone && !s_wasInZone)
             PulseHandHaptic(leftHanded ? vr::TrackedControllerRole_RightHand : vr::TrackedControllerRole_LeftHand, 600, 0.3f);
@@ -15367,19 +15378,13 @@ void VR::ApplyTwoHandWeaponAim()
         }
         if (pistol)
         {
-            // Under the grip (cupping hand). From the live miss log (user
-            // 2026-11-18, "a tad too far forward"): the left controller sat at
-            // ~(-3.6, -0.4, -5.4) units (fwd, right, up) from the gun hand.
-            const float ux = -0.071f * scale + (gx - m_VmClass.offhandMetersX * scale);
-            const float uy = -0.01f * scale, uz = -0.127f * scale;
-            const Vector under = F0 * ux + R0 * uy + U0 * uz;
-            const float distUnder = (d - under).Length();
-            if (distUnder < 0.08f * scale && (!onPoint || distUnder < distToGrip))
+            // Under the grip (cupping hand), see underX above.
+            if (distUnder < underR && (!onPoint || distUnder < distToGrip))
             {
                 onPoint = true;
-                gx = ux;
-                gy = uy;
-                gz = uz;
+                gx = underX;
+                gy = underY;
+                gz = underZ;
                 Game::logMsg("Two-hand pistol: under the grip (dist %.1f)", distUnder);
             }
         }
