@@ -337,6 +337,7 @@ namespace bmvr
     // Glock: a pull within VrGlockRapidWindow s of the last one fires Black Mesa's alt-fire (fast, wide spread).
     extern bool g_VrGlockRapidAlt;
     extern unsigned long g_ScreenshotAt;     // VR panel "Screenshot": GetTickCount when to dump the eyes (0 = none)
+    extern unsigned long g_SteamScreenshotAt; // gesture screenshot: GetTickCount when to send the right eye to Steam (0 = none)
     extern unsigned long g_DebugCaptureAt;   // VR panel "Capture debug frame": GetTickCount when to capture (0 = none)
     extern bool g_FlareLog;              // VR panel DEBUG "Flare position log" / bmvr_flare_log / env BMVR_FLARE_LOG=1: log lens flare positions + visibility; each switch-on starts fresh line caps (not saved)
     extern bool g_FreezeHead;            // VR panel debug row / bmvr_freeze_head: game view keeps the head pose of the moment it was switched on (not saved)

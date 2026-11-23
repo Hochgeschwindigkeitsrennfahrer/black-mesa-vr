@@ -26,7 +26,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **Grab gestures:** a hand behind a shoulder, at a hip or (left hand) at the forehead + grip. Each zone has a setting
   per hand: the right hand draws a weapon (default: right shoulder crowbar, right hip pistol, above the left hip MP5;
   "Dynamic" zones keep what you put away there), the left hand does an action (quick save, flashlight, ammo, quick
-  load, screenshot, recenter; default: left shoulder quick save, left hip ammo, forehead flashlight).
+  load, screenshot into the Steam library, recenter; default: left shoulder quick save, left hip ammo, forehead flashlight).
 - **Crowbar swinging** that hits where you swing (HL2VR style).
 - **HL2VR-style weapon wheel**, with the VR settings gear below the crowbar.
 - **Grenades thrown at the speed of your hand.**

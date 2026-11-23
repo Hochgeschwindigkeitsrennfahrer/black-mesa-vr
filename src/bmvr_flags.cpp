@@ -150,6 +150,7 @@ namespace bmvr
     bool g_PauseMenuColourFromFrame = true;
     unsigned long g_DebugCaptureAt = 0;
     unsigned long g_ScreenshotAt = 0;
+    unsigned long g_SteamScreenshotAt = 0;
     float g_DebugBlankEye = 0.f;
     float g_DebugHideXog = 0.f;
     bool g_FlareLog = false;

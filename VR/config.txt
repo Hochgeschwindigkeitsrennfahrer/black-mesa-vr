@@ -137,7 +137,8 @@ ScopeEye=right
 # Grab gestures: hand behind a shoulder, at a hip or (left hand) at the forehead
 # + grip. Every zone has a setting per hand, in the VR settings panel (GRAB
 # GESTURES): the left hand does an action (quick save, flashlight, ammo for
-# manual reloads, quick load = hold the grip ~1 s, screenshot, recenter; rest
+# manual reloads, quick load = hold the grip ~1 s, screenshot = right eye into
+# the Steam screenshot library, recenter; rest
 # the hand there ~0.25 s until a light buzz, then grip), the right hand takes a
 # weapon (grip right away). Dynamic = the zone keeps the weapon you last put
 # away there. Defaults: left shoulder quick save, left hip ammo, forehead

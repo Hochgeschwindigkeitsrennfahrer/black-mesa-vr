@@ -202,6 +202,8 @@ public:
     // published and the HUD/menu overlay surface to <VR dir>\<name>-*.bmp
     // (name = first word of dump.txt) and deletes dump.txt.
     void MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose);
+    // Gesture screenshot: the right eye (16:9 crop) into Steam's library.
+    void TakeSteamScreenshot(IDirect3DDevice9* dev, uint32_t slot);
     // Debug capture restore (VR/<capture>-state.txt etc., tools/headless/bm-restore):
     // render-thread part (raw OpenXR poses, view state), game-thread part
     // (engine view, settings, the capture save), and the headless restore

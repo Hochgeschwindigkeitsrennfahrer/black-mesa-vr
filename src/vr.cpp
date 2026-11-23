@@ -5046,24 +5046,27 @@ namespace
         return ok;
     }
 
-    // Read back a render-target surface and write every `step`th pixel as a
-    // 24-bit BMP. 8888 and 16F formats; others are only logged.
-    // alphaOnly: write the alpha channel as grey (layers blended by alpha).
-    bool DumpSurfaceBmp(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path, int step,
-        bool alphaOnly = false)
+    // Read back a render-target surface, every `step`th pixel, as top-down
+    // 24-bit RGB. 8888, 10-bit and 16F formats; others are only logged.
+    // alphaOnly: the alpha channel as grey (layers blended by alpha).
+    bool ReadSurfaceRgb(IDirect3DDevice9* dev, IDirect3DSurface9* src, const char* what, int step, bool alphaOnly,
+        int& w, int& h, std::vector<uint8_t>& rgb, D3DSURFACE_DESC* descOut = nullptr)
     {
+        w = h = 0;
         if (!dev || !src)
             return false;
         D3DSURFACE_DESC d{};
         if (FAILED(src->GetDesc(&d)))
             return false;
+        if (descOut)
+            *descOut = d;
         const bool f16 = d.Format == D3DFMT_A16B16G16R16F;
         const bool bgra = d.Format == D3DFMT_A8R8G8B8 || d.Format == D3DFMT_X8R8G8B8;
         const bool rgba = d.Format == D3DFMT_A8B8G8R8 || d.Format == D3DFMT_X8B8G8R8;
         const bool a2r10 = d.Format == D3DFMT_A2R10G10B10;
         if (!f16 && !bgra && !rgba && !a2r10)
         {
-            Game::logMsg("debug dump %s: format %u not handled (%ux%u)", path.c_str(), d.Format, d.Width, d.Height);
+            Game::logMsg("%s: format %u not handled (%ux%u)", what, d.Format, d.Width, d.Height);
             return false;
         }
         IDirect3DSurface9* sys = nullptr;
@@ -5073,13 +5076,13 @@ namespace
         D3DLOCKED_RECT lr{};
         if (SUCCEEDED(dev->GetRenderTargetData(src, sys)) && SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
         {
-            const int w = static_cast<int>(d.Width) / step, h = static_cast<int>(d.Height) / step;
-            const int rowBytes = (w * 3 + 3) & ~3;
-            std::vector<uint8_t> img(static_cast<size_t>(rowBytes) * h);
+            w = static_cast<int>(d.Width) / step;
+            h = static_cast<int>(d.Height) / step;
+            rgb.resize(static_cast<size_t>(w) * h * 3);
             for (int y = 0; y < h; ++y)
             {
                 const uint8_t* row = static_cast<const uint8_t*>(lr.pBits) + static_cast<size_t>(y * step) * lr.Pitch;
-                uint8_t* out = &img[static_cast<size_t>(h - 1 - y) * rowBytes];
+                uint8_t* out = &rgb[static_cast<size_t>(y) * w * 3];
                 for (int x = 0; x < w; ++x)
                 {
                     uint8_t r, g, b;
@@ -5108,35 +5111,163 @@ namespace
                         if (alphaOnly)
                             r = g = b = p[3];
                     }
-                    out[x * 3 + 0] = b; out[x * 3 + 1] = g; out[x * 3 + 2] = r;
+                    out[x * 3 + 0] = r; out[x * 3 + 1] = g; out[x * 3 + 2] = b;
                 }
             }
             sys->UnlockRect();
-            FILE* f = std::fopen(path.c_str(), "wb");
-            if (f)
-            {
-                const uint32_t dataSize = static_cast<uint32_t>(img.size());
-                uint8_t hdr[54]{};
-                hdr[0] = 'B'; hdr[1] = 'M';
-                *reinterpret_cast<uint32_t*>(hdr + 2) = 54 + dataSize;
-                *reinterpret_cast<uint32_t*>(hdr + 10) = 54;
-                *reinterpret_cast<uint32_t*>(hdr + 14) = 40;
-                *reinterpret_cast<int32_t*>(hdr + 18) = w;
-                *reinterpret_cast<int32_t*>(hdr + 22) = h;
-                *reinterpret_cast<uint16_t*>(hdr + 26) = 1;
-                *reinterpret_cast<uint16_t*>(hdr + 28) = 24;
-                *reinterpret_cast<uint32_t*>(hdr + 34) = dataSize;
-                std::fwrite(hdr, 1, sizeof(hdr), f);
-                std::fwrite(img.data(), 1, img.size(), f);
-                std::fclose(f);
-                ok = true;
-            }
+            ok = true;
         }
         sys->Release();
+        return ok;
+    }
+
+    // Top-down RGB -> 24-bit BMP.
+    bool WriteBmp(const std::string& path, int w, int h, const uint8_t* rgb)
+    {
+        const int rowBytes = (w * 3 + 3) & ~3;
+        std::vector<uint8_t> img(static_cast<size_t>(rowBytes) * h);
+        for (int y = 0; y < h; ++y)
+        {
+            const uint8_t* in = rgb + static_cast<size_t>(y) * w * 3;
+            uint8_t* out = &img[static_cast<size_t>(h - 1 - y) * rowBytes];
+            for (int x = 0; x < w; ++x)
+            {
+                out[x * 3 + 0] = in[x * 3 + 2];
+                out[x * 3 + 1] = in[x * 3 + 1];
+                out[x * 3 + 2] = in[x * 3 + 0];
+            }
+        }
+        FILE* f = std::fopen(path.c_str(), "wb");
+        if (!f)
+            return false;
+        const uint32_t dataSize = static_cast<uint32_t>(img.size());
+        uint8_t hdr[54]{};
+        hdr[0] = 'B'; hdr[1] = 'M';
+        *reinterpret_cast<uint32_t*>(hdr + 2) = 54 + dataSize;
+        *reinterpret_cast<uint32_t*>(hdr + 10) = 54;
+        *reinterpret_cast<uint32_t*>(hdr + 14) = 40;
+        *reinterpret_cast<int32_t*>(hdr + 18) = w;
+        *reinterpret_cast<int32_t*>(hdr + 22) = h;
+        *reinterpret_cast<uint16_t*>(hdr + 26) = 1;
+        *reinterpret_cast<uint16_t*>(hdr + 28) = 24;
+        *reinterpret_cast<uint32_t*>(hdr + 34) = dataSize;
+        std::fwrite(hdr, 1, sizeof(hdr), f);
+        std::fwrite(img.data(), 1, img.size(), f);
+        std::fclose(f);
+        return true;
+    }
+
+    // Read back a render-target surface and write every `step`th pixel as a
+    // 24-bit BMP. alphaOnly: write the alpha channel as grey.
+    bool DumpSurfaceBmp(IDirect3DDevice9* dev, IDirect3DSurface9* src, const std::string& path, int step,
+        bool alphaOnly = false)
+    {
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgb;
+        D3DSURFACE_DESC d{};
+        const std::string what = "debug dump " + path;
+        const bool ok = ReadSurfaceRgb(dev, src, what.c_str(), step, alphaOnly, w, h, rgb, &d)
+            && WriteBmp(path, w, h, rgb.data());
         Game::logMsg("debug dump %s: %s (%ux%u fmt=%u step=%d)", path.c_str(), ok ? "written" : "failed",
             d.Width, d.Height, d.Format, step);
         return ok;
     }
+
+    // Steam screenshot library (ISteamScreenshots::WriteScreenshot through the
+    // game's own steam_api.dll flat exports). nullptr = not available.
+    using SteamScreenshotsFn = void* (__cdecl*)();
+    using WriteScreenshotFn = uint32_t(__cdecl*)(void* self, void* rgb, uint32_t bytes, int w, int h);
+    bool SteamWriteScreenshot(const std::vector<uint8_t>& rgb, int w, int h, const char*& why)
+    {
+        HMODULE api = GetModuleHandleA("steam_api.dll");
+        if (!api)
+        {
+            why = "steam_api.dll not loaded";
+            return false;
+        }
+        auto get = reinterpret_cast<SteamScreenshotsFn>(GetProcAddress(api, "SteamAPI_SteamScreenshots_v003"));
+        auto write = reinterpret_cast<WriteScreenshotFn>(GetProcAddress(api, "SteamAPI_ISteamScreenshots_WriteScreenshot"));
+        if (!get || !write)
+        {
+            why = "no ISteamScreenshots v003 exports";
+            return false;
+        }
+        void* screenshots = get();
+        if (!screenshots)
+        {
+            why = "ISteamScreenshots unavailable";
+            return false;
+        }
+        const uint32_t handle = write(screenshots, const_cast<uint8_t*>(rgb.data()), static_cast<uint32_t>(rgb.size()), w, h);
+        if (handle == 0)   // INVALID_SCREENSHOT_HANDLE
+        {
+            why = "WriteScreenshot failed";
+            return false;
+        }
+        return true;
+    }
+}
+
+// Grab gesture "Screenshot" (user 2026-11-23): the right eye, cropped to 16:9
+// around straight ahead (the eye texture is symmetric around it; the crop
+// stays inside what that eye shows, so both sides reach as far as the inner
+// edge), into Steam's screenshot library like F12. Fallback: the BMP pair in
+// VR/. Headless test runs (BMVR_TESTDIR) never touch the library: they write
+// the crop as VR/steamshot-test.bmp.
+void VR::TakeSteamScreenshot(IDirect3DDevice9* dev, uint32_t slot)
+{
+    int w = 0, h = 0;
+    std::vector<uint8_t> rgb;
+    if (slot >= kOpenXrPublishSlots
+        || !ReadSurfaceRgb(dev, m_D9OpenXrPublishSurface[1][slot], "steam screenshot", 1, false, w, h, rgb))
+    {
+        Game::logMsg("Steam screenshot: no right eye to read (slot %u)", slot);
+        ShowToast("Screenshot failed", 1500);
+        return;
+    }
+    const vr::VRTextureBounds_t& b = m_TextureBounds[1];
+    const float u0 = (std::min)(b.uMin, b.uMax), u1 = (std::max)(b.uMin, b.uMax);
+    const float v0 = (std::min)(b.vMin, b.vMax), v1 = (std::max)(b.vMin, b.vMax);
+    float halfU = (std::min)(0.5f - u0, u1 - 0.5f), halfV = (std::min)(0.5f - v0, v1 - 0.5f);
+    if (!(halfU > 0.05f && halfU <= 0.5f))
+        halfU = 0.5f;
+    if (!(halfV > 0.05f && halfV <= 0.5f))
+        halfV = 0.5f;
+    int cw = static_cast<int>(2.f * halfU * w) & ~1;
+    int ch = static_cast<int>(cw * 9.f / 16.f) & ~1;
+    if (ch > static_cast<int>(2.f * halfV * h))
+    {
+        ch = static_cast<int>(2.f * halfV * h) & ~1;
+        cw = static_cast<int>(ch * 16.f / 9.f) & ~1;
+    }
+    const int x0 = (w - cw) / 2, y0 = (h - ch) / 2;
+    std::vector<uint8_t> crop(static_cast<size_t>(cw) * ch * 3);
+    for (int y = 0; y < ch; ++y)
+        std::memcpy(&crop[static_cast<size_t>(y) * cw * 3], &rgb[(static_cast<size_t>(y0 + y) * w + x0) * 3],
+            static_cast<size_t>(cw) * 3);
+    if (!bmvr::TestDir().empty())
+    {
+        const bool ok = WriteBmp(bmvr::VrFilePath("steamshot-test.bmp"), cw, ch, crop.data());
+        Game::logMsg("Steam screenshot (test run, not sent): right eye %dx%d crop %dx%d at %d,%d -> VR/steamshot-test.bmp %s",
+            w, h, cw, ch, x0, y0, ok ? "written" : "FAILED");
+        ShowToast("Screenshot saved", 1500);
+        return;
+    }
+    const char* why = "";
+    if (SteamWriteScreenshot(crop, cw, ch, why))
+    {
+        Game::logMsg("Steam screenshot: right eye %dx%d crop %dx%d sent to the Steam library", w, h, cw, ch);
+        ShowToast("Screenshot saved to Steam", 1500);
+        return;
+    }
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    char name[64];
+    std::snprintf(name, sizeof(name), "screenshot-%04u%02u%02u-%02u%02u%02u.bmp", st.wYear, st.wMonth, st.wDay,
+        st.wHour, st.wMinute, st.wSecond);
+    const bool ok = WriteBmp(bmvr::VrFilePath(name), cw, ch, crop.data());
+    Game::logMsg("Steam screenshot: %s; saved VR/%s instead (%s)", why, name, ok ? "ok" : "FAILED");
+    ShowToast(ok ? "Screenshot saved (VR folder)" : "Screenshot failed", 1500);
 }
 
 void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose)
@@ -5162,6 +5293,16 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
             Game::logMsg("Pause capture: %s (phase %d, menu up %d)", nm, static_cast<int>(m_VrPhase), IsMenuUp() ? 1 : 0);
         }
         return;
+    }
+    if (bmvr::g_SteamScreenshotAt && static_cast<LONG>(GetTickCount() - bmvr::g_SteamScreenshotAt) >= 0)
+    {
+        bmvr::g_SteamScreenshotAt = 0;
+        IDirect3DDevice9* dev = nullptr;
+        if (g_D3DVR9 && SUCCEEDED(g_D3DVR9->GetD3DDevice(&dev)) && dev)
+        {
+            TakeSteamScreenshot(dev, slot);
+            dev->Release();
+        }
     }
     static int s_capturePolls = 0;
     if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime && !bmvr::g_DebugDumps
@@ -15310,7 +15451,7 @@ bool VR::UpdateShoulderGestures(bool paused)
         {
             // A moment later, so the hand is out of view (the forehead!).
             const unsigned long at = GetTickCount() + 800;
-            bmvr::g_ScreenshotAt = at ? at : 1;
+            bmvr::g_SteamScreenshotAt = at ? at : 1;
             break;
         }
         case bmvr::kGestureRecenter:
