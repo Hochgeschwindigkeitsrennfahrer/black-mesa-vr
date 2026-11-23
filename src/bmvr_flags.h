@@ -430,6 +430,11 @@ namespace bmvr
     extern bool g_SprintAimedPose;       // sprint animations show the aimed idle pose
     extern float g_QuickDrawSec;         // after a weapon switch the draw wait is cut to this many seconds (< 0 = off)
     extern bool g_SkipDrawAnim;          // draw/holster/pickup animations show the idle pose
+    // Game auto-switches (user 2026-11-23: both off). Off = a picked-up weapon goes to the
+    // inventory only (CBM_SP_GameRules::FShouldSwitchWeapon -> false), and an emptied weapon stays in
+    // the hand (ReloadOrSwitchWeapons sees ITEM_FLAG_NOAUTOSWITCHEMPTY on every weapon).
+    extern bool g_AutoSwitchPickup;
+    extern bool g_AutoSwitchEmpty;
     extern bool g_ThrowStroke;           // frag throw velocity from the throwing stroke (far point of the hold -> release)
     extern bool g_DeltaSeqIdle;          // a delta layer as the main viewmodel sequence shows idle (tau/crossbow)
     extern bool g_CrowbarHitDrawnBar;    // crowbar hit sweep along the drawn v_crowbar bar (not the old HL2VR grip frame)

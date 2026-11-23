@@ -63,7 +63,9 @@ MODULES = {
         kBlackMesaPlayer_ShootSource_Server kCGrabController_SetTargetPosition
         kBlackMesaPlayer_GetShootAngles_Server kGrenadeCreate_Server kGrenadeThrowPosition_Server
         kProjectileCreate_Server kCBasePlayer_ImpulseCommands kServerWeaponFireOriginReturnRvas
-        kSnarkThrow_Server kSnarkPlace_Server kSetAbsVelocity_Server''',
+        kSnarkThrow_Server kSnarkPlace_Server kSetAbsVelocity_Server
+        kSpRules_FShouldSwitchWeapon_Server kReloadOrSwitchNoAutoSwitchInsn_Server
+        kBmWeaponEquipSwitchJeInsn_Server''',
     'engine': '''kEngineSetAudioStateRva kAreaPortalComputeViewReturnRva kEngineWorldBatchRva kEngineWorldStaticMeshesRva
         kMixPlayInsnRva''',
     'materialsystem': 'kCreateNamedRTExRva',
@@ -75,6 +77,9 @@ MODULE_OF = {n: m for m, names in MODULES.items() for n in names.split()}
 DEBUG_ONLY = set('''kEngineWorldBatchRva kEngineWorldStaticMeshesRva kPixelVisGetFractionRva
     kPixelVisQueryForViewRva kClientFrameStartRva kClientSetupBonesRva kClientBuildTransformationsRva
     kClientParticleCollectionSimulateRva kClientParticleMgrSimulateRva kLensflareFractionRva'''.split())
+# Bytes the mod itself rewrites at run time (offset from the constant): wildcarded, so the check
+# passes before and after the patch (test al,4 <-> or al,4; je <-> jmp).
+MOD_PATCHED = {'kReloadOrSwitchNoAutoSwitchInsn_Server': (0,), 'kBmWeaponEquipSwitchJeInsn_Server': (0,)}
 # Mid-function addresses (an instruction or a return address, not a function start).
 MID = re.compile(r'(Return|Insn|Cmp|Call)')
 
@@ -210,6 +215,10 @@ def main():
             t = pe.text()
             if t[1] <= val < t[1] + t[2]:
                 start, raw, mask, hits = code_check(pe, val, bool(MID.search(name)) or idx is not None)
+                if name in MOD_PATCHED:
+                    mask = list(mask)
+                    for k in MOD_PATCHED[name]:
+                        mask[k - start] = False
                 if hits == 0:
                     errors.append(f'{label}: code window does not match in {mod}')
                     continue

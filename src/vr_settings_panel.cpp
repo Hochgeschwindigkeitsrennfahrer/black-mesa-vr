@@ -205,6 +205,10 @@ namespace
             { "Last shot strength", RowKind::Number, "LastShotHapticStrength", nullptr, &bmvr::g_LastShotHapticStrength, 0.05f, 0.05f, 1.f, "%.2f" },
             { "Empty trigger buzz", RowKind::Choice, "DryFireHaptic", nullptr, &bmvr::g_DryFireHaptic, 1.f, 0.f, 2.f, "Off|Tick|Nope (double)" },
             { "Empty trigger strength", RowKind::Number, "DryFireHapticStrength", nullptr, &bmvr::g_DryFireHapticStrength, 0.05f, 0.05f, 1.f, "%.2f" },
+            // The game's own auto-switches, both off by default (user 2026-11-23).
+            { "WEAPON AUTO-SWITCH", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Switch to picked-up weapon", RowKind::Toggle, "AutoSwitchPickup", &bmvr::g_AutoSwitchPickup, nullptr, 0, 0, 0, nullptr },
+            { "Switch away when empty", RowKind::Toggle, "AutoSwitchEmpty", &bmvr::g_AutoSwitchEmpty, nullptr, 0, 0, 0, nullptr },
             { "PISTOLS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "One shot per trigger pull", RowKind::Toggle, "VrPistolSemiAuto", &bmvr::g_VrPistolSemiAuto, nullptr, 0, 0, 0, nullptr },
             { "Glock: fast pulls = alt-fire", RowKind::Toggle, "VrGlockRapidAlt", &bmvr::g_VrGlockRapidAlt, nullptr, 0, 0, 0, nullptr },

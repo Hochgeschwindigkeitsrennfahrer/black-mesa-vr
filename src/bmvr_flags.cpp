@@ -186,6 +186,8 @@ namespace bmvr
     bool g_SprintAimedPose = true;
     float g_QuickDrawSec = 0.12f;
     bool g_SkipDrawAnim = true;
+    bool g_AutoSwitchPickup = false;
+    bool g_AutoSwitchEmpty = false;
     bool g_DeltaSeqIdle = true;
     bool g_ScopeClipIdle = true;
     bool g_TwoHandNoLower = true;
@@ -1037,6 +1039,10 @@ namespace bmvr
                 g_QuickDrawSec = static_cast<float>(atof(val));
             else if (std::strcmp(n, "SkipDrawAnim") == 0)
                 g_SkipDrawAnim = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "AutoSwitchPickup") == 0)
+                g_AutoSwitchPickup = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "AutoSwitchEmpty") == 0)
+                g_AutoSwitchEmpty = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "DeltaSeqIdle") == 0)
                 g_DeltaSeqIdle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "CrowbarHitDrawnBar") == 0)

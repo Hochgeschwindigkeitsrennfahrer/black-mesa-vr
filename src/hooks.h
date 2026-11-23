@@ -107,6 +107,7 @@ typedef void(__thiscall* tGetShootAngles)(void* thisptr, QAngle* out);
 typedef void*(__cdecl* tGrenadeCreate)(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode);
 typedef bool(__cdecl* tGrenadeThrowPosition)(void* grenade, Vector* pos, QAngle* ang, void* owner);
 typedef void(__fastcall* tSnarkThrow)(void* weapon, void* edx, void* owner, float fspeed, float uspeed);
+typedef bool(__fastcall* tShouldSwitchWeapon)(void* rules, void* edx, void* player, void* weapon);
 typedef void(__thiscall* tSetAbsVelocity)(void* entity, const Vector* velocity);
 typedef void*(__cdecl* tProjectileCreate)(int type, Vector* target, float speed, void* owner, void* thrower);
 typedef int(__thiscall* tGetAttachmentVec)(void* thisptr, int number, Vector* origin, QAngle* angles);
@@ -205,6 +206,7 @@ public:
     static inline Hook<tGrenadeCreate> hkGrenadeCreate;
     static inline Hook<tGrenadeThrowPosition> hkGrenadeThrowPosition;
     static inline Hook<tSnarkThrow> hkSnarkThrow;
+    static inline Hook<tShouldSwitchWeapon> hkShouldSwitchWeapon;
     static inline Hook<tGrenadeThrowPosition> hkSnarkPlace;
     static inline Hook<tProjectileCreate> hkProjectileCreate;
     static inline Hook<tGetAttachmentVec> hkGetAttachmentVec;
@@ -301,6 +303,12 @@ public:
     static void* __cdecl dGrenadeCreate(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode);
     static void __fastcall dSnarkThrow(void* weapon, void* edx, void* owner, float fspeed, float uspeed);
     static bool __cdecl dSnarkPlace(void* snark, Vector* pos, QAngle* ang, void* owner);
+    static bool __fastcall dShouldSwitchWeapon(void* rules, void* edx, void* player, void* weapon);
+    // One-byte auto-switch toggles (AutoSwitchEmpty / AutoSwitchPickup); called per CreateMove.
+    static void ApplyAutoSwitchPatches();
+    static inline bool s_AutoSwitchSitesTried = false;
+    static inline unsigned char* s_AutoSwitchEmptyInsn = nullptr;
+    static inline unsigned char* s_AutoSwitchEquipInsn = nullptr;
     static bool __cdecl dGrenadeThrowPosition(void* grenade, Vector* pos, QAngle* ang, void* owner);
     static void* __cdecl dProjectileCreate(int type, Vector* target, float speed, void* owner, void* thrower);
     static int __fastcall dGetAttachmentVec(void* ecx, void* edx, int number, Vector* origin, QAngle* angles);

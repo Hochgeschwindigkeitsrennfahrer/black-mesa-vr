@@ -249,6 +249,20 @@ public:
     static constexpr int kEdict_Unknown = 0xC;
     static constexpr int kSnarkThrow_Server = 0x48D730;
     static constexpr int kSnarkPlace_Server = 0x483BF0;
+    // server.dll CBM_SP_GameRules::FShouldSwitchWeapon (vtable slot 61, +0xF4; thiscall rules
+    // (player, weapon) -> bool; build 26768221, disassembled 2026-11-23): ammo check, no active
+    // weapon -> true, AllowsAutoSwitchTo/From, CanHolster, heavier weight. Asked by Weapon_Equip on a
+    // pickup. Single player never reads cl_weapon_autoswitch (only CMultiplayRules 0x1D4C40 does).
+    static constexpr int kSpRules_FShouldSwitchWeapon_Server = 0x280790;
+    // server.dll CBaseCombatWeapon::ReloadOrSwitchWeapons (vtable +0x444, 0x1077F0): out of ammo ->
+    // `call [eax+0x55C]` (GetWeaponFlags); `test al, 4` (ITEM_FLAG_NOAUTOSWITCHEMPTY); jne skip;
+    // SwitchToNextBestWeapon. The `test al, 4` (A8 04) here; `or al, 4` (0C 04) = flag always set.
+    static constexpr int kReloadOrSwitchNoAutoSwitchInsn_Server = 0x10788D;
+    // server.dll CBlackMesaBaseWeapon::Equip (weapon vtable slot 324, 0x490AE0; thiscall (owner)):
+    // base Equip, then `if (this->vfunc[0x558]()) owner->Weapon_Switch(this, 0)` without asking the
+    // game rules (all pickups and `give` switch through here, harness 2026-11-23). The `je` (74 0D)
+    // over that switch; `jmp` (EB) = no switch.
+    static constexpr int kBmWeaponEquipSwitchJeInsn_Server = 0x490AFE;
     static constexpr int kSetAbsVelocity_Server = 0x11DC90;
     static constexpr int kProjectileCreate_Server = 0x37A4B0; // beta 26627981 (26234270: 0x379D20)
     static constexpr int kBlackMesaPlayer_RecoilPunchAngles_Server = 0x14BC;

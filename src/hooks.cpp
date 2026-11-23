@@ -11122,6 +11122,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     // Quick draw: the deploy wait after a weapon switch (about 0.5 s) cut short.
     if (m_Game && bmvr::g_QuickDrawSec >= 0.f)
         m_Game->ClampServerWeaponDeploy(bmvr::g_QuickDrawSec);
+    ApplyAutoSwitchPatches();
     // Predicted FireBullets add m_vecPunchAngle on the client. That punch
     // resets on map load and then walks the visible hit off the crosshair.
     // Zero it for every weapon, not only the MP5.
@@ -13965,6 +13966,39 @@ void Hooks::EnsureWeaponShootOriginHooks()
         &dSnarkThrow, "server snark throw");
     hookServerFn(hkSnarkPlace, Offsets::kSnarkPlace_Server, "558BEC83EC18538B5D1485DB",
         &dSnarkPlace, "server snark placement");
+    hookServerFn(hkShouldSwitchWeapon, Offsets::kSpRules_FShouldSwitchWeapon_Server, "558BEC56578B7D0C8BCF8B078B8018040000",
+        &dShouldSwitchWeapon, "server pickup auto-switch (FShouldSwitchWeapon)");
+    if (server && !s_AutoSwitchSitesTried)
+    {
+        s_AutoSwitchSitesTried = true;
+        // Each site: one opcode byte the toggle flips, checked with the bytes around it first.
+        struct Site { int rva; const char* ctx; int at; const char* what; unsigned char** slot; };
+        const Site sites[] = {
+            // call [eax+0x55C] (GetWeaponFlags); test al, 4 (A8 / or al, 4 = 0C); jne
+            { Offsets::kReloadOrSwitchNoAutoSwitchInsn_Server, "FF905C050000??040F85", 6,
+              "server empty-weapon auto-switch", &s_AutoSwitchEmptyInsn },
+            // call eax (slot 0x558); test al, al; je +0D (74 / jmp = EB); ...; call [eax+0x470] (Weapon_Switch)
+            { Offsets::kBmWeaponEquipSwitchJeInsn_Server, "FFD084C0??0D8B078BCF6A0056FF9070040000", 4,
+              "server pickup auto-switch (weapon Equip)", &s_AutoSwitchEquipInsn },
+        };
+        for (const Site& st : sites)
+        {
+            auto* p = reinterpret_cast<unsigned char*>(server) + st.rva;
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(p - st.at, &mbi, sizeof(mbi)) && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+                && CodeBytesMatch(p - st.at, st.ctx))
+            {
+                *st.slot = p;
+                Game::logMsg("%s patch site ok rva=0x%X", st.what, st.rva);
+            }
+            else
+            {
+                Game::logMsg("%s patch skipped (bytes/rva 0x%X)", st.what, st.rva);
+                Game::noteMissingOffset(st.what);
+            }
+        }
+        ApplyAutoSwitchPatches();
+    }
     if (client && !hkClientGetShootAngles.pTarget)
     {
         // C_BlackMesaPlayer::GetShootAngles (vtable slot 0x9D): EyeAngles (client vtable +0x26C, not the
@@ -16509,6 +16543,53 @@ void __fastcall Hooks::dSnarkThrow(void* weapon, void* edx, void* owner, float f
     Game::logMsg("Snark throw: hand %.0f u/s x %.2f -> (%.0f,%.0f,%.0f) (game fspeed %.0f uspeed %.0f), snark %s",
         hand.Length(), bmvr::g_SnarkThrowScale, vel.x, vel.y, vel.z, fspeed, uspeed,
         snark ? "placed at the hand" : "not seen (game point and speed)");
+}
+
+// Pickup auto-switch (AutoSwitchPickup, off by default, user 2026-11-23): with it off a picked-up
+// weapon only goes to the inventory, also the first time and with nothing in the hand. In single
+// player the game never reads cl_weapon_autoswitch (CMultiplayRules only); setting it made the
+// client skip the switch the server still did (draw sound, no gun).
+bool __fastcall Hooks::dShouldSwitchWeapon(void* rules, void* edx, void* player, void* weapon)
+{
+    if (!hkShouldSwitchWeapon.fOriginal)
+        return false;
+    const bool game = hkShouldSwitchWeapon.fOriginal(rules, edx, player, weapon);
+    if (game && !bmvr::g_AutoSwitchPickup)
+    {
+        Game::logMsg("Pickup auto-switch blocked (AutoSwitchPickup off)");
+        return false;
+    }
+    return game;
+}
+
+// The game's auto-switches as one-byte code toggles (single atomic writes, so they can flip live):
+// - AutoSwitchEmpty off: ReloadOrSwitchWeapons `test al, 4` -> `or al, 4` = every weapon has
+//   ITEM_FLAG_NOAUTOSWITCHEMPTY, so an emptied weapon idles instead of SwitchToNextBestWeapon.
+// - AutoSwitchPickup off: CBlackMesaBaseWeapon::Equip (0x490AE0) switches the new owner to the weapon
+//   on its own (slot 0x558 decides, the game rules are not asked); `je` over that Weapon_Switch ->
+//   `jmp`. Weapon_Equip's game-rules switch is blocked in dShouldSwitchWeapon.
+void Hooks::ApplyAutoSwitchPatches()
+{
+    struct Toggle { unsigned char* p; unsigned char on, off; bool gameDefault; const char* what; };
+    const Toggle toggles[] = {
+        { s_AutoSwitchEmptyInsn, 0xA8, 0x0C, bmvr::g_AutoSwitchEmpty, "Empty-weapon" },
+        { s_AutoSwitchEquipInsn, 0x74, 0xEB, bmvr::g_AutoSwitchPickup, "Pickup (weapon Equip)" },
+    };
+    for (const Toggle& t : toggles)
+    {
+        if (!t.p)
+            continue;
+        const unsigned char want = t.gameDefault ? t.on : t.off;
+        if (*t.p == want)
+            continue;
+        DWORD old = 0;
+        if (!VirtualProtect(t.p, 1, PAGE_EXECUTE_READWRITE, &old))
+            continue;
+        *t.p = want;
+        VirtualProtect(t.p, 1, old, &old);
+        FlushInstructionCache(GetCurrentProcess(), t.p, 1);
+        Game::logMsg("%s auto-switch %s", t.what, t.gameDefault ? "on (game default)" : "off");
+    }
 }
 
 bool __cdecl Hooks::dSnarkPlace(void* snark, Vector* pos, QAngle* ang, void* owner)
