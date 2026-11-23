@@ -5717,8 +5717,11 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
     }
     else
         Game::logMsg("debug dump: no publish slot (%u)", slot);
-    DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud.bmp", 2);
-    DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud-alpha.bmp", 2, true);
+    // HUD layer at the dump step capped at 2; step 1 keeps every row (the
+    // title layer's scanlines are on odd rows, a step-2 dump drops them all).
+    const int hudStep = step < 2 ? step : 2;
+    DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud.bmp", hudStep);
+    DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud-alpha.bmp", hudStep, true);
     {
         // Shared textures on the game device (new game UI: the Qt layer).
         std::lock_guard<std::mutex> lock(g_SharedResMutex);
@@ -10566,8 +10569,10 @@ namespace
     constexpr int kPanelGetParent = 20;
     constexpr int kPanelGetName = 37;
 
-    // HudCredits = the "BL@CK MESA" intro logo, HudMessage = chapter titles.
-    const char* const kTitleHudNames[2] = { "HudCredits", "HudMessage" };
+    // HudCredits = the "BL@CK MESA" intro logo, HudMessage = chapter titles,
+    // CHudIntroCredits = the developer names (bottom left, env_introcredits
+    // on the tram ride; BM's own HUD element, not the SDK's intro credits).
+    const char* const kTitleHudNames[kTitleHudCount] = { "HudCredits", "HudMessage", "CHudIntroCredits" };
 
     // Depth-first from the vgui root; fills found[i] for kTitleHudNames[i].
     bool SehFindTitleHudPanels(void* ipanel, unsigned int root, unsigned int* found)
@@ -10585,13 +10590,13 @@ namespace
                 const char* name = PanelCall<const char*>(ipanel, kPanelGetName, p);
                 if (name)
                 {
-                    for (int i = 0; i < 2; ++i)
+                    for (int i = 0; i < kTitleHudCount; ++i)
                     {
                         if (!found[i] && std::strcmp(name, kTitleHudNames[i]) == 0)
                             found[i] = p;
                     }
                 }
-                if (found[0] && found[1])
+                if (found[0] && found[1] && found[2])
                     return true;
                 const int n = PanelCall<int>(ipanel, kPanelGetChildCount, p);
                 for (int c = 0; c < n && sp < 64; ++c)
@@ -10701,6 +10706,36 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return false;
+        }
+    }
+
+    // Children of p: total, visible; names of the first few into buf.
+    int SehVisibleChildren(void* ipanel, unsigned int p, int* total, char* buf, size_t bufLen)
+    {
+        BMVR_TRY
+        {
+            const int n = PanelCall<int>(ipanel, kPanelGetChildCount, p);
+            int vis = 0;
+            size_t used = 0;
+            if (buf && bufLen)
+                buf[0] = 0;
+            for (int c = 0; c < n; ++c)
+            {
+                const unsigned int child = PanelCall<unsigned int>(ipanel, kPanelGetChild, p, c);
+                const bool v = child && PanelCall<bool>(ipanel, kPanelIsVisible, child);
+                if (v)
+                    ++vis;
+                const char* name = child ? PanelCall<const char*>(ipanel, kPanelGetName, child) : nullptr;
+                if (buf && used + 40 < bufLen && c < 8)
+                    used += static_cast<size_t>(snprintf(buf + used, bufLen - used, "%s%s=%d", c ? " " : "", name ? name : "?", v ? 1 : 0));
+            }
+            if (total)
+                *total = n;
+            return vis;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
         }
     }
 
@@ -11186,25 +11221,26 @@ void VR::UpdateTitleHud()
         m_VguiPanel = m_Game->GetInterface("vgui2.dll", "VGUI_Panel009");
     if (!m_VguiPanel || !m_Game->m_EngineVGui)
         return;
-    if (!m_TitleHudPanels[0] || !m_TitleHudPanels[1])
+    if (!m_TitleHudPanels[0] || !m_TitleHudPanels[1] || (!m_TitleHudPanels[2] && m_TitleHudSearches < 30))
     {
         const unsigned long long now = GetTickCount64();
         if (now >= m_TitleHudNextSearchMs)
         {
             m_TitleHudNextSearchMs = now + 2000;
+            ++m_TitleHudSearches;
             // PANEL_ROOT = 0.
             const unsigned int root = static_cast<unsigned int>(
                 reinterpret_cast<uintptr_t>(m_Game->m_EngineVGui->GetPanel(0)));
             if (root && SehFindTitleHudPanels(m_VguiPanel, root, m_TitleHudPanels))
             {
-                Game::logMsg("Title HUD panels: HudCredits=%08X HudMessage=%08X",
-                    m_TitleHudPanels[0], m_TitleHudPanels[1]);
+                Game::logMsg("Title HUD panels: HudCredits=%08X HudMessage=%08X CHudIntroCredits=%08X",
+                    m_TitleHudPanels[0], m_TitleHudPanels[1], m_TitleHudPanels[2]);
             }
         }
     }
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < kTitleHudCount; ++i)
     {
-        if (m_TitleHudPanels[i] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[i]))
+        if (TitleHudPanelShowing(i))
             m_TitleHudActive = true;
     }
     // Subtitle study probe (issue #18): find the caption panel, log its
@@ -11243,16 +11279,29 @@ void VR::UpdateTitleHud()
         // the head's yaw once per epoch (otherwise the layer is head-locked).
         if (m_TitleHudActive && ++m_MenuOverlayEpoch == 0)
             m_MenuOverlayEpoch = 1;
-        Game::logMsg("Title HUD %s (credits=%d message=%d)", m_TitleHudActive ? "shown" : "hidden",
-            m_TitleHudPanels[0] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[0]) ? 1 : 0,
-            m_TitleHudPanels[1] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[1]) ? 1 : 0);
-        for (int i = 0; m_TitleHudActive && i < 2; ++i)
+        Game::logMsg("Title HUD %s (credits=%d message=%d names=%d)", m_TitleHudActive ? "shown" : "hidden",
+            TitleHudPanelShowing(0) ? 1 : 0, TitleHudPanelShowing(1) ? 1 : 0, TitleHudPanelShowing(2) ? 1 : 0);
+        for (int i = 0; m_TitleHudActive && i < kTitleHudCount; ++i)
         {
             int b[4] = {};
             if (m_TitleHudPanels[i] && SehPanelBounds(m_VguiPanel, m_TitleHudPanels[i], b))
                 Game::logMsg("Title HUD %s bounds %d,%d %dx%d", kTitleHudNames[i], b[0], b[1], b[2], b[3]);
         }
     }
+}
+
+// CHudIntroCredits (developer names) is visible all game; it has one
+// label child per name on screen (0 before env_introcredits Activate and
+// after the last name; log 2026-11-23), so it counts only with children.
+bool VR::TitleHudPanelShowing(int i) const
+{
+    const unsigned int p = (i >= 0 && i < kTitleHudCount) ? m_TitleHudPanels[i] : 0;
+    if (!p || !m_VguiPanel || !SehPanelVisible(m_VguiPanel, p))
+        return false;
+    if (i != 2)
+        return true;
+    int total = 0;
+    return SehVisibleChildren(m_VguiPanel, p, &total, nullptr, 0) > 0;
 }
 
 bool VR::WantTitleHudOverlay() const
@@ -11264,14 +11313,14 @@ int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
 {
     if (!m_VguiPanel)
         return 0;
-    unsigned int targets[2];
+    unsigned int targets[kTitleHudCount];
     int n = 0;
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < kTitleHudCount; ++i)
     {
-        if (m_TitleHudPanels[i] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[i]))
+        if (TitleHudPanelShowing(i))
         {
             targets[n++] = m_TitleHudPanels[i];
-            static int s_chainLog[2];
+            static int s_chainLog[kTitleHudCount];
             if (s_chainLog[i] < 2)
             {
                 SehLogPanelChain(m_VguiPanel, m_TitleHudPanels[i], kTitleHudNames[i]);
@@ -18913,8 +18962,17 @@ void VR::ResolveMsaaEyesToSubmit(IDirect3DDevice9* device)
 // dropped here before a device Reset, with the other VR render targets.
 static IDirect3DTexture9* g_PauseLayerCopyTex;
 static IDirect3DTexture9* g_PauseFrameCopyTex;
+static IDirect3DTexture9* g_TitleBloomTex[2];   // title layer glow (TitleLayerPremultiplied)
 static void ReleasePauseLayerCopies()
 {
+    for (IDirect3DTexture9*& t : g_TitleBloomTex)
+    {
+        if (t)
+        {
+            t->Release();
+            t = nullptr;
+        }
+    }
     if (g_PauseLayerCopyTex)
     {
         g_PauseLayerCopyTex->Release();
@@ -20056,6 +20114,80 @@ static IDirect3DPixelShader9* TitlePremultipliedShader(IDirect3DDevice9* device)
     return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_alpha.hlsl");
 }
 
+// Flat Black Mesa does not show the HUD as VGUI painted it. With hud_post 1
+// (default) client 0x267c40 paints the HUD a second time into _rt_Hud and
+// adds a "retro" pass over the frame: dev/hud_downsample (downsample_nohdr,
+// 4 bilinear taps, pow(c, $BLOOMEXP 6) * luma) to _rt_SmallFB0 at 1/4 size,
+// dev/hud_blur_x / dev/hud_blur_y (13-tap Gaussian, Y pass scaled by
+// hud_post_bloom 4), then bms_retroscanlines_ps20b, additive:
+//   hud * scan * hud_post_scanline_influence (0.5)
+//   + bloom * hud_post_bloom_influence (8) * scan   (scanline bloom influence 1)
+// with scan = dev/hud_scanline (rows alternate 0 / 202/255), tiled once per
+// screen row ($C0_Y = height / hud_scanline_size 128). That is the glow and
+// the interlaced look of the intro logo, credit names and chapter titles. The
+// title layer took only the VGUI paint (user, 2026-11-23: logo without the
+// effect, names grey). These passes rebuild it on the title layer, with the
+// blur radius scaled from the 1080-row screen to the layer height (the title
+// panels are fitted to the layer for the paint).
+static IDirect3DPixelShader9* TitleBloomDownsampleShader(IDirect3DDevice9* device)
+{
+    static LayerShaderCache s_cache;
+    static const char kSrc[] =
+        "sampler2D s : register(s0);\n"
+        "float4 k : register(c0);\n"
+        "float3 f(float3 c) { return pow(max(c, 1e-5), 6.0) * dot(c, float3(0.3, 0.59, 0.11)); }\n"
+        "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+        "  float3 r = f(tex2D(s, uv + float2(-k.x, -k.y)).rgb) + f(tex2D(s, uv + float2(k.x, -k.y)).rgb)\n"
+        "    + f(tex2D(s, uv + float2(-k.x, k.y)).rgb) + f(tex2D(s, uv + float2(k.x, k.y)).rgb);\n"
+        "  return float4(r * 0.25, 1);\n"
+        "}\n";
+    return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_bloom_down.hlsl");
+}
+
+static IDirect3DPixelShader9* TitleBloomBlurShader(IDirect3DDevice9* device)
+{
+    static LayerShaderCache s_cache;
+    // Source blurfilter ($KERNEL 1): tap offsets in texels and weights.
+    static const char kSrc[] =
+        "sampler2D s : register(s0);\n"
+        "float4 k : register(c0);\n"
+        "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+        "  float2 d = k.xy;\n"
+        "  float3 r = tex2D(s, uv).rgb * 0.2013;\n"
+        "  r += (tex2D(s, uv + d * 1.3366).rgb + tex2D(s, uv - d * 1.3366).rgb) * 0.2185;\n"
+        "  r += (tex2D(s, uv + d * 3.4295).rgb + tex2D(s, uv - d * 3.4295).rgb) * 0.0821;\n"
+        "  r += (tex2D(s, uv + d * 5.4264).rgb + tex2D(s, uv - d * 5.4264).rgb) * 0.0461;\n"
+        "  r += (tex2D(s, uv + d * 7.4359).rgb + tex2D(s, uv - d * 7.4359).rgb) * 0.0262;\n"
+        "  r += (tex2D(s, uv + d * 9.4436).rgb + tex2D(s, uv - d * 9.4436).rgb) * 0.0162;\n"
+        "  r += (tex2D(s, uv + d * 11.4401).rgb + tex2D(s, uv - d * 11.4401).rgb) * 0.0102;\n"
+        "  return float4(r * k.z, 1);\n"
+        "}\n";
+    return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_bloom_blur.hlsl");
+}
+
+// c0 = (layer height / 2, glow on, additive, 0); c1 = (scanline influence,
+// bloom influence, scanline value, 0). Additive: alpha 0, so the
+// premultiplied layer adds to the world like BM's additive credit fonts and
+// the post pass, instead of darkening it by the text alpha.
+static IDirect3DPixelShader9* TitleCombineShader(IDirect3DDevice9* device)
+{
+    static LayerShaderCache s_cache;
+    static const char kSrc[] =
+        "sampler2D s : register(s0);\n"
+        "sampler2D b : register(s1);\n"
+        "float4 k : register(c0);\n"
+        "float4 g : register(c1);\n"
+        "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+        "  float4 c = tex2D(s, uv);\n"
+        "  float scan = frac(uv.y * k.x) >= 0.5 ? g.z : 0.0;\n"
+        "  float3 bl = tex2D(b, uv).rgb;\n"
+        "  float3 rgb = c.rgb + k.y * scan * (c.rgb * g.x + bl * g.y);\n"
+        "  float a = k.z > 0.5 ? 0.0 : sqrt(c.a);\n"
+        "  return float4(saturate(rgb), a);\n"
+        "}\n";
+    return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_combine.hlsl");
+}
+
 static IDirect3DTexture9* PauseLayerCopy(IDirect3DDevice9* device, const D3DSURFACE_DESC& desc)
 {
     return CachedPauseCopy(g_PauseLayerCopyTex, device, desc.Width, desc.Height, desc.Format);
@@ -20252,12 +20384,43 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
         prevDs->Release();
 }
 
+// One full-target quad with the bound pixel shader (state saved by the caller).
+static void TitleLayerQuad(IDirect3DDevice9* device, IDirect3DSurface9* target, UINT w, UINT h)
+{
+    if (FAILED(device->SetRenderTarget(0, target)))
+        return;
+    D3DVIEWPORT9 vp{ 0, 0, w, h, 0.f, 1.f };
+    device->SetViewport(&vp);
+    struct VT { float x, y, z, rhw; float u, v; };
+    const float fw = static_cast<float>(w) - 0.5f, fh = static_cast<float>(h) - 0.5f;
+    const VT tq[4] = { { -0.5f, -0.5f, 0.f, 1.f, 0.f, 0.f }, { fw, -0.5f, 0.f, 1.f, 1.f, 0.f },
+        { -0.5f, fh, 0.f, 1.f, 0.f, 1.f }, { fw, fh, 0.f, 1.f, 1.f, 1.f } };
+    device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tq, sizeof(VT));
+}
+
+static void TitleLayerSampler(IDirect3DDevice9* device, DWORD stage, IDirect3DBaseTexture9* tex, bool linear)
+{
+    device->SetTexture(stage, tex);
+    const DWORD f = linear ? D3DTEXF_LINEAR : D3DTEXF_POINT;
+    device->SetSamplerState(stage, D3DSAMP_MINFILTER, f);
+    device->SetSamplerState(stage, D3DSAMP_MAGFILTER, f);
+    device->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    device->SetSamplerState(stage, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    device->SetSamplerState(stage, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    device->SetSamplerState(stage, D3DSAMP_SRGBTEXTURE, FALSE);
+}
+
 static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9* surf)
 {
     D3DSURFACE_DESC desc{};
     if (!device || !surf || FAILED(surf->GetDesc(&desc)))
         return;
-    IDirect3DPixelShader9* ps = TitlePremultipliedShader(device);
+    const bool glow = bmvr::g_TitleGlow;
+    const bool additive = bmvr::g_TitleAdditive;
+    IDirect3DPixelShader9* ps = (glow || additive) ? TitleCombineShader(device) : TitlePremultipliedShader(device);
+    IDirect3DPixelShader9* psDown = glow ? TitleBloomDownsampleShader(device) : nullptr;
+    IDirect3DPixelShader9* psBlur = glow ? TitleBloomBlurShader(device) : nullptr;
     IDirect3DTexture9* copy = ps ? PauseLayerCopy(device, desc) : nullptr;
     IDirect3DSurface9* copySurf = nullptr;
     if (!copy || FAILED(copy->GetSurfaceLevel(0, &copySurf)) || !copySurf)
@@ -20268,46 +20431,72 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
         return;
     }
     copySurf->Release();
+    const UINT bw = desc.Width / 4 > 0 ? desc.Width / 4 : 1, bh = desc.Height / 4 > 0 ? desc.Height / 4 : 1;
+    IDirect3DTexture9* bloom0 = (psDown && psBlur) ? CachedPauseCopy(g_TitleBloomTex[0], device, bw, bh, D3DFMT_A8R8G8B8) : nullptr;
+    IDirect3DTexture9* bloom1 = bloom0 ? CachedPauseCopy(g_TitleBloomTex[1], device, bw, bh, D3DFMT_A8R8G8B8) : nullptr;
+    IDirect3DSurface9* b0 = nullptr;
+    IDirect3DSurface9* b1 = nullptr;
+    if (bloom1 && (FAILED(bloom0->GetSurfaceLevel(0, &b0)) || FAILED(bloom1->GetSurfaceLevel(0, &b1))))
+        bloom1 = nullptr;
+    const bool doGlow = glow && bloom1 && b0 && b1;
     IDirect3DStateBlock9* saved = nullptr;
     if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
+    {
+        if (b0) b0->Release();
+        if (b1) b1->Release();
         return;
+    }
     IDirect3DSurface9* prevRt = nullptr;
     IDirect3DSurface9* prevDs = nullptr;
     device->GetRenderTarget(0, &prevRt);
     device->GetDepthStencilSurface(&prevDs);
-    if (SUCCEEDED(device->SetRenderTarget(0, surf)))
+    device->SetDepthStencilSurface(nullptr);
+    device->SetVertexShader(nullptr);
+    device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+    device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+    device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    device->SetRenderState(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN
+        | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+    if (doGlow)
     {
-        device->SetDepthStencilSurface(nullptr);
-        D3DVIEWPORT9 vp{ 0, 0, desc.Width, desc.Height, 0.f, 1.f };
-        device->SetViewport(&vp);
-        device->SetVertexShader(nullptr);
-        device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
-        device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
-        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
-        device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
-        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
-        device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
-        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-        device->SetRenderState(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN
-            | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
-        device->SetTexture(0, copy);
-        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-        device->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
-        device->SetPixelShader(ps);
-        struct VT { float x, y, z, rhw; float u, v; };
-        const float w = static_cast<float>(desc.Width) - 0.5f, h = static_cast<float>(desc.Height) - 0.5f;
-        const VT tq[4] = { { -0.5f, -0.5f, 0.f, 1.f, 0.f, 0.f }, { w, -0.5f, 0.f, 1.f, 1.f, 0.f },
-            { -0.5f, h, 0.f, 1.f, 0.f, 1.f }, { w, h, 0.f, 1.f, 1.f, 1.f } };
-        device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
-        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, tq, sizeof(VT));
+        // Downsample: 4 bilinear taps 1 layer texel off the 4x4 block centre.
+        const float down[4] = { 1.f / desc.Width, 1.f / desc.Height, 0.f, 0.f };
+        device->SetPixelShader(psDown);
+        device->SetPixelShaderConstantF(0, down, 1);
+        TitleLayerSampler(device, 0, copy, true);
+        TitleLayerQuad(device, b0, bw, bh);
+        // Blur radius: BM's offsets are 1/4-screen texels at 1080 rows.
+        const float scale = static_cast<float>(desc.Height) / 1080.f;
+        const float bx[4] = { scale / bw, 0.f, 1.f, 0.f };
+        device->SetPixelShader(psBlur);
+        device->SetPixelShaderConstantF(0, bx, 1);
+        TitleLayerSampler(device, 0, bloom0, true);
+        TitleLayerQuad(device, b1, bw, bh);
+        const float by[4] = { 0.f, scale / bh, 4.f, 0.f };   // hud_post_bloom
+        device->SetPixelShaderConstantF(0, by, 1);
+        TitleLayerSampler(device, 0, bloom1, true);
+        TitleLayerQuad(device, b0, bw, bh);
     }
+    device->SetPixelShader(ps);
+    if (ps != TitlePremultipliedShader(device))
+    {
+        const float k[4] = { desc.Height * 0.5f, doGlow ? 1.f : 0.f, additive ? 1.f : 0.f, 0.f };
+        const float g[4] = { 0.5f, 8.f, 202.f / 255.f, 0.f };
+        device->SetPixelShaderConstantF(0, k, 1);
+        device->SetPixelShaderConstantF(1, g, 1);
+    }
+    TitleLayerSampler(device, 0, copy, false);
+    TitleLayerSampler(device, 1, doGlow ? static_cast<IDirect3DBaseTexture9*>(bloom0) : copy, true);
+    TitleLayerQuad(device, surf, desc.Width, desc.Height);
     saved->Apply();
     saved->Release();
+    if (b0) b0->Release();
+    if (b1) b1->Release();
     if (prevRt)
     {
         device->SetRenderTarget(0, prevRt);
@@ -20317,8 +20506,15 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
     if (prevDs)
         prevDs->Release();
     static int s_log;
-    if (s_log++ < 2)
-        Game::logMsg("Title layer: premultiplied %ux%u", desc.Width, desc.Height);
+    static int s_lastMode = -1;
+    const int mode = (doGlow ? 1 : 0) | (additive ? 2 : 0);
+    if (s_log < 8 && mode != s_lastMode)
+    {
+        ++s_log;
+        s_lastMode = mode;
+        Game::logMsg("Title layer: %ux%u glow=%d additive=%d (bloom %ux%u)", desc.Width, desc.Height,
+            doGlow ? 1 : 0, additive ? 1 : 0, bw, bh);
+    }
 }
 
 void VR::NoteHudPainted()

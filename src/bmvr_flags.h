@@ -742,6 +742,13 @@ namespace bmvr
     // left there (like the pause menu) instead of head-locked (turning,
     // pitching and rolling with the headset).
     extern bool g_TitleLevel;
+    // TitleGlow / TitleAdditive (default on, panel DEBUG > FIXES: RENDERING, not
+    // saved): the title layer gets flat Black Mesa's hud_post look (bloom +
+    // scanlines, client 0x267c40) and is added to the world like the game's
+    // additive credit fonts instead of alpha-blended (which darkened the world
+    // behind thin text: grey credit names).
+    extern bool g_TitleGlow;
+    extern bool g_TitleAdditive;
     // ParticlesLast (default true since 2026-11-17, panel DEBUG > FIXES: RENDERING): hold the main view's
     // particles to the end of the translucent pass also when "MSAA skips
     // particles" does not (MSAA 0 or that row off), as a pure draw-order change

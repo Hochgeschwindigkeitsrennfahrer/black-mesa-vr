@@ -64,6 +64,9 @@ struct D3DAimLineOverlayEyeState
     uint32_t outlineColor = 0;
 };
 
+// Title HUD panels: HudCredits, HudMessage, CHudIntroCredits.
+constexpr int kTitleHudCount = 3;
+
 class VR
 {
 public:
@@ -745,7 +748,8 @@ public:
     DWORD m_MenuRightHitMs = 0;
     void* m_EngineVGuiFromPaint = nullptr;
     void* m_VguiPanel = nullptr; // vgui2.dll VGUI_Panel009
-    unsigned int m_TitleHudPanels[2] = {};
+    unsigned int m_TitleHudPanels[kTitleHudCount] = {};
+    int m_TitleHudSearches = 0;
     // Panels resized to the HUD RT for the title paint, with their own sizes.
     unsigned int m_TitleFitPanels[16] = {};
     int m_TitleFitSizes[16][2] = {};
@@ -1337,6 +1341,7 @@ public:
     bool WantHudLayer() const { return WantPauseWorldOverlay() || WantTitleHudOverlay(); }
     // Hide every visible panel that is not a visible title panel or one of its
     // ancestors; returns how many were hidden into `hidden`.
+    bool TitleHudPanelShowing(int i) const;
     int IsolateTitleHudPanels(unsigned int* hidden, int cap);
     void RestoreTitleHudPanels(const unsigned int* hidden, int count);
     void UpdateScreenEffectNoDraw();
