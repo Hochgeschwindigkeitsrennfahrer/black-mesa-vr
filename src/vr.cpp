@@ -10529,6 +10529,45 @@ namespace
         }
     }
 
+    // Subtitle study (issue #18, 2026-11-23): first panel whose name has
+    // "aption" or "ubtitle" (closed captions). Logs every match once.
+    unsigned int SehFindCaptionPanel(void* ipanel, unsigned int root)
+    {
+        BMVR_TRY
+        {
+            unsigned int stack[64];
+            int sp = 0;
+            int visited = 0;
+            unsigned int found = 0;
+            stack[sp++] = root;
+            while (sp > 0 && visited < 4096)
+            {
+                const unsigned int p = stack[--sp];
+                ++visited;
+                const char* name = PanelCall<const char*>(ipanel, kPanelGetName, p);
+                if (name && std::strcmp(name, "HudCloseCaption") == 0)
+                {
+                    Game::logMsg("Caption panel '%s' = %08X visible=%d", name, p,
+                        PanelCall<bool>(ipanel, kPanelIsVisible, p) ? 1 : 0);
+                    found = p;
+                    break;
+                }
+                const int n = PanelCall<int>(ipanel, kPanelGetChildCount, p);
+                for (int c = 0; c < n && sp < 64; ++c)
+                {
+                    const unsigned int child = PanelCall<unsigned int>(ipanel, kPanelGetChild, p, c);
+                    if (child)
+                        stack[sp++] = child;
+                }
+            }
+            return found;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
     constexpr int kPanelGetAbsPos = 10;
     constexpr int kPanelGetClipRect = 11;
 
@@ -11087,6 +11126,36 @@ void VR::UpdateTitleHud()
     {
         if (m_TitleHudPanels[i] && SehPanelVisible(m_VguiPanel, m_TitleHudPanels[i]))
             m_TitleHudActive = true;
+    }
+    // Subtitle study probe (issue #18): find the caption panel, log its
+    // visibility changes and size.
+    {
+        static unsigned int s_cc;
+        static unsigned long long s_ccNext;
+        static int s_ccVis = -1, s_ccLogs;
+        const unsigned long long now = GetTickCount64();
+        if (!s_cc && now >= s_ccNext)
+        {
+            s_ccNext = now + 5000;
+            const unsigned int root = static_cast<unsigned int>(
+                reinterpret_cast<uintptr_t>(m_Game->m_EngineVGui->GetPanel(0)));
+            if (root)
+                s_cc = SehFindCaptionPanel(m_VguiPanel, root);
+        }
+        if (s_cc)
+        {
+            const int vis = SehPanelVisible(m_VguiPanel, s_cc) ? 1 : 0;
+            int b[4] = {};
+            const bool haveB = SehPanelBounds(m_VguiPanel, s_cc, b);
+            static int s_lastH = -1;
+            if ((vis != s_ccVis || (haveB && b[3] != s_lastH)) && s_ccLogs < 40)
+            {
+                ++s_ccLogs;
+                Game::logMsg("Caption panel visible=%d bounds %d,%d %dx%d", vis, b[0], b[1], b[2], b[3]);
+            }
+            s_ccVis = vis;
+            s_lastH = haveB ? b[3] : -1;
+        }
     }
     if (m_TitleHudActive != was)
     {
