@@ -5208,12 +5208,13 @@ namespace
     }
 }
 
-// Grab gesture "Screenshot" (user 2026-11-23): the right eye, cropped to 16:9
-// around straight ahead, a bit lower (the eye texture is symmetric around it; the crop
-// stays inside what that eye shows, so both sides reach as far as the inner
-// edge), into Steam's screenshot library like F12. Fallback: the BMP pair in
-// VR/. Headless test runs (BMVR_TESTDIR) never touch the library: they write
-// the crop as VR/steamshot-test.bmp.
+// Grab gesture "Screenshot" (user 2026-11-23): the right eye with the
+// desktop window's framing (MirrorStereoToDesktopWindow: the whole eye
+// width, top and bottom cropped to 16:9, centred), at full eye resolution,
+// into Steam's screenshot library like F12 (Steam shows its own notice).
+// An earlier crop limited to what the right eye shows (+-43 deg on PSVR2)
+// looked far too zoomed in (user). Fallback: a BMP in VR/. Headless test
+// runs (BMVR_TESTDIR) never touch the library: VR/steamshot-test.bmp.
 void VR::TakeSteamScreenshot(IDirect3DDevice9* dev, uint32_t slot)
 {
     int w = 0, h = 0;
@@ -5225,26 +5226,14 @@ void VR::TakeSteamScreenshot(IDirect3DDevice9* dev, uint32_t slot)
         ShowToast("Screenshot failed", 1500);
         return;
     }
-    const vr::VRTextureBounds_t& b = m_TextureBounds[1];
-    const float u0 = (std::min)(b.uMin, b.uMax), u1 = (std::max)(b.uMin, b.uMax);
-    const float v0 = (std::min)(b.vMin, b.vMax), v1 = (std::max)(b.vMin, b.vMax);
-    float halfU = (std::min)(0.5f - u0, u1 - 0.5f), halfV = (std::min)(0.5f - v0, v1 - 0.5f);
-    if (!(halfU > 0.05f && halfU <= 0.5f))
-        halfU = 0.5f;
-    if (!(halfV > 0.05f && halfV <= 0.5f))
-        halfV = 0.5f;
-    int cw = static_cast<int>(2.f * halfU * w) & ~1;
-    int ch = static_cast<int>(cw * 9.f / 16.f) & ~1;
-    if (ch > static_cast<int>(2.f * halfV * h))
+    int cw = w & ~1;
+    int ch = static_cast<int>(w * 9.f / 16.f) & ~1;
+    if (ch > h)
     {
-        ch = static_cast<int>(2.f * halfV * h) & ~1;
-        cw = static_cast<int>(ch * 16.f / 9.f) & ~1;
+        ch = h & ~1;
+        cw = static_cast<int>(h * 16.f / 9.f) & ~1;
     }
-    // A third of the crop lower than centred (user 2026-11-23): the gun and
-    // hands sit below straight ahead; kept inside what the eye shows.
-    const int x0 = (w - cw) / 2;
-    const int yMax = (std::max)(0, (std::min)(h, static_cast<int>(v1 * h)) - ch);
-    const int y0 = std::clamp((h - ch) / 2 + ch / 3, 0, yMax);
+    const int x0 = (w - cw) / 2, y0 = (h - ch) / 2;
     std::vector<uint8_t> crop(static_cast<size_t>(cw) * ch * 3);
     for (int y = 0; y < ch; ++y)
         std::memcpy(&crop[static_cast<size_t>(y) * cw * 3], &rgb[(static_cast<size_t>(y0 + y) * w + x0) * 3],
@@ -5261,7 +5250,6 @@ void VR::TakeSteamScreenshot(IDirect3DDevice9* dev, uint32_t slot)
     if (SteamWriteScreenshot(crop, cw, ch, why))
     {
         Game::logMsg("Steam screenshot: right eye %dx%d crop %dx%d sent to the Steam library", w, h, cw, ch);
-        ShowToast("Screenshot saved to Steam", 1500);
         return;
     }
     SYSTEMTIME st{};
