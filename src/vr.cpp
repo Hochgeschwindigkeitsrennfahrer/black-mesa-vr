@@ -5632,6 +5632,21 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         s_capturePolls = 40;
         return;
     }
+    // VR/click.txt "x y" (test aid): a left click at those game-window
+    // coordinates, as the laser and the new UI's Back do it.
+    {
+        const std::string clickTrigger = bmvr::VrFilePath("click.txt");
+        if (FILE* cf = std::fopen(clickTrigger.c_str(), "rb"))
+        {
+            int x = -1, y = -1;
+            const int got = std::fscanf(cf, "%d %d", &x, &y);
+            std::fclose(cf);
+            std::remove(clickTrigger.c_str());
+            if (got == 2)
+                StartSyntheticMenuClick(x, y);
+        }
+        TickSyntheticMenuClick();
+    }
     // VR/trace.txt [frames]: log every RT push/pop, copy, viewport and
     // screen-space draw for that many frames (default 2).
     const std::string traceTrigger = bmvr::VrFilePath("trace.txt");
@@ -10237,6 +10252,19 @@ void VR::ApplyMenuNavigation()
             ++s_wheelLog;
         }
     }
+    // New game UI: some lists run sideways (Load Game). Its forwarder only
+    // passes the vertical wheel to Qt; the UI is made for pads and moves
+    // along such a list with Left/Right, which vertical lists ignore. So the
+    // turn stick held sideways = Left/Right (repeat 250 ms), only when it is
+    // mostly sideways.
+    float turnX = 0.f;
+    if (bmvr::NewUiWindow() && GetAnalogActionData(m_ActionTurn, turn))
+        turnX = turn.x;
+    const bool sideways = fabsf(turnX) > 0.55f && fabsf(turnX) > fabsf(turnY) * 1.5f;
+    static bool s_tl, s_tr;
+    static DWORD s_tlMs, s_trMs;
+    dpad(sideways && turnX < 0.f, VK_LEFT, s_tl, s_tlMs, "turn-left");
+    dpad(sideways && turnX > 0.f, VK_RIGHT, s_tr, s_trMs, "turn-right");
 
     const bool select = PressedDigitalAction(m_ActionMenuSelect);
     // While the pointer is on the menu, menus click with the trigger only
@@ -10250,21 +10278,64 @@ void VR::ApplyMenuNavigation()
     }
     s_ok = select;
 
+    TickSyntheticMenuClick();
     const bool back = PressedDigitalAction(m_ActionMenuBack)
         || (!m_GameplayEligible && PressedDigitalAction(m_ActionPause));
     if (back && !s_back)
     {
-        // New game UI (Qt): Backspace is its "back" (its own button hints);
-        // it closes only the current page, Escape could close the whole
-        // menu. Keys reach Qt through the game window like the clicks do
-        // (its own window is hidden), with a real scan code.
+        // New game UI (Qt): in game (pause menu and its pages) Backspace
+        // closed the whole menu even from Load/Save/Options, whose own BACK
+        // button returns to the pause menu; so Circle presses that button
+        // (bottom-right, the last hint: "Back" on pages, "Back to game" on
+        // the pause menu). In the main menu Backspace behaves (page back;
+        // top level = the game's "Really quit?" dialog) and the corner
+        // button there is QUIT, so the key stays. Old UI: Escape.
         const bool newUi = bmvr::NewUiWindow() != nullptr;
-        const int key = newUi ? VK_BACK : VK_ESCAPE;
-        QueueKeyToHwnd(hwnd, key);
-        Game::logMsg("Menu back %s (%s)",
-            m_GameplayEligible ? "B/MenuBack" : "B/Pause", newUi ? "Backspace, new UI" : "Escape");
+        // Gameplay map, not IsInGame: the main menu's background map is "in game".
+        const bool inGame = m_GameplayEligible;
+        if (newUi && inGame)
+        {
+            const UINT w = KnownWindowWidth(), h = KnownWindowHeight();
+            StartSyntheticMenuClick(static_cast<int>(w * 0.985f), static_cast<int>(h * 0.94f));
+        }
+        else
+            QueueKeyToHwnd(hwnd, newUi ? VK_BACK : VK_ESCAPE);
+        Game::logMsg("Menu back %s (%s)", m_GameplayEligible ? "B/MenuBack" : "B/Pause",
+            !newUi ? "Escape" : inGame ? "new UI: corner Back button" : "new UI: Backspace");
     }
     s_back = back;
+}
+
+// A left click at game-window x,y the way the laser clicks: the pointer
+// hovers there first (GetCursorPos hook + WM_MOUSEMOVE), the press and
+// release follow ~150 ms later (all at once, the new game UI only
+// highlighted the item).
+void VR::StartSyntheticMenuClick(int x, int y)
+{
+    m_SynthClickX = x;
+    m_SynthClickY = y;
+    m_SynthClickAtMs = GetTickCount() + 150;
+}
+
+void VR::TickSyntheticMenuClick()
+{
+    if (m_SynthClickX < 0)
+        return;
+    HWND hwnd = FindGameHwnd();
+    if (!hwnd)
+        return;
+    POINT pt{ m_SynthClickX, m_SynthClickY };
+    ClientToScreen(hwnd, &pt);
+    m_MenuClickHoldScreen.store(PackScreenPoint(pt), std::memory_order_relaxed);
+    m_MenuClickHoldUntilMs.store(GetTickCount() + kMenuClickHoldMs, std::memory_order_release);
+    SetCursorPos(pt.x, pt.y);
+    PostMessageA(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(m_SynthClickX, m_SynthClickY));
+    if (static_cast<int>(GetTickCount() - m_SynthClickAtMs) < 0)
+        return;
+    PostMessageA(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(m_SynthClickX, m_SynthClickY));
+    PostMessageA(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(m_SynthClickX, m_SynthClickY));
+    Game::logMsg("Synthetic menu click at %d,%d", m_SynthClickX, m_SynthClickY);
+    m_SynthClickX = m_SynthClickY = -1;
 }
 
 void VR::QueueGameUiToggle(bool currentlyPaused)

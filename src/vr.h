@@ -1387,6 +1387,12 @@ public:
     // HL2VR restores OverrideAlphaWriteEnable(false, true) after RenderHUD.
     void FinishPauseHudExtraPaint(IMatRenderContext* ctx);
     void StampPauseOverlayCursor();
+    // Laser-style click at window coordinates (new UI Back, test clicks).
+    void StartSyntheticMenuClick(int x, int y);
+    void TickSyntheticMenuClick();
+    int m_SynthClickX = -1;
+    int m_SynthClickY = -1;
+    DWORD m_SynthClickAtMs = 0;
     // New game UI pause: no VGUI extra paint (the QML layer is the menu).
     void SetPauseHudSkipVgui(bool skip) { m_PauseHudSkipVgui.store(skip, std::memory_order_release); }
     std::atomic<bool> m_PauseHudSkipVgui{ false };

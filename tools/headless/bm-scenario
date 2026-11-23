@@ -142,6 +142,8 @@ while IFS= read -r line || [[ -n $line ]]; do
 		unfake) grep -v "^$arg " "$out/VR/fake.txt" > "$out/VR/fake.tmp" || true; mv "$out/VR/fake.tmp" "$out/VR/fake.txt" ;;
 		shot) if window_shot "$out/$arg.png"; then echo "shot $arg"; else echo "shot $arg FAILED"; fi ;;
 		log) if [[ -n ${BMVR_FLAT:-} ]]; then cp "$CONSOLE" "$out/console-$(date +%H%M%S).txt"; else cp "$out/bmvr_log.txt" "$out/log-$(date +%H%M%S).txt"; fi ;;
+		click) echo "$arg" > "$out/VR/click.txt"   # left click at game-window x y (posted like the laser's menu click)
+			sleep 0.5 ;;
 		trace) echo "${arg:-2}" > "$out/VR/trace.txt"   # mod logs every RT push/pop/copy/viewport/screen rect for <arg> frames
 			sleep 1 ;;
 		audit) echo "${arg:-2}" > "$out/VR/audit.txt"   # render-target audit (sizes, viewports, which eye wrote each sampled RT) + trace for <arg> Presents
