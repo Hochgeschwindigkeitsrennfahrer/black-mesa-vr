@@ -7360,6 +7360,7 @@ void VR::ProcessInput()
     // squeeze is needed anyway and the wait lost hurried grabs. Hip
     // holsters (HipGestures): right hand at the right hip + grip = pistol,
     // a bit above the left hip = MP5, also armed at once.
+    UpdateBodyFrame();
     const bool rightShoulder = UpdateShoulderGestures(paused);
     m_GestureZoneRight = rightShoulder;
     UpdateLadderGrips();
@@ -15404,6 +15405,194 @@ void VR::ApplyTwoHandWeaponAim()
     finishDraw(F, R, U, gxSlide);
 }
 
+// Grab zones (shoulders, hips, ammo pouch) in a body frame instead of the
+// headset (user 2026-11-23: looking left/right moved the holsters). Body yaw:
+// a head turn within the dead zone leaves it alone, a turn held past it for
+// the catch-up delay turns it (until fully aligned, else it stays ~35 deg off),
+// past the hard limit it is dragged along at once; walking catches up at once.
+// While a hand reaches into a zone the yaw is frozen (except the hard limit)
+// so the slot does not move away from the hand. Everything stays in tracking
+// space like the poses, so snap/smooth turning needs nothing.
+void VR::UpdateBodyFrame()
+{
+    using Clock = std::chrono::steady_clock;
+    static Clock::time_point s_last{};
+    static float s_offsetSec = 0.f;
+    static bool s_catchingUp = false;
+    static bool s_wasOn = false;
+    static int s_logLines = 0;
+    struct Reach { Clock::time_point entered{}; Clock::time_point left{}; bool in = false; };
+    static Reach s_reachLeft, s_reachRight;
+
+    const Clock::time_point now = Clock::now();
+    float dt = s_last == Clock::time_point{} ? 0.f : std::chrono::duration<float>(now - s_last).count();
+    s_last = now;
+    dt = std::clamp(dt, 0.f, 0.1f);
+
+    if (!m_HmdPoseValid)
+    {
+        m_BodyFrameValid = false;
+        return;
+    }
+    const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+    const Vector up(0.f, 0.f, 1.f);
+    auto setFrame = [&](float yawDeg, const Vector& origin) {
+        const float r = DEG2RAD(yawDeg);
+        m_ZoneFwd = Vector(std::cos(r), std::sin(r), 0.f);
+        m_ZoneRight = CrossProduct(m_ZoneFwd, up);   // Source: x fwd, y left, z up
+        m_ZoneOrigin = origin;
+        m_BodyFrameValid = true;
+    };
+
+    if (!bmvr::g_GestureBodyFrame)
+    {
+        // Old head-locked zones: the headset and its flattened forward.
+        Vector fwd = m_HmdForward;
+        fwd.z = 0.f;
+        if (VectorNormalize(fwd) <= 0.01f)
+        {
+            m_BodyFrameValid = false;
+            return;
+        }
+        m_BodyYawDeg = m_BodyHeadYawDeg = RAD2DEG(std::atan2(fwd.y, fwd.x));
+        setFrame(m_BodyYawDeg, m_HmdPosAbs);
+        if (s_wasOn)
+            Game::logMsg("Body frame: off, grab zones follow the headset");
+        s_wasOn = false;
+        s_catchingUp = false;
+        return;
+    }
+
+    // Head yaw that still works looking down/up: looking down, the top of the
+    // head points forward; looking up, the back of it does.
+    Vector d = m_HmdForward - m_HmdUp * m_HmdForward.z;
+    d.z = 0.f;
+    if (d.Length2D() > 1e-3f)
+        m_BodyHeadYawDeg = RAD2DEG(std::atan2(d.y, d.x));
+    const float headYaw = m_BodyHeadYawDeg;
+    if (!s_wasOn || !m_BodyFrameValid)
+    {
+        m_BodyYawDeg = headYaw;
+        s_offsetSec = 0.f;
+        s_catchingUp = false;
+        Game::logMsg("Body frame: on (dead zone %.0f, hard limit %.0f, catch-up %.1f s at %.0f deg/s)",
+            bmvr::g_BodyYawDeadzoneDeg, bmvr::g_BodyYawHardLimitDeg, bmvr::g_BodyYawCatchUpSec,
+            bmvr::g_BodyYawCatchUpDegPerSec);
+    }
+    s_wasOn = true;
+
+    // Holster lock, from last frame's zones: a hand that moved into a zone
+    // (8 cm margin) freezes the yaw, and for 250 ms after it leaves. A hand
+    // resting there (> 1.5 s, e.g. hanging at the hip) no longer counts, or
+    // empty hands at the sides would pin the body for good.
+    auto reach = [&](Reach& r, bool valid, const Vector& hand, std::initializer_list<GestureZone> zones) {
+        bool in = false;
+        if (valid && m_BodyFrameValid)
+            for (GestureZone z : zones)
+                in = in || HandInGestureZone(hand, z, 0.08f);
+        if (in && !r.in)
+            r.entered = now;
+        if (!in && r.in)
+            r.left = now;
+        r.in = in;
+        if (in)
+            return now - r.entered < std::chrono::milliseconds(1500);
+        return r.left != Clock::time_point{} && now - r.left < std::chrono::milliseconds(250)
+            && r.left - r.entered < std::chrono::milliseconds(1500);
+    };
+    const bool locked =
+        reach(s_reachLeft, m_LeftControllerTrackingValid, m_LeftControllerPosAbs,
+            { GestureZone::ShoulderLeft, GestureZone::HipAmmo })
+        | reach(s_reachRight, m_PhysicalRightTrackingValid && !m_TwoHandActive, m_PhysicalRightPosAbs,
+            { GestureZone::ShoulderRight, GestureZone::HipRight, GestureZone::HipCross });
+
+    auto deltaAngle = [](float from, float to) { return std::remainder(to - from, 360.f); };
+    float delta = deltaAngle(m_BodyYawDeg, headYaw);
+    const float hardLimit = bmvr::g_BodyYawHardLimitDeg;
+    if (std::fabs(delta) > hardLimit)   // also while locked: turning around still works
+    {
+        m_BodyYawDeg += (delta > 0.f ? 1.f : -1.f) * (std::fabs(delta) - hardLimit);
+        delta = deltaAngle(m_BodyYawDeg, headYaw);
+    }
+    if (!locked)
+    {
+        const bool walking = std::fabs(m_WalkForward.load(std::memory_order_acquire)) > 0.2f
+            || std::fabs(m_WalkSide.load(std::memory_order_acquire)) > 0.2f;
+        const float delay = walking ? 0.f : bmvr::g_BodyYawCatchUpSec;
+        const float absDelta = std::fabs(delta);
+        s_offsetSec = absDelta > bmvr::g_BodyYawDeadzoneDeg ? s_offsetSec + dt : 0.f;
+        if (!s_catchingUp && absDelta > bmvr::g_BodyYawDeadzoneDeg && s_offsetSec >= delay)
+        {
+            s_catchingUp = true;
+            if (s_logLines < 40)
+            {
+                ++s_logLines;
+                Game::logMsg("Body frame: catching up %+.0f deg%s", delta, walking ? " (walking)" : "");
+            }
+        }
+        if (s_catchingUp)
+        {
+            const float step = bmvr::g_BodyYawCatchUpDegPerSec * dt;
+            m_BodyYawDeg += std::clamp(delta, -step, step);
+            if (std::fabs(deltaAngle(m_BodyYawDeg, headYaw)) < 5.f)
+                s_catchingUp = false;   // keep going until aligned, not just back in the dead zone
+        }
+    }
+    m_BodyYawDeg = std::remainder(m_BodyYawDeg, 360.f);
+
+    // Neck pivot ~10 cm below and 9 cm behind the eyes (head frame), so head
+    // pitch/roll no longer swings the zones. The zone limits were tuned from
+    // the eyes looking straight ahead, so the origin is where the eyes would be
+    // with the head straight over the neck, facing the body yaw.
+    const Vector neck = m_HmdPosAbs - m_HmdForward * (0.09f * scale) - m_HmdUp * (0.10f * scale);
+    const float r = DEG2RAD(m_BodyYawDeg);
+    const Vector bodyFwd(std::cos(r), std::sin(r), 0.f);
+    setFrame(m_BodyYawDeg, neck + bodyFwd * (0.09f * scale) + up * (0.10f * scale));
+}
+
+void VR::ZoneCoords(const Vector& hand, float& along, float& lateral, float& height) const
+{
+    const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+    const Vector d = hand - m_ZoneOrigin;
+    along = d.Dot(m_ZoneFwd) / scale;
+    lateral = d.Dot(m_ZoneRight) / scale;   // + = right
+    height = d.z / scale;
+}
+
+// Zone boxes in metres from the (body-frame) eye point: along = ahead,
+// lateral = toward that zone's side, height = up. growM widens every side
+// (holster lock margin).
+bool VR::HandInGestureZone(const Vector& hand, GestureZone zone, float growM) const
+{
+    if (!m_BodyFrameValid)
+        return false;
+    float along, lateral, height;
+    ZoneCoords(hand, along, lateral, height);
+    struct Box { float side, back, front, lo, hi, latLo, latHi; };
+    Box b{};
+    switch (zone)
+    {
+    // Behind the head (the HMD sits ~10 cm ahead of the neck), above chest
+    // height, on that hand's side. Closer than the first try (2026-10-15:
+    // crowbar a reach too far): level with the eyes counts. Not below the
+    // shoulder (~20 cm under the eyes): down to -0.38 a shotgun stock held in
+    // close at chest height took the crowbar on the grip squeeze (2026-10-26).
+    case GestureZone::ShoulderLeft:  b = { -1.f, -10.f, 0.04f, -0.20f, 0.30f, 0.05f, 0.50f }; break;
+    case GestureZone::ShoulderRight: b = { 1.f, -10.f, 0.04f, -0.20f, 0.30f, 0.05f, 0.50f }; break;
+    // Pistol zone 18 cm further back and 8 cm lower than the first try
+    // (2026-11-14: 5-10 cm too far forward and too high; 2026-11-16 headset:
+    // still 10 cm too far forward).
+    case GestureZone::HipRight:      b = { 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f }; break;
+    // Right hand, a bit above the left hip (cross draw).
+    case GestureZone::HipCross:      b = { -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f }; break;
+    // Left hand: mirror of the pistol zone (manual-reload ammo).
+    case GestureZone::HipAmmo:       b = { -1.f, -0.43f, 0.10f, -1.03f, -0.45f, 0.05f, 0.45f }; break;
+    }
+    lateral *= b.side;
+    return along > b.back - growM && along < b.front + growM && height > b.lo - growM && height < b.hi + growM
+        && lateral > b.latLo - growM && lateral < b.latHi + growM;
+}
+
 bool VR::UpdateShoulderGestures(bool paused)
 {
     // Returns true while the right hand is in its shoulder or hip zone, so
@@ -15432,26 +15621,14 @@ bool VR::UpdateShoulderGestures(bool paused)
         return false;
     }
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
+    // Shoulder/hip zones: body frame (UpdateBodyFrame). The forehead zone
+    // below stays on the head (fwd/right = the headset's flattened forward).
     Vector fwd = m_HmdForward;
     fwd.z = 0.f;
-    if (VectorNormalize(fwd) <= 0.01f)
+    if (VectorNormalize(fwd) <= 0.01f || !m_BodyFrameValid)
         return false;
     const Vector up(0.f, 0.f, 1.f);
     const Vector right = CrossProduct(fwd, up);   // Source: x fwd, y left, z up
-    // Behind the head (the HMD sits ~10 cm ahead of the neck), above chest
-    // height, on that hand's side.
-    auto inZone = [&](const Vector& hand, float side) {
-        const Vector d = hand - m_HmdPosAbs;
-        const float along = d.Dot(fwd) / scale;
-        const float lateral = d.Dot(right) / scale * side;
-        const float height = d.z / scale;
-        // Closer than the first try (2026-10-15: crowbar a reach too far):
-        // level with the eyes counts. Not below the shoulder (~20 cm under
-        // the eyes): down to -0.38 a shotgun stock held in close at chest
-        // height took the crowbar on the grip squeeze (2026-10-26).
-        return along < 0.04f && height > -0.20f && height < 0.30f
-            && lateral > 0.05f && lateral < 0.50f;
-    };
     auto gripValue = [&](vr::VRActionHandle_t h) {
         vr::InputAnalogActionData_t a{};
         if (GetAnalogActionData(h, a))
@@ -15563,7 +15740,8 @@ bool VR::UpdateShoulderGestures(bool paused)
             bmvr::GestureWeaponName(heldW), target->key, oldW >= 0 ? bmvr::GestureWeaponName(oldW) : "off",
             swappedKey ? ", that weapon moves to " : "", swappedKey ? swappedKey : "", ok ? "saved" : "SAVE FAILED");
     };
-    const bool leftIn = leftAction >= 0 && m_LeftControllerTrackingValid && inZone(m_LeftControllerPosAbs, -1.f);
+    const bool leftIn = leftAction >= 0 && m_LeftControllerTrackingValid
+        && HandInGestureZone(m_LeftControllerPosAbs, GestureZone::ShoulderLeft);
     // Left hand at the forehead: just ahead of the eyes (the headset front
     // is ~8 cm ahead of them), from just below eye level up, within 25 cm of
     // the middle. Reaches 40 cm ahead and 15 cm down so the hand need not hit
@@ -15588,7 +15766,7 @@ bool VR::UpdateShoulderGestures(bool paused)
     }
     // Not while both hands hold the gun: that grip squeeze is the gun's.
     const bool rightIn = shoulderW >= 0 && m_PhysicalRightTrackingValid && !m_TwoHandActive
-        && inZone(m_PhysicalRightPosAbs, 1.f) && zoneLive(shoulderW);
+        && HandInGestureZone(m_PhysicalRightPosAbs, GestureZone::ShoulderRight) && zoneLive(shoulderW);
     // Ammo (leftAction 2): no gesture here, the manual-reload ammo grab takes
     // this zone as a second ammo pouch (atLeftHip); the grip stays out of the
     // flashlight via m_GestureZoneLeft.
@@ -15653,9 +15831,11 @@ bool VR::UpdateShoulderGestures(bool paused)
             m_EmptyHands = false;
             m_PendingWeaponSelect.store(inv[i].entityIndex, std::memory_order_release);
             PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
-            const Vector d = m_PhysicalRightPosAbs - m_HmdPosAbs;
-            Game::logMsg("Grab gesture: %s entity=%d (hand %.2f m ahead, %.2f m up, %.2f m right of the head)",
-                label, inv[i].entityIndex, d.Dot(fwd) / scale, d.z / scale, d.Dot(right) / scale);
+            float along, lateral, height;
+            ZoneCoords(m_PhysicalRightPosAbs, along, lateral, height);
+            Game::logMsg("Grab gesture: %s entity=%d (hand %.2f m ahead, %.2f m up, %.2f m right of the %s; head %+.0f deg off the body)",
+                label, inv[i].entityIndex, along, height, lateral, bmvr::g_GestureBodyFrame ? "body" : "head",
+                std::remainder(m_BodyHeadYawDeg - m_BodyYawDeg, 360.f));
             return;
         }
         Game::logMsg("Grab gesture: %s not in the inventory", label);
@@ -15672,21 +15852,10 @@ bool VR::UpdateShoulderGestures(bool paused)
     // Hip holsters (right hand only): right hip = pistol, a bit above the
     // left hip (cross draw) = MP5. Close to the body (a gun aimed forward is
     // ~0.3 m+ ahead) and well below the shoulder zone, so they never overlap.
-    auto inHip = [&](const Vector& hand, float side, float back, float front, float lo, float hi, float latLo, float latHi) {
-        const Vector d = hand - m_HmdPosAbs;
-        const float along = d.Dot(fwd) / scale;
-        const float lateral = d.Dot(right) / scale * side;
-        const float height = d.z / scale;
-        return along > back && along < front && height > lo && height < hi
-            && lateral > latLo && lateral < latHi;
-    };
     const bool hipsOn = m_PhysicalRightTrackingValid && !m_TwoHandActive;
-    // Pistol zone 18 cm further back and 8 cm lower than the first try
-    // (2026-11-14: it took the pistol 5-10 cm too far forward and too high;
-    // 2026-11-16 headset: still 10 cm too far forward).
-    const bool hipRightIn = hipsOn && hipRightW >= 0 && inHip(m_PhysicalRightPosAbs, 1.f, -0.43f, 0.02f, -1.03f, -0.53f, 0.10f, 0.45f)
+    const bool hipRightIn = hipsOn && hipRightW >= 0 && HandInGestureZone(m_PhysicalRightPosAbs, GestureZone::HipRight)
         && zoneLive(hipRightW);
-    const bool hipLeftIn = hipsOn && hipLeftW >= 0 && inHip(m_PhysicalRightPosAbs, -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f)
+    const bool hipLeftIn = hipsOn && hipLeftW >= 0 && HandInGestureZone(m_PhysicalRightPosAbs, GestureZone::HipCross)
         && zoneLive(hipLeftW);
     if (step(s_hipRight, hipRightIn, rightGrip, vr::TrackedControllerRole_RightHand, 0))
     {
@@ -22599,28 +22768,21 @@ void VR::UpdateMagReload(uint32_t& buttons)
     auto atLeftHip = [&]() -> bool {
         if (!m_HmdPoseValid || !m_LeftControllerTrackingValid)
             return false;
-        const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
-        Vector fwd = m_HmdForward;
-        fwd.z = 0.f;
-        if (VectorNormalize(fwd) <= 0.01f)
+        if (!m_BodyFrameValid)
             return false;
-        const Vector right = CrossProduct(fwd, Vector(0.f, 0.f, 1.f));
-        const Vector d = m_LeftControllerPosAbs - m_HmdPosAbs;
-        const float along = d.Dot(fwd) / scale;
-        const float lateral = -d.Dot(right) / scale;
-        const float height = d.z / scale;
-        const bool in = along > -0.43f && along < 0.10f && height > -1.03f && height < -0.45f
-            && lateral > 0.05f && lateral < 0.45f;
-        // Left shoulder set to "Ammo": the same zone as the shoulder gesture
-        // (see UpdateShoulderGestures inZone) also takes ammo.
-        if (!in && static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder)) == 2 && along < 0.04f
-            && height > -0.20f && height < 0.30f && lateral > 0.05f && lateral < 0.50f)
+        const bool in = HandInGestureZone(m_LeftControllerPosAbs, GestureZone::HipAmmo);
+        // Left shoulder set to "Ammo": the shoulder gesture zone also takes ammo.
+        if (!in && static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder)) == 2
+            && HandInGestureZone(m_LeftControllerPosAbs, GestureZone::ShoulderLeft))
             return true;
+        float along, lateral, height;
+        ZoneCoords(m_LeftControllerPosAbs, along, lateral, height);
+        lateral = -lateral;
         static int s_missLog;
         if (!in && s_missLog < 20)
         {
             ++s_missLog;
-            Game::logMsg("Mag reload: grip outside the hip zone (%.2f m ahead, %.2f m up, %.2f m left of the head)",
+            Game::logMsg("Mag reload: grip outside the hip zone (%.2f m ahead, %.2f m up, %.2f m left of the body)",
                 along, height, lateral);
         }
         return in;

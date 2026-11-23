@@ -461,6 +461,14 @@ namespace bmvr
     // weapon puts it away there and makes that zone take it from then on
     // (saved to config.txt; the zone that took it before gets the old weapon).
     extern bool g_VrHolsterDynamic;
+    // Grab zones follow an estimated body yaw + neck point, not the headset
+    // (debug A/B, not saved; on by default). Tunables in VR/config.txt and the
+    // Debug tab TESTS rows.
+    extern bool g_GestureBodyFrame;
+    extern float g_BodyYawDeadzoneDeg;    // head turns this far without moving the body (35)
+    extern float g_BodyYawHardLimitDeg;   // body dragged along past this (80)
+    extern float g_BodyYawCatchUpSec;     // head held past the dead zone this long -> body turns (0.8)
+    extern float g_BodyYawCatchUpDegPerSec; // turn speed while catching up (120)
     constexpr int kGestureWeaponCount = 11;
     const char* GestureWeaponName(int index);
     // Name parts matched against the inventory's network / model names (nullptr-terminated).

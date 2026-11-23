@@ -1703,6 +1703,20 @@ private:
     void ApplyTwoHandWeaponAim();
     float LeftSupportGripValue() const;
     bool UpdateShoulderGestures(bool paused);
+    // Body frame for the grab zones (shoulders, hips, ammo pouch): a body yaw
+    // that only follows the head on sustained or large turns, and a point
+    // where the eyes would be with the head straight over the neck. With
+    // g_GestureBodyFrame off: the headset itself (the old head-locked zones).
+    enum class GestureZone { ShoulderLeft, ShoulderRight, HipRight, HipCross, HipAmmo };
+    void UpdateBodyFrame();
+    bool HandInGestureZone(const Vector& hand, GestureZone zone, float growM = 0.f) const;
+    void ZoneCoords(const Vector& hand, float& along, float& lateral, float& height) const;
+    bool m_BodyFrameValid = false;
+    float m_BodyYawDeg = 0.f;          // tracking space, degrees (atan2 of Source y, x)
+    float m_BodyHeadYawDeg = 0.f;      // head yaw from the looking-down-safe estimate
+    Vector m_ZoneOrigin{};             // tracking space, Source units
+    Vector m_ZoneFwd{ 1.f, 0.f, 0.f };
+    Vector m_ZoneRight{ 0.f, -1.f, 0.f };
     bool ResolveOffhandGripLocal(float& gx, float& gy, float& gz) const;
     bool m_TwoHandActive = false;
     std::atomic<bool> m_SupportNearGun{ false };   // support hand at the gun (ApplyTwoHandWeaponAim)

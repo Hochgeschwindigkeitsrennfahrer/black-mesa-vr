@@ -365,6 +365,10 @@ namespace
             { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
             { "RPG laser ring size", RowKind::Number, "VrRpgRingScale", nullptr, &bmvr::g_VrRpgRingScale, 0.05f, 0.1f, 3.f, "%.2fx" },
+            // Grab-zone body frame (see "Grab zones follow the body" under FIXES).
+            { "Body yaw: dead zone", RowKind::Number, "BodyYawDeadzoneDeg", nullptr, &bmvr::g_BodyYawDeadzoneDeg, 5.f, 0.f, 90.f, "%.0f\xB0" },
+            { "Body yaw: hard limit", RowKind::Number, "BodyYawHardLimitDeg", nullptr, &bmvr::g_BodyYawHardLimitDeg, 5.f, 20.f, 180.f, "%.0f\xB0" },
+            { "Body yaw: catch-up delay", RowKind::Number, "BodyYawCatchUpSec", nullptr, &bmvr::g_BodyYawCatchUpSec, 0.1f, 0.f, 5.f, "%.1f s" },
             { "Head hold: angle", RowKind::Number, "PoseHoldDeg", nullptr, &bmvr::g_PoseHoldDeg, 0.02f, 0.f, 1.f, "%.2f\xB0" },
             { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
             // Engine cvars: "cvar:" keys go to the console on the game thread
@@ -399,6 +403,7 @@ namespace
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Gun hand cuff closed", RowKind::Toggle, nullptr, &bmvr::g_GunHandCuffCap, nullptr, 0, 0, 0, nullptr },
+            { "Grab zones follow the body", RowKind::Toggle, nullptr, &bmvr::g_GestureBodyFrame, nullptr, 0, 0, 0, nullptr },
             { "Pump stroke at the controller", RowKind::Toggle, nullptr, &bmvr::g_PumpStrokeAtController, nullptr, 0, 0, 0, nullptr },
             { "Tripmine placed along its face", RowKind::Toggle, nullptr, &bmvr::g_TripmineFaceAim, nullptr, 0, 0, 0, nullptr },
             // Live per-weapon angle trim for the weapon in the hand (saved in

@@ -205,6 +205,11 @@ namespace bmvr
     float g_GestureWeaponHipLeft = 3.f;
     bool g_VrHolsterBack = false;
     bool g_VrHolsterDynamic = false;
+    bool g_GestureBodyFrame = true;
+    float g_BodyYawDeadzoneDeg = 35.f;
+    float g_BodyYawHardLimitDeg = 80.f;
+    float g_BodyYawCatchUpSec = 0.8f;
+    float g_BodyYawCatchUpDegPerSec = 120.f;
     namespace
     {
         struct GestureWeapon { const char* name; const char* parts[4]; };
@@ -1115,6 +1120,14 @@ namespace bmvr
                 g_ParticlesLast = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TitleLevel") == 0)
                 g_TitleLevel = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "BodyYawDeadzoneDeg") == 0)
+                g_BodyYawDeadzoneDeg = std::clamp(static_cast<float>(atof(val)), 0.f, 90.f);
+            else if (std::strcmp(n, "BodyYawHardLimitDeg") == 0)
+                g_BodyYawHardLimitDeg = std::clamp(static_cast<float>(atof(val)), 20.f, 180.f);
+            else if (std::strcmp(n, "BodyYawCatchUpSec") == 0)
+                g_BodyYawCatchUpSec = std::clamp(static_cast<float>(atof(val)), 0.f, 5.f);
+            else if (std::strcmp(n, "BodyYawCatchUpDegPerSec") == 0)
+                g_BodyYawCatchUpDegPerSec = std::clamp(static_cast<float>(atof(val)), 10.f, 720.f);
             else if (std::strcmp(n, "PoseHoldDeg") == 0)
                 g_PoseHoldDeg = std::clamp(static_cast<float>(atof(val)), 0.f, 1.f);
             else if (std::strcmp(n, "PoseHoldMm") == 0)
