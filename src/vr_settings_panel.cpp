@@ -2792,6 +2792,13 @@ void VR::UpdateSettingsPanel()
             float v = *r.f + (zone == 2 ? r.step : -r.step);
             v = std::round(v / r.step) * r.step;   // no drift from repeated float steps
             *r.f = std::clamp(v, r.lo, r.hi);
+            // Foveation rings stay ordered: a half-rate radius inside the sharp
+            // one does nothing (DXVK uses max(Mid, Inner)), so raising sharp
+            // pushes half-rate along and half-rate stops at sharp.
+            if (r.f == &bmvr::g_FoveatedInner && bmvr::g_FoveatedMid < bmvr::g_FoveatedInner)
+                bmvr::g_FoveatedMid = bmvr::g_FoveatedInner;
+            else if (r.f == &bmvr::g_FoveatedMid && bmvr::g_FoveatedMid < bmvr::g_FoveatedInner)
+                bmvr::g_FoveatedMid = bmvr::g_FoveatedInner;
         }
         else
             return;
