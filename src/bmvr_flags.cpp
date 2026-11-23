@@ -294,6 +294,7 @@ namespace bmvr
     bool g_TitleLevel = true;
     bool g_ParticlesLast = true;
     float g_GlowProxyScale = 1.0f;
+    float g_VrRpgRingScale = 0.5f;
     float g_PoseHoldDeg = 0.f;
     float g_PoseHoldMm = 0.f;
     float g_GlowTraceSeconds = 0.f;
@@ -1108,6 +1109,8 @@ namespace bmvr
                 g_GlowHideMs = std::clamp(static_cast<float>(atof(val)), 0.f, 500.f);
             else if (std::strcmp(n, "GlowProxyScale") == 0)
                 g_GlowProxyScale = std::clamp(static_cast<float>(atof(val)), 1.f, 8.f);
+            else if (std::strcmp(n, "VrRpgRingScale") == 0)
+                g_VrRpgRingScale = std::clamp(static_cast<float>(atof(val)), 0.1f, 3.f);
             else if (std::strcmp(n, "ParticlesLast") == 0)
                 g_ParticlesLast = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TitleLevel") == 0)

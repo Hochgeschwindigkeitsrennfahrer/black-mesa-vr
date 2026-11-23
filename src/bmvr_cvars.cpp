@@ -343,6 +343,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_TitleLevel, nullptr },
             { "bmvr_glow_proxy_scale", "VR test: glow occlusion test area this many times wider (1 = stock): finer visibility steps, less flicker",
               Kind::Float, 1.f, 8.f, nullptr, &g_GlowProxyScale },
+            { "bmvr_rpg_ring_scale", "VR: size of the spinning red lines around the RPG laser point (1 = flat HUD size)",
+              Kind::Float, 0.1f, 3.f, nullptr, &g_VrRpgRingScale },
             { "bmvr_pose_hold_deg", "VR test: keep the previous head pose until the head turns more than this many degrees (0 = off)",
               Kind::Float, 0.f, 1.f, nullptr, &g_PoseHoldDeg },
             { "bmvr_pose_hold_mm", "VR test: keep the previous head pose until the head moves more than this many mm (0 = off)",

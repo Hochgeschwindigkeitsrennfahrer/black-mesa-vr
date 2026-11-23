@@ -364,6 +364,7 @@ namespace
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
+            { "RPG laser ring size", RowKind::Number, "VrRpgRingScale", nullptr, &bmvr::g_VrRpgRingScale, 0.05f, 0.1f, 3.f, "%.2fx" },
             { "Head hold: angle", RowKind::Number, "PoseHoldDeg", nullptr, &bmvr::g_PoseHoldDeg, 0.02f, 0.f, 1.f, "%.2f\xB0" },
             { "Head hold: distance", RowKind::Number, "PoseHoldMm", nullptr, &bmvr::g_PoseHoldMm, 0.5f, 0.f, 20.f, "%.1f mm" },
             // Engine cvars: "cvar:" keys go to the console on the game thread

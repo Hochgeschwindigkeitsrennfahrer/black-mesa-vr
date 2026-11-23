@@ -674,6 +674,10 @@ namespace bmvr
     // this; the frame goes out with that pose, SteamVR reprojects the rest.
     // A still head then renders identical frames (no glow / shimmer crawl).
     extern float g_GlowProxyScale;
+    // VrRpgRingScale (bmvr_rpg_ring_scale): size of the spinning red lines
+    // around the RPG laser point. 1 = the flat HUD's size (10-18 px per 1440 px
+    // of eye height); default 0.5. Own setting, not the aim marker size.
+    extern float g_VrRpgRingScale;
     extern float g_PoseHoldDeg;
     extern float g_PoseHoldMm;
     // LOADING card on in-game loads (bmvr_loading_card, default on). Test switch

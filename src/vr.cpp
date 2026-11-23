@@ -12596,11 +12596,13 @@ void VR::DrawRpgLockRing(IDirect3DDevice9* device, float sx, float sy, UINT h) c
         float x, y, z, rhw;
         D3DCOLOR color;
     };
-    float scale = bmvr::g_VrCrosshairScale;
+    // Own size (Debug tab, "RPG laser ring size"), not the aim marker's: the
+    // marker size floored at 1 here made the ring flat-HUD sized, which reads
+    // large in the headset, most of all on far targets (user 2026-11-23).
+    float scale = bmvr::g_VrRpgRingScale;
     if (!(scale > 0.05f) || scale > 8.f)
-        scale = 1.f;
-    // Floor so a small marker size does not shrink the ring into the dot.
-    const float px = ((h > 8) ? static_cast<float>(h) : 1440.f) / 1440.f * (std::max)(1.f, scale);
+        scale = 0.5f;
+    const float px = ((h > 8) ? static_cast<float>(h) : 1440.f) / 1440.f * scale;
     const float inner = 10.f * px;
     const float outer = 18.f * px;
     const float halfW = (std::max)(1.f, 1.5f * px);
