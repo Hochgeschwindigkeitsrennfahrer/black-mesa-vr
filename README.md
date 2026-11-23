@@ -69,14 +69,16 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
   ammo feedback, crossbow scope, mounted guns, physical weapons.
 - **Gestures:** what each hand does in each grab zone, on a picture of the HEV suit. A zone lights up while your hand
   is in it.
+
+  <img src="docs/images/panel-gestures.jpg" alt="VR settings: Gestures tab" width="90%">
+
 - **Controls:** every button of both controllers, shown on pictures of your own controllers (PS VR2 Sense, Quest
   Touch, Index, WMR / Reverb G2, Steam Frame). Pick a preset or set each press and hold yourself.
+
+  <img src="docs/images/panel-controls.png" alt="VR settings: Controls tab with PS VR2 Sense controller pictures" width="90%">
+
 - **Graphics:** foveated rendering, frame cap, MSAA, FXAA, bloom, lens flares, light glows, reflections.
 - **Debug:** diagnostics, logs and debug captures for bug reports.
-
-<img src="docs/images/panel-gestures.jpg" alt="VR settings: Gestures tab" width="90%">
-
-<img src="docs/images/panel-controls.png" alt="VR settings: Controls tab with PS VR2 Sense controller pictures" width="90%">
 
 Most changes apply right away. The panel only saves the settings you changed into `VR\config.txt`, so improved
 defaults reach you with each update.
