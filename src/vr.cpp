@@ -6699,11 +6699,41 @@ bool VR::ScriptedCameraView(Vector& angles, Vector& right) const
 void VR::SyncTurnToRestoredYaw(float engineYaw)
 {
     const ULONGLONG now = GetTickCount64();
+    // Diagnostics (new game UI loads did not sync, 2026-11-23): arming,
+    // the first eligible command after it, and why a window ran out.
+    static int s_diag;
+    static bool s_firstEligibleLogged;
     if (m_LastCmdMs && now - m_LastCmdMs > 400)
+    {
+        if (s_diag < 40)
+        {
+            ++s_diag;
+            Game::logMsg("Yaw sync armed after a %llu ms command gap (engine yaw %.1f, last sent %.1f valid=%d, eligible=%d pose=%d)",
+                static_cast<unsigned long long>(now - m_LastCmdMs), engineYaw, m_LastCmdYaw, m_LastCmdYawValid ? 1 : 0,
+                m_GameplayEligible ? 1 : 0, m_HmdPoseValid ? 1 : 0);
+        }
         m_YawSyncTicks = 600;
+        s_firstEligibleLogged = false;
+        // A load, not the session start: the start-view path (fake runtime
+        // only) must not take this window.
+        m_FirstCmdYawPending = false;
+    }
     m_LastCmdMs = now;
     if (m_YawSyncTicks <= 0)
         return;
+    if (!s_firstEligibleLogged && m_GameplayEligible && m_HmdPoseValid && s_diag < 40)
+    {
+        s_firstEligibleLogged = true;
+        ++s_diag;
+        Game::logMsg("Yaw sync first eligible command: engine yaw %.1f, last sent %.1f valid=%d, last sent in gameplay %.1f valid=%d, ticks left %d",
+            engineYaw, m_LastCmdYaw, m_LastCmdYawValid ? 1 : 0, m_LastGameplayCmdYaw, m_LastGameplayCmdYawValid ? 1 : 0, m_YawSyncTicks);
+    }
+    if (m_YawSyncTicks == 1 && s_diag < 40)
+    {
+        ++s_diag;
+        Game::logMsg("Yaw sync window ran out: engine yaw %.1f, last sent in gameplay %.1f (no change >= 1 deg seen)",
+            engineYaw, m_LastGameplayCmdYaw);
+    }
     if (!m_LastCmdYawValid && !m_FirstCmdYawPending && std::isfinite(engineYaw) && L4D2VR_FakeHelperActive())
     {
         m_FirstCmdYawPending = true;
@@ -6722,20 +6752,27 @@ void VR::SyncTurnToRestoredYaw(float engineYaw)
             m_FirstCmdYaw, viewYaw, before, offset);
         return;
     }
-    if (!m_LastCmdYawValid || !m_HmdPoseValid || !m_GameplayEligible || !std::isfinite(engineYaw))
+    if (!m_HmdPoseValid || !m_GameplayEligible || !std::isfinite(engineYaw))
         return;
     --m_YawSyncTicks;
-    const float changed = WrapYaw(engineYaw - m_LastCmdYaw);
-    if (fabsf(changed) < 1.f)
-        return;
+    // Reference: the last yaw sent in gameplay (commands outside gameplay
+    // pass the restored angles through; comparing with those, the new game
+    // UI's menu loads never synced, 2026-11-23). No gameplay yet this
+    // session: the engine's yaw (spawn or save) is the one to take.
+    if (m_LastGameplayCmdYawValid)
+    {
+        const float changed = WrapYaw(engineYaw - m_LastGameplayCmdYaw);
+        if (fabsf(changed) < 1.f)
+            return;
+    }
     m_YawSyncTicks = 0;
     const float viewYaw = GetViewAngle().y;
     const float before = m_RotationOffsetY.load(std::memory_order_acquire);
     float offset = before + WrapYaw(engineYaw - viewYaw);
     offset -= 360.f * floorf(offset / 360.f);
     m_RotationOffsetY.store(offset, std::memory_order_release);
-    Game::logMsg("Turn synced to the restored view: engine yaw %.1f (last sent %.1f), view %.1f, turn offset %.1f -> %.1f",
-        engineYaw, m_LastCmdYaw, viewYaw, before, offset);
+    Game::logMsg("Turn synced to the restored view: engine yaw %.1f (last sent in gameplay %.1f valid=%d), view %.1f, turn offset %.1f -> %.1f",
+        engineYaw, m_LastGameplayCmdYaw, m_LastGameplayCmdYawValid ? 1 : 0, viewYaw, before, offset);
 }
 
 void VR::ApplyTurnStick(float stickX, float deltaMs)
@@ -19757,6 +19794,13 @@ void VR::UnbindPauseHudAfterExtraPaint()
 
 void VR::PreparePauseHudForVgui(IMatRenderContext* ctx)
 {
+    if (m_PauseHudSkipVgui.load(std::memory_order_acquire))
+    {
+        if (m_D9HUDPublishSurface && !m_VKHUD.m_VRTexture.handle)
+            FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
+        m_PauseHudAlphaOverridden = false;
+        return;
+    }
     // HL2VR RenderHUD / DrawMainMenu: OverrideAlphaWriteEnable so VGUI
     // writes destination alpha. Empty pixels stay the D3D clear (0,0,0,0).
     if (m_D9HUDPublishSurface && !m_VKHUD.m_VRTexture.handle)
@@ -19769,7 +19813,7 @@ void VR::FinishPauseHudExtraPaint(IMatRenderContext* ctx)
 {
     // viewrender.cpp / vrviewrender.cpp restore this after HUD. Leaving it
     // on made every later stereo pass write alpha (50fps areas dropped to 35).
-    if (!m_PauseHudAlphaOverridden && !ctx)
+    if (!m_PauseHudAlphaOverridden && (!ctx || m_PauseHudSkipVgui.load(std::memory_order_acquire)))
         return;
     SehOverrideAlphaWrite(ctx, false, true);
     m_PauseHudAlphaOverridden = false;

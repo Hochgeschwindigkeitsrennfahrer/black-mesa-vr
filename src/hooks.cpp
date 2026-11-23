@@ -9743,6 +9743,12 @@ namespace
             return;
 
         MatCtxScope scope;
+        // New game UI pause: the menu is the QML layer (drawn in
+        // StampPauseOverlayCursor); the VGUI paint is empty there and its
+        // OverrideAlphaWriteEnable faulted in materialsystem at load ends
+        // (2026-11-23). Title layer (intro credits) still paints VGUI.
+        const bool skipVgui = !title && bmvr::NewUiWindow() != nullptr;
+        vr->SetPauseHudSkipVgui(skipVgui);
         vr->SetHudPaintActive(true);
         vr->SetHudPaintTitle(title);
         const bool mc = vr->McPipelineEnabled();
@@ -9774,7 +9780,7 @@ namespace
         unsigned int hiddenPanels[256];
         const int hiddenCount = title ? vr->IsolateTitleHudPanels(hiddenPanels, 256) : 0;
         ++g_VguiOverlayReentry;
-        const bool painted = SehVguiPaintOriginal(vgui, paintMode);
+        const bool painted = skipVgui ? true : SehVguiPaintOriginal(vgui, paintMode);
         --g_VguiOverlayReentry;
         vr->RestoreTitleHudPanels(hiddenPanels, hiddenCount);
         if (!painted)

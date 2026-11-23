@@ -772,6 +772,11 @@ public:
     // turn offset once. A load is a gap in usercmds (the LevelInit hook is not
     // installed on BM, and reloading the same map does not change its name).
     int m_YawSyncTicks = 0;
+    // Yaw of the last usercmd sent in gameplay: the turn sync's reference.
+    // Commands outside gameplay (the new game UI's loading/menu phase, menu
+    // background maps) pass the engine's angles through and must not move it.
+    float m_LastGameplayCmdYaw = 0.f;
+    bool m_LastGameplayCmdYawValid = false;
     ULONGLONG m_LastCmdMs = 0;
     bool m_LastCmdYawValid = false;
     // Headless harness only (fake VR runtime): it starts straight into a save
@@ -783,7 +788,17 @@ public:
     float m_LastCmdYaw = 0.f;
     void SyncTurnToRestoredYaw(float engineYaw);
     float m_LastCmdPitch = 0.f;
-    void NoteCmdAngles(float pitch, float yaw) { m_LastCmdPitch = pitch; m_LastCmdYaw = yaw; m_LastCmdYawValid = true; }
+    void NoteCmdAngles(float pitch, float yaw)
+    {
+        m_LastCmdPitch = pitch;
+        m_LastCmdYaw = yaw;
+        m_LastCmdYawValid = true;
+        if (m_GameplayEligible)
+        {
+            m_LastGameplayCmdYaw = yaw;
+            m_LastGameplayCmdYawValid = true;
+        }
+    }
     // Scripted camera (FollowScriptedCamera / bmvr_follow_scripted_camera):
     // in normal play the engine's view angles are the ones the mod sent with
     // the last usercmd; a cutscene camera (point_viewcontrol, the drag scene,
@@ -1372,6 +1387,9 @@ public:
     // HL2VR restores OverrideAlphaWriteEnable(false, true) after RenderHUD.
     void FinishPauseHudExtraPaint(IMatRenderContext* ctx);
     void StampPauseOverlayCursor();
+    // New game UI pause: no VGUI extra paint (the QML layer is the menu).
+    void SetPauseHudSkipVgui(bool skip) { m_PauseHudSkipVgui.store(skip, std::memory_order_release); }
+    std::atomic<bool> m_PauseHudSkipVgui{ false };
     IDirect3DTexture9* NewUiLayerTexture();
     bool DrawNewUiLayerTo(IDirect3DDevice9* device, IDirect3DSurface9* dst);
     bool IntersectMenuPanelUv(float& u, float& v);
