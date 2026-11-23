@@ -5209,7 +5209,7 @@ namespace
 }
 
 // Grab gesture "Screenshot" (user 2026-11-23): the right eye, cropped to 16:9
-// around straight ahead (the eye texture is symmetric around it; the crop
+// around straight ahead, a bit lower (the eye texture is symmetric around it; the crop
 // stays inside what that eye shows, so both sides reach as far as the inner
 // edge), into Steam's screenshot library like F12. Fallback: the BMP pair in
 // VR/. Headless test runs (BMVR_TESTDIR) never touch the library: they write
@@ -5240,7 +5240,11 @@ void VR::TakeSteamScreenshot(IDirect3DDevice9* dev, uint32_t slot)
         ch = static_cast<int>(2.f * halfV * h) & ~1;
         cw = static_cast<int>(ch * 16.f / 9.f) & ~1;
     }
-    const int x0 = (w - cw) / 2, y0 = (h - ch) / 2;
+    // A third of the crop lower than centred (user 2026-11-23): the gun and
+    // hands sit below straight ahead; kept inside what the eye shows.
+    const int x0 = (w - cw) / 2;
+    const int yMax = (std::max)(0, (std::min)(h, static_cast<int>(v1 * h)) - ch);
+    const int y0 = std::clamp((h - ch) / 2 + ch / 3, 0, yMax);
     std::vector<uint8_t> crop(static_cast<size_t>(cw) * ch * 3);
     for (int y = 0; y < ch; ++y)
         std::memcpy(&crop[static_cast<size_t>(y) * cw * 3], &rgb[(static_cast<size_t>(y0 + y) * w + x0) * 3],
