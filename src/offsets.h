@@ -748,7 +748,7 @@ public:
     static constexpr int kCBasePlayer_FlashlightTurnOnVt = 0x5D8 / 4;
     static constexpr int kCBasePlayer_FlashlightTurnOffVt = 0x5DC / 4;
 
-    // client.dll CClientShadowMgr::UpdateFlashlightState (research/resolution-hud-flashlight.md).
+    // client.dll CClientShadowMgr::UpdateFlashlightState.
     // FlashlightState_t: origin float[0..2], forward float[3..5], fov float[9].
     // CClientShadowMgr::UpdateFlashlightState. public-beta +0x260.
     // Pushes the string "CClientShadowMgr::UpdateFlashlightState".

@@ -3,7 +3,7 @@
 Instructions for another AI agent working on **this repo or a fork** that still uses the combined Win32 `d3d9.dll` (DXVK + `IDirect3DVR9` + OpenVR + BMVR `src/`). Read this file end to end before touching DXVK. Do not invent a second VR architecture.
 
 Primary architecture reference: https://github.com/keyou91/l4d2vr  
-This repo’s rules: `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/DXVK.md`.
+This repo’s rules: `AGENTS.md`. Failed approaches: `docs/RETIRED.md`.
 
 **Acceptance is visible fused Black Mesa gameplay in the headset.** Compiling, loading, `VR_Init`, and head tracking are not success.
 
@@ -141,7 +141,7 @@ Build a **drop-in directory** (do not MIR over live until the drop-in compiles i
 4. Port the hand-splice files (§4).
 5. Set `include/version.h` to a unique string, e.g. `DXVK_VERSION "v2.6.8-2+bmvr"`. That string is how you prove the game loaded **this** build.
 
-This repo has a previous example under `research/dxvk-gplasync/` (`_build_drop_in.py`, `HOW-TO-APPLY.md`). Treat it as a **2.6.1 → 2.6.8-2** recipe, not a script you blindly re-run onto a newer tag. Re-diff every ported file against the new upstream.
+The previous upgrade (2.6.1 → 2.6.8-2, removed `research/dxvk-gplasync/` in git history: `_build_drop_in.py`, `HOW-TO-APPLY.md`) is an example. Treat it as a **2.6.1 → 2.6.8-2** recipe, not a script you blindly re-run onto a newer tag. Re-diff every ported file against the new upstream.
 
 ---
 
@@ -214,9 +214,8 @@ Keep `DXVK_WSI_WIN32`, `/bigobj`, `/MP`. C++17. Win32 only (`CMAKE_SIZEOF_VOID_P
 
 ## 8. Build until it links (expected breakage)
 
-```powershell
-# Close bms.exe first if you will install later
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1
+```sh
+ninja -C build-beta d3d9   # configure: AGENTS.md → Build
 ```
 
 ### Clean rebuild is mandatory after replacing `dxvk_new`
@@ -249,11 +248,11 @@ Only after the drop-in is something you are willing to compile:
 ```powershell
 # Prefer preserving lib32: copy onto, then restore vulkan-1.lib if needed
 # MIR is OK only if the drop-in contains lib32\vulkan-1.lib
-Copy-Item -Recurse -Force .\research\...\drop-in-dxvk_new\* .\third_party\l4d2vr\dxvk_new\
+Copy-Item -Recurse -Force .\<drop-in>\dxvk_new\* .\third_party\l4d2vr\dxvk_new\
 Copy-Item -Force .\...\drop-in-dxvk_sources.txt .\tools\dxvk_sources.txt
 ```
 
-CMake `DXVK` path stays `third_party/l4d2vr/dxvk_new`. Do not point CMake at `research/`.
+CMake `DXVK` path stays `third_party/l4d2vr/dxvk_new`. Do not point CMake at the drop-in folder.
 
 Then **clean** Release build (§8).
 
@@ -263,7 +262,7 @@ Proof of compile: `build\Release\d3d9.dll` contains the version string (search t
 
 ## 10. Install (three paths, always)
 
-`scripts/install.ps1` stops `bms.exe` and copies `build\Release\d3d9.dll` to:
+Close `bms.exe`, then copy `d3d9.dll` to:
 
 1. `Black Mesa\bin\thirdparty\dxvk-windows-x86\d3d9.dll` — launcher `AddDllDirectory` / `DXVK_CONFIG_FILE`
 2. `Black Mesa\bin\d3d9.dll` — `shaderapidx9` `LoadLibrary("d3d9.dll")` with `LOAD_LIBRARY_SEARCH_USER_DIRS`
@@ -273,7 +272,7 @@ A copy in only one of these is a **failed** install. Native D3D9 never loads the
 
 Keep `d3d9.dll.stock-dxvk` in the thirdparty folder (non-VR rollback only).
 
-Black Mesa sets `DXVK_CONFIG_FILE` to the **thirdparty** `dxvk.conf`. A file next to `bms.exe` is ignored. `install.ps1` rewrites that conf — put required keys in the script or they vanish next install.
+Black Mesa sets `DXVK_CONFIG_FILE` to the **thirdparty** `dxvk.conf`. A file next to `bms.exe` is ignored. Keep the required keys in that file.
 
 Minimum conf (do not drop these):
 
@@ -324,7 +323,7 @@ Revert the **DLL** to the last headset-good `d3d9.dll` on all three paths. Then 
 
 ## 12. Config-only vs source upgrade
 
-If the human only wanted less stutter on the **current** DLL: change `dxvk.conf` / `install.ps1` only. Do not replace `dxvk_new`. That is transparent to hooks.
+If the human only wanted less stutter on the **current** DLL: change `dxvk.conf` only. Do not replace `dxvk_new`. That is transparent to hooks.
 
 A source upgrade is for a specific 2.6.x D3D9/CPU/pacer fix, or to stay on the latest **compatible** GPLALL. It is highly risky. Do it on a branch with a one-command DLL revert.
 
@@ -350,7 +349,7 @@ Stop and report (do not keep merging) if:
 
 - The only available “latest” is DXVK 3 / Ph42oN 3.
 - `IDirect3DVR9` or `DxvkImage::handle()` no longer maps to a `VkImage` you can Submit.
-- CreateDevice/Reset exclusive-fullscreen comes back and you are about to “fix” it by forcing HMD swapchain size (already verified bad on Black Mesa — see `docs/DXVK.md`).
+- CreateDevice/Reset exclusive-fullscreen comes back and you are about to “fix” it by forcing HMD swapchain size (already verified bad on Black Mesa — see `docs/RETIRED.md`, `hmd_swap`).
 - You are tempted to ship a gcc zip `x32/d3d9.dll` to “just test DXVK.” That test has no VR; do it only as a desktop experiment with the BMVR DLL moved aside, and say so.
 
 When uncertain: investigate (Ghidra / x32dbg if the **runtime** path is in doubt) → verify → implement. Not assume → implement → hope.

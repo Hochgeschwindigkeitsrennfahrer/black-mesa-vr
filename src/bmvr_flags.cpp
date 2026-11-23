@@ -2319,7 +2319,7 @@ namespace bmvr
                 "offscreen HMD eyes + gameplay FullFrame/G-buffer grow", false);
         }
         // WorldRenderAtEyeSize is an explicit config opt-in. Do not treat a
-        // leftover in-progress flag as a miss: install.ps1 killing bms.exe
+        // leftover in-progress flag as a miss: an install killing bms.exe
         // mid-stereo left this flag and the next launch drew the HWND into
         // the eyes (soft 16:9 stretch). Revert with the config key.
         for (const auto& dir : FlagDirs())

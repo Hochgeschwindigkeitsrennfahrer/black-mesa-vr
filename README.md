@@ -1,7 +1,7 @@
 # Black Mesa VR
 
 <a href="https://www.youtube.com/watch?v=S9kmK95yqgM">
-  <img src="assets/release-2026-09-06.jpg" alt="Black Mesa VR — Weapon Menu" width="90%">
+  <img src="docs/images/weapon-menu.jpg" alt="Black Mesa VR — Weapon Menu" width="90%">
 </a>
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/P5P56X4HH)
@@ -84,27 +84,29 @@ defaults reach you with each update.
 3. Copy **everything inside** `drop-into-Black-Mesa-folder` into your Black Mesa folder, the one that contains
    `bms.exe` (Steam → Black Mesa → Manage → Browse local files). Replace files when asked.
    This puts `d3d9.dll` in all three places it has to be: the game folder, `bin\` and `bin\thirdparty\dxvk-windows-x86\`.
-4. Run **`DISABLE-SOURCEVR.bat`** once (next to `bms.exe`). It stops a "VR_Shutdown could not be located" popup at
-   startup; this mod does not use Valve's old VR plugin.
-5. **Steam → Black Mesa → Properties → Launch Options:**
+4. **Steam → Black Mesa → Properties → Launch Options:**
    ```text
    -heapsize 524288 -processheap -high -novid -windowed -oldgameui
    ```
    `-oldgameui` is required (the new game UI is upside-down in the headset). If the game's video menu shows
    **Direct3D 9** as the renderer, also add `-enabledxvk`.
-6. **Turn off Steam Input for Black Mesa** (Properties → Controller → Disable Steam Input).
-7. Pick **one OpenXR runtime** and start it before the game:
+5. **Turn off Steam Input for Black Mesa** (Properties → Controller → Disable Steam Input).
+6. Pick **one OpenXR runtime** and start it before the game:
    - **SteamVR:** SteamVR → Settings → OpenXR → Set SteamVR as OpenXR runtime.
    - **Meta Link (Quest):** uses the Link / Oculus OpenXR runtime.
    - **Virtual Desktop:** Streamer → Options → **OpenXR Runtime = VDXR**. "SteamVR" in that dropdown shows the
      world upside-down.
-8. Launch Black Mesa from Steam. `bmvr_log.txt` next to `bms.exe` should appear and start with `BMVR d3d9.dll loaded`.
+7. Launch Black Mesa from Steam. `bmvr_log.txt` next to `bms.exe` should appear and start with `BMVR d3d9.dll loaded`.
 
 **Updating:** copy the new zip over the old install the same way. Keep your `VR\config.txt` unless the release notes
 say otherwise; it only holds what you changed.
 
-**Uninstall:** run `UNINSTALL-BMVR.bat` next to `bms.exe` and type `YES`. Steam's "Verify integrity of game files"
-also restores the stock files.
+**Uninstall:** quit the game, then in the Black Mesa folder delete `d3d9.dll`, `BMVR_README.txt`, `bmvr_*` files,
+the `VR\` folder, `bin\d3d9.dll`, `bms\cfg\bmvr.cfg` and `bms\sound\bmvr\` (same under `bshift\` if you played Blue
+Shift). Installs from before 2026-11 may also have `openvr_api.dll` next to `bms.exe`,
+`bin\thirdparty\dxvk-windows-x86\openvr_api.dll` and `bin\sourcevr.dll.disabled`: delete those too. Then run Steam → Black Mesa → Properties → Installed Files → **Verify integrity of game files**:
+it restores the game's own `d3d9.dll` in the DXVK folder, `bin\openvr_api.dll` and `bin\sourcevr.dll`. Verify alone
+is not enough: it does not delete the mod's extra files. Remove the launch options too.
 
 **Blue Shift:** same install, plus `-game bshift` in the launch options. Calhoun
 keeps bare hands for the whole campaign, and the weapon wheel and wrist HUD turn security-guard blue.

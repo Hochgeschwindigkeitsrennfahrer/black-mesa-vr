@@ -22,12 +22,14 @@ Do not copy d3d9.dll into only one of those. Native Direct3D 9 never loads this 
 
 If you already tuned VR\config.txt, keep your copy (do not overwrite it).
 
-After the copy, run DISABLE-SOURCEVR.bat once (it sits next to bms.exe).
-That renames bin\sourcevr.dll so Windows does not pop "VR_Shutdown could
-not be located" at startup. This mod does not use Valve's sourcevr plugin.
-
-To remove the mod later, run UNINSTALL-BMVR.bat next to bms.exe (needs
-UNINSTALL-BMVR.ps1 beside it). Type YES when asked.
+To remove the mod later: quit the game and delete, in the Black Mesa folder,
+d3d9.dll, BMVR_README.txt, bmvr_* files, the VR folder, bin\d3d9.dll,
+bms\cfg\bmvr.cfg and bms\sound\bmvr (same under bshift if you played Blue
+Shift). Older installs may also have openvr_api.dll next to bms.exe,
+bin\thirdparty\dxvk-windows-x86\openvr_api.dll and bin\sourcevr.dll.disabled:
+delete those too. Then Steam ->
+Black Mesa -> Properties -> Installed Files -> Verify integrity of game files
+restores the game's own files. Verify alone does not remove the mod.
 
 This zip also includes:
 

@@ -298,7 +298,7 @@ is the one before this pass:
 
 - Game: `OpenXrDeferredPublish=false` — `WaitDeviceIdle` then publish in
   the same Present. CPU/GPU serial, but the compositor sees a regular
-  finished pair. `scripts/install.ps1` overwrites an existing `true`.
+  finished pair.
 - Helper: `RenderEye` / overlay blit `vkQueueWaitIdle` again before
   `xrEndFrame`, and `helperConsumedFrameId` is written after those waits
   (not a timeout-0 fence). When the game already drained the GPU, those

@@ -55,6 +55,7 @@ set(BMVR_SOURCES
   src/bmvr_glowtrace.cpp
   src/bmvr_cvars.cpp
   src/bmvr_seh.cpp
+  src/bmvr_delayload.cpp
   src/sdk/checksum_crc.cpp
   third_party/l4d2vr/L4D2VR/vr_hands/vr_hand_asset_loader.cpp
   third_party/minhook/src/buffer.c
@@ -143,6 +144,7 @@ target_link_directories(d3d9 PRIVATE
 
 target_link_libraries(d3d9 PRIVATE
   openvr_api
+  delayimp
   vulkan-1
   synchronization
   setupapi
@@ -157,7 +159,7 @@ target_link_libraries(d3d9 PRIVATE
 )
 
 set_target_properties(d3d9 PROPERTIES
-  LINK_FLAGS "/DEF:\"${DXVK}/src/d3d9/d3d9.def\" /INCREMENTAL:NO"
+  LINK_FLAGS "/DEF:\"${DXVK}/src/d3d9/d3d9.def\" /INCREMENTAL:NO /DELAYLOAD:openvr_api.dll"
 )
 
 if(MSVC)

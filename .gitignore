@@ -1,5 +1,5 @@
-build/
-build_openxr_helper64/
+/build*/
+__pycache__/
 dist/
 .vs/
 out/
@@ -12,13 +12,7 @@ bmvr_heartbeat.txt
 bmvr_skip.txt
 bmvr_in_*.flag
 probe_logs/
-tools/__pycache__/
 CMakeUserPresets.json
 .git.upstream/
 third_party/l4d2vr-openxr/
 third_party/openxr/loader/
-build-linux/
-build-linux-helper/
-build-stable*/
-build-beta/
-build-beta-helper/

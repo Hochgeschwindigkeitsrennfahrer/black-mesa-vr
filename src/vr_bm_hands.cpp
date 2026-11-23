@@ -1,5 +1,5 @@
 // Black Mesa hands from the installed game files (see vr_bm_hands.h).
-// Same approach as scripts/rip_hev_gloves.py, from the game files: VPK -> MDL/VVD/VTX arms body part ->
+// Same approach as the old scripts/rip_hev_gloves.py (made VR/hands/*.glb), from the game files: VPK -> MDL/VVD/VTX arms body part ->
 // wrist + finger subtree in the glove's model space, plus the v_hand texture.
 
 #include "vr_bm_hands.h"

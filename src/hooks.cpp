@@ -2439,7 +2439,7 @@ int Hooks::initSourceHooks()
             Game::logMsg("LightcacheFindNearest skipped (could not parse LRU head/base)");
     }
     // LevelInit stays unhooked: MinHook on it crashed inside the original on
-    // background01 (docs/RUNTIME.md). Map names come from GetLevelNameShort.
+    // background01 (bring-up, 2026-08). Map names come from GetLevelNameShort.
     if (m_Game->MaterialVTableMatchesDump() && m_Game->m_MaterialSystem)
     {
         void** vt = SehMaterialSystemVTable(m_Game->m_MaterialSystem);
@@ -13375,7 +13375,7 @@ void __fastcall Hooks::dUpdateFlashlightState(void* ecx, void* edx, void* flashl
     (void)edx;
     // Desktop beam works; HMD missed it because FlashlightState_t is filled
     // from player EyePosition/EyeAngles (body) while stereo cameras use the
-    // HMD (research/resolution-hud-flashlight.md §8). Retarget to HMD view.
+    // HMD. Retarget to HMD view.
             if (flashlightState && m_VR && m_VR->m_IsVREnabled && m_VR->IsGameplayEligible()
         && m_VR->m_HmdPoseValid && EngineInGame())
     {

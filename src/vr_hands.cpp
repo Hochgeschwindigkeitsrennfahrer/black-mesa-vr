@@ -734,14 +734,19 @@ struct BmVrGloves::Impl
             return true;
         };
 
+        // openvr_api.dll is delay-loaded and only loaded for the OpenVR backend (bmvr_delayload.cpp):
+        // ask it only when it is already in the process and is the modern one.
+        using GetRuntimePathFn = bool(__cdecl*)(char*, uint32_t, uint32_t*);
+        HMODULE ovr = GetModuleHandleA("openvr_api.dll");
+        auto getRuntimePath = ovr ? reinterpret_cast<GetRuntimePathFn>(GetProcAddress(ovr, "VR_GetRuntimePath")) : nullptr;
         std::vector<char> buffer(vr::k_unMaxPropertyStringSize, '\0');
         uint32_t required = 0;
-        if (vr::VR_GetRuntimePath(buffer.data(), static_cast<uint32_t>(buffer.size()), &required))
+        if (getRuntimePath && getRuntimePath(buffer.data(), static_cast<uint32_t>(buffer.size()), &required))
         {
             if (required > buffer.size())
             {
                 buffer.assign(static_cast<size_t>(required) + 1u, '\0');
-                vr::VR_GetRuntimePath(buffer.data(), static_cast<uint32_t>(buffer.size()), &required);
+                getRuntimePath(buffer.data(), static_cast<uint32_t>(buffer.size()), &required);
             }
             if (buffer.front() != '\0' && tryRoot(std::filesystem::path(buffer.data())))
                 return true;

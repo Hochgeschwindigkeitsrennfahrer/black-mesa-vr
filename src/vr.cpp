@@ -3774,6 +3774,15 @@ VR::VR(Game* game)
         runtimeSelection.openXrLoaderAvailable ? 1 : 0,
         runtimeSelection.openXrBackendImplemented ? 1 : 0,
         runtimeSelection.message.c_str());
+    {
+        // openvr_api.dll is delay-loaded (bmvr_delayload.cpp); with OpenXR it should not be ours.
+        char path[MAX_PATH] = "-";
+        HMODULE ovr = GetModuleHandleA("openvr_api.dll");
+        if (ovr)
+            GetModuleFileNameA(ovr, path, MAX_PATH);
+        Game::logMsg("[VR][Runtime] openvr_api.dll in process: %s modern=%d", path,
+            (ovr && GetProcAddress(ovr, "VR_InitInternal2")) ? 1 : 0);
+    }
 
     if (runtimeSelection.active == VrRuntimeBackend::OpenXR)
     {
