@@ -1831,7 +1831,11 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
     if (stickClickHeld)
     {
         m_WeaponMenuClickHeld = true;
-        if (!m_WeaponMenuOpen && (now - m_WeaponMenuClickStartMs) >= kMenuHoldMs)
+        // No wheel with 0 weapons (user 2026-11-23): nothing to pick, so no
+        // menu and no buzz either.
+        Game::InventoryWeapon anyWeapon{};
+        if (!m_WeaponMenuOpen && (now - m_WeaponMenuClickStartMs) >= kMenuHoldMs
+            && m_Game->CollectInventoryWeapons(&anyWeapon, 1) > 0)
         {
             m_WeaponMenuOpen = true;
             m_WeaponMenuOpenedThisHold = true;

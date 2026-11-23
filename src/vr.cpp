@@ -15755,9 +15755,14 @@ bool VR::UpdateShoulderGestures(bool paused)
 
     // A weapon zone counts only while that weapon is carried (user
     // 2026-11-19: the pistol hip buzzed in the intro, before the pistol):
-    // otherwise no buzz, and the grip keeps its own action there.
+    // otherwise no buzz, and the grip keeps its own action there. The
+    // inventory decides: m_LastViewmodelModel keeps the last gun's name after
+    // a new game or a load without weapons (user 2026-11-23: zones buzzed
+    // with 0 weapons), so it only counts while something is carried.
+    Game::InventoryWeapon inv[32]{};
+    const int invN = m_Game ? m_Game->CollectInventoryWeapons(inv, 32) : 0;
     auto carries = [&](int w) {
-        if (w < 0 || !m_Game)
+        if (w < 0 || invN <= 0)
             return false;
         const char* const* parts = bmvr::GestureWeaponParts(w);
         auto matches = [&](const char* nm) {
@@ -15770,9 +15775,7 @@ bool VR::UpdateShoulderGestures(bool paused)
         };
         if (!m_LastViewmodelModel.empty() && matches(m_LastViewmodelModel.c_str()))
             return true;
-        Game::InventoryWeapon inv[32]{};
-        const int n = m_Game->CollectInventoryWeapons(inv, 32);
-        for (int i = 0; i < n; ++i)
+        for (int i = 0; i < invN; ++i)
             if (inv[i].entityIndex > 0 && (matches(inv[i].networkName) || matches(inv[i].modelName)))
                 return true;
         return false;
@@ -15782,7 +15785,7 @@ bool VR::UpdateShoulderGestures(bool paused)
     // weapon no zone can take). A zone set to another weapon then also counts,
     // and the grip there puts the held one away in it (storeHeld below).
     int heldW = -1;
-    if (bmvr::g_VrHolsterBack && bmvr::g_VrHolsterDynamic && !m_EmptyHands && !m_LastViewmodelModel.empty())
+    if (bmvr::g_VrHolsterBack && bmvr::g_VrHolsterDynamic && !m_EmptyHands && invN > 0 && !m_LastViewmodelModel.empty())
     {
         for (int w = 0; w < bmvr::kGestureWeaponCount && heldW < 0; ++w)
             for (const char* const* part = bmvr::GestureWeaponParts(w); *part; ++part)
