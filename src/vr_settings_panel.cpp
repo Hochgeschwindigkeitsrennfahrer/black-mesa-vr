@@ -1669,7 +1669,7 @@ namespace
         IDirect3DTexture9* gearGpu = nullptr;
         IDirect3DTexture9* toastGpu = nullptr;
         char toastText[32]{};
-        char toastDetail[64]{};
+        char toastDetail[128]{};
         int toastW = 512; // texture width: wider than 512 for a long one-line message
         int w = 0, h = 0;
     };
@@ -2803,10 +2803,13 @@ void VR::WelcomeStep(bool paused)
         m_WelcomeGameplaySinceMs = 0;
         return;
     }
-    // A few seconds into gameplay, so the load fade and turn sync are over.
+    // Right at gameplay start (turn sync runs before gameplay): a new game
+    // fires the BLACK MESA logo (env_credits, OnNewGame) at once and it fades
+    // in over ~2 s; at 3 s it drew over the panel (user 2026-11-23). Pausing
+    // this early freezes it before it shows.
     if (!m_WelcomeGameplaySinceMs)
         m_WelcomeGameplaySinceMs = now ? now : 1;
-    if (now - m_WelcomeGameplaySinceMs < 3000)
+    if (now - m_WelcomeGameplaySinceMs < 250)
         return;
     m_WelcomeTriedThisMap = true;
 
@@ -2837,12 +2840,18 @@ void VR::WelcomeStep(bool paused)
         Game::logMsg("Welcome: skipped, no button opens the VR panel (mapping=%d)", mapped ? 1 : 0);
         return;
     }
-    std::snprintf(m_WelcomeText, sizeof(m_WelcomeText), "%s %s (%s hand) to open the VR menu",
+    std::snprintf(m_WelcomeText, sizeof(m_WelcomeText),
+        "%s %s (%s hand) to open the VR menu\nThe game stays paused until you do",
         hold ? "Hold" : "Press", label, labelHand == 0 ? "left" : "right");
     m_WelcomeActive = true;
     m_WelcomePaused = true;
     m_PendingPauseCmd.store(1, std::memory_order_release);
-    Game::logMsg("Welcome shown: \"%s\" (map %s)", m_WelcomeText, m_CurrentMapName.c_str());
+    char logText[sizeof(m_WelcomeText)]{};
+    strncpy_s(logText, m_WelcomeText, _TRUNCATE);
+    if (char* nl = std::strchr(logText, '\n'))
+        *nl = '|';
+    Game::logMsg("Welcome shown: \"%s\" (map %s, %u ms into gameplay)", logText, m_CurrentMapName.c_str(),
+        static_cast<unsigned>(now - m_WelcomeGameplaySinceMs));
     ShowToast("WELCOME TO BLACK MESA VR", 1000, m_WelcomeText);
 }
 
@@ -3591,7 +3600,14 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         ReleaseGfx();
     g_Gfx.device = device;
     const bool detail = m_ToastDetail[0] != 0;
-    const int texH = detail ? 144 : 96;
+    // Detail may hold a second line after '\n' (first-run welcome).
+    const char* detail2 = detail ? std::strchr(m_ToastDetail, '\n') : nullptr;
+    char detail1[128]{};
+    if (detail)
+        strncpy_s(detail1, m_ToastDetail, detail2 ? static_cast<size_t>(detail2 - m_ToastDetail) : _TRUNCATE);
+    if (detail2)
+        ++detail2;
+    const int texH = detail2 ? 180 : detail ? 144 : 96;
     if (!g_Gfx.toastGpu || std::strcmp(g_Gfx.toastText, m_ToastText) != 0
         || std::strcmp(g_Gfx.toastDetail, m_ToastDetail) != 0)
     {
@@ -3605,7 +3621,11 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             Canvas probe(16, 16);
             if (!probe.ok())
                 return;
-            const int need = probe.textWidth(m_ToastText, titlePx, true) + 32;
+            int need = probe.textWidth(m_ToastText, titlePx, true) + 32;
+            if (detail)
+                need = (std::max)(need, probe.textWidth(detail1, 24, false) + 32);
+            if (detail2)
+                need = (std::max)(need, probe.textWidth(detail2, 24, false) + 32);
             if (need > texW)
                 texW = (std::min)(1024, (need + 15) & ~15);
             while (titlePx > 24 && probe.textWidth(m_ToastText, titlePx, true) + 32 > texW)
@@ -3618,8 +3638,13 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         c.fill(0, 0, c.w, c.h, kBg);
         c.fill(0, 0, c.w, 5, kAmber);
         c.text(m_ToastText, 0, 5, c.w, 96, kAmber, titlePx, true, DT_CENTER);
-        if (detail)
-            c.text(m_ToastDetail, 8, 92, c.w - 8, c.h - 8, kText, 24, false, DT_CENTER);
+        if (detail2)
+        {
+            c.text(detail1, 8, 92, c.w - 8, 128, kText, 24, false, DT_CENTER);
+            c.text(detail2, 8, 128, c.w - 8, c.h - 12, kText, 24, false, DT_CENTER);
+        }
+        else if (detail)
+            c.text(detail1, 8, 92, c.w - 8, c.h - 8, kText, 24, false, DT_CENTER);
         c.setAlpha(225);
         IDirect3DTexture9* sys = nullptr;
         if (!Upload(device, c, sys, g_Gfx.toastGpu) && g_Gfx.toastGpu)

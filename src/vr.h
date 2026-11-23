@@ -1491,7 +1491,7 @@ public:
     void DrawToastOnEyeSurface(IDirect3DSurface9* eyeSurf, int stereoEye);
     static constexpr DWORD kToastMs = 2500;
     char m_ToastText[32]{};
-    char m_ToastDetail[64]{};
+    char m_ToastDetail[128]{};
     DWORD m_ToastUntilMs = 0;
     int m_MissingOffsetsWarned = 0;   // Game::missingOffsetCount() at the last "out of date" toast
     bool m_VrConfigsExecuted = false; // bmvr.cfg / bmvr_local.cfg run once per game start
@@ -1510,7 +1510,7 @@ public:
     bool m_WelcomePaused = false;      // our setpause is on
     bool m_WelcomeTriedThisMap = false;
     DWORD m_WelcomeGameplaySinceMs = 0;
-    char m_WelcomeText[64]{};
+    char m_WelcomeText[128]{};
     // Set by the game thread, cleared by the render thread before it paints:
     // a change during a paint stays set and is painted next frame.
     std::atomic<bool> m_SettingsDirty{ false };
