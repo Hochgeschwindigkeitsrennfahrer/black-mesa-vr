@@ -92,8 +92,10 @@ namespace
     // button-map presets (vr_button_map.h). BindPicture (fmt "L"/"R"): that
     // controller drawn from its SteamVR model with a card per button; the card
     // lines are the hand's Bind rows (hidden while the picture shows).
+    // GestureFigure (fmt "L"/"R"): the GESTURES tab's body figure and zone
+    // cards; the card lines are the grab-zone slot rows (hidden as rows).
     enum class RowKind { Tab, Section, Toggle, Number, Button, Close, Info, Choice, DevSection, Preset,
-        Bind, ColumnBreak, BindPreset, BindPicture };
+        Bind, ColumnBreak, BindPreset, BindPicture, GestureFigure };
     bool IsHeading(RowKind k) { return k == RowKind::Section || k == RowKind::DevSection; }
     struct Row;
     bool r_IsTabReset(const Row& r);
@@ -174,22 +176,6 @@ namespace
             { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Reset hands + HUD position", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
-            { "GRAB GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            // A row per zone and hand, Off as a choice (user 2026-11-19, per hand
-            // 2026-11-23). Left hand: an action (quick load = 1 s hold). Right hand:
-            // a weapon, buzzes and takes the grip only while you carry it; Dynamic =
-            // the weapon you last put away there (ChoiceText shows which).
-            { "Left shoulder, left hand", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
-            { "Left shoulder, right hand", RowKind::Choice, "GestureWeaponShoulderLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Right shoulder, left hand", RowKind::Choice, "GestureLeftHandShoulderRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
-            { "Right shoulder, right hand", RowKind::Choice, "GestureWeaponShoulder", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Left hip, left hand", RowKind::Choice, "GestureLeftHandHipLeft", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
-            { "Left hip, right hand", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Right hip, left hand", RowKind::Choice, "GestureLeftHandHipRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
-            { "Right hip, right hand", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Forehead, left hand", RowKind::Choice, "GestureLeftHandHead", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHead], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
-            { "Manual reload ammo from", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "ammo_zones" },
-            { "Allow holstering", RowKind::Toggle, "VrHolsterBack", &bmvr::g_VrHolsterBack, nullptr, 0, 0, 0, nullptr },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
             { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -240,6 +226,29 @@ namespace
             { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
             // Kick with the second hand on the gun, as a share of one-handed (pistols x5/3, capped at 1).
             { "Recoil with two hands", RowKind::Number, "VrRecoilTwoHand", nullptr, &bmvr::g_VrRecoilTwoHand, 0.05f, 0.f, 1.f, "%.2f" },
+            { "GESTURES", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Back view of the body with a card per zone (GestureFigure, user
+            // 2026-11-23): the left column's figure row paints the figure across
+            // the divider and the left-side cards, the right one the right-side
+            // cards. The card lines are the slot rows below (always hidden).
+            { "", RowKind::GestureFigure, nullptr, nullptr, nullptr, 0, 0, 0, "L" },
+            { "Manual reload ammo from", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "ammo_zones" },
+            // A row per zone and hand, Off as a choice (user 2026-11-19, per hand
+            // 2026-11-23). Left hand: an action (quick load = 1 s hold). Right hand:
+            // a weapon, buzzes and takes the grip only while you carry it; Dynamic =
+            // the weapon you last put away there (ChoiceText shows which).
+            { "Left shoulder, left hand", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Left shoulder, right hand", RowKind::Choice, "GestureWeaponShoulderLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Right shoulder, left hand", RowKind::Choice, "GestureLeftHandShoulderRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Right shoulder, right hand", RowKind::Choice, "GestureWeaponShoulder", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Left hip, left hand", RowKind::Choice, "GestureLeftHandHipLeft", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Left hip, right hand", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Right hip, left hand", RowKind::Choice, "GestureLeftHandHipRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Right hip, right hand", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Forehead, left hand", RowKind::Choice, "GestureLeftHandHead", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHead], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "", RowKind::GestureFigure, nullptr, nullptr, nullptr, 0, 0, 0, "R" },
+            { "Allow holstering", RowKind::Toggle, "VrHolsterBack", &bmvr::g_VrHolsterBack, nullptr, 0, 0, 0, nullptr },
             { "CONTROLS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Left column = left controller, right column = right controller. Headings name
             // the detected controller; button names follow it (A/B, Cross/Circle).
@@ -489,10 +498,20 @@ namespace
     }
 
     int PictureAreaHeight(int hand);
+    // GESTURES tab figure (PaintGestureFigure): its row height, the slot row
+    // under a texture point (px absolute, ly from the row top), and the grab
+    // zones a hand is in now (bit z = left hand, bit 8 + z = right hand; set
+    // by VR::DrawSettingsPanel while the tab shows, lights the zone up).
+    constexpr int kGestureFigureH = 900;
+    int GestureFigureHit(bool rightSide, int px, int ly);
+    bool IsGestureSlotRow(const Row& r);
+    unsigned g_GestureHot = 0;
     int RowHeight(const Row& r)
     {
         if (r.kind == RowKind::ColumnBreak)
             return 0;
+        if (r.kind == RowKind::GestureFigure)
+            return kGestureFigureH;
         if (r.kind == RowKind::BindPicture)
             return PictureAreaHeight(r.fmt && r.fmt[0] == 'R' ? 1 : 0);
         return IsHeading(r.kind) ? kSectionPx : kRowPx;
@@ -1184,7 +1203,8 @@ namespace
             hidden[i] = ((inDev || IsDevRow(rows[i])) && !devRows) || k == RowKind::ColumnBreak
                 || (k == RowKind::Bind && BindRowHidden(rows[i]))
                 || (k == RowKind::BindPicture && !PictureShown(hand))
-                || (k != RowKind::BindPicture && hand >= 0 && PictureShown(hand));
+                || (k != RowKind::BindPicture && hand >= 0 && PictureShown(hand))
+                || IsGestureSlotRow(rows[i]);   // the figure's card lines
         }
         // A section heading whose rows are all hidden (developer rows) goes too.
         for (int i = 0; i < n; ++i)
@@ -1436,6 +1456,8 @@ namespace
             {
                 if (k == RowKind::BindPicture)
                     return PictureHit(RowHand(rows[i]), px - c * kColW, py - l.top[i]);
+                if (k == RowKind::GestureFigure)
+                    return GestureFigureHit(rows[i].fmt && rows[i].fmt[0] == 'R', px, py - l.top[i]);
                 return (IsHeading(k) || k == RowKind::Info || RowDisabled(rows[i])) ? -1 : i;
             }
         }
@@ -1775,38 +1797,43 @@ namespace
         return buf;
     }
 
+    // One card: amber head, then a line per CardLine (fixed lines dim, the
+    // others buttons that open the row's picker). Controller and gesture cards.
+    void PaintCard(Canvas& c, int cx0, int cx1, int y0, int y1, const std::string& head,
+        const std::vector<CardLine>& lines, int hoverRow)
+    {
+        c.fill(cx0, y0, cx1, y1, RGB(26, 31, 38));
+        c.fill(cx0, y0, cx1, y0 + 4, RGB(90, 70, 20));
+        c.text(head.c_str(), cx0 + 16, y0 + 4, cx1 - 16, y0 + kCardHeadPx, kAmber, 28, true, DT_LEFT);
+        for (size_t k = 0; k < lines.size(); ++k)
+        {
+            const CardLine& ln = lines[k];
+            const int ly0 = y0 + kCardHeadPx + static_cast<int>(k) * kCardLinePx;
+            const int ly1 = ly0 + kCardLinePx;
+            const bool hv = !ln.fixed && ln.row == hoverRow;
+            const int capW = ln.caption.empty() ? 0 : 180;
+            if (!ln.fixed)
+                c.fill(cx0 + 10, ly0 + 3, cx1 - 10, ly1 - 3, hv ? kBtnHover : kBtn);
+            if (capW)
+                c.text(ln.caption.c_str(), cx0 + 24, ly0, cx0 + 24 + capW, ly1, hv ? RGB(0, 0, 0) : kDim, 26, false, DT_LEFT);
+            const int tx0 = cx0 + 24 + capW, tx1 = cx1 - (ln.fixed ? 20 : 44);
+            int fontPx = 30;
+            while (fontPx > 20 && c.textWidth(ln.text.c_str(), fontPx, true) > tx1 - tx0)
+                fontPx -= 2;
+            const COLORREF ink = hv ? RGB(0, 0, 0) : ln.fixed ? kDim : ln.changed ? kAmber : kText;
+            c.text(ln.text.c_str(), tx0, ly0, tx1, ly1, ink, fontPx, !ln.fixed, DT_LEFT);
+            if (!ln.fixed)
+                c.text(">", cx1 - 44, ly0, cx1 - 14, ly1 - 2, hv ? RGB(0, 0, 0) : kDim, 28, true, DT_CENTER);
+        }
+    }
+
     // One controller's cards (RowKind::BindPicture); picture and lines: ComposeWings.
     void PaintPicture(Canvas& c, int hand, int top, int hoverRow)
     {
         const int colX = hand * kColW;
         const int cx0 = colX + CardX0(hand), cx1 = cx0 + kCardW;
         for (const Card& card : PictureCards(hand))
-        {
-            const int y0 = top + card.y0;
-            c.fill(cx0, y0, cx1, top + card.y1, RGB(26, 31, 38));
-            c.fill(cx0, y0, cx1, y0 + 4, RGB(90, 70, 20));
-            c.text(card.head.c_str(), cx0 + 16, y0 + 4, cx1 - 16, y0 + kCardHeadPx, kAmber, 28, true, DT_LEFT);
-            for (size_t k = 0; k < card.lines.size(); ++k)
-            {
-                const CardLine& ln = card.lines[k];
-                const int ly0 = y0 + kCardHeadPx + static_cast<int>(k) * kCardLinePx;
-                const int ly1 = ly0 + kCardLinePx;
-                const bool hv = !ln.fixed && ln.row == hoverRow;
-                const int capW = ln.caption.empty() ? 0 : 180;
-                if (!ln.fixed)
-                    c.fill(cx0 + 10, ly0 + 3, cx1 - 10, ly1 - 3, hv ? kBtnHover : kBtn);
-                if (capW)
-                    c.text(ln.caption.c_str(), cx0 + 24, ly0, cx0 + 24 + capW, ly1, hv ? RGB(0, 0, 0) : kDim, 26, false, DT_LEFT);
-                const int tx0 = cx0 + 24 + capW, tx1 = cx1 - (ln.fixed ? 20 : 44);
-                int fontPx = 30;
-                while (fontPx > 20 && c.textWidth(ln.text.c_str(), fontPx, true) > tx1 - tx0)
-                    fontPx -= 2;
-                const COLORREF ink = hv ? RGB(0, 0, 0) : ln.fixed ? kDim : ln.changed ? kAmber : kText;
-                c.text(ln.text.c_str(), tx0, ly0, tx1, ly1, ink, fontPx, !ln.fixed, DT_LEFT);
-                if (!ln.fixed)
-                    c.text(">", cx1 - 44, ly0, cx1 - 14, ly1 - 2, hv ? RGB(0, 0, 0) : kDim, 28, true, DT_CENTER);
-            }
-        }
+            PaintCard(c, cx0, cx1, top + card.y0, top + card.y1, card.head, card.lines, hoverRow);
     }
 
     // Width of each side wing: the panel texture is the body plus a wing on
@@ -1895,6 +1922,236 @@ namespace
             }
     }
 
+    // ---- GESTURES tab: the body seen from behind (your left = panel left) ----
+    // Texture px; y from the figure row's top. The body stands on the column
+    // divider, left-side zone cards in the left column, right-side ones in the
+    // right column, a leader line from each card to its zone. Card lines are
+    // the slot rows (picker, save, reset, changed marks as any Choice row).
+    constexpr int kFigCx = kColW;
+    constexpr int kGCardW = 540;
+    constexpr int kGCardL0 = 40, kGCardR0 = kTexW - 40 - kGCardW;
+    struct ZoneBox { int x0, y0, x1, y1; };
+    ZoneBox GestureZoneBox(int z)
+    {
+        switch (z)
+        {
+        case bmvr::kGestureShoulderLeft:  return { kFigCx - 220, 150, kFigCx - 72, 285 };
+        case bmvr::kGestureShoulderRight: return { kFigCx + 72, 150, kFigCx + 220, 285 };
+        case bmvr::kGestureHipLeft:       return { kFigCx - 250, 535, kFigCx - 105, 665 };
+        case bmvr::kGestureHipRight:      return { kFigCx + 105, 535, kFigCx + 250, 665 };
+        default:                          return { kFigCx - 70, 40, kFigCx + 70, 120 };   // forehead (seen through the head)
+        }
+    }
+    bool IsGestureSlotRow(const Row& r)
+    {
+        if (!r.f)
+            return false;
+        for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
+            if (r.f == &bmvr::g_GestureLeft[z])
+                return true;
+        for (int z = 0; z < bmvr::kGestureWeaponZoneCount; ++z)
+            if (r.f == &bmvr::g_GestureRight[z])
+                return true;
+        return false;
+    }
+    struct GestureCard
+    {
+        int zone = 0;
+        std::string head;
+        std::vector<CardLine> lines;
+        int y0 = 0, y1 = 0;
+    };
+    std::vector<GestureCard> GestureCards(bool rightSide)
+    {
+        const auto& rows = Rows();
+        auto line = [&](const char* caption, const float* f) {
+            CardLine ln;
+            ln.caption = caption;
+            for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+                if (rows[i].f == f && rows[i].kind == RowKind::Choice)
+                {
+                    ln.row = i;
+                    ln.text = ChoiceText(rows[i]);
+                    const size_t d = ln.text.rfind(" (default)");
+                    if (d != std::string::npos && d + 10 == ln.text.size())
+                        ln.text.erase(d);
+                    ln.changed = RowChanged(rows[i]);
+                }
+            return ln;
+        };
+        std::vector<GestureCard> cards;
+        auto add = [&](int z, int y0, bool withRight) {
+            GestureCard c;
+            c.zone = z;
+            std::string head = bmvr::GestureZoneName(z);
+            head[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(head[0])));
+            c.head = head;
+            c.lines.push_back(line("Left hand", &bmvr::g_GestureLeft[z]));
+            if (withRight)
+                c.lines.push_back(line("Right hand", &bmvr::g_GestureRight[z]));
+            c.y0 = y0;
+            c.y1 = y0 + kCardHeadPx + static_cast<int>(c.lines.size()) * kCardLinePx + 6;
+            cards.push_back(c);
+        };
+        if (!rightSide)
+        {
+            add(bmvr::kGestureShoulderLeft, 150, true);
+            add(bmvr::kGestureHipLeft, 530, true);
+        }
+        else
+        {
+            add(bmvr::kGestureHead, 10, false);
+            add(bmvr::kGestureShoulderRight, 150, true);
+            add(bmvr::kGestureHipRight, 530, true);
+        }
+        return cards;
+    }
+    int GestureFigureHit(bool rightSide, int px, int ly)
+    {
+        const int x0 = rightSide ? kGCardR0 : kGCardL0;
+        if (px < x0 || px >= x0 + kGCardW)
+            return -1;
+        for (const GestureCard& c : GestureCards(rightSide))
+            for (size_t k = 0; k < c.lines.size(); ++k)
+            {
+                const int y = c.y0 + kCardHeadPx + static_cast<int>(k) * kCardLinePx;
+                if (ly >= y && ly < y + kCardLinePx && !c.lines[k].fixed)
+                    return c.lines[k].row;
+            }
+        return -1;
+    }
+    bool GestureZoneOn(int z)
+    {
+        const int a = static_cast<int>(std::lround(bmvr::g_GestureLeft[z]));
+        bool on = a >= 0 && (a != bmvr::kGestureAmmo || bmvr::PhysicalWeapon(bmvr::g_VrMagReload));
+        if (z < bmvr::kGestureWeaponZoneCount)
+            on = on || std::lround(bmvr::g_GestureRight[z]) >= 0;
+        return on;
+    }
+
+    void PaintGestureBody(Canvas& c, int top)
+    {
+        const int cx = kFigCx;
+        // Clear the divider behind the figure.
+        c.fill(kGCardL0 + kGCardW + 6, top, kGCardR0 - 6, top + kGestureFigureH, kBg);
+        const COLORREF body = RGB(66, 74, 86), shade = RGB(50, 57, 67);
+        HDC dc = c.dc;
+        HBRUSH br = CreateSolidBrush(body);
+        HGDIOBJ ob = SelectObject(dc, br);
+        HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
+        // Arms and legs: thick round-capped strokes.
+        LOGBRUSH lb{ BS_SOLID, body, 0 };
+        auto limb = [&](int width, std::initializer_list<POINT> pts) {
+            HPEN pen = ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND, width, &lb, 0, nullptr);
+            HGDIOBJ prev = SelectObject(dc, pen);
+            bool first = true;
+            for (const POINT& p : pts)
+            {
+                if (first)
+                    MoveToEx(dc, p.x, top + p.y, nullptr);
+                else
+                    LineTo(dc, p.x, top + p.y);
+                first = false;
+            }
+            SelectObject(dc, prev);
+            DeleteObject(pen);
+        };
+        limb(86, { { cx - 70, 600 }, { cx - 84, 770 } });
+        limb(86, { { cx + 70, 600 }, { cx + 84, 770 } });
+        limb(60, { { cx - 178, 262 }, { cx - 214, 430 }, { cx - 222, 590 } });
+        limb(60, { { cx + 178, 262 }, { cx + 214, 430 }, { cx + 222, 590 } });
+        // Hands.
+        Ellipse(dc, cx - 252, top + 585, cx - 192, top + 655);
+        Ellipse(dc, cx + 192, top + 585, cx + 252, top + 655);
+        // Torso (back), neck, head.
+        const POINT torso[] = { { cx - 190, top + 232 }, { cx + 190, top + 232 }, { cx + 158, top + 330 },
+            { cx + 122, top + 515 }, { cx + 152, top + 612 }, { cx - 152, top + 612 }, { cx - 122, top + 515 },
+            { cx - 158, top + 330 } };
+        Polygon(dc, torso, 8);
+        Rectangle(dc, cx - 30, top + 170, cx + 31, top + 250);
+        Ellipse(dc, cx - 64, top + 48, cx + 65, top + 192);
+        // Back detail: spine and shoulder blades, so it reads as a back.
+        HPEN line = CreatePen(PS_SOLID, 4, shade);
+        SelectObject(dc, line);
+        MoveToEx(dc, cx, top + 252, nullptr);
+        LineTo(dc, cx, top + 560);
+        Arc(dc, cx - 150, top + 260, cx - 30, top + 400, cx - 40, top + 300, cx - 140, top + 330);
+        Arc(dc, cx + 30, top + 260, cx + 150, top + 400, cx + 140, top + 330, cx + 40, top + 300);
+        SelectObject(dc, op);
+        SelectObject(dc, ob);
+        DeleteObject(line);
+        DeleteObject(br);
+    }
+
+    void PaintGestureFigure(Canvas& c, bool rightSide, int top, int hoverRow)
+    {
+        HDC dc = c.dc;
+        if (!rightSide)
+        {
+            PaintGestureBody(c, top);
+            // Zones: hatched while set, solid amber while a hand is in them now.
+            for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
+            {
+                const ZoneBox b = GestureZoneBox(z);
+                const bool on = GestureZoneOn(z);
+                const bool hot = (g_GestureHot & (1u << z)) || (g_GestureHot & (1u << (8 + z)));
+                const COLORREF edge = hot ? kAmber : on ? RGB(200, 150, 50) : RGB(95, 100, 108);
+                HPEN pen = CreatePen(PS_SOLID, hot ? 6 : 4, edge);
+                HBRUSH fill = hot ? CreateSolidBrush(RGB(150, 105, 20))
+                    : on ? CreateHatchBrush(HS_BDIAGONAL, RGB(120, 90, 30)) : static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+                HGDIOBJ op = SelectObject(dc, pen);
+                HGDIOBJ ob = SelectObject(dc, fill);
+                SetBkMode(dc, TRANSPARENT);
+                RoundRect(dc, b.x0, top + b.y0, b.x1, top + b.y1, 24, 24);
+                SelectObject(dc, ob);
+                SelectObject(dc, op);
+                DeleteObject(pen);
+                if (hot || on)
+                    DeleteObject(fill);
+            }
+            c.text("Seen from behind: your left is on the left", kGCardL0 + kGCardW, top + kGestureFigureH - 52,
+                kGCardR0, top + kGestureFigureH - 20, kDim, 24, false, DT_CENTER);
+            c.text("A zone lights up while your hand is in it", kGCardL0 + kGCardW, top + kGestureFigureH - 22,
+                kGCardR0, top + kGestureFigureH + 8, kDim, 24, false, DT_CENTER);
+        }
+        const int cx0 = rightSide ? kGCardR0 : kGCardL0, cx1 = cx0 + kGCardW;
+        for (const GestureCard& card : GestureCards(rightSide))
+        {
+            PaintCard(c, cx0, cx1, top + card.y0, top + card.y1, card.head, card.lines, hoverRow);
+            bool hot = false;
+            for (const CardLine& ln : card.lines)
+                hot |= ln.row == hoverRow;
+            const ZoneBox b = GestureZoneBox(card.zone);
+            const int ax = (b.x0 + b.x1) / 2, ay = top + (b.y0 + b.y1) / 2;
+            const int ly = top + card.y0 + kCardHeadPx / 2;
+            const int edge = rightSide ? cx0 : cx1;
+            const int elbow = rightSide ? cx0 - 24 : cx1 + 24;
+            const COLORREF ink = hot ? kAmber : RGB(170, 140, 80);
+            HPEN pen = CreatePen(PS_SOLID, hot ? 5 : 3, ink);
+            HBRUSH br = CreateSolidBrush(ink);
+            HGDIOBJ op = SelectObject(dc, pen);
+            HGDIOBJ ob = SelectObject(dc, br);
+            MoveToEx(dc, edge, ly, nullptr);
+            LineTo(dc, elbow, ly);
+            LineTo(dc, ax, ay);
+            Ellipse(dc, ax - 8, ay - 8, ax + 9, ay + 9);
+            SelectObject(dc, ob);
+            SelectObject(dc, op);
+            DeleteObject(br);
+            DeleteObject(pen);
+        }
+    }
+    // The GESTURES tab is the one shown.
+    bool GestureTabShown()
+    {
+        const auto& rows = Rows();
+        const Layout& l = GetLayout();
+        for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+            if (rows[i].kind == RowKind::GestureFigure)
+                return l.tab[i] == g_Tab;
+        return false;
+    }
+
     void Paint(Canvas& c, int hoverRow, int hoverZone)
     {
         c.fill(0, 0, c.w, c.h, kBg);
@@ -1929,8 +2186,12 @@ namespace
                 if (alert)
                     c.fill(l.x0[i] - 6, y0 - 2, l.x1[i] + 6, y1 + 6, alert == 2 ? kAlert : RGB(255, 255, 255));
                 c.fill(l.x0[i], y0 + 4, l.x1[i], y1, active ? kAmber : hover ? kRowHover : kBtn);
-                c.text(alert ? "!   DEBUG   !" : r.label, l.x0[i], y0 + 4, l.x1[i], y1, active ? RGB(0, 0, 0) : kText,
-                    32, true, DT_CENTER);
+                // Six tabs: long names ("HANDS & WEAPONS") get a smaller font.
+                const char* tabText = alert ? "!   DEBUG   !" : r.label;
+                int tabPx = 32;
+                while (tabPx > 22 && c.textWidth(tabText, tabPx, true) > l.x1[i] - l.x0[i] - 36)
+                    tabPx -= 2;
+                c.text(tabText, l.x0[i], y0 + 4, l.x1[i], y1, active ? RGB(0, 0, 0) : kText, tabPx, true, DT_CENTER);
                 // Something on this tab differs from the defaults: a dot in the corner.
                 if (TabChangedCount(tabIndex - 1) > 0)
                     c.fill(l.x1[i] - 22, y0 + 12, l.x1[i] - 10, y0 + 24, active ? RGB(0, 0, 0) : kAmber);
@@ -1980,6 +2241,11 @@ namespace
             if (r.kind == RowKind::BindPicture)
             {
                 PaintPicture(c, RowHand(r), y0, hoverRow);
+                continue;
+            }
+            if (r.kind == RowKind::GestureFigure)
+            {
+                PaintGestureFigure(c, r.fmt && r.fmt[0] == 'R', y0, hoverRow);
                 continue;
             }
             if (hover && r.kind != RowKind::Close)
@@ -2615,6 +2881,7 @@ void VR::UpdateSettingsPanel()
     case RowKind::Info:
     case RowKind::ColumnBreak:
     case RowKind::BindPicture:
+    case RowKind::GestureFigure:
         return;
     case RowKind::Bind:
         g_PickerRow = row;
@@ -2915,6 +3182,22 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     {
         s_paintedFovStatus = std::move(fovStatus);
         m_SettingsDirty = true;
+    }
+    // GESTURES tab: a grab zone lights up while a hand is in it.
+    if (GestureTabShown())
+    {
+        unsigned hot = 0;
+        for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
+            if (m_LeftControllerTrackingValid && LeftHandInSlotZone(z))
+                hot |= 1u << z;
+        for (int z = 0; z < bmvr::kGestureWeaponZoneCount; ++z)
+            if (m_PhysicalRightTrackingValid && RightHandInSlotZone(z))
+                hot |= 1u << (8 + z);
+        if (hot != g_GestureHot)
+        {
+            g_GestureHot = hot;
+            m_SettingsDirty = true;
+        }
     }
     // Controller models finished loading (or changed): relayout + repaint.
     static int s_paintedModelGen = -1;
