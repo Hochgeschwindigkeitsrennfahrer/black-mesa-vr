@@ -5283,6 +5283,46 @@ namespace
     }
 }
 
+namespace
+{
+    // Shared textures/surfaces on the VR (game) device, for `dump` (new game
+    // UI study, 2026-11-23). Each keeps a reference; at most 16.
+    struct SharedResEntry
+    {
+        IDirect3DSurface9* surface;
+        int index;
+    };
+    std::mutex g_SharedResMutex;
+    std::vector<SharedResEntry> g_SharedRes;
+    int g_SharedResCount = 0;
+}
+
+void bmvr::NoteSharedResource(void* device, IDirect3DTexture9* texture, IDirect3DSurface9* surface, const char* kind,
+    bool opened, void* handle)
+{
+    IDirect3DDevice9* vrDev = nullptr;
+    if (g_D3DVR9)
+        g_D3DVR9->GetD3DDevice(&vrDev);
+    const bool onVr = vrDev && vrDev == device;
+    if (vrDev)
+        vrDev->Release();
+    D3DSURFACE_DESC d{};
+    if (surface)
+        surface->GetDesc(&d);
+    std::lock_guard<std::mutex> lock(g_SharedResMutex);
+    const int index = g_SharedResCount++;
+    if (index < 64)
+        Game::logMsg("Shared %s #%d %s on %s device %p: tex=%p surf=%p %ux%u fmt=%u usage=0x%X pool=%u handle=%p",
+            kind, index, opened ? "OPENED" : "created", onVr ? "VR(game)" : "other", device,
+            static_cast<void*>(texture), static_cast<void*>(surface), d.Width, d.Height,
+            static_cast<unsigned>(d.Format), static_cast<unsigned>(d.Usage), static_cast<unsigned>(d.Pool), handle);
+    if (onVr && surface && g_SharedRes.size() < 16)
+    {
+        surface->AddRef();
+        g_SharedRes.push_back({ surface, index });
+    }
+}
+
 // Grab gesture "Screenshot" (user 2026-11-23): the right eye with the
 // desktop window's framing (MirrorStereoToDesktopWindow: the whole eye
 // width, top and bottom cropped to 16:9, centred), at full eye resolution,
@@ -5504,6 +5544,18 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         Game::logMsg("debug dump: no publish slot (%u)", slot);
     DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud.bmp", 2);
     DumpSurfaceBmp(dev, m_D9HUDPublishSurface, base + "-hud-alpha.bmp", 2, true);
+    {
+        // Shared textures on the game device (new game UI: the Qt layer).
+        std::lock_guard<std::mutex> lock(g_SharedResMutex);
+        for (const SharedResEntry& e : g_SharedRes)
+        {
+            char suffix[48];
+            std::snprintf(suffix, sizeof(suffix), "-shared%d.bmp", e.index);
+            DumpSurfaceBmp(dev, e.surface, base + suffix, 1);
+            std::snprintf(suffix, sizeof(suffix), "-shared%d-alpha.bmp", e.index);
+            DumpSurfaceBmp(dev, e.surface, base + suffix, 1, true);
+        }
+    }
     // Panel "Screenshot": a short note once the eyes are on disk (user).
     if (std::strncmp(name, "screenshot-", 11) == 0)
         ShowToast("Screenshot saved", 1500);

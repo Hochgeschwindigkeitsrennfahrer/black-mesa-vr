@@ -4,6 +4,7 @@
 #include <string>
 
 struct IDirect3DDevice9;
+struct IDirect3DTexture9;
 struct IDirect3DSurface9;
 class Game;
 
@@ -21,6 +22,11 @@ namespace bmvr
 
     void Log(const char* fmt, ...);
     void SetStage(const char* stage);
+    // New game UI study (2026-11-23): DXVK reports every shared texture or
+    // surface (created or opened from a handle). Logged; the ones on the VR
+    // (game) device are kept so `dump` can write them to VR/.
+    void NoteSharedResource(void* device, IDirect3DTexture9* texture, IDirect3DSurface9* surface, const char* kind,
+        bool opened, void* handle);
 
     bool TryHmdFramebuffer();
     bool TryHmdNative();

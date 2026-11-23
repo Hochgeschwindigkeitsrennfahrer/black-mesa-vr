@@ -1856,6 +1856,7 @@ namespace dxvk {
 
       HANDLE openXrSharedHandle = nullptr;
       HANDLE* effectiveSharedHandle = pSharedHandle;
+      const bool bmvrSharedOpen = pSharedHandle != nullptr && *pSharedHandle != nullptr;
       if (pSharedHandle == nullptr && Pool == D3DPOOL_DEFAULT && g_Game && g_Game->m_VR)
       {
         const VR::TextureID texID = g_Game->m_VR->m_CreatingTextureID;
@@ -1868,6 +1869,12 @@ namespace dxvk {
 
       m_initializer->InitTexture(texture->GetCommonTexture(), initialData);
       *ppTexture = texture.ref();
+
+      if (unlikely(pSharedHandle != nullptr)) {
+        Com<IDirect3DSurface9> level0;
+        texture->GetSurfaceLevel(0, &level0);
+        bmvr::NoteSharedResource(this, *ppTexture, level0.ptr(), "texture", bmvrSharedOpen, *pSharedHandle);
+      }
 
       if (g_Game && g_Game->m_VR && g_Game->m_VR->m_CreatingTextureID != VR::Texture_None && g_D3DVR9) {
         SharedTextureHolder* textureTarget = nullptr;
@@ -6890,9 +6897,12 @@ namespace dxvk {
       return D3DERR_INVALIDCALL;
 
     try {
+      const bool bmvrSharedOpen = pSharedHandle != nullptr && *pSharedHandle != nullptr;
       const Com<D3D9Surface> surface = new D3D9Surface(this, &desc, IsExtended(), nullptr, pSharedHandle);
       m_initializer->InitTexture(surface->GetCommonTexture());
       *ppSurface = surface.ref();
+      if (unlikely(pSharedHandle != nullptr))
+        bmvr::NoteSharedResource(this, nullptr, *ppSurface, "surface", bmvrSharedOpen, *pSharedHandle);
       m_losableResourceCounter++;
 
       return D3D_OK;
@@ -6959,9 +6969,12 @@ namespace dxvk {
       if (unlikely(pSharedHandle != nullptr && Pool != D3DPOOL_DEFAULT))
         return D3DERR_INVALIDCALL;
 
+      const bool bmvrSharedOpen = pSharedHandle != nullptr && *pSharedHandle != nullptr;
       const Com<D3D9Surface> surface = new D3D9Surface(this, &desc, IsExtended(), nullptr, pSharedHandle);
       m_initializer->InitTexture(surface->GetCommonTexture(), initialData);
       *ppSurface = surface.ref();
+      if (unlikely(pSharedHandle != nullptr))
+        bmvr::NoteSharedResource(this, nullptr, *ppSurface, "surface", bmvrSharedOpen, *pSharedHandle);
 
       if (desc.Pool == D3DPOOL_DEFAULT)
         m_losableResourceCounter++;
@@ -7029,9 +7042,12 @@ namespace dxvk {
       return D3DERR_INVALIDCALL;
 
     try {
+      const bool bmvrSharedOpen = pSharedHandle != nullptr && *pSharedHandle != nullptr;
       const Com<D3D9Surface> surface = new D3D9Surface(this, &desc, IsExtended(), nullptr, pSharedHandle);
       m_initializer->InitTexture(surface->GetCommonTexture());
       *ppSurface = surface.ref();
+      if (unlikely(pSharedHandle != nullptr))
+        bmvr::NoteSharedResource(this, nullptr, *ppSurface, "surface", bmvrSharedOpen, *pSharedHandle);
       m_losableResourceCounter++;
 
       if (vr && vr->m_ReShadeVRCompat && creatingVrEyeDepth) {
