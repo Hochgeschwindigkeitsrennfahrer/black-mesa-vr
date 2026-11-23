@@ -1871,6 +1871,8 @@ namespace dxvk {
       *ppTexture = texture.ref();
 
       if (unlikely(pSharedHandle != nullptr)) {
+        texture->GetCommonTexture()->m_bmvrShared = true;
+        ++m_bmvrSharedTextures;
         Com<IDirect3DSurface9> level0;
         texture->GetSurfaceLevel(0, &level0);
         bmvr::NoteSharedResource(this, *ppTexture, level0.ptr(), "texture", bmvrSharedOpen, *pSharedHandle);
@@ -4209,6 +4211,12 @@ namespace dxvk {
 
     if (pTexture != nullptr && g_Game && g_Game->m_VR)
       pTexture = g_Game->m_VR->EyeRtSubstitute(pTexture);
+
+    if (unlikely(m_bmvrSharedTextures != 0 && pTexture != nullptr)) {
+      D3D9CommonTexture* common = GetCommonTexture(pTexture);
+      if (common != nullptr && common->m_bmvrShared)
+        bmvr::NoteSharedTextureBound(this, pTexture);
+    }
 
     DWORD stateSampler = RemapSamplerState(Stage);
 

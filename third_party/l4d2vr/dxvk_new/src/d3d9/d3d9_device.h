@@ -1797,6 +1797,9 @@ namespace dxvk {
     D3D9DeviceLostState             m_deviceLostState          = D3D9DeviceLostState::Ok;
     HWND                            m_fullscreenWindow         = NULL;
     std::atomic<uint32_t>           m_losableResourceCounter   = { 0 };
+    // BMVR: shared textures on this device; SetTexture only checks binds
+    // when there are any (new game UI), so -oldgameui pays nothing.
+    uint32_t                        m_bmvrSharedTextures       = 0;
 
     D3D9SwapChainEx*                m_mostRecentlyUsedSwapchain = nullptr;
 

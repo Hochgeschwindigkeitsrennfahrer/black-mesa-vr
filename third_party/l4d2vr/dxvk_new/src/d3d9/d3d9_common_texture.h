@@ -77,6 +77,10 @@ namespace dxvk {
 
     static constexpr UINT AllLayers = std::numeric_limits<uint32_t>::max();
 
+    // BMVR: created/opened with a shared handle (new game UI layers). The
+    // device reports binds of such textures (SetTexture) to the mod.
+    bool m_bmvrShared = false;
+
     D3D9CommonTexture(
             D3D9DeviceEx*             pDevice,
             IUnknown*                 pInterface,

@@ -27,6 +27,12 @@ namespace bmvr
     // (game) device are kept so `dump` can write them to VR/.
     void NoteSharedResource(void* device, IDirect3DTexture9* texture, IDirect3DSurface9* surface, const char* kind,
         bool opened, void* handle);
+    // A shared texture was bound for drawing (SetTexture). On the game device
+    // the last one bound in a frame is the top UI layer the game composites.
+    void NoteSharedTextureBound(void* device, void* texture);
+    // UI device window (second device, 1x1 back buffer), or nullptr.
+    void SetNewUiWindow(void* hwnd);
+    void* NewUiWindow();
 
     bool TryHmdFramebuffer();
     bool TryHmdNative();

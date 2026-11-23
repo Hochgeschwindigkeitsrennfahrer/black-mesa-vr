@@ -1372,6 +1372,8 @@ public:
     // HL2VR restores OverrideAlphaWriteEnable(false, true) after RenderHUD.
     void FinishPauseHudExtraPaint(IMatRenderContext* ctx);
     void StampPauseOverlayCursor();
+    IDirect3DTexture9* NewUiLayerTexture();
+    bool DrawNewUiLayerTo(IDirect3DDevice9* device, IDirect3DSurface9* dst);
     bool IntersectMenuPanelUv(float& u, float& v);
     // Paint complete: copy the HUD RT to the publish surface, then flag it.
     void NoteHudPainted();

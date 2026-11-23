@@ -3487,9 +3487,12 @@ namespace
     {
         if (!hwnd)
             return;
-        PostMessageA(hwnd, WM_KEYDOWN, static_cast<WPARAM>(vk), 1);
+        // Real scan code in lParam: the new game UI (Qt) maps keys by scan
+        // code; with 0 it ignored our Escape (2026-11-23).
+        const UINT scan = MapVirtualKeyA(static_cast<UINT>(vk), MAPVK_VK_TO_VSC) & 0xFF;
+        PostMessageA(hwnd, WM_KEYDOWN, static_cast<WPARAM>(vk), static_cast<LPARAM>(1u | (scan << 16)));
         PostMessageA(hwnd, WM_KEYUP, static_cast<WPARAM>(vk),
-            static_cast<LPARAM>(1u | (1u << 30) | (1u << 31)));
+            static_cast<LPARAM>(1u | (scan << 16) | (1u << 30) | (1u << 31)));
     }
 
     bool CopySurfaceLetterboxed(IDirect3DDevice9* device, IDirect3DSurface9* src, IDirect3DSurface9* dst, float scale)
@@ -5290,11 +5293,167 @@ namespace
     struct SharedResEntry
     {
         IDirect3DSurface9* surface;
+        IDirect3DTexture9* texture;   // not referenced separately (surface holds it)
         int index;
+        uint64_t lastBind;            // g_SharedBindSeq at its last SetTexture
+        uint32_t binds;               // since the last bind summary
     };
     std::mutex g_SharedResMutex;
     std::vector<SharedResEntry> g_SharedRes;
     int g_SharedResCount = 0;
+    uint64_t g_SharedBindSeq = 0;
+    void* g_NewUiHwnd = nullptr;
+}
+
+void bmvr::SetNewUiWindow(void* hwnd)
+{
+    g_NewUiHwnd = hwnd;
+}
+
+void* bmvr::NewUiWindow()
+{
+    return g_NewUiHwnd;
+}
+
+void bmvr::NoteSharedTextureBound(void* device, void* texture)
+{
+    std::lock_guard<std::mutex> lock(g_SharedResMutex);
+    for (SharedResEntry& e : g_SharedRes)
+    {
+        if (e.texture == texture)
+        {
+            e.lastBind = ++g_SharedBindSeq;
+            ++e.binds;
+            return;
+        }
+    }
+    (void)device;
+}
+
+// New game UI: the shared texture the game device bound last = the top layer
+// it composites (the QML UI, alpha, vertically flipped). nullptr: none.
+IDirect3DTexture9* VR::NewUiLayerTexture()
+{
+    std::lock_guard<std::mutex> lock(g_SharedResMutex);
+    const SharedResEntry* best = nullptr;
+    for (const SharedResEntry& e : g_SharedRes)
+    {
+        if (e.texture && e.lastBind && (!best || e.lastBind > best->lastBind))
+            best = &e;
+    }
+    // Which layers the game draws, while it matters (12 lines).
+    static int s_log;
+    static ULONGLONG s_lastLog;
+    const ULONGLONG now = GetTickCount64();
+    if (s_log < 12 && now - s_lastLog > 2000)
+    {
+        s_lastLog = now;
+        ++s_log;
+        char line[256];
+        int len = std::snprintf(line, sizeof(line), "New UI layer binds since last:");
+        for (SharedResEntry& e : g_SharedRes)
+        {
+            if (len > 0 && len < static_cast<int>(sizeof(line)) - 40)
+                len += std::snprintf(line + len, sizeof(line) - len, " #%d=%u", e.index, e.binds);
+            e.binds = 0;
+        }
+        Game::logMsg("%s -> top #%d", line, best ? best->index : -1);
+    }
+    return best ? best->texture : nullptr;
+}
+
+// Copy the QML layer (flipped, cropped to the window size, alpha kept) onto
+// the pause overlay. Its own state block: callers come from the VGUI paint
+// path with the game's state bound.
+bool VR::DrawNewUiLayerTo(IDirect3DDevice9* device, IDirect3DSurface9* dst)
+{
+    IDirect3DTexture9* tex = NewUiLayerTexture();
+    if (!device || !dst || !tex)
+        return false;
+    D3DSURFACE_DESC td{}, dd{};
+    if (FAILED(tex->GetLevelDesc(0, &td)) || FAILED(dst->GetDesc(&dd)) || td.Width < 64 || td.Height < 64)
+        return false;
+    // The UI is window-sized in the texture's bottom rows, upside down (GL
+    // origin): its top row is the texture's last row.
+    UINT uiW = KnownWindowWidth(), uiH = KnownWindowHeight();
+    if (uiW < 64 || uiH < 64 || uiW > td.Width || uiH > td.Height)
+    {
+        uiW = dd.Width <= td.Width ? dd.Width : td.Width;
+        uiH = dd.Height <= td.Height ? dd.Height : td.Height;
+    }
+    const float u1 = static_cast<float>(uiW) / static_cast<float>(td.Width);
+    const float vTop = 1.f;
+    const float vBottom = static_cast<float>(td.Height - uiH) / static_cast<float>(td.Height);
+    IDirect3DStateBlock9* saved = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
+        return false;
+    IDirect3DSurface9* prevRt = nullptr;
+    IDirect3DSurface9* prevDs = nullptr;
+    device->GetRenderTarget(0, &prevRt);
+    device->GetDepthStencilSurface(&prevDs);
+    bool ok = false;
+    if (SUCCEEDED(device->SetRenderTarget(0, dst)))
+    {
+        device->SetDepthStencilSurface(nullptr);
+        D3DVIEWPORT9 vp{ 0, 0, dd.Width, dd.Height, 0.f, 1.f };
+        device->SetViewport(&vp);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
+        device->SetTexture(0, tex);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        device->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        struct V { float x, y, z, rhw, u, v; };
+        const float w = static_cast<float>(dd.Width) - 0.5f, h = static_cast<float>(dd.Height) - 0.5f;
+        const V quad[4] = {
+            { -0.5f, -0.5f, 0.f, 1.f, 0.f, vTop },
+            { w, -0.5f, 0.f, 1.f, u1, vTop },
+            { -0.5f, h, 0.f, 1.f, 0.f, vBottom },
+            { w, h, 0.f, 1.f, u1, vBottom },
+        };
+        device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+        ok = SUCCEEDED(device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(V)));
+        device->SetTexture(0, nullptr);
+    }
+    saved->Apply();
+    saved->Release();
+    if (prevRt)
+    {
+        device->SetRenderTarget(0, prevRt);
+        prevRt->Release();
+    }
+    device->SetDepthStencilSurface(prevDs);
+    if (prevDs)
+        prevDs->Release();
+    static int s_log;
+    if (s_log < 6)
+    {
+        ++s_log;
+        Game::logMsg("New UI layer -> pause overlay %ux%u from %ux%u (ui %ux%u, flipped) ok=%d",
+            dd.Width, dd.Height, td.Width, td.Height, uiW, uiH, ok ? 1 : 0);
+    }
+    return ok;
 }
 
 void bmvr::NoteSharedResource(void* device, IDirect3DTexture9* texture, IDirect3DSurface9* surface, const char* kind,
@@ -5319,7 +5478,7 @@ void bmvr::NoteSharedResource(void* device, IDirect3DTexture9* texture, IDirect3
     if (onVr && surface && g_SharedRes.size() < 16)
     {
         surface->AddRef();
-        g_SharedRes.push_back({ surface, index });
+        g_SharedRes.push_back({ surface, texture, index, 0, 0 });
     }
 }
 
@@ -10058,9 +10217,15 @@ void VR::ApplyMenuNavigation()
         || (!m_GameplayEligible && PressedDigitalAction(m_ActionPause));
     if (back && !s_back)
     {
-        QueueKeyToHwnd(hwnd, VK_ESCAPE);
-        Game::logMsg("Menu back %s",
-            m_GameplayEligible ? "B/MenuBack" : "B/Pause");
+        // New game UI (Qt): Backspace is its "back" (its own button hints);
+        // it closes only the current page, Escape could close the whole
+        // menu. Keys reach Qt through the game window like the clicks do
+        // (its own window is hidden), with a real scan code.
+        const bool newUi = bmvr::NewUiWindow() != nullptr;
+        const int key = newUi ? VK_BACK : VK_ESCAPE;
+        QueueKeyToHwnd(hwnd, key);
+        Game::logMsg("Menu back %s (%s)",
+            m_GameplayEligible ? "B/MenuBack" : "B/Pause", newUi ? "Backspace, new UI" : "Escape");
     }
     s_back = back;
 }
@@ -20063,11 +20228,14 @@ void VR::StampPauseOverlayCursor()
     // view (pause capture 2026-11-19: layer alpha mean 0.98 -> 0.02 over
     // 0.7 s; the eye images were clean).
     const int alphaPasses = static_cast<int>(bmvr::g_PauseMenuAlphaPasses + 0.5f);
+    // New game UI: the menu is the QML layer, not VGUI (that paint is empty,
+    // so the old alpha-from-paint path published a transparent overlay).
+    const bool qml = !title && bmvr::NewUiWindow() && DrawNewUiLayerTo(device, m_D9HUDSurface);
     if (title)
         TitleLayerPremultiplied(device, m_D9HUDSurface);
     else if (alphaPasses > 0)
         FixPauseLayerAlpha(device, m_D9HUDSurface, alphaPasses > 6 ? 6 : alphaPasses);
-    if (bmvr::g_PauseMenuColourFromFrame && !title)
+    if (bmvr::g_PauseMenuColourFromFrame && !title && !qml)
         PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
     if (!title)
         DrawMenuCursorOnSurface(device, m_D9HUDSurface);

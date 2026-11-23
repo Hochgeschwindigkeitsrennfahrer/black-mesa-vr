@@ -435,6 +435,8 @@ namespace dxvk {
       const bool uiDevice = g_D3DVR9 != nullptr && pPresentationParameters
         && pPresentationParameters->BackBufferWidth <= 1 && pPresentationParameters->BackBufferHeight <= 1;
       if (uiDevice)
+        bmvr::SetNewUiWindow(pPresentationParameters->hDeviceWindow ? pPresentationParameters->hDeviceWindow : hFocusWindow);
+      if (uiDevice)
         bmvr::Log("D3D9 device %p (1x1 back buffer) kept out of VR: new game UI device", static_cast<void*>(*ppReturnedDeviceInterface));
       else
         Direct3DCreateVRImpl(*ppReturnedDeviceInterface, &g_D3DVR9);
