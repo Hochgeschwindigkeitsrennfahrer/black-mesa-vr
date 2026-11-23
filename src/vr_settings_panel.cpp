@@ -3681,9 +3681,14 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         return true;
     };
     // Both eyes share the head-centred placement, so it fuses at 30 HU.
+    // Detail toasts (welcome, warnings) are wide (up to 1024 texels): at 30 HU
+    // the welcome filled most of the view and felt in the face (user
+    // 2026-11-23). They sit at 60 HU with the same world size = half the
+    // angular size, further out.
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     const Vector head = GetViewOrigin(body);
-    const Vector po = head + fwd * 30.f - up * 5.f;
+    const float dist = (detail && !m_ToastSmall) ? 60.f : 30.f;
+    const Vector po = head + fwd * dist - up * (5.f * dist / 30.f);
     // Small (reload hints): 4.2 (3.5 was hard to read, user 2026-11-18).
     // hw is per 512 texels, so a wider texture keeps the letter size.
     const float texScale = static_cast<float>(g_Gfx.toastW) / 512.f;
