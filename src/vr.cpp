@@ -206,6 +206,19 @@ namespace
         delta.y = ny;
     }
 
+    // Yaw (radians, about OpenXR +Y) of a quaternion; 0 = facing -Z.
+    float OpenXrQuatYaw(const float* q)
+    {
+        const float x = q[0], y = q[1], z = q[2], w = q[3];
+        return atan2f(2.f * (w * y + x * z), 1.f - 2.f * (y * y + z * z));
+    }
+
+    float WrapRad(float a)
+    {
+        const float twoPi = 6.28318531f;
+        return a - twoPi * floorf((a + 3.14159265f) / twoPi);
+    }
+
     // OpenXR Y-up yaw only. Drops headset pitch/roll so a tilted head cannot
     // latch a crooked 2D GameUI panel.
     void LevelOpenXrPoseToYaw(L4D2VROpenXrPoseDesc& pose)
@@ -6166,6 +6179,15 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
     overlay.offsetMeters[0] = 0.0f;
     overlay.offsetMeters[1] = yOff;
     overlay.offsetMeters[2] = 0.0f;
+    // Pause menu: place it from the latched panel pose (room front at eye
+    // height), so it matches the pointer ray in IntersectMenuPanelUv.
+    if (WantPauseWorldOverlay() && m_MenuPanelPoseValid
+        && m_MenuPanelPose.reserved0 == m_MenuOverlayEpoch)
+    {
+        overlay.reserved1 |= L4D2VR_OPENXR_OVERLAY_FLAG_ANCHOR_POSE;
+        std::memcpy(overlay.anchorPosition, m_MenuPanelPose.position, sizeof(overlay.anchorPosition));
+        std::memcpy(overlay.orientation, m_MenuPanelPose.orientation, sizeof(overlay.orientation));
+    }
 
     L4D2VR_PublishOpenXrOverlay(L4D2VR_OPENXR_OVERLAY_HUD, overlay);
     L4D2VR_PublishOpenXrOverlayFrame(frameId);
@@ -11344,8 +11366,11 @@ void VR::LatchMenuPanelIfNeeded()
             Game::logMsg("Menu panel pose unlocked (back to live HMD)");
         }
         m_MenuPointerLastValid = false;
+        m_MenuPanelMovedSinceMs = 0;
+        m_MenuPanelTurnedSinceMs = 0;
         return;
     }
+    const char* relatchWhy = nullptr;
     if (m_MenuPanelPoseValid)
     {
         // A pause overlay latched just before loading began (or the reverse):
@@ -11359,10 +11384,43 @@ void VR::LatchMenuPanelIfNeeded()
                 m_MenuPanelPose.reserved1 &= ~L4D2VR_OPENXR_POSE_FLAG_MONO;
             Game::logMsg("Menu panel %s (phase %s)", mono ? "-> mono 2D" : "-> world overlay", VrPhaseName(m_VrPhase));
         }
-        return;
+        // Re-anchor an open menu when the head is clearly somewhere else:
+        // headset put on after the startup menu latched, stood up / walked
+        // (> 0.5 m sideways or 0.3 m up/down for 0.5 s), or turned > 90 deg
+        // off the panel for 1 s. A short lean or glance keeps it static.
+        if (!bmvr::g_MenuRoomFront || !m_OpenXrLastHmdPose.valid || !m_HmdPoseValid)
+            return;
+        const DWORD nowMs = GetTickCount();
+        const float* hp = m_OpenXrLastHmdPose.position;
+        const float* pp = m_MenuPanelPose.position;
+        const float dx = hp[0] - pp[0];
+        const float dz = hp[2] - pp[2];
+        const float dy = hp[1] - pp[1];
+        const bool moved = (dx * dx + dz * dz) > 0.25f || fabsf(dy) > 0.3f;
+        const float off = fabsf(WrapRad(OpenXrQuatYaw(m_OpenXrLastHmdPose.orientation)
+            - OpenXrQuatYaw(m_MenuPanelPose.orientation)));
+        const bool turned = off > 1.5707964f;
+        if (!moved)
+            m_MenuPanelMovedSinceMs = 0;
+        else if (m_MenuPanelMovedSinceMs == 0)
+            m_MenuPanelMovedSinceMs = nowMs ? nowMs : 1;
+        if (!turned)
+            m_MenuPanelTurnedSinceMs = 0;
+        else if (m_MenuPanelTurnedSinceMs == 0)
+            m_MenuPanelTurnedSinceMs = nowMs ? nowMs : 1;
+        if (m_MenuPanelMovedSinceMs != 0 && nowMs - m_MenuPanelMovedSinceMs >= 500)
+            relatchWhy = "head moved";
+        else if (m_MenuPanelTurnedSinceMs != 0 && nowMs - m_MenuPanelTurnedSinceMs >= 1000)
+            relatchWhy = "turned > 90 deg";
+        if (!relatchWhy)
+            return;
+        Game::logMsg("Menu panel re-anchor: %s (moved %.2fm sideways, %.2fm up, %.0f deg off)",
+            relatchWhy, sqrtf(dx * dx + dz * dz), dy, off * 57.2957795f);
     }
     if (!m_OpenXrLastHmdPose.valid || !m_HmdPoseValid)
         return;
+    m_MenuPanelMovedSinceMs = 0;
+    m_MenuPanelTurnedSinceMs = 0;
     ++m_MenuOverlayEpoch;
     if (m_MenuOverlayEpoch == 0)
         m_MenuOverlayEpoch = 1;
@@ -11373,13 +11431,41 @@ void VR::LatchMenuPanelIfNeeded()
     else
         m_MenuPanelPose.reserved1 &= ~L4D2VR_OPENXR_POSE_FLAG_MONO;
     LevelOpenXrPoseToYaw(m_MenuPanelPose);
+    // Room front: face the play area's forward (STAGE -Z) at the current
+    // eye position and height, so menus always open in the same direction
+    // in the room. Turned > 90 deg away from it -> face the head instead.
+    const float headYaw = OpenXrQuatYaw(m_MenuPanelPose.orientation);
+    float panelYaw = headYaw;
+    m_MenuPanelRoomFront = false;
+    L4D2VROpenXrPoseDesc stage{};
+    const bool haveStage = bmvr::g_MenuRoomFront && L4D2VR_ReadOpenXrStagePose(stage);
+    float roomYaw = 0.f;
+    if (haveStage)
+    {
+        roomYaw = OpenXrQuatYaw(stage.orientation);
+        if (fabsf(WrapRad(headYaw - roomYaw)) <= 1.5707964f)
+        {
+            panelYaw = roomYaw;
+            m_MenuPanelRoomFront = true;
+        }
+    }
+    m_MenuPanelPose.orientation[0] = 0.f;
+    m_MenuPanelPose.orientation[1] = sinf(panelYaw * 0.5f);
+    m_MenuPanelPose.orientation[2] = 0.f;
+    m_MenuPanelPose.orientation[3] = cosf(panelYaw * 0.5f);
+    // Pointer fallback basis (no helper): game view yaw plus the panel's
+    // offset from the head.
     const Vector va = GetViewAngle();
-    QAngle::AngleVectors(QAngle(0.f, va.y, 0.f), &m_MenuPanelFwd, &m_MenuPanelRight, &m_MenuPanelUp);
+    const float yawOffDeg = WrapRad(panelYaw - headYaw) * 57.2957795f;
+    QAngle::AngleVectors(QAngle(0.f, va.y + yawOffDeg, 0.f), &m_MenuPanelFwd, &m_MenuPanelRight, &m_MenuPanelUp);
     m_MenuPanelPoseValid = true;
     float dist = 0.f, width = 0.f, yOff = 0.f;
     GetMenuOverlayMetrics(dist, width, yOff);
-    Game::logMsg("Menu panel pose latched (level yaw, dist=%.2fm width=%.2fm pause3d=%d seen=%d paused=%d epoch=%u)",
-        dist, width, WantPauseWorldOverlay() ? 1 : 0, m_SeenGameplay ? 1 : 0,
+    Game::logMsg("Menu panel pose latched (%s, head %.0f deg off room front%s, eye y=%.2fm, dist=%.2fm width=%.2fm pause3d=%d seen=%d paused=%d epoch=%u)",
+        m_MenuPanelRoomFront ? "room front" : "head yaw",
+        haveStage ? WrapRad(headYaw - roomYaw) * 57.2957795f : 0.f,
+        haveStage ? "" : " [no STAGE]",
+        m_MenuPanelPose.position[1], dist, width, WantPauseWorldOverlay() ? 1 : 0, m_SeenGameplay ? 1 : 0,
         (m_Game && SehIsPaused(m_Game->m_EngineClient)) ? 1 : 0, m_MenuOverlayEpoch);
 }
 

@@ -615,6 +615,34 @@ bool L4D2VR_ReadOpenXrHmdPose(L4D2VROpenXrPoseDesc& pose, uint32_t* generation)
     return false;
 }
 
+bool L4D2VR_ReadOpenXrStagePose(L4D2VROpenXrPoseDesc& pose)
+{
+    std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);
+    const L4D2VROpenXrBridgeState* state = g_OpenXrBridgeState;
+    if (!state)
+        return false;
+
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        const uint32_t gen0 = state->stagePoseGeneration;
+        if (gen0 == 0 || (gen0 & 1u))
+            continue;
+
+        L4D2VR_SeqlockAcquire();
+        L4D2VROpenXrPoseDesc snapshot = state->stagePose;
+        L4D2VR_SeqlockAcquire();
+        if (state->stagePoseGeneration == gen0)
+        {
+            if (!snapshot.valid)
+                return false;
+            pose = snapshot;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool L4D2VR_ReadOpenXrRuntimeViewConfig(L4D2VROpenXrRuntimeViewConfigDesc& config, uint32_t* generation)
 {
     std::lock_guard<std::mutex> lock(g_OpenXrBridgeStateMutex);

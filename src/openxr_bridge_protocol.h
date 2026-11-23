@@ -26,7 +26,7 @@ inline void L4D2VR_SeqlockAcquire()
 }
 
 constexpr uint32_t L4D2VR_OPENXR_BRIDGE_MAGIC = 0x5258344Cu; // L4XR
-constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 18;
+constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 19;
 // 13: XR_KHR_visibility_mask hidden triangle list (NDC xy per eye).
 // 14: helperConsumingFrameId / helperConsumedFrameId (helper -> game blit
 //     progress; the game reuses a publish slot only once the helper's blit
@@ -35,6 +35,9 @@ constexpr uint32_t L4D2VR_OPENXR_BRIDGE_VERSION = 18;
 //     head view space, for eye-tracked foveated rendering).
 // 18: L4D2VROpenXrInputStateDesc.rawHands + systemName (physical buttons per
 //     hand for the DLL's button mapping; legacy actions stay as they were).
+// 19: stagePose (STAGE space origin located in the LOCAL app space; the
+//     room's floor + forward, for menus anchored to the room front) and
+//     L4D2VROpenXrOverlayDesc.anchorPosition (OVERLAY_FLAG_ANCHOR_POSE).
 // L4D2VROpenXrRuntimeViewConfigDesc.reserved0: 0 = recommended size only
 // (CreateDevice), 1 = xrLocateViews FOV (InitOpenXR stereo fusion).
 constexpr uint32_t L4D2VR_OPENXR_RUNTIME_VIEW_SIZE_ONLY = 0;
@@ -281,6 +284,9 @@ struct L4D2VROpenXrOverlayDesc
     float curvature = 0.0f;
     float offsetMeters[3] = { 0.0f, -0.25f, 0.0f };
     float orientation[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    // v19, with L4D2VR_OPENXR_OVERLAY_FLAG_ANCHOR_POSE: the head position the
+    // overlay is placed from (LOCAL space); orientation gives its yaw.
+    float anchorPosition[3] = { 0.0f, 0.0f, 0.0f };
 };
 
 // reserved1 bits on L4D2VROpenXrPoseDesc. reserved0 is still the packed IPD
@@ -296,6 +302,10 @@ constexpr uint32_t L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED = 1u << 1;
 // paint colour*a). Without it the HUD quad is submitted UNPREMULTIPLIED.
 // Older helpers ignore the bit (text then composites a little darker).
 constexpr uint32_t L4D2VR_OPENXR_OVERLAY_FLAG_PREMULTIPLIED = 1u << 2;
+// Placed from anchorPosition + orientation (yaw) instead of the head pose when
+// the epoch starts: the pause menu uses the game's latched menu panel pose
+// (room front at eye height), the same pose its pointer ray hits.
+constexpr uint32_t L4D2VR_OPENXR_OVERLAY_FLAG_ANCHOR_POSE = 1u << 3;
 // L4D2VROpenXrSharedTextureDesc.reserved0. UVs are a subrect of a shared
 // ring (or similar); do not treat 0..1 as one eye.
 constexpr uint32_t L4D2VR_OPENXR_SHARED_UV_EXPLICIT = 1u << 0;
@@ -524,4 +534,8 @@ struct L4D2VROpenXrBridgeState
     uint32_t reservedTail0 = 0;
     uint32_t menuQuadGeneration = 0;
     L4D2VROpenXrMenuQuadDesc menuQuad = {};
+    // Helper -> game (v19). valid = 0 when the runtime has no STAGE space
+    // or cannot locate it (orientation not tracked).
+    uint32_t stagePoseGeneration = 0;
+    L4D2VROpenXrPoseDesc stagePose = {};
 };

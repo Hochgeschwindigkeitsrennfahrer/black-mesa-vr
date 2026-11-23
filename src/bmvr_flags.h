@@ -465,6 +465,9 @@ namespace bmvr
     // (debug A/B, not saved; on by default). Tunables in VR/config.txt and the
     // Debug tab TESTS rows.
     extern bool g_GestureBodyFrame;
+    // Menus / pause overlay face the room's front (STAGE forward) at eye
+    // height unless the head is > 90 deg off it (debug A/B, not saved; on).
+    extern bool g_MenuRoomFront;
     extern float g_BodyYawDeadzoneDeg;    // head turns this far without moving the body (35)
     extern float g_BodyYawHardLimitDeg;   // body dragged along past this (80)
     extern float g_BodyYawCatchUpSec;     // head held past the dead zone this long -> body turns (0.8)

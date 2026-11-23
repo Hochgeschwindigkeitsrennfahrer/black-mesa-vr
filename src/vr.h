@@ -1930,6 +1930,11 @@ private:
     uint32_t m_MenuOverlayEpoch = 0;
     L4D2VROpenXrPoseDesc m_MenuPanelPose{};
     Vector m_MenuPanelFwd{};
+    // Menu re-anchor while open: head moved away from the latch point / turned
+    // > 90 deg off the panel since this tick (0 = not pending).
+    DWORD m_MenuPanelMovedSinceMs = 0;
+    DWORD m_MenuPanelTurnedSinceMs = 0;
+    bool m_MenuPanelRoomFront = false;
     Vector m_MenuPanelRight{};
     Vector m_MenuPanelUp{};
     HWND m_MenuCursorHwnd = nullptr;

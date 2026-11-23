@@ -404,6 +404,7 @@ namespace
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Gun hand cuff closed", RowKind::Toggle, nullptr, &bmvr::g_GunHandCuffCap, nullptr, 0, 0, 0, nullptr },
             { "Grab zones follow the body", RowKind::Toggle, nullptr, &bmvr::g_GestureBodyFrame, nullptr, 0, 0, 0, nullptr },
+            { "Menus face the room front", RowKind::Toggle, nullptr, &bmvr::g_MenuRoomFront, nullptr, 0, 0, 0, nullptr },
             { "Pump stroke at the controller", RowKind::Toggle, nullptr, &bmvr::g_PumpStrokeAtController, nullptr, 0, 0, 0, nullptr },
             { "Tripmine placed along its face", RowKind::Toggle, nullptr, &bmvr::g_TripmineFaceAim, nullptr, 0, 0, 0, nullptr },
             // Live per-weapon angle trim for the weapon in the hand (saved in

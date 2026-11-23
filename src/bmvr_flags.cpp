@@ -206,6 +206,7 @@ namespace bmvr
     bool g_VrHolsterBack = false;
     bool g_VrHolsterDynamic = false;
     bool g_GestureBodyFrame = true;
+    bool g_MenuRoomFront = true;
     float g_BodyYawDeadzoneDeg = 35.f;
     float g_BodyYawHardLimitDeg = 80.f;
     float g_BodyYawCatchUpSec = 0.8f;

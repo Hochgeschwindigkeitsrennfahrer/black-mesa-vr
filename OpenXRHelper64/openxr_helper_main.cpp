@@ -1746,6 +1746,16 @@ namespace
             m_State->heartbeatTickMs = GetTickCount64();
         }
 
+        void PublishStagePose(const L4D2VROpenXrPoseDesc& pose)
+        {
+            if (!m_State)
+                return;
+
+            L4D2VR_SeqlockBegin(m_State->stagePoseGeneration);
+            m_State->stagePose = pose;
+            L4D2VR_SeqlockEnd(m_State->stagePoseGeneration);
+        }
+
         void PublishRuntimeViewConfig(const L4D2VROpenXrRuntimeViewConfigDesc& config)
         {
             if (!m_State || !config.valid)
@@ -7029,6 +7039,15 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                     m_Xr.xrCreateReferenceSpace(m_Session, &viewInfo, &m_OverlayViewSpace)))
                 m_OverlayViewSpace = XR_NULL_HANDLE;
 
+            // Room front for menus: the STAGE origin located in LOCAL gives the
+            // play area's forward. Optional; without it menus face the head.
+            XrReferenceSpaceCreateInfo stageInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
+            stageInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+            stageInfo.poseInReferenceSpace.orientation.w = 1.0f;
+            if (!Succeeded(m_Log, "xrCreateReferenceSpace(STAGE, room front for menus)",
+                    m_Xr.xrCreateReferenceSpace(m_Session, &stageInfo, &m_StageSpace)))
+                m_StageSpace = XR_NULL_HANDLE;
+
             m_Log.Print("Created OpenXR Vulkan session and LOCAL reference space");
             m_Bridge.Update(L4D2VROpenXrBridgeStatus::SessionCreated, 0, 0, "OpenXR Vulkan session created");
             return true;
@@ -8844,12 +8863,19 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             const XrPosef* gameRenderCenterPose = nullptr)
         {
             OverlayAnchor anchor{};
-            if (!gameRenderCenterPose && locatedViews.empty())
+            const bool givenAnchor = (overlay.reserved1 & L4D2VR_OPENXR_OVERLAY_FLAG_ANCHOR_POSE) != 0;
+            if (!givenAnchor && !gameRenderCenterPose && locatedViews.empty())
                 return anchor;
 
             XrVector3f hmdPosition{};
             XrQuaternionf hmdOrientation{};
-            if (gameRenderCenterPose)
+            if (givenAnchor)
+            {
+                // The game's latched menu panel pose (room front, eye height).
+                hmdPosition = XrVector3f{ overlay.anchorPosition[0], overlay.anchorPosition[1], overlay.anchorPosition[2] };
+                hmdOrientation = NormalizeOpenXrQuaternion(overlay.orientation);
+            }
+            else if (gameRenderCenterPose)
             {
                 hmdPosition = gameRenderCenterPose->position;
                 hmdOrientation = gameRenderCenterPose->orientation;
@@ -9923,6 +9949,37 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                         locatedCount,
                         viewState.viewStateFlags,
                         frameState.predictedDisplayTime));
+                    // Room front: the STAGE origin moves only on a room
+                    // re-setup / recenter, so ~4 Hz is plenty.
+                    if (m_StageSpace != XR_NULL_HANDLE && (m_StageLocateFrame++ % 30u) == 0u)
+                    {
+                        XrSpaceLocation stageLoc{ XR_TYPE_SPACE_LOCATION };
+                        L4D2VROpenXrPoseDesc stage{};
+                        if (XR_SUCCEEDED(m_Xr.xrLocateSpace(m_StageSpace, m_AppSpace,
+                                frameState.predictedDisplayTime, &stageLoc))
+                            && (stageLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT))
+                        {
+                            stage.valid = 1;
+                            stage.viewStateFlags = static_cast<uint32_t>(stageLoc.locationFlags);
+                            stage.displayTime = frameState.predictedDisplayTime;
+                            stage.position[0] = stageLoc.pose.position.x;
+                            stage.position[1] = stageLoc.pose.position.y;
+                            stage.position[2] = stageLoc.pose.position.z;
+                            stage.orientation[0] = stageLoc.pose.orientation.x;
+                            stage.orientation[1] = stageLoc.pose.orientation.y;
+                            stage.orientation[2] = stageLoc.pose.orientation.z;
+                            stage.orientation[3] = stageLoc.pose.orientation.w;
+                        }
+                        m_Bridge.PublishStagePose(stage);
+                        if (static_cast<int>(stage.valid) != m_StageLoggedValid)
+                        {
+                            m_StageLoggedValid = static_cast<int>(stage.valid);
+                            m_Log.Print("STAGE space in LOCAL: %s pos=(%.2f, %.2f, %.2f) rot=(%.3f, %.3f, %.3f, %.3f)",
+                                stage.valid ? "valid" : "not located",
+                                stage.position[0], stage.position[1], stage.position[2],
+                                stage.orientation[0], stage.orientation[1], stage.orientation[2], stage.orientation[3]);
+                        }
+                    }
                     // HMD 2026-09-20: polling here for a pair tagged with
                     // this predictedDisplayTime timed out almost every
                     // frame (matchHit=2/N, matchWaitAvg=9.01ms) and made
@@ -10787,6 +10844,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             }
             if (m_CommandPool != VK_NULL_HANDLE && m_Vk.vkDestroyCommandPool)
                 m_Vk.vkDestroyCommandPool(m_VkDevice, m_CommandPool, nullptr);
+            if (m_StageSpace != XR_NULL_HANDLE && m_Xr.xrDestroySpace)
+                m_Xr.xrDestroySpace(m_StageSpace);
             if (m_OverlayViewSpace != XR_NULL_HANDLE && m_Xr.xrDestroySpace)
                 m_Xr.xrDestroySpace(m_OverlayViewSpace);
             if (m_AppSpace != XR_NULL_HANDLE && m_Xr.xrDestroySpace)
@@ -10818,6 +10877,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         XrSession m_Session = XR_NULL_HANDLE;
         XrSpace m_AppSpace = XR_NULL_HANDLE;
         XrSpace m_OverlayViewSpace = XR_NULL_HANDLE;
+        XrSpace m_StageSpace = XR_NULL_HANDLE;
+        uint32_t m_StageLocateFrame = 0;
+        int m_StageLoggedValid = -1;
         XrSessionState m_SessionState = XR_SESSION_STATE_UNKNOWN;
         XrEnvironmentBlendMode m_BlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
         OpenXrInputBridge m_InputBridge;

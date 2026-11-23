@@ -45,6 +45,9 @@ bool L4D2VR_ReadOpenXrHelperSubmittedFrames(uint32_t& submittedFrames);
 // the bridge is not mapped.
 bool L4D2VR_ReadOpenXrHelperConsumedFrame(uint32_t& consuming, uint32_t& consumed, uint32_t& consumedCount);
 bool L4D2VR_ReadOpenXrHmdPose(L4D2VROpenXrPoseDesc& pose, uint32_t* generation = nullptr);
+// Room (STAGE) origin in the LOCAL app space (bridge v19). False when the
+// helper has not published one or the runtime has no STAGE space.
+bool L4D2VR_ReadOpenXrStagePose(L4D2VROpenXrPoseDesc& pose);
 bool L4D2VR_ReadOpenXrRuntimeViewConfig(L4D2VROpenXrRuntimeViewConfigDesc& config, uint32_t* generation = nullptr);
 bool L4D2VR_PeekOpenXrVisibilityMaskGeneration(uint32_t* generation);
 bool L4D2VR_ReadOpenXrVisibilityMask(L4D2VROpenXrVisibilityMaskDesc& mask, uint32_t* generation = nullptr);
