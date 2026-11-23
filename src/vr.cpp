@@ -16311,7 +16311,7 @@ void VR::ResolveWeaponViewmodelPose(float& ox, float& oy, float& oz, float& ax, 
     ox += bmvr::g_ViewmodelPosOffsetX;
     oy += bmvr::g_ViewmodelPosOffsetY;
     oz += bmvr::g_ViewmodelPosOffsetZ;
-    if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH)
+    if (L4D2VR_ControllerFamilyPoseTuning(family) == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH)
     {
         ox += bmvr::g_ViewmodelPosOffsetXTouch;
         static bool s_loggedTouchOx;

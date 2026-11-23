@@ -99,7 +99,11 @@ enum : uint32_t
     L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH = 1, // Quest / Rift / Pico Touch-like
     L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2 = 2,
     L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES = 3,
-    L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE = 4
+    L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE = 4,
+    // Steam Frame controllers (XR_VALVE_frame_controller_interaction). Without
+    // that profile SteamVR emulates Touch and folds bumper / right X+Y / D-pad
+    // onto trigger / B / X+Y (frame_controller_remapping.json, upstream #20).
+    L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME = 5
 };
 
 inline bool L4D2VR_TextContainsI(const char* haystack, const char* needle)
@@ -143,6 +147,8 @@ inline uint32_t L4D2VR_ClassifyOpenXrInteractionProfile(const char* path)
         L4D2VR_TextContainsI(path, "vive_cosmos") ||
         L4D2VR_TextContainsI(path, "vive_focus"))
         return L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE;
+    if (L4D2VR_TextContainsI(path, "frame_controller"))
+        return L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME;
     return L4D2VR_OPENXR_CONTROLLER_FAMILY_UNKNOWN;
 }
 
@@ -164,6 +170,8 @@ inline uint32_t L4D2VR_ClassifyOpenVrControllerType(const char* type)
         return L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2;
     if (L4D2VR_TextContainsI(type, "vive"))
         return L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE;
+    if (L4D2VR_TextContainsI(type, "frame_controller"))
+        return L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME;
     return L4D2VR_OPENXR_CONTROLLER_FAMILY_UNKNOWN;
 }
 
@@ -174,7 +182,16 @@ inline bool L4D2VR_ControllerFamilyPrefersAimPose(uint32_t family)
     // pose -45°. Index hands still need a 90° inward roll around that aim
     // (thumbstick face vs palm); weapons keep the unrolled aim pose.
     return family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH
-        || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES;
+        || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES
+        || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME;
+}
+
+// Pose tuning (hand offsets, gun tilt, viewmodel ox) per family. The Frame
+// used to arrive as SteamVR's Touch emulation, so it keeps the Touch tuning
+// until a Frame owner reports otherwise.
+inline uint32_t L4D2VR_ControllerFamilyPoseTuning(uint32_t family)
+{
+    return family == L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME ? L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH : family;
 }
 
 inline const char* L4D2VR_ControllerFamilyName(uint32_t family)
@@ -185,6 +202,7 @@ inline const char* L4D2VR_ControllerFamilyName(uint32_t family)
     case L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2: return "g2";
     case L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES: return "knuckles";
     case L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE: return "vive";
+    case L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME: return "frame";
     default: return "unknown";
     }
 }
@@ -400,16 +418,25 @@ struct L4D2VROpenXrEyeGazeDesc
 // Physical inputs per hand (protocol 18). face1 = A/X/Cross (lower face
 // button), face2 = B/Y/Circle (upper). Index: A/B on both hands. Controllers
 // without face buttons (WMR, Vive wand) report none of those bits.
+// Steam Frame (Xbox-style diamond): face1..4 = A/B/X/Y on the right hand and
+// D-pad down/right/left/up on the left (SteamVR's own mirror pairs), plus a
+// bumper on each hand. Only the Frame sets FACE3/FACE4/BUMPER.
 enum : uint32_t
 {
     L4D2VR_RAW_BUTTON_FACE1 = 1u << 0,
     L4D2VR_RAW_BUTTON_FACE2 = 1u << 1,
     L4D2VR_RAW_BUTTON_STICK_CLICK = 1u << 2,
     L4D2VR_RAW_BUTTON_MENU = 1u << 3,
+    L4D2VR_RAW_BUTTON_FACE3 = 1u << 4,
+    L4D2VR_RAW_BUTTON_FACE4 = 1u << 5,
+    L4D2VR_RAW_BUTTON_BUMPER = 1u << 6,
     L4D2VR_RAW_BUTTON_FACE1_PRESENT = 1u << 16, // bound on the active profile
     L4D2VR_RAW_BUTTON_FACE2_PRESENT = 1u << 17,
     L4D2VR_RAW_BUTTON_STICK_CLICK_PRESENT = 1u << 18,
     L4D2VR_RAW_BUTTON_GRIP_PRESENT = 1u << 19,
+    L4D2VR_RAW_BUTTON_FACE3_PRESENT = 1u << 20,
+    L4D2VR_RAW_BUTTON_FACE4_PRESENT = 1u << 21,
+    L4D2VR_RAW_BUTTON_BUMPER_PRESENT = 1u << 22,
 };
 
 struct L4D2VROpenXrRawHandDesc

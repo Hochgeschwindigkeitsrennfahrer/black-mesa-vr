@@ -2007,7 +2007,7 @@ namespace bmvr
 
     static float FamilyControllerPitchTilt(uint32_t controllerFamily)
     {
-        switch (controllerFamily)
+        switch (L4D2VR_ControllerFamilyPoseTuning(controllerFamily))
         {
         case L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH:
             return g_ControllerPitchTiltTouch;
@@ -2033,7 +2033,7 @@ namespace bmvr
         x = g_VrHandsPoseOffX;
         y = g_VrHandsPoseOffY;
         z = g_VrHandsPoseOffZ;
-        if (controllerFamily == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH)
+        if (L4D2VR_ControllerFamilyPoseTuning(controllerFamily) == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH)
         {
             x += g_VrHandsTouchOffX;
             y += g_VrHandsTouchOffY;

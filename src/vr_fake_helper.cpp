@@ -20,14 +20,16 @@
 //                                select back next prev weaponmenu sprint gripleft (pressed = analog 1)
 //   pressraw [<hand>.<input> ...]  physical buttons (protocol 18 rawHands; button
 //                                mapping on): hand left|right, input trigger grip
-//                                face1 face2 stickclick menu. The line alone (no
+//                                face1 face2 stickclick menu (family 5 Frame also
+//                                face3 face4 bumper). The line alone (no
 //                                inputs) = raw inputs present, nothing pressed.
 //                                Without it rawHands stay invalid = fixed layout,
 //                                so older scripts using `buttons` keep working.
 //                                Sticks: move = left, turn = right.
 //   system <name>                XrSystemProperties.systemName (default "PlayStation VR2")
 //   family <n>                   controller family (L4D2VR_OPENXR_CONTROLLER_FAMILY_*:
-//                                0 unknown, 1 Touch (default), 2 HP G2, 3 Index, 4 Vive)
+//                                0 unknown, 1 Touch (default), 2 HP G2, 3 Index, 4 Vive,
+//                                5 Steam Frame)
 //   move <x> <y> / turn <x> <y>  sticks
 //   poserate <hz>                pose updates per second (default 120; ~45 = game at half rate)
 //   throw <id> <dx> <dy> <dz> <seconds> <release>  right hand moves from its pose by
@@ -333,6 +335,9 @@ namespace
                     else if (input == "face2") fresh.rawButtons[h] |= L4D2VR_RAW_BUTTON_FACE2;
                     else if (input == "stickclick") fresh.rawButtons[h] |= L4D2VR_RAW_BUTTON_STICK_CLICK;
                     else if (input == "menu") fresh.rawButtons[h] |= L4D2VR_RAW_BUTTON_MENU;
+                    else if (input == "face3") fresh.rawButtons[h] |= L4D2VR_RAW_BUTTON_FACE3;
+                    else if (input == "face4") fresh.rawButtons[h] |= L4D2VR_RAW_BUTTON_FACE4;
+                    else if (input == "bumper") fresh.rawButtons[h] |= L4D2VR_RAW_BUTTON_BUMPER;
                 }
             }
             else if (key == "family")
@@ -638,6 +643,9 @@ namespace
                 r.valid = 1;
                 r.buttons = script.rawButtons[h] | L4D2VR_RAW_BUTTON_FACE1_PRESENT | L4D2VR_RAW_BUTTON_FACE2_PRESENT
                     | L4D2VR_RAW_BUTTON_STICK_CLICK_PRESENT | L4D2VR_RAW_BUTTON_GRIP_PRESENT;
+                if (script.family == L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME)
+                    r.buttons |= L4D2VR_RAW_BUTTON_FACE3_PRESENT | L4D2VR_RAW_BUTTON_FACE4_PRESENT
+                        | L4D2VR_RAW_BUTTON_BUMPER_PRESENT;
                 r.trigger = script.rawTrigger[h];
                 r.grip = script.rawGrip[h];
                 r.stick[0] = h == 0 ? script.moveX : script.turnX;

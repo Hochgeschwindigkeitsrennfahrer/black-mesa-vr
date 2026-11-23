@@ -47,11 +47,14 @@ namespace bmvr
     {
         Trigger = 0,
         Grip,
-        Face1,      // A / X / Cross (Index: A)
-        Face2,      // B / Y / Circle (Index: B)
+        Face1,      // A / X / Cross (Index: A; Frame: A / D-pad down)
+        Face2,      // B / Y / Circle (Index: B; Frame: B / D-pad right)
         StickClick,
         StickUp,
         StickDown,
+        Face3,      // Steam Frame only: right X / left D-pad left
+        Face4,      // Steam Frame only: right Y / left D-pad up
+        Bumper,     // Steam Frame only
         Count
     };
 

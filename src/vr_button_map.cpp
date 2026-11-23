@@ -48,12 +48,16 @@ namespace bmvr
 
         const char* const kInputTokens[kBindInputCount] =
         {
-            "trigger", "grip", "face1", "face2", "stickclick", "stickup", "stickdown"
+            "trigger", "grip", "face1", "face2", "stickclick", "stickup", "stickdown", "face3", "face4", "bumper"
         };
 
         // Overrides from VR/config.txt / the panel, key "touch.right.face1[.hold]".
         std::mutex g_BindMutex;
         std::map<std::string, BindAction> g_BindOverrides;
+
+        constexpr uint32_t kBindFamilies[] = { L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH, L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2,
+            L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES, L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE,
+            L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME };
 
         uint32_t StorageFamily(uint32_t family)
         {
@@ -114,6 +118,19 @@ namespace bmvr
     const char* BindInputLabel(uint32_t family, const char* systemName, int hand, BindInput input)
     {
         const bool left = hand == 0;
+        if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME)
+        {
+            // Left D-pad mirrors the right diamond (SteamVR's mirror pairs).
+            switch (input)
+            {
+            case BindInput::Face1: return left ? "D-pad down" : "A";
+            case BindInput::Face2: return left ? "D-pad right" : "B";
+            case BindInput::Face3: return left ? "D-pad left" : "X";
+            case BindInput::Face4: return left ? "D-pad up" : "Y";
+            case BindInput::Bumper: return "Bumper";
+            default: break;
+            }
+        }
         switch (input)
         {
         case BindInput::Trigger: return "Trigger";
@@ -133,6 +150,9 @@ namespace bmvr
             if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES)
                 return "B";
             return left ? "Y" : "B";
+        case BindInput::Face3: return left ? "D-pad left" : "X";
+        case BindInput::Face4: return left ? "D-pad up" : "Y";
+        case BindInput::Bumper: return "Bumper";
         default: return "?";
         }
     }
@@ -158,6 +178,14 @@ namespace bmvr
             if (rawButtons)
                 return (rawButtons & L4D2VR_RAW_BUTTON_FACE2_PRESENT) != 0;
             return family != L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE && family != L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2;
+        // Steam Frame only. Without raw inputs (old helper) the Frame's
+        // native profile is not bound either, so these never show then.
+        case BindInput::Face3:
+            return (rawButtons & L4D2VR_RAW_BUTTON_FACE3_PRESENT) != 0;
+        case BindInput::Face4:
+            return (rawButtons & L4D2VR_RAW_BUTTON_FACE4_PRESENT) != 0;
+        case BindInput::Bumper:
+            return (rawButtons & L4D2VR_RAW_BUTTON_BUMPER_PRESENT) != 0;
         default:
             return false;
         }
@@ -169,7 +197,11 @@ namespace bmvr
         // (AddTouchFaceButtonBindings / AddIndexFaceButtonBindings / AddStickAndTriggerBindings).
         family = StorageFamily(family);
         const bool knuckles = family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES;
-        const bool faces = family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH || knuckles;
+        // Steam Frame = the Touch layout: right A/B as on Touch, left D-pad
+        // down / up where Touch has X / Y (the helper's AddFrameFaceButtonBindings).
+        // Bumpers, right X/Y and D-pad left/right start free.
+        const bool frame = family == L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME;
+        const bool faces = family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH || knuckles || frame;
         // Fixed since 2026-11-18. The old switches that changed these defaults
         // (FlashlightOnSquare, SettingsTriangleHold, CrouchStickHold) are
         // turned into mappings once (MigrateLegacyBindSettings) and only
@@ -187,7 +219,14 @@ namespace bmvr
                     s.press = BindAction::PrevWeapon;
                 break;
             case BindInput::Face2:
-                if (faces)
+                if (faces && !frame)
+                {
+                    s.press = BindAction::Pause;
+                    s.hold = pauseHold;
+                }
+                break;
+            case BindInput::Face4:
+                if (frame)
                 {
                     s.press = BindAction::Pause;
                     s.hold = pauseHold;
@@ -252,8 +291,7 @@ namespace bmvr
             return false;
         }
         uint32_t family = ~0u;
-        for (uint32_t f : { L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH, L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2,
-                 L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES, L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE })
+        for (uint32_t f : kBindFamilies)
             if (_stricmp(parts[0], L4D2VR_ControllerFamilyName(f)) == 0)
                 family = f;
         const int hand = _stricmp(parts[1], "left") == 0 ? 0 : _stricmp(parts[1], "right") == 0 ? 1 : -1;
@@ -302,14 +340,16 @@ namespace bmvr
         if (flashlightOnSquare)
             wants.push_back({ 0, BindInput::Face1, false, BindAction::Flashlight, "FlashlightOnSquare" });
         if (!triangleHold)
+        {
             wants.push_back({ 0, BindInput::Face2, true, BindAction::Nothing, "SettingsTriangleHold" });
+            wants.push_back({ 0, BindInput::Face4, true, BindAction::Nothing, "SettingsTriangleHold" }); // Frame D-pad up
+        }
         if (!crouchStickHold)
             wants.push_back({ 1, BindInput::StickDown, false, BindAction::CrouchToggle, "CrouchStickHold" });
         if (!sprintToggle)
             wants.push_back({ 0, BindInput::StickClick, false, BindAction::Sprint, "SprintToggle" });
         std::lock_guard<std::mutex> lock(g_BindMutex);
-        for (uint32_t f : { L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH, L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2,
-                 L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES, L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE })
+        for (uint32_t f : kBindFamilies)
         {
             for (const Want& w : wants)
             {
@@ -318,7 +358,7 @@ namespace bmvr
                 // Only where the old switch changed something (e.g. Square is
                 // Previous weapon only on Touch-style controllers).
                 const bool applies = w.input == BindInput::Face1 ? defA == BindAction::PrevWeapon
-                    : w.input == BindInput::Face2 ? defA == BindAction::VrSettings
+                    : (w.input == BindInput::Face2 || w.input == BindInput::Face4) ? defA == BindAction::VrSettings
                     : w.input == BindInput::StickClick ? defA == BindAction::SprintToggle
                     : defA == BindAction::CrouchHold;
                 if (!applies || defA == w.a)
@@ -390,7 +430,8 @@ namespace bmvr
         bool FamilyHasFaces(uint32_t family)
         {
             family = StorageFamily(family);
-            return family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES;
+            return family == L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES
+                || family == L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME;
         }
     }
 
@@ -533,6 +574,9 @@ namespace bmvr
             down[hand][static_cast<int>(BindInput::Face1)] = (r.buttons & L4D2VR_RAW_BUTTON_FACE1) != 0;
             down[hand][static_cast<int>(BindInput::Face2)] = (r.buttons & L4D2VR_RAW_BUTTON_FACE2) != 0;
             down[hand][static_cast<int>(BindInput::StickClick)] = (r.buttons & L4D2VR_RAW_BUTTON_STICK_CLICK) != 0;
+            down[hand][static_cast<int>(BindInput::Face3)] = (r.buttons & L4D2VR_RAW_BUTTON_FACE3) != 0;
+            down[hand][static_cast<int>(BindInput::Face4)] = (r.buttons & L4D2VR_RAW_BUTTON_FACE4) != 0;
+            down[hand][static_cast<int>(BindInput::Bumper)] = (r.buttons & L4D2VR_RAW_BUTTON_BUMPER) != 0;
             down[hand][kBindInputCount] = (r.buttons & L4D2VR_RAW_BUTTON_MENU) != 0;
         }
 

@@ -255,7 +255,7 @@ namespace
         log.Print("Enabling OpenXR extension %s", name);
     }
 
-    // Quest 3 / Touch Plus, Touch Pro, Pico, Cosmos, Focus 3, and G2 profiles
+    // Quest 3 / Touch Plus, Touch Pro, Pico, Cosmos, Focus 3, G2 and Steam Frame profiles
     // are extension-gated. Suggesting them without the extension returns
     // XR_ERROR_PATH_UNSUPPORTED for the whole profile, so Pause never binds.
     void AppendInteractionProfileExtensions(
@@ -270,6 +270,8 @@ namespace
             XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME,
             XR_HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION_EXTENSION_NAME,
             XR_EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME,
+            // Steam Frame controllers (SteamVR; not in the OpenXR 1.1.60 headers).
+            "XR_VALVE_frame_controller_interaction",
         };
         for (const char* name : kOptional)
             AppendOpenXrExtensionIfSupported(available, enabled, name, log);
@@ -2381,6 +2383,7 @@ namespace
         void AddGripValueBindings(std::vector<XrActionSuggestedBinding>& bindings, const char* gripValueName);
         void AddTouchFaceButtonBindings(std::vector<XrActionSuggestedBinding>& bindings);
         void AddIndexFaceButtonBindings(std::vector<XrActionSuggestedBinding>& bindings);
+        void AddFrameFaceButtonBindings(std::vector<XrActionSuggestedBinding>& bindings);
         void AddMenuButtonBindings(std::vector<XrActionSuggestedBinding>& bindings);
         void SuggestBindings(Logger& log);
         std::string PathToString(XrPath path) const;
@@ -2428,6 +2431,9 @@ namespace
         XrAction m_RawFace2 = XR_NULL_HANDLE;
         XrAction m_RawStickClick = XR_NULL_HANDLE;
         XrAction m_RawMenu = XR_NULL_HANDLE;
+        XrAction m_RawFace3 = XR_NULL_HANDLE;   // Steam Frame only (see L4D2VR_RAW_BUTTON_FACE3)
+        XrAction m_RawFace4 = XR_NULL_HANDLE;
+        XrAction m_RawBumper = XR_NULL_HANDLE;
         bool m_RawReady = false;
         char m_SystemName[64] = {};
         bool m_EyeGazeEnabled = false;
@@ -4960,7 +4966,10 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_face1", "Raw Lower Face Button", m_RawFace1, log) &&
             CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_face2", "Raw Upper Face Button", m_RawFace2, log) &&
             CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_stick_click", "Raw Stick Click", m_RawStickClick, log) &&
-            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_menu", "Raw Menu Button", m_RawMenu, log);
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_menu", "Raw Menu Button", m_RawMenu, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_face3", "Raw Third Face Button", m_RawFace3, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_face4", "Raw Fourth Face Button", m_RawFace4, log) &&
+            CreateSubactionAction(m_MainActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "raw_bumper", "Raw Bumper", m_RawBumper, log);
     }
 
     namespace
@@ -4977,6 +4986,13 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             const char* faceRight2;
             const char* menuLeft;
             const char* menuRight;
+            // Steam Frame only: third/fourth face button per hand, bumper.
+            const char* faceLeft3 = nullptr;
+            const char* faceLeft4 = nullptr;
+            const char* faceRight3 = nullptr;
+            const char* faceRight4 = nullptr;
+            const char* bumper = nullptr;
+            const char* gripAlt = nullptr; // second grip name tried (one of the two is dropped)
         };
 
         const RawProfileLayout kRawProfileLayouts[] =
@@ -4991,6 +5007,13 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             { "/interaction_profiles/htc/vive_focus3_controller", "thumbstick", "squeeze/click", "x", "y", "a", "b", "menu", nullptr },
             { "/interaction_profiles/microsoft/motion_controller", "thumbstick", "squeeze/click", nullptr, nullptr, nullptr, nullptr, "menu", "menu" },
             { "/interaction_profiles/htc/vive_controller", "trackpad", "squeeze/click", nullptr, nullptr, nullptr, nullptr, "menu", "menu" },
+            // Steam Frame: left D-pad down/right/left/up mirrors right A/B/X/Y
+            // (SteamVR frame_controller_profile.json mirror_mappings); View = left menu.
+            // The extension is not in the public registry yet: component names
+            // follow SteamVR's paths, SuggestProfile drops any it rejects.
+            { "/interaction_profiles/valve/frame_controller", "thumbstick", "squeeze/value",
+              "dpad_down", "dpad_right", "a", "b", "view", "menu",
+              "dpad_left", "dpad_up", "x", "y", "bumper", "grip/value" },
         };
 
         const RawProfileLayout* FindRawProfileLayout(const char* profilePath)
@@ -5018,6 +5041,8 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             AddBinding(b, m_RawTrigger, (base + "trigger/value").c_str());
             if (l->grip)
                 AddBinding(b, m_RawGrip, (base + l->grip).c_str());
+            if (l->gripAlt)
+                AddBinding(b, m_RawGrip, (base + l->gripAlt).c_str());
             AddBinding(b, m_RawStick, (base + l->stick).c_str());
             AddBinding(b, m_RawStickClick, (base + l->stick + "/click").c_str());
             const char* f1 = h == 0 ? l->faceLeft1 : l->faceRight1;
@@ -5029,6 +5054,14 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 AddBinding(b, m_RawFace2, (base + f2 + "/click").c_str());
             if (menu)
                 AddBinding(b, m_RawMenu, (base + menu + "/click").c_str());
+            const char* f3 = h == 0 ? l->faceLeft3 : l->faceRight3;
+            const char* f4 = h == 0 ? l->faceLeft4 : l->faceRight4;
+            if (f3)
+                AddBinding(b, m_RawFace3, (base + f3 + "/click").c_str());
+            if (f4)
+                AddBinding(b, m_RawFace4, (base + f4 + "/click").c_str());
+            if (l->bumper)
+                AddBinding(b, m_RawBumper, (base + l->bumper + "/click").c_str());
         }
     }
 
@@ -5047,6 +5080,12 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             bits |= L4D2VR_RAW_BUTTON_FACE1_PRESENT;
         if (hand == L4D2VR_OPENXR_HAND_LEFT ? l->faceLeft2 != nullptr : l->faceRight2 != nullptr)
             bits |= L4D2VR_RAW_BUTTON_FACE2_PRESENT;
+        if (hand == L4D2VR_OPENXR_HAND_LEFT ? l->faceLeft3 != nullptr : l->faceRight3 != nullptr)
+            bits |= L4D2VR_RAW_BUTTON_FACE3_PRESENT;
+        if (hand == L4D2VR_OPENXR_HAND_LEFT ? l->faceLeft4 != nullptr : l->faceRight4 != nullptr)
+            bits |= L4D2VR_RAW_BUTTON_FACE4_PRESENT;
+        if (l->bumper)
+            bits |= L4D2VR_RAW_BUTTON_BUMPER_PRESENT;
         return bits;
     }
 
@@ -5098,6 +5137,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             readBool(m_RawFace2, L4D2VR_RAW_BUTTON_FACE2);
             readBool(m_RawStickClick, L4D2VR_RAW_BUTTON_STICK_CLICK);
             readBool(m_RawMenu, L4D2VR_RAW_BUTTON_MENU);
+            readBool(m_RawFace3, L4D2VR_RAW_BUTTON_FACE3);
+            readBool(m_RawFace4, L4D2VR_RAW_BUTTON_FACE4);
+            readBool(m_RawBumper, L4D2VR_RAW_BUTTON_BUMPER);
             raw.buttons |= RawPresentBits(hand);
             raw.valid = any ? 1u : 0u;
         }
@@ -5316,6 +5358,20 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/system/click");
     }
 
+    void OpenXrInputBridge::AddFrameFaceButtonBindings(std::vector<XrActionSuggestedBinding>& b)
+    {
+        // Touch layout on the Frame's diamonds: right A/B as on Touch, left
+        // D-pad down / up where Touch has X / Y, View = Pause. Bumpers, right
+        // X/Y and D-pad left/right stay free for the CONTROLS tab (raw inputs).
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::SecondaryAttack)], "/user/hand/right/input/b/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Reload)], "/user/hand/right/input/a/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::MenuSelect)], "/user/hand/right/input/a/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::MenuBack)], "/user/hand/right/input/b/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::PrevItem)], "/user/hand/left/input/dpad_down/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/dpad_up/click");
+        AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::Pause)], "/user/hand/left/input/view/click");
+    }
+
     void OpenXrInputBridge::AddMenuButtonBindings(std::vector<XrActionSuggestedBinding>& b)
     {
         AddBinding(b, m_BooleanActions[Index(L4D2VROpenXrActionId::ActivateVR)], "/user/hand/right/input/menu/click");
@@ -5340,6 +5396,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             "/interaction_profiles/htc/vive_focus3_controller",
             "/interaction_profiles/htc/vive_controller",
             "/interaction_profiles/bytedance/pico4_controller",
+            "/interaction_profiles/valve/frame_controller",
             "/interaction_profiles/khr/simple_controller",
         };
 
@@ -5375,6 +5432,18 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             AddGripValueBindings(b, "squeeze/value");
             AddIndexFaceButtonBindings(b);
             SuggestProfile(log, "/interaction_profiles/valve/index_controller", b);
+        }
+        {
+            // Native Steam Frame profile: without it SteamVR falls back to its
+            // Touch emulation, which folds bumper into trigger, right X/Y into B
+            // and the whole D-pad into X/Y (upstream issue #20).
+            std::vector<XrActionSuggestedBinding> b;
+            AddPoseAndHapticBindings(b);
+            AddStickAndTriggerBindings(b, "thumbstick");
+            AddGripValueBindings(b, "squeeze/value");
+            AddGripValueBindings(b, "grip/value");
+            AddFrameFaceButtonBindings(b);
+            SuggestProfile(log, "/interaction_profiles/valve/frame_controller", b);
         }
         {
             std::vector<XrActionSuggestedBinding> b;
@@ -5546,6 +5615,9 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             DestroyAction(m_RawFace2);
             DestroyAction(m_RawStickClick);
             DestroyAction(m_RawMenu);
+            DestroyAction(m_RawFace3);
+            DestroyAction(m_RawFace4);
+            DestroyAction(m_RawBumper);
             m_RawReady = false;
             for (XrAction& action : m_BooleanActions)
                 DestroyAction(action);

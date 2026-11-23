@@ -263,10 +263,16 @@ namespace
             { "", RowKind::BindPicture, nullptr, nullptr, nullptr, 0, 0, 0, "L" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.trigger" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.grip" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.bumper" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.bumper.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face1" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face1.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face2" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face2.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face3" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face3.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face4" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.face4.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.stickclick" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "L.stickclick.hold" },
             { "Stick", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "fixedL:Move" },
@@ -282,10 +288,16 @@ namespace
             { "", RowKind::BindPicture, nullptr, nullptr, nullptr, 0, 0, 0, "R" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.trigger" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.grip" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.bumper" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.bumper.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face1" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face1.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face2" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face2.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face3" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face3.hold" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face4" },
+            { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.face4.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickclick" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickclick.hold" },
             { "", RowKind::Bind, nullptr, nullptr, nullptr, 0, 0, 0, "R.stickup" },
@@ -575,6 +587,7 @@ namespace
         case L4D2VR_OPENXR_CONTROLLER_FAMILY_HP_G2: return "WMR";
         case L4D2VR_OPENXR_CONTROLLER_FAMILY_VIVE: return "Vive";
         case L4D2VR_OPENXR_CONTROLLER_FAMILY_TOUCH: return "Touch";
+        case L4D2VR_OPENXR_CONTROLLER_FAMILY_FRAME: return "Steam Frame";
         default: return "not detected yet";
         }
     }
