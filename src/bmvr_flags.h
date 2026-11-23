@@ -442,24 +442,53 @@ namespace bmvr
     extern bool g_ScopeClipIdle;         // crossbow to/from-scope clips show idle (the clip moves the gun to the eye)
     extern bool g_MuteFidgetSounds;      // weapon fidget clips play no sound (the pose is frozen in VR)
     // Optional features, default off:
-    // Grab zones (grip with the hand there). Left shoulder (left hand):
-    // -1 off, 0 quick save (default), 1 flashlight toggle, 2 ammo (the manual-reload
-    // ammo grab also works here, besides the left hip; no quick save / flashlight).
-    extern float g_GestureLeftShoulder;
-    // Weapon each right-hand zone takes (index into GestureWeaponName / parts),
-    // -1 = zone off: 0 crowbar, 1 pistol, 2 .357, 3 MP5, 4 shotgun, 5 crossbow,
-    // 6 RPG, 7 tau, 8 gluon, 9 hivehand, 10 grenade. Floats for the panel's
-    // Choice rows. The old ShoulderGestures / HipGestures switches (false =
-    // zones off) migrate once to these values and are dropped from config.txt.
-    extern float g_GestureWeaponShoulder;  // right shoulder (default crowbar)
-    extern float g_GestureWeaponHipRight;  // right hip (default pistol)
-    extern float g_GestureWeaponHipLeft;   // above the left hip, cross draw (default MP5)
+    // Grab zones (grip with the hand there). Every zone has a slot per hand
+    // (user 2026-11-23): the left hand does an action, the right hand takes a
+    // weapon. The forehead (head frame) has a left-hand slot only: the gun
+    // hand aims and scopes there.
+    enum GestureZoneId
+    {
+        kGestureShoulderLeft = 0,
+        kGestureShoulderRight,
+        kGestureHipLeft,        // right hand: just above it (cross draw)
+        kGestureHipRight,       // left hand: just above it (cross draw)
+        kGestureHead,
+        kGestureZoneCount
+    };
+    constexpr int kGestureWeaponZoneCount = 4;   // all but the forehead
+    // Left-hand actions. Ammo = the manual-reload ammo pouch (live only while
+    // manual reload is on). Quick load needs a ~1 s grip hold.
+    enum GestureAction
+    {
+        kGestureOff = -1,
+        kGestureQuickSave = 0,
+        kGestureFlashlight,
+        kGestureAmmo,
+        kGestureQuickLoad,
+        kGestureScreenshot,
+        kGestureRecenter,
+        kGestureActionMax = kGestureRecenter
+    };
+    extern float g_GestureLeft[kGestureZoneCount];
+    // Right-hand slots: -1 off, a weapon (index into GestureWeaponName / parts:
+    // 0 crowbar, 1 pistol, 2 .357, 3 MP5, 4 shotgun, 5 crossbow, 6 RPG, 7 tau,
+    // 8 gluon, 9 hivehand, 10 grenade), or kGestureDynamic: the zone holds the
+    // weapon last put away there (g_GestureDyn, -1 = none yet; written by the
+    // game). Floats for the panel's Choice rows. The old ShoulderGestures /
+    // HipGestures switches and VrHolsterDynamic migrate once and are dropped.
+    constexpr int kGestureWeaponCount = 11;
+    constexpr int kGestureDynamic = kGestureWeaponCount;
+    extern float g_GestureRight[kGestureWeaponZoneCount];
+    extern float g_GestureDyn[kGestureWeaponZoneCount];
+    const char* GestureLeftKey(int zone);    // config.txt keys
+    const char* GestureRightKey(int zone);
+    const char* GestureDynKey(int zone);
+    const char* GestureZoneName(int zone);   // "left shoulder", ...
+    const char* GestureActionName(int action);
+    // The right-hand slot's weapon now (a Dynamic zone's stored one), -1 = none.
+    int GestureWeaponAt(int zone);
     // Grip in a weapon's own zone while holding that weapon puts it away (empty hands). Off = the grip there does nothing.
     extern bool g_VrHolsterBack;
-    // With VrHolsterBack: the grip in another weapon zone while holding a zone
-    // weapon puts it away there and makes that zone take it from then on
-    // (saved to config.txt; the zone that took it before gets the old weapon).
-    extern bool g_VrHolsterDynamic;
     // Grab zones follow an estimated body yaw + neck point, not the headset
     // (debug A/B, not saved; on by default). Tunables in VR/config.txt and the
     // Debug tab TESTS rows.
@@ -471,7 +500,6 @@ namespace bmvr
     extern float g_BodyYawHardLimitDeg;   // body dragged along past this (80)
     extern float g_BodyYawCatchUpSec;     // head held past the dead zone this long -> body turns (0.8)
     extern float g_BodyYawCatchUpDegPerSec; // turn speed while catching up (120)
-    constexpr int kGestureWeaponCount = 11;
     const char* GestureWeaponName(int index);
     // Name parts matched against the inventory's network / model names (nullptr-terminated).
     const char* const* GestureWeaponParts(int index);

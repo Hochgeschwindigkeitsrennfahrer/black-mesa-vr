@@ -175,15 +175,21 @@ namespace
             { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Reset hands + HUD position", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
             { "GRAB GESTURES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            // One row per zone, Off as a choice (user 2026-11-19). A weapon zone only
-            // buzzes and takes the grip while you carry that weapon.
-            { "Left shoulder action", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeftShoulder, 1.f, -1.f, 2.f, "Off|Quick save|Flashlight|Ammo" },
-            { "Right shoulder takes", RowKind::Choice, "GestureWeaponShoulder", nullptr, &bmvr::g_GestureWeaponShoulder, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
-            { "Left hip takes", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureWeaponHipLeft, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
-            { "Right hip takes", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureWeaponHipRight, 1.f, -1.f, 10.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade" },
+            // A row per zone and hand, Off as a choice (user 2026-11-19, per hand
+            // 2026-11-23). Left hand: an action (quick load = 1 s hold). Right hand:
+            // a weapon, buzzes and takes the grip only while you carry it; Dynamic =
+            // the weapon you last put away there (ChoiceText shows which).
+            { "Left shoulder, left hand", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Left shoulder, right hand", RowKind::Choice, "GestureWeaponShoulderLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Right shoulder, left hand", RowKind::Choice, "GestureLeftHandShoulderRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Right shoulder, right hand", RowKind::Choice, "GestureWeaponShoulder", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Left hip, left hand", RowKind::Choice, "GestureLeftHandHipLeft", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Left hip, right hand", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Right hip, left hand", RowKind::Choice, "GestureLeftHandHipRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Right hip, right hand", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
+            { "Forehead, left hand", RowKind::Choice, "GestureLeftHandHead", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHead], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Manual reload ammo from", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "ammo_zones" },
             { "Allow holstering", RowKind::Toggle, "VrHolsterBack", &bmvr::g_VrHolsterBack, nullptr, 0, 0, 0, nullptr },
-            // Put a weapon away in another zone = that zone takes it from then on (user 2026-11-20).
-            { "Dynamic holsters", RowKind::Toggle, "VrHolsterDynamic", &bmvr::g_VrHolsterDynamic, nullptr, 0, 0, 0, nullptr },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
             { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -752,28 +758,33 @@ namespace
                 grab += grab.empty() ? "Ladders" : ", ladders";
             if (!grab.empty())
                 fixedLine("Grab", grab);
-            const int leftShoulder = static_cast<int>(std::lround(bmvr::g_GestureLeftShoulder));
-            if (hand == 0 && leftShoulder >= 0)
-                fixedLine("Shoulder", leftShoulder == 2 ? "Ammo" : leftShoulder == 1 ? "Flashlight" : "Quick save");
-            // Manual reloads: the left grip takes ammo at the left hip and works the bolt / slide / pump.
-            if (hand == 0 && bmvr::PhysicalWeapon(bmvr::g_VrMagReload))
-                fixedLine("Left hip", "Magazine, shells, rocket");
-            if (hand == 1)
+            // Grab zones of this hand: left = actions, right = weapons.
+            std::string zones;
+            auto addZone = [&](int z, const char* what) {
+                zones += zones.empty() ? "" : ", ";
+                zones += std::string(bmvr::GestureZoneName(z)) + " " + what;
+            };
+            if (hand == 0)
             {
-                std::string zones;
-                auto addZone = [&](const char* where, float v) {
-                    const int w = static_cast<int>(std::lround(v));
-                    if (w < 0)
-                        return;
-                    zones += zones.empty() ? "" : ", ";
-                    zones += std::string(where) + " " + bmvr::GestureWeaponName(w);
-                };
-                addZone("Shoulder", bmvr::g_GestureWeaponShoulder);
-                addZone("left hip", bmvr::g_GestureWeaponHipLeft);
-                addZone("right hip", bmvr::g_GestureWeaponHipRight);
-                if (!zones.empty())
-                    fixedLine("Take", zones);
+                for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
+                {
+                    const int a = static_cast<int>(std::lround(bmvr::g_GestureLeft[z]));
+                    if (a >= 0 && (a != bmvr::kGestureAmmo || bmvr::PhysicalWeapon(bmvr::g_VrMagReload)))
+                        addZone(z, bmvr::GestureActionName(a));
+                }
             }
+            else
+            {
+                for (int z = 0; z < bmvr::kGestureWeaponZoneCount; ++z)
+                {
+                    const int setting = static_cast<int>(std::lround(bmvr::g_GestureRight[z]));
+                    const int w = bmvr::GestureWeaponAt(z);
+                    if (setting >= 0)
+                        addZone(z, setting == bmvr::kGestureDynamic && w < 0 ? "dynamic" : bmvr::GestureWeaponName(w));
+                }
+            }
+            if (!zones.empty())
+                fixedLine("Zones", zones);
         }
 
         // Cards stack from the top of the area; the picture is moved so its
@@ -1105,6 +1116,18 @@ namespace
         }
         const char* e = std::strchr(p, '|');
         std::string name = e ? std::string(p, e) : std::string(p);
+        // A Dynamic grab zone: which weapon it holds now.
+        for (int z = 0; z < bmvr::kGestureWeaponZoneCount; ++z)
+            if (r.f == &bmvr::g_GestureRight[z] && std::lround(*r.f) == bmvr::kGestureDynamic)
+            {
+                // The weapon's own option label ("MP5"): option w + 1 (after Off).
+                const int w = bmvr::GestureWeaponAt(z);
+                const char* o = r.fmt;
+                for (int i = 0; i < w + 1 && o; ++i)
+                    o = std::strchr(o, '|') ? std::strchr(o, '|') + 1 : nullptr;
+                const char* oe = o ? std::strchr(o, '|') : nullptr;
+                name += w >= 0 && o ? " (" + (oe ? std::string(o, oe) : std::string(o)) + ")" : " (empty)";
+            }
         if (g_DefaultsCaptured && std::lround((*r.f - r.lo) / r.step) == std::lround((r.defF - r.lo) / r.step))
             name += " (default)";
         return name;
@@ -1351,8 +1374,6 @@ namespace
             return g_SnapTurning;
         if (is({ "LadderBodyFollowsArms", "LadderGunHand", "LadderHandBack", "LadderHandWrap", "LadderStickClimb" }))
             return !g_PhysicalLadders;
-        if (is({ "VrHolsterDynamic" }))
-            return !g_VrHolsterBack;
         if (is({ "DamageFlashStrength" }))
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
@@ -1728,6 +1749,17 @@ namespace
             return std::string(std::strchr(r.fmt, ':') + 1) + " (fixed)";
         if (r.fmt && std::strcmp(r.fmt, "foveation") == 0)
             return bmvr::FoveationStatusText();
+        if (r.fmt && std::strcmp(r.fmt, "ammo_zones") == 0)
+        {
+            // Left-hand slots set to Ammo; none while manual reload is on = no way to reload.
+            if (!bmvr::PhysicalWeapon(bmvr::g_VrMagReload))
+                return "manual reload off";
+            std::string zones;
+            for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
+                if (std::lround(bmvr::g_GestureLeft[z]) == bmvr::kGestureAmmo)
+                    zones += (zones.empty() ? "" : ", ") + std::string(bmvr::GestureZoneName(z));
+            return zones.empty() ? "! NO ZONE: set a left hand to Ammo" : zones;
+        }
         if (!r.fmt || std::strcmp(r.fmt, "missing_hooks") != 0)
             return {};
         const int game = Game::missingOffsetCount(), debug = Game::missingDebugOffsetCount();

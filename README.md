@@ -23,8 +23,10 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **6DOF motion controls**, the gun follows your hand, and you aim with the controller while you walk where you look.
 - **Two-handed weapons:** put your off-hand on the forend of a rifle, shotgun, MP5, crossbow and so on and hold grip;
   the glove sits on the gun and steadies it.
-- **Quick-draw gestures:** right hand at the right hip + grip = pistol, right hand above the left hip + grip = MP5,
-  right hand behind the shoulder + grip = crowbar, left hand behind the shoulder (hold until a light buzz) + grip = quick save.
+- **Grab gestures:** a hand behind a shoulder, at a hip or (left hand) at the forehead + grip. Each zone has a setting
+  per hand: the right hand draws a weapon (default: right shoulder crowbar, right hip pistol, above the left hip MP5;
+  "Dynamic" zones keep what you put away there), the left hand does an action (quick save, flashlight, ammo, quick
+  load, screenshot, recenter; default: left shoulder quick save, left hip ammo, forehead flashlight).
 - **Crowbar swinging** that hits where you swing (HL2VR style).
 - **HL2VR-style weapon wheel**, with the VR settings gear below the crowbar.
 - **Grenades thrown at the speed of your hand.**

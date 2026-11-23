@@ -198,12 +198,68 @@ namespace bmvr
     static bool g_ShoulderGestures = true;   // old switches, read only for the migration
     static bool g_HipGestures = true;
     static bool g_OldGestureKeysSeen = false;
-    float g_GestureLeftShoulder = 0.f;
-    float g_GestureWeaponShoulder = 0.f;
-    float g_GestureWeaponHipRight = 1.f;
-    float g_GestureWeaponHipLeft = 3.f;
+    static bool g_VrHolsterDynamic = false;    // old switch, read only for the migration
+    static bool g_OldHolsterDynamicSeen = false;
+    // Defaults: left shoulder quick save, left hip ammo, forehead flashlight;
+    // right shoulder crowbar, above the left hip MP5, right hip pistol.
+    float g_GestureLeft[kGestureZoneCount] = { 0.f, -1.f, 2.f, -1.f, 1.f };
+    float g_GestureRight[kGestureWeaponZoneCount] = { -1.f, 0.f, 3.f, 1.f };
+    float g_GestureDyn[kGestureWeaponZoneCount] = { -1.f, -1.f, -1.f, -1.f };
+    namespace
+    {
+        // Old keys kept: GestureLeftShoulder, GestureWeaponShoulder (right shoulder).
+        const char* const kGestureLeftKeys[kGestureZoneCount] = { "GestureLeftShoulder",
+            "GestureLeftHandShoulderRight", "GestureLeftHandHipLeft", "GestureLeftHandHipRight", "GestureLeftHandHead" };
+        const char* const kGestureRightKeys[kGestureWeaponZoneCount] = { "GestureWeaponShoulderLeft",
+            "GestureWeaponShoulder", "GestureWeaponHipLeft", "GestureWeaponHipRight" };
+        const char* const kGestureDynKeys[kGestureWeaponZoneCount] = { "GestureDynShoulderLeft",
+            "GestureDynShoulderRight", "GestureDynHipLeft", "GestureDynHipRight" };
+        const char* const kGestureZoneNames[kGestureZoneCount] = { "left shoulder", "right shoulder", "left hip",
+            "right hip", "forehead" };
+        const char* const kGestureActionNames[kGestureActionMax + 1] = { "quick save", "flashlight", "ammo",
+            "quick load", "screenshot", "recenter" };
+    }
+    const char* GestureLeftKey(int zone) { return zone >= 0 && zone < kGestureZoneCount ? kGestureLeftKeys[zone] : ""; }
+    const char* GestureRightKey(int zone) { return zone >= 0 && zone < kGestureWeaponZoneCount ? kGestureRightKeys[zone] : ""; }
+    const char* GestureDynKey(int zone) { return zone >= 0 && zone < kGestureWeaponZoneCount ? kGestureDynKeys[zone] : ""; }
+    const char* GestureZoneName(int zone) { return zone >= 0 && zone < kGestureZoneCount ? kGestureZoneNames[zone] : ""; }
+    const char* GestureActionName(int action)
+    {
+        return action >= 0 && action <= kGestureActionMax ? kGestureActionNames[action] : "off";
+    }
+    int GestureWeaponAt(int zone)
+    {
+        if (zone < 0 || zone >= kGestureWeaponZoneCount)
+            return -1;
+        int w = static_cast<int>(std::lround(g_GestureRight[zone]));
+        if (w == kGestureDynamic)
+            w = static_cast<int>(std::lround(g_GestureDyn[zone]));
+        return w >= 0 && w < kGestureWeaponCount ? w : -1;
+    }
+    // Grab-zone slot keys; out-of-range values keep the default. False = not one.
+    static bool ReadGestureKey(const char* n, const char* val)
+    {
+        if (std::strncmp(n, "Gesture", 7) != 0)
+            return false;
+        const int v = atoi(val);
+        auto set = [&](float& f, int hi) {
+            if (v >= -1 && v <= hi)
+                f = static_cast<float>(v);
+            return true;
+        };
+        for (int z = 0; z < kGestureZoneCount; ++z)
+            if (std::strcmp(n, kGestureLeftKeys[z]) == 0)
+                return set(g_GestureLeft[z], kGestureActionMax);
+        for (int z = 0; z < kGestureWeaponZoneCount; ++z)
+        {
+            if (std::strcmp(n, kGestureRightKeys[z]) == 0)
+                return set(g_GestureRight[z], kGestureDynamic);
+            if (std::strcmp(n, kGestureDynKeys[z]) == 0)
+                return set(g_GestureDyn[z], kGestureWeaponCount - 1);
+        }
+        return false;
+    }
     bool g_VrHolsterBack = false;
-    bool g_VrHolsterDynamic = false;
     bool g_GestureBodyFrame = true;
     bool g_MenuRoomFront = true;
     float g_BodyYawDeadzoneDeg = 35.f;
@@ -893,20 +949,8 @@ namespace bmvr
                 g_HipGestures = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
                 g_OldGestureKeysSeen = true;
             }
-            else if (std::strcmp(n, "GestureLeftShoulder") == 0)
-            {
-                const int v = atoi(val);
-                if (v >= -1 && v <= 2)
-                    g_GestureLeftShoulder = static_cast<float>(v);
-            }
-            else if (std::strcmp(n, "GestureWeaponShoulder") == 0 || std::strcmp(n, "GestureWeaponHipRight") == 0
-                || std::strcmp(n, "GestureWeaponHipLeft") == 0)
-            {
-                const int w = atoi(val);
-                if (w >= -1 && w < kGestureWeaponCount)
-                    (n[13] == 'S' ? g_GestureWeaponShoulder : n[16] == 'R' ? g_GestureWeaponHipRight : g_GestureWeaponHipLeft)
-                        = static_cast<float>(w);
-            }
+            else if (ReadGestureKey(n, val))
+                continue;
             else if (std::strcmp(n, "SettingsTriangleHold") == 0)
             {
                 g_SettingsTriangleHold = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
@@ -921,7 +965,10 @@ namespace bmvr
             else if (std::strcmp(n, "VrHolsterBack") == 0)
                 g_VrHolsterBack = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHolsterDynamic") == 0)
+            {
                 g_VrHolsterDynamic = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_OldHolsterDynamicSeen = true;
+            }
             else if (std::strcmp(n, "VrPistolSemiAuto") == 0)
                 g_VrPistolSemiAuto = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrGlockRapidAlt") == 0)
@@ -2211,23 +2258,44 @@ namespace bmvr
         if (g_OldGestureKeysSeen)
         {
             std::vector<std::pair<std::string, std::string>> set;
+            auto off = [&](float& f, const char* key) {
+                f = -1.f;
+                set.emplace_back(key, "-1");
+            };
             if (!g_ShoulderGestures)
             {
-                g_GestureLeftShoulder = -1.f;
-                g_GestureWeaponShoulder = -1.f;
-                set.emplace_back("GestureLeftShoulder", "-1");
-                set.emplace_back("GestureWeaponShoulder", "-1");
+                off(g_GestureLeft[kGestureShoulderLeft], kGestureLeftKeys[kGestureShoulderLeft]);
+                off(g_GestureRight[kGestureShoulderRight], kGestureRightKeys[kGestureShoulderRight]);
             }
             if (!g_HipGestures)
             {
-                g_GestureWeaponHipRight = -1.f;
-                g_GestureWeaponHipLeft = -1.f;
-                set.emplace_back("GestureWeaponHipRight", "-1");
-                set.emplace_back("GestureWeaponHipLeft", "-1");
+                off(g_GestureRight[kGestureHipRight], kGestureRightKeys[kGestureHipRight]);
+                off(g_GestureRight[kGestureHipLeft], kGestureRightKeys[kGestureHipLeft]);
             }
             const bool ok = WriteVrConfigValues(set, { "ShoulderGestures", "HipGestures" });
             Log("Grab zones: old ShoulderGestures=%d HipGestures=%d migrated (%zu value%s), %s",
                 g_ShoulderGestures ? 1 : 0, g_HipGestures ? 1 : 0, set.size(), set.size() == 1 ? "" : "s", ok ? "ok" : "FAILED");
+        }
+        // Old VrHolsterDynamic switch (user 2026-11-23: Dynamic is a choice per
+        // zone now): on = every weapon zone that is on becomes Dynamic, keeping
+        // its weapon. Written once, old key dropped.
+        if (g_OldHolsterDynamicSeen)
+        {
+            std::vector<std::pair<std::string, std::string>> set;
+            if (g_VrHolsterDynamic)
+                for (int z = 0; z < kGestureWeaponZoneCount; ++z)
+                {
+                    const int w = static_cast<int>(std::lround(g_GestureRight[z]));
+                    if (w < 0 || w >= kGestureWeaponCount)
+                        continue;
+                    g_GestureRight[z] = static_cast<float>(kGestureDynamic);
+                    g_GestureDyn[z] = static_cast<float>(w);
+                    set.emplace_back(kGestureRightKeys[z], std::to_string(kGestureDynamic));
+                    set.emplace_back(kGestureDynKeys[z], std::to_string(w));
+                }
+            const bool ok = WriteVrConfigValues(set, { "VrHolsterDynamic" });
+            Log("Grab zones: old VrHolsterDynamic=%d migrated (%zu value%s), %s", g_VrHolsterDynamic ? 1 : 0,
+                set.size(), set.size() == 1 ? "" : "s", ok ? "ok" : "FAILED");
         }
         // Panel rows removed in the 2026-11-19 review: their values are fixed
         // at the defaults, whatever an older config.txt still says.

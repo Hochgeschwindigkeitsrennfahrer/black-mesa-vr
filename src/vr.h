@@ -706,7 +706,7 @@ public:
     DWORD m_RecoilLastMs = 0;
     DWORD m_RecoilAttackMs = 0;
     void UpdateVrRecoil();
-    bool m_GestureZoneLeft = false;   // last frame: left hand in the quick-save zone
+    bool m_GestureZoneLeft = false;   // last frame: left hand in one of its gesture zones
     bool m_GestureZoneRight = false;  // last frame: right hand in a shoulder/hip zone (or just left one)
     // Saves keep the player's view angles, and gameplay usercmds carry the
     // controller aim, so a load faced where the gun pointed. Before a quick
@@ -1670,9 +1670,17 @@ private:
     // that only follows the head on sustained or large turns, and a point
     // where the eyes would be with the head straight over the neck. With
     // g_GestureBodyFrame off: the headset itself (the old head-locked zones).
-    enum class GestureZone { ShoulderLeft, ShoulderRight, HipRight, HipCross, HipAmmo };
+    // Boxes, per hand: HipCrossLeft = right hand above the left hip, HipAmmo =
+    // left hand at the left hip, HipCrossRight = left hand above the right hip.
+    enum class GestureZone { ShoulderLeft, ShoulderRight, HipRight, HipCrossLeft, HipAmmo, HipCrossRight };
     void UpdateBodyFrame();
     bool HandInGestureZone(const Vector& hand, GestureZone zone, float growM = 0.f) const;
+    // Hand in that slot's zone (bmvr::GestureZoneId); the left hand's forehead
+    // zone is head-framed. No setting / tracking checks.
+    bool LeftHandInSlotZone(int zone, float growM = 0.f) const;
+    bool RightHandInSlotZone(int zone, float growM = 0.f) const;
+    // Left hand in a zone whose left-hand slot is Ammo (manual-reload pouch).
+    bool LeftHandInAmmoZone() const;
     void ZoneCoords(const Vector& hand, float& along, float& lateral, float& height) const;
     bool m_BodyFrameValid = false;
     float m_BodyYawDeg = 0.f;          // tracking space, degrees (atan2 of Source y, x)
