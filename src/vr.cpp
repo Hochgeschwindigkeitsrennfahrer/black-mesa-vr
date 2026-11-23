@@ -22431,8 +22431,16 @@ void VR::UpdateMagReload(uint32_t& buttons)
         bool needPump = false;
         bool spentHull = false; // shotgun: a fired hull waits for the back stroke
         bool dryRefill = false; // fired dry: the game's own reload filled its count from the reserve
+        int lastReserve = -1;
     };
     static WeaponState s_w[kWeaponCount];
+    // Map change: the hands' state from the previous map, taken over per gun
+    // when it is first drawn with the same clip + reserve (a level transition
+    // keeps the weapons). Else an empty gun came back loaded: the game puts
+    // picked-up ammo straight into an empty gun, and the reset trusted it
+    // (user 2026-11-23: RPG loaded itself after an ammo pickup).
+    static WeaponState s_carry[kWeaponCount];
+    static bool s_carryPending[kWeaponCount] = {};
     static bool s_reloadWas = false, s_gripWas = false, s_attackWas = false;
     static bool s_boltFull = false;
     static DWORD s_pulseUntil = 0;
@@ -22452,10 +22460,26 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // with 2 shells kept 2 after a load of a full gun, and one that died
     // empty stayed blocked (tester log 2026-11-20).
     static unsigned s_loadEpoch = 0;
+    // Nothing during a load: a level transition starts loading under the old
+    // map name, which looked like a same-map load (state reset to the game's).
+    if (m_VrPhase == VrPhase::Loading)
+        return;
     if (s_level != m_CurrentMapName || s_loadEpoch != m_LoadEpoch)
     {
-        if (s_loadEpoch != m_LoadEpoch && s_level == m_CurrentMapName)
+        const bool sameMap = s_level == m_CurrentMapName;
+        if (s_loadEpoch != m_LoadEpoch && sameMap)
             Game::logMsg("Mag reload: load, hands' weapon state reset to the game's");
+        for (int k = 0; k < kWeaponCount; ++k)
+        {
+            // Only guns that were not plainly loaded need carrying over.
+            // A pending carry survives an empty map name in between.
+            const WeaponState& o = s_w[k];
+            const bool carry = !sameMap && !s_level.empty() && o.lastReserve >= 0
+                && (o.mag != kLoaded || !o.chambered || o.needPump || (o.shells >= 0 && o.shells != o.lastClip));
+            if (carry)
+                s_carry[k] = o;
+            s_carryPending[k] = carry || (!sameMap && s_carryPending[k]);
+        }
         s_level = m_CurrentMapName;
         s_loadEpoch = m_LoadEpoch;
         for (auto& w : s_w)
@@ -22518,6 +22542,23 @@ void VR::UpdateMagReload(uint32_t& buttons)
     }
     int clip = m_Game ? m_Game->ReadWeaponClip(m_Game->GetActiveWeaponEntity()) : -1;
     const int reserve = m_Game ? m_Game->ReadWeaponReserve(m_Game->GetActiveWeaponEntity()) : -1;
+    if (s_carryPending[weapon] && reserve >= 0)
+    {
+        s_carryPending[weapon] = false;
+        const WeaponState& c = s_carry[weapon];
+        if (c.lastClip == clip && c.lastReserve == reserve)
+        {
+            w = c;
+            if (w.mag == kInHand)
+                w.mag = kEmpty;
+            Game::logMsg("Mag reload: %s state kept over the map change (mag %d, chambered %d, clip %d, reserve %d)",
+                def.name, w.mag, w.chambered ? 1 : 0, clip, reserve);
+        }
+        else
+            Game::logMsg("Mag reload: %s ammo changed over the map change (clip %d/%d, reserve %d/%d), game's state",
+                def.name, c.lastClip, clip, c.lastReserve, reserve);
+    }
+    w.lastReserve = reserve;
     // Rounds the game still holds for this gun (its own magazine count, kept
     // through the hands' swaps, plus the reserve): a new magazine/shell only
     // comes off the hip while there are any (user: manual reloads used no ammo).
