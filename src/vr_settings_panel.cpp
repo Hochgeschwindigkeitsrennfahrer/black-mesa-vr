@@ -18,6 +18,7 @@
 #include "bmvr_cvars.h"
 #include "vr_button_map.h"
 #include "vr_controller_models.h"
+#include "openxr_helper_bridge.h"
 
 #include <algorithm>
 #include <cmath>
@@ -2753,6 +2754,96 @@ void VR::CloseSettingsPanel(const char* why)
         m_PendingPauseCmd.store(2, std::memory_order_release);
     m_SettingsPausedGame = false;
     Game::logMsg("VR settings panel closed (%s)", why ? why : "");
+}
+
+void VR::WelcomeStep(bool paused)
+{
+    if (bmvr::g_VrWelcomeSeen && !m_WelcomeActive)
+        return;
+    const DWORD now = GetTickCount();
+    if (m_WelcomeActive)
+    {
+        if (m_SettingsOpen)
+        {
+            // Opened from the welcome: done for good. The panel takes over our
+            // pause (its close unpauses); with "Panel pauses the game" off it
+            // does not want one, so drop ours.
+            m_WelcomeActive = false;
+            bmvr::g_VrWelcomeSeen = true;
+            const bool ok = WriteConfigValues({ { "VrWelcomeSeen", "true" } }, {});
+            if (m_WelcomePaused && !m_SettingsPausedGame)
+                m_PendingPauseCmd.store(2, std::memory_order_release);
+            m_WelcomePaused = false;
+            m_ToastUntilMs = 0;
+            Game::logMsg("Welcome: VR panel opened, VrWelcomeSeen saved (%s)", ok ? "ok" : "FAILED");
+            return;
+        }
+        if (m_VrPhase != VrPhase::Gameplay || IsMenuUp() || !m_GameplayEligible)
+        {
+            // Game menu (Esc / pause tap), map change or load: give up for this
+            // map; Black Mesa's menu or the load owns the pause now.
+            m_WelcomeActive = false;
+            m_WelcomePaused = false;
+            m_ToastUntilMs = 0;
+            Game::logMsg("Welcome: cancelled (phase %s, gameUi=%d), again next map", VrPhaseName(m_VrPhase),
+                IsMenuUp() ? 1 : 0);
+            return;
+        }
+        ShowToast("WELCOME TO BLACK MESA VR", 1000, m_WelcomeText);
+        return;
+    }
+    // Headless runs (fake runtime) would stall on the pause and write the live
+    // config.txt: only with BMVR_TEST_WELCOME=1 there.
+    static const bool s_allowed = !L4D2VR_FakeHelperActive() || GetEnvironmentVariableA("BMVR_TEST_WELCOME", nullptr, 0) > 0;
+    if (!s_allowed)
+        return;
+    if (m_WelcomeTriedThisMap || !m_IsVREnabled || !m_GameplayEligible || m_VrPhase != VrPhase::Gameplay
+        || IsMenuUp() || m_SettingsOpen || m_WeaponMenuOpen || paused)
+    {
+        m_WelcomeGameplaySinceMs = 0;
+        return;
+    }
+    // A few seconds into gameplay, so the load fade and turn sync are over.
+    if (!m_WelcomeGameplaySinceMs)
+        m_WelcomeGameplaySinceMs = now ? now : 1;
+    if (now - m_WelcomeGameplaySinceMs < 3000)
+        return;
+    m_WelcomeTriedThisMap = true;
+
+    // Name the button that opens the panel on this controller (hold slot first).
+    const L4D2VROpenXrInputStateDesc& in = m_OpenXrLastInputState;
+    const uint32_t family = in.reserved0;
+    const char* label = nullptr;
+    int labelHand = 0;
+    bool hold = false;
+    const bool mapped = m_ButtonMapActive;
+    for (int pass = 0; pass < 2 && !label; ++pass)
+        for (int hand = 0; hand < bmvr::kBindHands && !label; ++hand)
+            for (int i = 0; i < bmvr::kBindInputCount && !label; ++i)
+            {
+                const auto input = static_cast<bmvr::BindInput>(i);
+                const bmvr::BindSlot slot = mapped ? bmvr::EffectiveBind(family, hand, input)
+                                                   : bmvr::DefaultBind(family, hand, input);
+                const bmvr::BindAction a = pass == 0 ? slot.hold : slot.press;
+                if (a == bmvr::BindAction::VrSettings)
+                {
+                    label = bmvr::BindInputLabel(family, in.systemName, hand, input);
+                    labelHand = hand;
+                    hold = pass == 0;
+                }
+            }
+    if (!label || !label[0] || (!mapped && !bmvr::g_SettingsTriangleHold))
+    {
+        Game::logMsg("Welcome: skipped, no button opens the VR panel (mapping=%d)", mapped ? 1 : 0);
+        return;
+    }
+    std::snprintf(m_WelcomeText, sizeof(m_WelcomeText), "%s %s (%s hand) to open the VR menu",
+        hold ? "Hold" : "Press", label, labelHand == 0 ? "left" : "right");
+    m_WelcomeActive = true;
+    m_WelcomePaused = true;
+    m_PendingPauseCmd.store(1, std::memory_order_release);
+    Game::logMsg("Welcome shown: \"%s\" (map %s)", m_WelcomeText, m_CurrentMapName.c_str());
+    ShowToast("WELCOME TO BLACK MESA VR", 1000, m_WelcomeText);
 }
 
 void VR::SettingsPanelFrame(Vector& origin, Vector& fwd, Vector& right, Vector& up) const

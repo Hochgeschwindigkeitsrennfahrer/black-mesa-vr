@@ -305,6 +305,7 @@ namespace bmvr
     bool g_ControlsPicture = true;
     bool g_SprintToggle = true;
     bool g_VrSettingsPause = true;
+    bool g_VrWelcomeSeen = false;
     bool g_HideHandsWithoutSuit = true;
     bool g_ScopeUsesHmdAim = true;
     float g_ScopeZoomFovScale = 0.28f;
@@ -938,6 +939,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "VrSettingsPause") == 0)
                 g_VrSettingsPause = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrWelcomeSeen") == 0)
+                g_VrWelcomeSeen = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrShootFromMuzzle") == 0)
                 g_VrShootFromMuzzle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ShoulderGestures") == 0)

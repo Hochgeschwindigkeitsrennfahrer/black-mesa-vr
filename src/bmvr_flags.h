@@ -549,6 +549,9 @@ namespace bmvr
     extern bool g_SprintToggle;
     // VR settings panel pauses the game while open (setpause / unpause).
     extern bool g_VrSettingsPause;
+    // First-run welcome ("hold <button> to open the VR menu") done; written by
+    // the mod once the player opened the panel from it (VrWelcomeSeen=true).
+    extern bool g_VrWelcomeSeen;
     // Logs (and resets) the access-violation count since the last call.
     void LogFaultStats();
     // Hide HEV gloves and wrist HUD until the HEV suit is picked up. Bare-hand

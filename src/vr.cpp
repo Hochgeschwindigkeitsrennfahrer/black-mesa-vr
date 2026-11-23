@@ -3831,6 +3831,7 @@ void VR::OnLevelInit(const char* newmap)
     bmvr::SetGameplayWorldRts(m_GameplayEligible);
     m_SeenGameplay = false;
     m_YawSyncTicks = 600;
+    m_WelcomeTriedThisMap = false;
     m_GameplayFrames = 0;
     m_EligiblePresents = 0;
     m_SafeLookActive = false;
@@ -6992,7 +6993,7 @@ void VR::UpdateButtonMap()
     }
     if (m_ButtonMapper.Pressed(BindAction::Recenter))
         Recenter("mapped button");
-    if (m_ButtonMapper.Pressed(BindAction::VrSettings) && !paused && !m_WeaponMenuOpen)
+    if (m_ButtonMapper.Pressed(BindAction::VrSettings) && (!paused || m_WelcomeActive) && !m_WeaponMenuOpen)
     {
         Game::logMsg("Button map: VR settings panel");
         OpenSettingsPanel();
@@ -7074,6 +7075,7 @@ void VR::ProcessInput()
     UpdateVrRecoil();
     const bool menuStick = WeaponMenuStickHeld();
     UpdateWeaponMenu(menuStick, deltaMs);
+    WelcomeStep(m_Game && SehIsPaused(m_Game->m_EngineClient));
     UpdateSettingsPanel();
 
     bool usedAnalogTurn = false;
@@ -7570,7 +7572,7 @@ void VR::ProcessInput()
     // Mapped buttons resolve tap vs hold in the mapper (Pause on release,
     // VrSettings on hold), so the Pause action here is already a tap.
     const bool pauseHoldable = bmvr::g_SettingsTriangleHold && !m_ButtonMapActive
-        && !paused && !IsMenuUp() && !m_SettingsOpen;
+        && (!paused || m_WelcomeActive) && !IsMenuUp() && !m_SettingsOpen;
     if (m_GameplayEligible && pauseHeld && !s_pause)
     {
         s_pauseHoldFired = false;

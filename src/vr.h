@@ -1502,6 +1502,15 @@ public:
     void SettingsPanelFrame(Vector& origin, Vector& fwd, Vector& right, Vector& up) const;
     static IDirect3DTexture9* SettingsGearTexture(IDirect3DDevice9* device);
     bool m_SettingsOpen = false;
+    // First-run welcome: once per map until the player opened the VR panel
+    // from it, pause the game and show "hold <button> to open the VR menu"
+    // until they do (WelcomeStep, vr_settings_panel.cpp).
+    void WelcomeStep(bool paused);
+    bool m_WelcomeActive = false;
+    bool m_WelcomePaused = false;      // our setpause is on
+    bool m_WelcomeTriedThisMap = false;
+    DWORD m_WelcomeGameplaySinceMs = 0;
+    char m_WelcomeText[64]{};
     // Set by the game thread, cleared by the render thread before it paints:
     // a change during a paint stays set and is painted next frame.
     std::atomic<bool> m_SettingsDirty{ false };
