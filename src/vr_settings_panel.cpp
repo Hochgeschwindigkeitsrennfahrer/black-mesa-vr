@@ -3681,20 +3681,58 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         return true;
     };
     // Both eyes share the head-centred placement, so it fuses at 30 HU.
-    // Detail toasts (welcome, warnings) are wide (up to 1024 texels): at 30 HU
-    // the welcome filled most of the view and felt in the face (user
-    // 2026-11-23). They sit at 60 HU with the same world size = half the
-    // angular size, further out.
     Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
     const Vector head = GetViewOrigin(body);
-    const float dist = (detail && !m_ToastSmall) ? 60.f : 30.f;
-    const Vector po = head + fwd * dist - up * (5.f * dist / 30.f);
+    Vector po = head + fwd * 30.f - up * 5.f;
+    Vector qr = right, qu = up;
     // Small (reload hints): 4.2 (3.5 was hard to read, user 2026-11-18).
     // hw is per 512 texels, so a wider texture keeps the letter size.
     const float texScale = static_cast<float>(g_Gfx.toastW) / 512.f;
-    const float hw0 = m_ToastSmall ? 4.2f : detail ? 10.f : 6.f;  // warnings: larger, readable
+    float hw0 = m_ToastSmall ? 4.2f : detail ? 10.f : 6.f;  // warnings: larger, readable
+    // First-run welcome: head-locked it smeared under reprojection and filled
+    // the view at 30 HU (user 2026-11-23, the VR panel looked sharp). Placed
+    // like the panel instead: latched in the room, centred in front at the
+    // panel's distance and texel density; follows only when you look >40 deg away.
+    if (m_WelcomeActive && !m_ToastSmall)
+    {
+        Vector mb;
+        float rotY = 0.f;
+        MenuDrawBody(mb, rotY);
+        Vector yawFwd = fwd;
+        yawFwd.z = 0.f;
+        if (VectorNormalize(yawFwd) <= 0.01f)
+            yawFwd = Vector(1.f, 0.f, 0.f);
+        const Vector worldUp(0.f, 0.f, 1.f);
+        auto frame = [&](Vector& o, Vector& f, Vector& r) {
+            const float a = (rotY - m_WelcomeLatchYaw) * (kPi / 180.f), c = cosf(a), sn = sinf(a);
+            auto yaw = [&](const Vector& v) { return Vector(v.x * c - v.y * sn, v.x * sn + v.y * c, v.z); };
+            o = mb + yaw(m_WelcomeLatchDelta);
+            f = yaw(m_WelcomeLatchFwd);
+            r = yaw(m_WelcomeLatchRight);
+        };
+        Vector lo, lf, lr;
+        if (m_WelcomeLatched)
+            frame(lo, lf, lr);
+        if (!m_WelcomeLatched || lf.Dot(yawFwd) < cosf(40.f * kPi / 180.f))
+        {
+            Vector yawRight = CrossProduct(yawFwd, worldUp);
+            VectorNormalize(yawRight);
+            m_WelcomeLatchDelta = GetViewOrigin(mb) + yawFwd * kPanelMinDistanceHu - worldUp * kPanelDropHu - mb;
+            m_WelcomeLatchFwd = yawFwd;
+            m_WelcomeLatchRight = yawRight;
+            m_WelcomeLatchYaw = rotY;
+            m_WelcomeLatched = true;
+            frame(lo, lf, lr);
+        }
+        po = lo;
+        qr = lr;
+        qu = worldUp;
+        hw0 = kPanelWidthHu * 0.5f * 512.f / kTexW;   // panel density: 512 texels = 10 HU
+    }
+    else
+        m_WelcomeLatched = false;
     const float hw = hw0 * texScale, hh = hw0 * static_cast<float>(texH) / 512.f;
-    const Vector corners[4] = { po - right * hw + up * hh, po + right * hw + up * hh, po - right * hw - up * hh, po + right * hw - up * hh };
+    const Vector corners[4] = { po - qr * hw + qu * hh, po + qr * hw + qu * hh, po - qr * hw - qu * hh, po + qr * hw - qu * hh };
     const int left = static_cast<int>(m_ToastUntilMs - GetTickCount());
     const int alpha = (std::min)(255, (std::max)(0, left * 255 / 400));
     MenuVertTex v[4]{};

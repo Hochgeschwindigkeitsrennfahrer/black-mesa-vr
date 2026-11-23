@@ -1516,6 +1516,12 @@ public:
     bool m_WelcomeTriedThisMap = false;
     DWORD m_WelcomeGameplaySinceMs = 0;
     char m_WelcomeText[128]{};
+    // Welcome toast latched in the room like the VR panel (DrawToast).
+    bool m_WelcomeLatched = false;
+    float m_WelcomeLatchYaw = 0.f;
+    Vector m_WelcomeLatchDelta{};
+    Vector m_WelcomeLatchFwd{};
+    Vector m_WelcomeLatchRight{};
     // Set by the game thread, cleared by the render thread before it paints:
     // a change during a paint stays set and is painted next frame.
     std::atomic<bool> m_SettingsDirty{ false };
