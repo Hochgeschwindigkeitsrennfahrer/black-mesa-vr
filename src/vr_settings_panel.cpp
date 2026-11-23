@@ -177,14 +177,6 @@ namespace
             { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Reset hands + HUD position", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
-            { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
-            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
-            { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
-            { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
-            // Left column: hands & HUD, grab gestures, flashlight, grenades (user 2026-11-19).
-            { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
             { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
@@ -193,6 +185,14 @@ namespace
             { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
+            { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
+            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
+            { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
+            { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
+            // Left column: hands & HUD, aiming, flashlight, grenades (user 2026-11-23: aiming moved left for balance).
+            { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "AMMO FEEDBACK", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Last shot buzz", RowKind::Choice, "LastShotHaptic", nullptr, &bmvr::g_LastShotHaptic, 1.f, 0.f, 2.f, "Off|Double|Long" },
             { "Last shot strength", RowKind::Number, "LastShotHapticStrength", nullptr, &bmvr::g_LastShotHapticStrength, 0.05f, 0.05f, 1.f, "%.2f" },
@@ -2012,14 +2012,15 @@ namespace
             c.y1 = y0 + kCardHeadPx + static_cast<int>(c.lines.size()) * kCardLinePx + 6;
             cards.push_back(c);
         };
+        // Forehead is left hand only: its card sits on the left (user 2026-11-23).
         if (!rightSide)
         {
+            add(bmvr::kGestureHead, 10, false);
             add(bmvr::kGestureShoulderLeft, 150, true);
             add(bmvr::kGestureHipLeft, 530, true);
         }
         else
         {
-            add(bmvr::kGestureHead, 10, false);
             add(bmvr::kGestureShoulderRight, 150, true);
             add(bmvr::kGestureHipRight, 530, true);
         }
@@ -2214,23 +2215,20 @@ namespace
             bool hot = false;
             for (const CardLine& ln : card.lines)
                 hot |= ln.row == hoverRow;
+            // The leader line ends on the zone box's side facing the card
+            // (user 2026-11-23: no line into the zone, no dot).
             const ZoneBox b = GestureZoneBox(card.zone);
-            const int ax = (b.x0 + b.x1) / 2, ay = top + (b.y0 + b.y1) / 2;
+            const int ax = rightSide ? b.x1 : b.x0, ay = top + (b.y0 + b.y1) / 2;
             const int ly = top + card.y0 + kCardHeadPx / 2;
             const int edge = rightSide ? cx0 : cx1;
             const int elbow = rightSide ? cx0 - 24 : cx1 + 24;
             const COLORREF ink = hot ? kAmber : RGB(170, 140, 80);
             HPEN pen = CreatePen(PS_SOLID, hot ? 5 : 3, ink);
-            HBRUSH br = CreateSolidBrush(ink);
             HGDIOBJ op = SelectObject(dc, pen);
-            HGDIOBJ ob = SelectObject(dc, br);
             MoveToEx(dc, edge, ly, nullptr);
             LineTo(dc, elbow, ly);
             LineTo(dc, ax, ay);
-            Ellipse(dc, ax - 8, ay - 8, ax + 9, ay + 9);
-            SelectObject(dc, ob);
             SelectObject(dc, op);
-            DeleteObject(br);
             DeleteObject(pen);
         }
     }
