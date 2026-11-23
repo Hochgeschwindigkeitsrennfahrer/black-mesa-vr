@@ -12805,6 +12805,9 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
         }
         TryGetLadderPinDrawPos(true, s.body, s.leftPos);
         TryGetLadderPinDrawPos(false, s.body, s.rightPos);
+        s.gunHandOk = m_GunPlaceHandOk && GetTickCount() - m_GunPlaceTick <= 100;
+        s.gunHandWorld = m_GunPlaceHandWorld;
+        s.gunHandAng = m_GunPlaceHandAng;
     }
     GetViewBasis(&s.fwd, &s.right, &s.up);
     s.eyeOrig[0] = GetViewOrigin(s.body);
@@ -12842,6 +12845,37 @@ void VR::MenuDrawBody(Vector& body, float& rotationOffsetY) const
     }
     body = (m_HasStereoBodyOrigin && m_StereoBodyOrigin.LengthSqr() > 1.f) ? m_StereoBodyOrigin : m_SetupOrigin;
     rotationOffsetY = m_RotationOffsetY.load(std::memory_order_acquire);
+}
+
+void VR::NoteGunPlacementHand()
+{
+    // Same base as GetRecommendedViewmodelAbsPos. The gun is placed in
+    // SetUpView, before RenderView waits for this frame's poses; the hand
+    // HUD drew from that newer pose, so the ammo panel slid off the gun
+    // while it moved (user 2026-11-23: "hud on the gun lags behind").
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    Vector base = m_SetupOrigin;
+    if (m_HasStereoBodyOrigin)
+        base = m_StereoBodyOrigin;
+    const bool left = bmvr::g_LeftHanded;
+    m_GunPlaceHandOk = left ? m_LeftControllerTrackingValid : m_PhysicalRightTrackingValid;
+    m_GunPlaceHandWorld = ControllerTrackingToWorld(base, left ? m_LeftControllerPosAbs : m_PhysicalRightPosAbs);
+    m_GunPlaceHandAng = left ? m_LeftControllerAngAbs : m_PhysicalRightAngAbs;
+    m_GunPlaceTick = GetTickCount();
+}
+
+bool VR::GunHandHudPose(Vector& world, QAngle& ang) const
+{
+    if (const HandDrawSnap* snap = t_HandSnap)
+    {
+        world = snap->gunHandWorld;
+        ang = snap->gunHandAng;
+        return snap->gunHandOk;
+    }
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    world = m_GunPlaceHandWorld;
+    ang = m_GunPlaceHandAng;
+    return m_GunPlaceHandOk && GetTickCount() - m_GunPlaceTick <= 100;
 }
 
 bool VR::GunCapWristForDraw(float out[12]) const
@@ -14198,6 +14232,37 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     const D3DCOLOR redBack = D3DCOLOR_RGBA(255, 48, 32, 60);
     constexpr int kLowHealth = 25;
     const bool rightDominant = !bmvr::g_LeftHanded;
+    // Panels on the gun follow the hand pose the gun was placed from this
+    // frame, not the newer pose the gloves draw with (NoteGunPlacementHand).
+    Vector gunHudPos = rightDominant ? rightOrigin : leftOrigin;
+    QAngle gunHudAng = rightDominant ? rightAng : leftAng;
+    {
+        Vector placeWorld{};
+        QAngle placeAng{};
+        if (GunHandHudPose(placeWorld, placeAng))
+        {
+            // Diagnostic: how far the gun's pose trails the drawn hand pose.
+            static float s_maxD;
+            static DWORD s_next;
+            static int s_lines;
+            const float d = (placeWorld - gunHudPos).Length();
+            if (stereoEye != 2 && d > s_maxD)
+                s_maxD = d;
+            const DWORD now = GetTickCount();
+            if (stereoEye != 2 && s_lines < 12 && now >= s_next)
+            {
+                if (s_next != 0)
+                {
+                    Game::logMsg("Gun HUD: placement vs drawn hand max %.2f units over 5 s", s_maxD);
+                    ++s_lines;
+                }
+                s_maxD = 0.f;
+                s_next = now + 5000;
+            }
+            gunHudPos = placeWorld;
+            gunHudAng = placeAng;
+        }
+    }
 
     auto drawValueIcon = [&](const HudPanel& p, float x0, float yTop, float valueCell,
         float fieldWidth, float rowH, float iconSize, int value, D3DCOLOR color, D3DCOLOR backing,
@@ -14235,8 +14300,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                 // it, so both read at once while aiming (on the support
                 // wrist it turned away from the eye).
                 HudPanel gunPanel{};
-                BuildAmmoHudPanel(rightDominant ? rightOrigin : leftOrigin,
-                    rightDominant ? rightAng : leftAng, rightDominant, gunPanel);
+                BuildAmmoHudPanel(gunHudPos, gunHudAng, rightDominant, gunPanel);
                 if (gunPanel.valid)
                 {
                     handPanel = gunPanel;
@@ -14293,10 +14357,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     if (hasAmmoHud && gunOk)
     {
         HudPanel weaponPanel{};
-        BuildAmmoHudPanel(
-            rightDominant ? rightOrigin : leftOrigin,
-            rightDominant ? rightAng : leftAng,
-            rightDominant, weaponPanel);
+        BuildAmmoHudPanel(gunHudPos, gunHudAng, rightDominant, weaponPanel);
         if (weaponPanel.valid && !HudIsBackfacing(weaponPanel, eyeOrig))
         {
             std::string weaponModel;

@@ -318,6 +318,11 @@ public:
     Vector m_ViewmodelUp{};
     mutable std::recursive_mutex m_ControllerMutex;
     std::string m_LastViewmodelModel;
+    // NoteGunPlacementHand (m_ControllerMutex).
+    bool m_GunPlaceHandOk = false;
+    Vector m_GunPlaceHandWorld{};
+    QAngle m_GunPlaceHandAng{};
+    DWORD m_GunPlaceTick = 0;
     // Everything derived from m_LastViewmodelModel by substring matching,
     // computed once in NoteViewmodelModel when the model changes. The pose /
     // scale / two-hand / numpad lookups used to lowercase-copy the model path
@@ -1202,8 +1207,19 @@ public:
         // Turn offset of this frame: world-latched menus (weapon menu, VR
         // panel) rebuild their pose from body + turn at draw time.
         float rotationOffsetY = 0.f;
+        // Gun hand as the viewmodel was placed this frame (CalcViewModelView,
+        // before the frame's pose wait): the ammo HUD follows the gun, not the
+        // newer pose the gloves draw with.
+        bool gunHandOk = false;
+        Vector gunHandWorld{};
+        QAngle gunHandAng{};
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
+    // CalcViewModelView: remember the gun hand's pose the gun is placed from.
+    void NoteGunPlacementHand();
+    // Gun hand world pose for the ammo HUD: the drawing frame's snapshot
+    // while one is drawn (MC), else the latest placement (within 100 ms).
+    bool GunHandHudPose(Vector& world, QAngle& ang) const;
     // Body origin + turn offset for drawing world-latched menus: the drawing
     // frame's snapshot while one is drawn (MC), else the live values.
     void MenuDrawBody(Vector& body, float& rotationOffsetY) const;
