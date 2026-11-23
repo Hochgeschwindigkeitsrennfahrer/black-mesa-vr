@@ -851,3 +851,18 @@ std::shared_ptr<const bmvr::ctlmodel::Models> bmvr::ctlmodel::Current()
 }
 
 int bmvr::ctlmodel::Generation() { return g_Generation.load(); }
+
+bool bmvr::ctlmodel::DecodePngFile(const std::string& path, int& w, int& h, std::vector<uint32_t>& px)
+{
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);   // RPC_E_CHANGED_MODE: COM is up already
+    Texture t;
+    const bool ok = DecodePng(fs::path(path), t);
+    if (SUCCEEDED(co))
+        CoUninitialize();
+    if (!ok)
+        return false;
+    w = t.w;
+    h = t.h;
+    px = std::move(t.px);
+    return true;
+}

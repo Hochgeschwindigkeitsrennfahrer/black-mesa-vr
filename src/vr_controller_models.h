@@ -58,4 +58,7 @@ namespace bmvr::ctlmodel
     std::shared_ptr<const Models> Current();
     // Changes whenever Current() changes.
     int Generation();
+    // Any PNG (WIC) as straight-alpha 0xAARRGGBB pixels, top-down. Initialises
+    // COM on the calling thread if needed. False if missing or undecodable.
+    bool DecodePngFile(const std::string& path, int& w, int& h, std::vector<uint32_t>& px);
 }

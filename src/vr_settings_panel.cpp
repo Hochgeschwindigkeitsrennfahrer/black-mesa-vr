@@ -232,7 +232,6 @@ namespace
             // the divider and the left-side cards, the right one the right-side
             // cards. The card lines are the slot rows below (always hidden).
             { "", RowKind::GestureFigure, nullptr, nullptr, nullptr, 0, 0, 0, "L" },
-            { "Manual reload ammo from", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "ammo_zones" },
             // A row per zone and hand, Off as a choice (user 2026-11-19, per hand
             // 2026-11-23). Left hand: an action (quick load = 1 s hold). Right hand:
             // a weapon, buzzes and takes the grip only while you carry it; Dynamic =
@@ -1771,17 +1770,6 @@ namespace
             return std::string(std::strchr(r.fmt, ':') + 1) + " (fixed)";
         if (r.fmt && std::strcmp(r.fmt, "foveation") == 0)
             return bmvr::FoveationStatusText();
-        if (r.fmt && std::strcmp(r.fmt, "ammo_zones") == 0)
-        {
-            // Left-hand slots set to Ammo; none while manual reload is on = no way to reload.
-            if (!bmvr::PhysicalWeapon(bmvr::g_VrMagReload))
-                return "manual reload off";
-            std::string zones;
-            for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
-                if (std::lround(bmvr::g_GestureLeft[z]) == bmvr::kGestureAmmo)
-                    zones += (zones.empty() ? "" : ", ") + std::string(bmvr::GestureZoneName(z));
-            return zones.empty() ? "! NO ZONE: set a left hand to Ammo" : zones;
-        }
         if (!r.fmt || std::strcmp(r.fmt, "missing_hooks") != 0)
             return {};
         const int game = Game::missingOffsetCount(), debug = Game::missingDebugOffsetCount();
@@ -1935,11 +1923,13 @@ namespace
     {
         switch (z)
         {
-        case bmvr::kGestureShoulderLeft:  return { kFigCx - 220, 150, kFigCx - 72, 285 };
-        case bmvr::kGestureShoulderRight: return { kFigCx + 72, 150, kFigCx + 220, 285 };
-        case bmvr::kGestureHipLeft:       return { kFigCx - 250, 535, kFigCx - 105, 665 };
-        case bmvr::kGestureHipRight:      return { kFigCx + 105, 535, kFigCx + 250, 665 };
-        default:                          return { kFigCx - 70, 40, kFigCx + 70, 120 };   // forehead (seen through the head)
+        // Fitted to VR/panel/gesture_body.png (345x860, drawn from y 10):
+        // behind the shoulder pads beside the head, the hands / belt sides.
+        case bmvr::kGestureShoulderLeft:  return { kFigCx - 185, 95, kFigCx - 50, 235 };
+        case bmvr::kGestureShoulderRight: return { kFigCx + 50, 95, kFigCx + 185, 235 };
+        case bmvr::kGestureHipLeft:       return { kFigCx - 205, 385, kFigCx - 85, 545 };
+        case bmvr::kGestureHipRight:      return { kFigCx + 85, 385, kFigCx + 205, 545 };
+        default:                          return { kFigCx - 58, 12, kFigCx + 58, 92 };   // forehead (seen through the head)
         }
     }
     bool IsGestureSlotRow(const Row& r)
@@ -2029,11 +2019,85 @@ namespace
         return on;
     }
 
+    // The HEV suit from behind (VR/panel/gesture_body.png, transparent
+    // background; user 2026-11-23), loaded once. Missing: a grey silhouette.
+    struct BodyPicture { bool tried = false; int w = 0, h = 0; std::vector<uint32_t> px; };
+    const BodyPicture& GestureBodyPicture()
+    {
+        static BodyPicture pic;
+        if (!pic.tried)
+        {
+            pic.tried = true;
+            // A shipped asset: the game's VR folder, also in test runs (VrFilePath = the test dir).
+            char exe[MAX_PATH]{};
+            GetModuleFileNameA(nullptr, exe, MAX_PATH);
+            std::string path(exe);
+            const size_t slash = path.find_last_of("\\/");
+            path = (slash == std::string::npos ? std::string(".") : path.substr(0, slash)) + "\\VR\\panel\\gesture_body.png";
+            if (bmvr::ctlmodel::DecodePngFile(path, pic.w, pic.h, pic.px))
+                Game::logMsg("VR panel: gesture body picture %dx%d", pic.w, pic.h);
+            else
+            {
+                pic.w = pic.h = 0;
+                Game::logMsg("VR panel: %s missing or unreadable, plain figure instead (please report)", path.c_str());
+            }
+        }
+        return pic;
+    }
+    // Straight-alpha blend of a 0xAARRGGBB picture onto the canvas.
+    void BlendPicture(Canvas& c, const BodyPicture& pic, int x0, int y0)
+    {
+        GdiFlush();
+        for (int y = 0; y < pic.h; ++y)
+        {
+            const int dy = y0 + y;
+            if (dy < 0 || dy >= c.h)
+                continue;
+            for (int x = 0; x < pic.w; ++x)
+            {
+                const int dx = x0 + x;
+                const uint32_t sp = pic.px[static_cast<size_t>(y) * pic.w + x];
+                const uint32_t a = sp >> 24;
+                if (!a || dx < 0 || dx >= c.w)
+                    continue;
+                uint32_t& dp = c.px[static_cast<size_t>(dy) * c.w + dx];
+                uint32_t out = 0;
+                for (int sh = 0; sh <= 16; sh += 8)
+                {
+                    const uint32_t s = (sp >> sh) & 0xFF, d = (dp >> sh) & 0xFF;
+                    out |= ((s * a + d * (255 - a)) / 255) << sh;
+                }
+                dp = out;
+            }
+        }
+    }
+    // Tints a rectangle toward a colour (share 0..255): zone overlays that
+    // keep the suit visible.
+    void TintRect(Canvas& c, int x0, int y0, int x1, int y1, COLORREF col, uint32_t share)
+    {
+        GdiFlush();
+        const uint32_t cr = GetRValue(col), cg = GetGValue(col), cb = GetBValue(col);
+        for (int y = (std::max)(0, y0); y < (std::min)(c.h, y1); ++y)
+            for (int x = (std::max)(0, x0); x < (std::min)(c.w, x1); ++x)
+            {
+                uint32_t& p = c.px[static_cast<size_t>(y) * c.w + x];
+                const uint32_t r = (p >> 16) & 0xFF, g = (p >> 8) & 0xFF, b = p & 0xFF;
+                p = (((r * (255 - share) + cr * share) / 255) << 16) | (((g * (255 - share) + cg * share) / 255) << 8)
+                    | ((b * (255 - share) + cb * share) / 255);
+            }
+    }
+
     void PaintGestureBody(Canvas& c, int top)
     {
         const int cx = kFigCx;
         // Clear the divider behind the figure.
         c.fill(kGCardL0 + kGCardW + 6, top, kGCardR0 - 6, top + kGestureFigureH, kBg);
+        const BodyPicture& pic = GestureBodyPicture();
+        if (pic.w > 0)
+        {
+            BlendPicture(c, pic, cx - pic.w / 2, top + 10);
+            return;
+        }
         const COLORREF body = RGB(66, 74, 86), shade = RGB(50, 57, 67);
         HDC dc = c.dc;
         HBRUSH br = CreateSolidBrush(body);
@@ -2089,30 +2153,30 @@ namespace
         if (!rightSide)
         {
             PaintGestureBody(c, top);
-            // Zones: hatched while set, solid amber while a hand is in them now.
+            // Zones: outlined while set, tinted amber while a hand is in them now.
             for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
             {
                 const ZoneBox b = GestureZoneBox(z);
                 const bool on = GestureZoneOn(z);
                 const bool hot = (g_GestureHot & (1u << z)) || (g_GestureHot & (1u << (8 + z)));
-                const COLORREF edge = hot ? kAmber : on ? RGB(200, 150, 50) : RGB(95, 100, 108);
-                HPEN pen = CreatePen(PS_SOLID, hot ? 6 : 4, edge);
-                HBRUSH fill = hot ? CreateSolidBrush(RGB(150, 105, 20))
-                    : on ? CreateHatchBrush(HS_BDIAGONAL, RGB(120, 90, 30)) : static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+                if (hot)
+                    TintRect(c, b.x0, top + b.y0, b.x1, top + b.y1, kAmber, 130);
+                const COLORREF edge = hot ? kAmber : on ? RGB(255, 200, 90) : RGB(140, 146, 154);
+                HPEN pen = CreatePen(on || hot ? PS_SOLID : PS_DOT, hot ? 6 : on ? 4 : 1, edge);
                 HGDIOBJ op = SelectObject(dc, pen);
-                HGDIOBJ ob = SelectObject(dc, fill);
-                SetBkMode(dc, TRANSPARENT);
+                HGDIOBJ ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
                 RoundRect(dc, b.x0, top + b.y0, b.x1, top + b.y1, 24, 24);
                 SelectObject(dc, ob);
                 SelectObject(dc, op);
                 DeleteObject(pen);
-                if (hot || on)
-                    DeleteObject(fill);
             }
-            c.text("Seen from behind: your left is on the left", kGCardL0 + kGCardW, top + kGestureFigureH - 52,
-                kGCardR0, top + kGestureFigureH - 20, kDim, 24, false, DT_CENTER);
-            c.text("A zone lights up while your hand is in it", kGCardL0 + kGCardW, top + kGestureFigureH - 22,
-                kGCardR0, top + kGestureFigureH + 8, kDim, 24, false, DT_CENTER);
+            // Manual reload with no zone set to Ammo: no way to reload.
+            bool ammoZone = false;
+            for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
+                ammoZone = ammoZone || std::lround(bmvr::g_GestureLeft[z]) == bmvr::kGestureAmmo;
+            if (bmvr::PhysicalWeapon(bmvr::g_VrMagReload) && !ammoZone)
+                c.text("! Manual reload is on, but no zone gives ammo: set a left hand to Ammo",
+                    40, top + kGestureFigureH - 34, kTexW - 40, top + kGestureFigureH, kAlert, 28, true, DT_CENTER);
         }
         const int cx0 = rightSide ? kGCardR0 : kGCardL0, cx1 = cx0 + kGCardW;
         for (const GestureCard& card : GestureCards(rightSide))
