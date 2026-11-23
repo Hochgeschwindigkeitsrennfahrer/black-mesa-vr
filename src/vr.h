@@ -1213,6 +1213,12 @@ public:
         bool gunHandOk = false;
         Vector gunHandWorld{};
         QAngle gunHandAng{};
+        // HUD numbers (health, armor, clip, reserve, secondary, air) read on
+        // the game thread with the frame: the render thread reading them live
+        // caught the next frame's network update before prediction re-applied
+        // a reload, so the reserve flicked back to its old value.
+        bool hudOk = false;
+        int hud[6] = { -1, -1, -1, -1, -1, -1 };
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
     // CalcViewModelView: remember the gun hand's pose the gun is placed from.
@@ -1220,6 +1226,9 @@ public:
     // Gun hand world pose for the ammo HUD: the drawing frame's snapshot
     // while one is drawn (MC), else the latest placement (within 100 ms).
     bool GunHandHudPose(Vector& world, QAngle& ang) const;
+    // HUD values for drawing: the drawing frame's snapshot while one is drawn
+    // (MC), else read live.
+    bool HudValuesForDraw(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air) const;
     // Body origin + turn offset for drawing world-latched menus: the drawing
     // frame's snapshot while one is drawn (MC), else the live values.
     void MenuDrawBody(Vector& body, float& rotationOffsetY) const;

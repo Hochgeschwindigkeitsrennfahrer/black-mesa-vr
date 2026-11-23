@@ -12809,6 +12809,8 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
         s.gunHandWorld = m_GunPlaceHandWorld;
         s.gunHandAng = m_GunPlaceHandAng;
     }
+    if (m_Game)
+        s.hudOk = m_Game->ReadWristHudValues(s.hud[0], s.hud[1], s.hud[2], s.hud[3], s.hud[4], s.hud[5]);
     GetViewBasis(&s.fwd, &s.right, &s.up);
     s.eyeOrig[0] = GetViewOrigin(s.body);
     s.eyeOrig[1] = GetViewOriginLeft(s.body);
@@ -12876,6 +12878,22 @@ bool VR::GunHandHudPose(Vector& world, QAngle& ang) const
     world = m_GunPlaceHandWorld;
     ang = m_GunPlaceHandAng;
     return m_GunPlaceHandOk && GetTickCount() - m_GunPlaceTick <= 100;
+}
+
+bool VR::HudValuesForDraw(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air) const
+{
+    if (const HandDrawSnap* snap = t_HandSnap)
+    {
+        health = snap->hud[0];
+        armor = snap->hud[1];
+        clip = snap->hud[2];
+        reserve = snap->hud[3];
+        secondary = snap->hud[4];
+        air = snap->hud[5];
+        return snap->hudOk;
+    }
+    health = armor = clip = reserve = secondary = air = -1;
+    return m_Game && m_Game->ReadWristHudValues(health, armor, clip, reserve, secondary, air);
 }
 
 bool VR::GunCapWristForDraw(float out[12]) const
@@ -13910,7 +13928,7 @@ void VR::UpdateDamageFlash(int stereoEye)
     int health = -1, armor = -1, clip = -1, reserve = -1, secondary = -1, air = -1;
     // Loads/menus change health without damage (a save with less health).
     if (!bmvr::g_DamageFlash || m_VrPhase != VrPhase::Gameplay || PauseUiActive() || !m_Game
-        || !m_Game->ReadWristHudValues(health, armor, clip, reserve, secondary, air)
+        || !HudValuesForDraw(health, armor, clip, reserve, secondary, air)
         || health < 0 || health > 1000)
     {
         m_DmgLastHealth = m_DmgLastArmor = -1;
@@ -14045,8 +14063,40 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     if (!m_Game || !device)
         return;
     int health = -1, armor = -1, clip = -1, reserve = -1, secondary = -1, air = -1;
-    if (!m_Game->ReadWristHudValues(health, armor, clip, reserve, secondary, air))
+    if (!HudValuesForDraw(health, armor, clip, reserve, secondary, air))
         return;
+    {
+        // Diagnostic (capped): how often a live read on this (render) thread
+        // would have shown other ammo numbers than the frame's snapshot.
+        static int s_lines, s_frames, s_diff;
+        static DWORD s_next;
+        if (t_HandSnap && stereoEye != 2 && s_lines < 12)
+        {
+            int h2, a2, c2, r2, s2, air2;
+            if (m_Game->ReadWristHudValues(h2, a2, c2, r2, s2, air2))
+            {
+                ++s_frames;
+                if (c2 != clip || r2 != reserve || s2 != secondary)
+                {
+                    if (s_diff++ < 3)
+                        Game::logMsg("Hand HUD: live read clip %d reserve %d, frame snapshot clip %d reserve %d",
+                            c2, r2, clip, reserve);
+                }
+            }
+            const DWORD now = GetTickCount();
+            if (now >= s_next)
+            {
+                if (s_next != 0 && s_diff > 0)
+                {
+                    Game::logMsg("Hand HUD: live read differed from the frame snapshot on %d of %d frames (10 s)",
+                        s_diff, s_frames);
+                    ++s_lines;
+                }
+                s_frames = s_diff = 0;
+                s_next = now + 10000;
+            }
+        }
+    }
     const float aspect = m_OffCenterActive ? m_OffCenterAspect
         : (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : m_Aspect;
     const float projFov = m_OffCenterActive ? WorldRenderFov() : HorizontalFovForAspect(aspect);
