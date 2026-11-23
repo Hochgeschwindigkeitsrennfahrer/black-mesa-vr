@@ -36,7 +36,6 @@ public:
         float aspectRatio,
         float sourceUnitsPerMeter,
         float modelScale,
-        vr::IVRInput* input,
         vr::VRActionHandle_t leftSkeleton,
         vr::VRActionHandle_t rightSkeleton,
         bool leftOk,

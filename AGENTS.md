@@ -12,7 +12,7 @@ VR mod for the Steam version of Black Mesa (and Blue Shift). One 32-bit `d3d9.dl
 | `OpenXRHelper64/` | x64 helper: owns the OpenXR session, receives the eye textures through shared handles (`src/openxr_bridge_protocol.h`, shared with the DLL — change both together) |
 | `third_party/l4d2vr/dxvk_new` | DXVK fork with `IDirect3DVR9` (from [L4D2VR](https://github.com/keyou91/l4d2vr)). CMake builds only the files listed in `tools/dxvk_sources.txt`. Upgrade playbook: `docs/DXVK-UPGRADE.md` |
 | `L4D2VR/` | Include shims only (DXVK `#include "L4D2VR/game.h"`). No new code here |
-| `VR/` | Files shipped into the game's `VR\` folder: `config.txt` (player settings), `bmvr.cfg`, `viewmodel_offsets.txt`, weapon-wheel textures, action manifests, glove GLBs (fallback only: hands are built from the game's own models at runtime, `src/vr_bm_hands.cpp`) |
+| `VR/` | Files shipped into the game's `VR\` folder: `config.txt` (player settings), `bmvr.cfg`, `viewmodel_offsets.txt`, weapon-wheel textures, glove GLBs (fallback only: hands are built from the game's own models at runtime, `src/vr_bm_hands.cpp`) |
 | `packaging/` | `BMVR_README.txt` for the release zip |
 | `tools/offsets/` | Port `src/offsets.h` to a new game build (`port_offsets.py`, then `gen_offset_checks.py`) |
 | `tools/headless/` | Headless test runner under Proton (`bm-scenario`, `bm-run`, `bm-restore`; fake VR runtime in `src/vr_fake_helper.cpp`) |

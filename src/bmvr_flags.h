@@ -159,7 +159,6 @@ namespace bmvr
     extern uint32_t g_RecommendedEyeHeight;
     extern uint32_t g_FramebufferWidth;
     extern uint32_t g_FramebufferHeight;
-    extern bool g_OpenVRInitedFromCreateDevice;
     extern float g_RenderScale;
     extern float g_TurnSpeed;
     extern bool g_SnapTurning;
@@ -946,8 +945,6 @@ namespace bmvr
     // Wrist HUD, weapon-wheel chrome, HUD icons, and the pause cursor use
     // Calhoun blue (64,168,255) instead of HEV orange.
     bool UseBlueHud();
-    // false = runtime PostPresentHandoff. true = L4D2VR app handoff (default).
-    extern bool g_CompositorPostPresentHandoff;
     // Old stereo vis workaround: r_portalsopenall + r_occlusion 0. Default
     // off — that pair draws the whole map and tanks open/complex areas.
     extern bool g_ForceOpenVis;
@@ -1012,9 +1009,6 @@ namespace bmvr
     bool TryGbLeftSkip();
     bool TryDrawHud();
     bool TryDrawModelExecute();
-    // HL2VR: QueueCall WaitGetPoses onto ICallQueue. Sticky disables queued
-    // WGP only — sync WaitGetPoses on the calling thread stays on.
-    bool TryHl2vrQueuedWgp();
     // Apply OpenXR/OpenVR controller poses into tracking (viewmodel + gloves).
     bool TryCtrlPose();
     // CalcViewModelView hard-lock to the aim controller.

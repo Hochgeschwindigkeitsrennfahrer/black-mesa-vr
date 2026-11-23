@@ -7,7 +7,7 @@
 
 struct OpenXrHelperLaunchConfig
 {
-    bool enabled = false;
+    bool enabled = true;  // the helper is the only VR path; OpenXRHelper= in old configs is ignored
     // -1 auto (Oculus/Meta OpenXR), 0 off, 1 on.
     int swapProjectionEyes = -1;
     bool swapProjectionViewOrder = false;

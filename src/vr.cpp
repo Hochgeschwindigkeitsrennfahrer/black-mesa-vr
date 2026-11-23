@@ -120,12 +120,6 @@ namespace
         }
     }
 
-    static bool FileExistsA(const char* path)
-    {
-        const DWORD a = GetFileAttributesA(path);
-        return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
-    }
-
     // High-resolution wall clock in ms. GetTickCount only advances every
     // ~15.6 ms, which is useless for per-Present gating.
     static double QpcNowMs()
@@ -310,53 +304,6 @@ namespace
             o.m[r][3] = a.m[r][0] * b.m[0][3] + a.m[r][1] * b.m[1][3] + a.m[r][2] * b.m[2][3] + a.m[r][3];
         }
         return o;
-    }
-
-    // G2 / WMR device pose is the tracking-ring origin. OpenVR grip/tip is the
-    // handle. Do not apply this to the gun (offsets were tuned on raw pose).
-    vr::HmdMatrix34_t DevicePoseToGrip(vr::IVRSystem* system, vr::TrackedDeviceIndex_t idx,
-        const vr::HmdMatrix34_t& devicePose)
-    {
-        if (!system || idx >= vr::k_unMaxTrackedDeviceCount)
-            return devicePose;
-        vr::IVRRenderModels* rm = vr::VRRenderModels();
-        if (!rm)
-            return devicePose;
-        char model[vr::k_unMaxPropertyStringSize]{};
-        if (system->GetStringTrackedDeviceProperty(idx, vr::Prop_RenderModelName_String,
-                model, sizeof(model)) == 0 || !model[0])
-            return devicePose;
-        vr::VRControllerState_t cs{};
-        if (!system->GetControllerState(idx, &cs, sizeof(cs)))
-            memset(&cs, 0, sizeof(cs));
-        vr::RenderModel_ControllerMode_State_t mode{};
-        vr::RenderModel_ComponentState_t comp{};
-        const char* names[] = {
-            vr::k_pch_Controller_Component_OpenXR_Grip,
-            vr::k_pch_Controller_Component_HandGrip,
-            vr::k_pch_Controller_Component_Tip,
-        };
-        static int s_gripLog;
-        for (const char* name : names)
-        {
-            if (!rm->GetComponentState(model, name, &cs, &mode, &comp))
-                continue;
-            if (s_gripLog < 4)
-            {
-                Game::logMsg("Hand grip component=%s model=%s t=(%.3f,%.3f,%.3f)",
-                    name, model, comp.mTrackingToComponentRenderModel.m[0][3],
-                    comp.mTrackingToComponentRenderModel.m[1][3],
-                    comp.mTrackingToComponentRenderModel.m[2][3]);
-                ++s_gripLog;
-            }
-            return MulHmd34(devicePose, comp.mTrackingToComponentRenderModel);
-        }
-        if (s_gripLog < 4)
-        {
-            Game::logMsg("Hand grip component missing model=%s — raw device pose", model);
-            ++s_gripLog;
-        }
-        return devicePose;
     }
 
     bool QueryGameClientSize(UINT& w, UINT& h);
@@ -3523,40 +3470,6 @@ namespace
     }
 }
 
-class Hl2vrAwaitFrameFunctor : public CFunctor
-{
-public:
-    Hl2vrAwaitFrameFunctor(VR* vr, uint64_t frameId)
-        : m_vr(vr)
-        , m_frameId(frameId)
-    {
-    }
-
-    int AddRef() override
-    {
-        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
-    }
-
-    int Release() override
-    {
-        const int n = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
-        if (n == 0)
-            delete this;
-        return n;
-    }
-
-    void operator()() override
-    {
-        if (m_vr)
-            m_vr->MatAwaitFrame(m_frameId);
-    }
-
-private:
-    VR* m_vr;
-    uint64_t m_frameId;
-    std::atomic<int> m_refs{ 0 };
-};
-
 class McMatFunctor : public CFunctor
 {
 public:
@@ -3757,43 +3670,27 @@ static bool SehQueueFunctorInternal(ICallQueue* q, CFunctor* functor)
 VR::VR(Game* game)
     : m_Game(game)
 {
-    Game::logMsg("VR ctor: L4D2VR OpenVR / OpenXR helper path (Black Mesa capture)");
+    Game::logMsg("VR ctor: OpenXR helper path");
     const VrRuntimeBackendConfig runtimeConfig = L4D2VR_ReadRuntimeBackendConfig();
-    m_RuntimeBackendFallbackToOpenVR = true;
-    const VrRuntimeBackendSelection runtimeSelection =
-        L4D2VR_SelectRuntimeBackend(runtimeConfig.requestedBackend, m_RuntimeBackendFallbackToOpenVR);
+    const VrRuntimeBackendSelection runtimeSelection = L4D2VR_SelectRuntimeBackend(runtimeConfig.requestedBackend);
     m_RequestedRuntimeBackend = runtimeSelection.requested;
     m_RuntimeBackend = runtimeSelection.active;
     m_OpenXrLoaderAvailable = runtimeSelection.openXrLoaderAvailable;
     Game::logMsg(
-        "[VR][Runtime] requested=%s active=%s fallback=%d usedFallback=%d openxrLoader=%d openxrBackendImplemented=%d detail=%s",
+        "[VR][Runtime] requested=%s active=%s openxrLoader=%d openxrBackendImplemented=%d detail=%s",
         L4D2VR_RuntimeBackendName(runtimeSelection.requested),
         L4D2VR_RuntimeBackendName(runtimeSelection.active),
-        runtimeSelection.fallbackToOpenVR ? 1 : 0,
-        runtimeSelection.usedFallback ? 1 : 0,
         runtimeSelection.openXrLoaderAvailable ? 1 : 0,
         runtimeSelection.openXrBackendImplemented ? 1 : 0,
         runtimeSelection.message.c_str());
-    {
-        // openvr_api.dll is delay-loaded (bmvr_delayload.cpp); with OpenXR it should not be ours.
-        char path[MAX_PATH] = "-";
-        HMODULE ovr = GetModuleHandleA("openvr_api.dll");
-        if (ovr)
-            GetModuleFileNameA(ovr, path, MAX_PATH);
-        Game::logMsg("[VR][Runtime] openvr_api.dll in process: %s modern=%d", path,
-            (ovr && GetProcAddress(ovr, "VR_InitInternal2")) ? 1 : 0);
-    }
 
-    if (runtimeSelection.active == VrRuntimeBackend::OpenXR)
+    m_IsInitialized = InitOpenXR();
+    if (!m_IsInitialized)
     {
-        m_IsInitialized = InitOpenXR();
-        if (m_IsInitialized)
-            return;
-        Game::logMsg("[VR][Runtime] OpenXR helper init failed; falling back to OpenVR (desktop must still launch)");
+        // The desktop game keeps running without VR.
+        Game::logMsg("[VR][Runtime] OpenXR helper init failed; VR stays off");
         m_OpenXrHelperBridgeActive = false;
-        m_RuntimeBackend = VrRuntimeBackend::OpenVR;
     }
-    m_IsInitialized = InitOpenVR();
 }
 
 bool VR::IsGameplayMapName(const char* map)
@@ -4165,171 +4062,6 @@ void VR::HandleMissingRenderContext(const char* location)
     Game::logMsg("Missing render context at %s", location ? location : "?");
 }
 
-bool VR::InitOpenVR()
-{
-    ++m_OpenVRInitAttempts;
-    m_AntiAliasing = 0;
-
-    if (bmvr::g_OpenVRInitedFromCreateDevice && vr::VRSystem())
-    {
-        m_System = vr::VRSystem();
-        Game::logMsg("OpenVR already initialized from CreateDevice");
-    }
-    else
-    {
-        vr::EVRInitError error = vr::VRInitError_None;
-        m_System = vr::VR_Init(&error, vr::VRApplication_Scene);
-        if (error != vr::VRInitError_None || !m_System)
-        {
-            Game::logMsg("VR_Init failed (%d): %s", (int)error,
-                vr::VR_GetVRInitErrorAsEnglishDescription(error));
-            m_System = nullptr;
-            m_IsVREnabled = false;
-            return false;
-        }
-    }
-
-    m_Compositor = vr::VRCompositor();
-    if (!m_Compositor)
-    {
-        Game::logMsg("VRCompositor() returned null");
-        m_IsVREnabled = false;
-        return false;
-    }
-
-    m_Input = vr::VRInput();
-    m_Overlay = vr::VROverlay();
-    if (m_Overlay && bmvr::TryHudOverlay())
-    {
-        const vr::EVROverlayError oe = m_Overlay->CreateOverlay("bmvr.hud", "Black Mesa VR HUD", &m_HUDTopHandle);
-        if (oe == vr::VROverlayError_None)
-        {
-            m_Overlay->SetOverlayWidthInMeters(m_HUDTopHandle, bmvr::g_HudSize);
-            m_Overlay->SetOverlayFlag(m_HUDTopHandle, vr::VROverlayFlags_IgnoreTextureAlpha, false);
-            m_Overlay->SetOverlayInputMethod(m_HUDTopHandle, vr::VROverlayInputMethod_None);
-            m_Overlay->HideOverlay(m_HUDTopHandle);
-            Game::logMsg("HUD overlay created (distance=%.2f m width=%.2f m; hidden until VGUI paints)",
-                bmvr::g_HudDistance, bmvr::g_HudSize);
-        }
-        else
-        {
-            Game::logMsg("HUD overlay CreateOverlay err=%d", (int)oe);
-            m_HUDTopHandle = vr::k_ulOverlayHandleInvalid;
-        }
-    }
-
-    uint32_t recW = bmvr::g_RecommendedEyeWidth;
-    uint32_t recH = bmvr::g_RecommendedEyeHeight;
-    if (recW < 640 || recH < 360)
-        m_System->GetRecommendedRenderTargetSize(&recW, &recH);
-    if (recW >= 640 && recH >= 360)
-    {
-        bmvr::g_RecommendedEyeWidth = recW;
-        bmvr::g_RecommendedEyeHeight = recH;
-        // m_RenderWidth/Height stay off the HMD size here: an HMD-sized
-        // swapchain gave a black desktop and the SteamVR waiting room
-        // (2026-08-16). Eyes are separate offscreen RTs (ChooseEyeRenderSize).
-    }
-    Game::logMsg("OpenVR recommended RT %ux%u (eye size %ux%u)",
-        recW, recH, m_RenderWidth, m_RenderHeight);
-    RefreshIpdFromHmd();
-
-    float l_left = 0, l_right = 0, l_top = 0, l_bottom = 0;
-    m_System->GetProjectionRaw(vr::Eye_Left, &l_left, &l_right, &l_top, &l_bottom);
-    float r_left = 0, r_right = 0, r_top = 0, r_bottom = 0;
-    m_System->GetProjectionRaw(vr::Eye_Right, &r_left, &r_right, &r_top, &r_bottom);
-
-    {
-        // GetProjectionRaw: bottom (> 0) is the visual up edge, top (< 0)
-        // the down edge (same mapping as the OpenXR init below).
-        const float le[4] = { l_left, l_right, l_top, l_bottom };
-        const float re[4] = { r_left, r_right, r_top, r_bottom };
-        SetupOffCenter(le, re);
-    }
-
-    float tanHalfFovX = (std::max)({ -l_left, l_right, -r_left, r_right });
-    // NormalizeViewSetupForVREye renders this frustum at the eye RT's own
-    // aspect, so the engine's vertical half-FOV is tanX / rtAspect, not the
-    // HMD's max(|top|,|bottom|). The two only agree when tanX/tanY happens to
-    // equal the RT aspect (near-symmetric HMDs); PSVR2 (tanX/tanY 1.386 vs RT
-    // 0.984) got a ~29 % vertical squash. Derive it from the RT for every HMD.
-    const float rtAspect = (recW >= 640 && recH >= 360)
-        ? static_cast<float>(recW) / static_cast<float>(recH) : 1.0f;
-    // An HMD whose vertical FOV is taller than tanX / rtAspect would get
-    // texture bounds outside 0..1 (the compositor samples past the eye
-    // texture at the top and bottom). Widen the symmetric frustum until it
-    // covers the HMD vertically too. OffCenterEyes keeps the raw union: its
-    // per-eye sub-rectangles (SetupOffCenter) are fractions of that frustum.
-    const float hmdTanHalfFovY = (std::max)({ -l_top, l_bottom, -r_top, r_bottom });
-    if (!m_OffCenterActive && std::isfinite(hmdTanHalfFovY) && hmdTanHalfFovY * rtAspect > tanHalfFovX)
-    {
-        Game::logMsg("OpenVR render FOV widened for the HMD's vertical FOV: tanX %.4f -> %.4f (hmd tanY %.4f, RT aspect %.4f)",
-            tanHalfFovX, hmdTanHalfFovY * rtAspect, hmdTanHalfFovY, rtAspect);
-        tanHalfFovX = hmdTanHalfFovY * rtAspect;
-    }
-    const float tanHalfFovY = tanHalfFovX / rtAspect;
-
-    m_Aspect = tanHalfFovX / tanHalfFovY;
-    m_Fov = 2.0f * atanf(tanHalfFovX) * 180.0f / 3.14159265358979323846f;
-
-    // Same projection crop as L4D2VR vr_lifecycle_init.inl, per eye: the
-    // HMD eye's tangents inside the rectangle that eye is rendered with
-    // (EyeRenderRect: symmetric, the runtime eye with OffCenterEyes, the left
-    // eye widened to the right by LeftEyeCullPad). Keep OpenVR v unflipped on
-    // this DXVK path (Vulkan v-swap inverted the fused image).
-    {
-        // {left, right, down (raw top), up (raw bottom)}
-        const float raw[2][4] = {
-            { l_left, l_right, l_top, l_bottom },
-            { r_left, r_right, r_top, r_bottom } };
-        for (int e = 0; e < 2; ++e)
-        {
-            float rect[4];
-            if (!EyeRenderRect(e + 1, rect, rtAspect))
-                continue;
-            const float w = rect[1] - rect[0];
-            const float h = rect[3] - rect[2];
-            vr::VRTextureBounds_t& bounds = m_TextureBounds[e];
-            bounds.uMin = (raw[e][0] - rect[0]) / w;
-            bounds.uMax = (raw[e][1] - rect[0]) / w;
-            bounds.vMin = (rect[3] - raw[e][3]) / h;
-            bounds.vMax = (rect[3] - raw[e][2]) / h;
-        }
-    }
-    if (LeftEyeCullPadTan() > 0.f)
-        Game::logMsg("LeftEyeCullPad: left eye right edge +%.3f tan (%.0f%% of the half-FOV)",
-            LeftEyeCullPadTan(), (std::min)(bmvr::g_LeftEyeCullPad, 0.25f) * 100.f);
-    // Same guard as the OpenXR init: never hand the compositor UVs outside
-    // the texture (rounding, or GetProjectionRaw edge cases).
-    for (vr::VRTextureBounds_t& bounds : m_TextureBounds)
-    {
-        bounds.uMin = std::clamp(bounds.uMin, 0.0f, 1.0f);
-        bounds.uMax = std::clamp(bounds.uMax, 0.0f, 1.0f);
-        bounds.vMin = std::clamp(bounds.vMin, 0.0f, 1.0f);
-        bounds.vMax = std::clamp(bounds.vMax, 0.0f, 1.0f);
-        if (bounds.uMax <= bounds.uMin || bounds.vMax <= bounds.vMin)
-            bounds = vr::VRTextureBounds_t{ 0.0f, 0.0f, 1.0f, 1.0f };
-    }
-    Game::logMsg("OpenVR projection UV L=(%.3f,%.3f)-(%.3f,%.3f) R=(%.3f,%.3f)-(%.3f,%.3f)",
-        m_TextureBounds[0].uMin, m_TextureBounds[0].vMin, m_TextureBounds[0].uMax, m_TextureBounds[0].vMax,
-        m_TextureBounds[1].uMin, m_TextureBounds[1].vMin, m_TextureBounds[1].uMax, m_TextureBounds[1].vMax);
-    m_FovLeft = m_Fov;
-    m_FovRight = m_Fov;
-    ChooseEyeRenderSize();
-
-    m_IsVREnabled = true;
-    m_CompositorAppHandoff = bmvr::g_CompositorPostPresentHandoff;
-    m_Compositor->SetExplicitTimingMode(m_CompositorAppHandoff
-        ? vr::VRCompositorTimingMode_Explicit_ApplicationPerformsPostPresentHandoff
-        : vr::VRCompositorTimingMode_Explicit_RuntimePerformsPostPresentHandoff);
-    m_Compositor->CompositorBringToFront();
-    SetActionManifest();
-    Game::logMsg("OpenVR scene app ready compositor=%p canRender=%d fov=%.1f aspect=%.3f appHandoff=%d msaa=%u",
-        (void*)m_Compositor, m_Compositor->CanRenderScene() ? 1 : 0, m_Fov, m_Aspect,
-        m_CompositorAppHandoff ? 1 : 0, bmvr::g_Msaa);
-    return true;
-}
-
 void VR::BindOpenXrActionHandles()
 {
     auto handle = [](L4D2VROpenXrActionId id) -> vr::VRActionHandle_t {
@@ -4590,28 +4322,6 @@ namespace
         if (grip.valid && grip.active)
             return grip;
         return aim;
-    }
-
-    uint32_t DetectOpenVrControllerFamily(
-        vr::IVRSystem* system,
-        vr::TrackedDeviceIndex_t left,
-        vr::TrackedDeviceIndex_t right)
-    {
-        if (!system)
-            return L4D2VR_OPENXR_CONTROLLER_FAMILY_UNKNOWN;
-        char buf[128]{};
-        const vr::TrackedDeviceIndex_t indices[2] = { right, left };
-        for (vr::TrackedDeviceIndex_t idx : indices)
-        {
-            if (idx == vr::k_unTrackedDeviceIndexInvalid || idx >= vr::k_unMaxTrackedDeviceCount)
-                continue;
-            buf[0] = '\0';
-            system->GetStringTrackedDeviceProperty(idx, vr::Prop_ControllerType_String, buf, sizeof(buf));
-            const uint32_t family = L4D2VR_ClassifyOpenVrControllerType(buf);
-            if (family != L4D2VR_OPENXR_CONTROLLER_FAMILY_UNKNOWN)
-                return family;
-        }
-        return L4D2VR_OPENXR_CONTROLLER_FAMILY_UNKNOWN;
     }
 
     bool FillOpenXrOverlayTextureFromShared(
@@ -6218,110 +5928,6 @@ void VR::HideOpenXrHudOverlay()
     m_HudOverlayHasImage = false;
 }
 
-void VR::SetActionManifest()
-{
-    m_ActionsReady.store(false, std::memory_order_release);
-    if (!m_Input)
-    {
-        Game::logMsg("VRInput() null; motion controllers disabled");
-        return;
-    }
-
-    char cwd[MAX_PATH]{};
-    GetCurrentDirectoryA(MAX_PATH, cwd);
-
-    wchar_t wexe[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, wexe, MAX_PATH);
-    const std::string exeDir = DirFromModulePath(wexe);
-
-    wchar_t wmod[MAX_PATH]{};
-    HMODULE mod = bmvr::DllModule();
-    if (mod)
-        GetModuleFileNameW(mod, wmod, MAX_PATH);
-    const std::string modDir = wmod[0] ? DirFromModulePath(wmod) : std::string();
-
-    std::vector<std::string> dirs;
-    dirs.push_back(cwd);
-    if (!exeDir.empty())
-        dirs.push_back(exeDir);
-    if (!modDir.empty())
-        dirs.push_back(modDir);
-
-    char path[MAX_PATH]{};
-    bool found = false;
-    for (const std::string& dir : dirs)
-    {
-        snprintf(path, sizeof(path), "%s\\VR\\SteamVRActionManifest\\action_manifest.json", dir.c_str());
-        if (FileExistsA(path))
-        {
-            found = true;
-            break;
-        }
-        snprintf(path, sizeof(path), "%s\\..\\VR\\SteamVRActionManifest\\action_manifest.json", dir.c_str());
-        if (FileExistsA(path))
-        {
-            found = true;
-            break;
-        }
-    }
-    if (!found)
-    {
-        Game::logMsg("SteamVR action manifest missing (install VR\\SteamVRActionManifest next to bms.exe)");
-        return;
-    }
-    char full[MAX_PATH]{};
-    if (GetFullPathNameA(path, MAX_PATH, full, nullptr) && full[0])
-        snprintf(path, sizeof(path), "%s", full);
-
-    const vr::EVRInputError err = m_Input->SetActionManifestPath(path);
-    Game::logMsg("SetActionManifestPath %s err=%d", path, (int)err);
-    if (err != vr::VRInputError_None)
-        return;
-
-    auto grab = [this](const char* name, vr::VRActionHandle_t* handle) {
-        const vr::EVRInputError e = m_Input->GetActionHandle(name, handle);
-        if (e != vr::VRInputError_None)
-            Game::logMsg("GetActionHandle %s err=%d", name, (int)e);
-    };
-    grab("/actions/main/in/Jump", &m_ActionJump);
-    grab("/actions/main/in/PrimaryAttack", &m_ActionPrimaryAttack);
-    grab("/actions/main/in/SecondaryAttack", &m_ActionSecondaryAttack);
-    grab("/actions/main/in/Reload", &m_ActionReload);
-    grab("/actions/main/in/Use", &m_ActionUse);
-    grab("/actions/main/in/Walk", &m_ActionWalk);
-    grab("/actions/main/in/Turn", &m_ActionTurn);
-    grab("/actions/main/in/boolean_turnleft", &m_ActionBooleanTurnLeft);
-    grab("/actions/main/in/boolean_turnright", &m_ActionBooleanTurnRight);
-    grab("/actions/main/in/NextItem", &m_ActionNextItem);
-    grab("/actions/main/in/PrevItem", &m_ActionPrevItem);
-    grab("/actions/main/in/ResetPosition", &m_ActionResetPosition);
-    grab("/actions/main/in/Crouch", &m_ActionCrouch);
-    grab("/actions/main/in/CrouchToggle", &m_ActionCrouchToggle);
-    grab("/actions/main/in/Flashlight", &m_ActionFlashlight);
-    grab("/actions/main/in/Scoreboard", &m_ActionScoreboard);
-    grab("/actions/main/in/Pause", &m_ActionPause);
-    grab("/actions/main/in/Sprint", &m_ActionSprint);
-    grab("/actions/main/in/MenuSelect", &m_ActionMenuSelect);
-    grab("/actions/main/in/MenuBack", &m_ActionMenuBack);
-    grab("/actions/main/in/MenuUp", &m_ActionMenuUp);
-    grab("/actions/main/in/MenuDown", &m_ActionMenuDown);
-    grab("/actions/main/in/MenuLeft", &m_ActionMenuLeft);
-    grab("/actions/main/in/MenuRight", &m_ActionMenuRight);
-    grab("/actions/main/in/WeaponMenu", &m_ActionWeaponMenu);
-    grab("/actions/main/in/InventoryQuickSwitch", &m_ActionInventoryQuickSwitch);
-    grab("/actions/base/in/skeleton_lefthand", &m_ActionSkeletonLeft);
-    grab("/actions/base/in/skeleton_righthand", &m_ActionSkeletonRight);
-
-    m_Input->GetActionSetHandle("/actions/main", &m_ActionSet);
-    m_Input->GetActionSetHandle("/actions/base", &m_BaseActionSet);
-    m_ActiveActionSets[0] = {};
-    m_ActiveActionSets[0].ulActionSet = m_ActionSet;
-    m_ActiveActionSets[1] = {};
-    m_ActiveActionSets[1].ulActionSet = m_BaseActionSet;
-    m_ActionsReady.store(true, std::memory_order_release);
-    Game::logMsg("SteamVR actions ready (Walk/Turn/Use/Attack). G2 type hpmotioncontroller");
-}
-
 bool VR::GetDigitalActionData(vr::VRActionHandle_t handle, vr::InputDigitalActionData_t& out) const
 {
     out = {};
@@ -6361,11 +5967,7 @@ bool VR::GetDigitalActionData(vr::VRActionHandle_t handle, vr::InputDigitalActio
         out.fUpdateTime = 0.0f;
         return true;
     }
-    if (!m_Input || handle == vr::k_ulInvalidActionHandle)
-        return false;
-    const vr::EVRInputError result = m_Input->GetDigitalActionData(
-        handle, &out, sizeof(out), vr::k_ulInvalidInputValueHandle);
-    return result == vr::VRInputError_None;
+    return false;
 }
 
 bool VR::GetAnalogActionData(vr::VRActionHandle_t handle, vr::InputAnalogActionData_t& out) const
@@ -6390,11 +5992,7 @@ bool VR::GetAnalogActionData(vr::VRActionHandle_t handle, vr::InputAnalogActionD
         out.fUpdateTime = 0.0f;
         return true;
     }
-    if (!m_Input || handle == vr::k_ulInvalidActionHandle)
-        return false;
-    const vr::EVRInputError result = m_Input->GetAnalogActionData(
-        handle, &out, sizeof(out), vr::k_ulInvalidInputValueHandle);
-    return result == vr::VRInputError_None;
+    return false;
 }
 
 bool VR::PressedDigitalAction(vr::VRActionHandle_t handle, bool onChanged) const
@@ -6934,8 +6532,6 @@ void VR::ProcessInput()
 {
     BMVR_PROF("vr ProcessInput");
     if (!m_IsVREnabled || !m_ActionsReady.load(std::memory_order_acquire))
-        return;
-    if (m_RuntimeBackend != VrRuntimeBackend::OpenXR && !m_Input)
         return;
 
     static auto s_prev = std::chrono::steady_clock::now();
@@ -7641,17 +7237,6 @@ void VR::ApplyVulkanYFlip(vr::VRTextureBounds_t& bounds)
     bounds.vMax = tmp;
 }
 
-void VR::RefreshIpdFromHmd()
-{
-    if (!m_System)
-        return;
-    const vr::HmdMatrix34_t right = m_System->GetEyeToHeadTransform(vr::Eye_Right);
-    const float ipd = fabsf(right.m[0][3]) * 2.0f;
-    if (ipd >= 0.04f && ipd <= 0.10f)
-        m_Ipd = ipd;
-    m_EyeZ = right.m[2][3];
-}
-
 bool VR::ResolveSurfaceSize(IDirect3DSurface9* surf, UINT& w, UINT& h, D3DSURFACE_DESC* outDesc)
 {
     w = 0;
@@ -7694,8 +7279,6 @@ UINT VR::KnownWindowHeight() const
 
 void VR::ChooseEyeRenderSize()
 {
-    PollSteamVrRecommendedSize();
-
     if (m_CreatedVRTextures.load(std::memory_order_acquire)
         && m_D9LeftEyeSurface && m_D9RightEyeSurface
         && m_VKLeftEye.m_VulkanData.m_nWidth >= 640
@@ -10420,31 +10003,6 @@ void VR::FlushPendingGameUi()
     }
 }
 
-void VR::PollVrMenuEvents()
-{
-    if (m_OpenXrHelperBridgeActive)
-        return;
-    vr::IVRSystem* sys = m_System ? m_System : vr::VRSystem();
-    if (!sys)
-        return;
-    vr::VREvent_t ev{};
-    while (sys->PollNextEvent(&ev, sizeof(ev)))
-    {
-        if (ev.eventType == vr::VREvent_Quit)
-        {
-            Game::logMsg("SteamVR VREvent_Quit");
-            sys->AcknowledgeQuit_Exiting();
-            m_PendingQuit.store(1, std::memory_order_release);
-        }
-        else if (ev.eventType == vr::VREvent_DashboardActivated && !IsMenuUp())
-        {
-            // HL2VR: dashboard up while GameUI is down -> gameui_toggle (activate).
-            m_PendingGameUi.store(1, std::memory_order_release);
-            Game::logMsg("SteamVR dashboard opened GameUI");
-        }
-    }
-}
-
 void VR::NoteEngineVGui(void* engineVgui)
 {
     if (engineVgui)
@@ -11745,42 +11303,6 @@ void VR::ApplyMenuCursor()
         }
     }
 
-    if (!haveHit && m_HudOverlayReady && m_Overlay && m_HUDTopHandle != vr::k_ulOverlayHandleInvalid
-        && m_Compositor && m_RightControllerTrackingValid)
-    {
-        vr::VROverlayIntersectionParams_t params{};
-        vr::VROverlayIntersectionResults_t results{};
-        params.eOrigin = m_Compositor->GetTrackingSpace();
-        params.vSource = {
-            m_RightControllerTracking.m[0][3],
-            m_RightControllerTracking.m[1][3],
-            m_RightControllerTracking.m[2][3]
-        };
-        params.vDirection = {
-            -m_RightControllerTracking.m[0][2],
-            -m_RightControllerTracking.m[1][2],
-            -m_RightControllerTracking.m[2][2]
-        };
-        if (m_Overlay->ComputeOverlayIntersection(m_HUDTopHandle, &params, &results)
-            == vr::VROverlayError_None)
-        {
-            hudW = m_HUDTexture ? m_HUDTexture->GetActualWidth() : hudW;
-            hudH = m_HUDTexture ? m_HUDTexture->GetActualHeight() : hudH;
-            if (hudW < 320)
-                hudW = 1280;
-            if (hudH < 180)
-                hudH = 720;
-            float u = results.vUVs.v[0];
-            float v = results.vUVs.v[1];
-            if (u < 0.f) u = 0.f;
-            if (u > 1.f) u = 1.f;
-            if (v < 0.f) v = 0.f;
-            if (v > 1.f) v = 1.f;
-            rawX = u * static_cast<float>(hudW);
-            rawY = v * static_cast<float>(hudH);
-            haveHit = true;
-        }
-    }
 
     // Screenspace FOV fallback maps idle / look-forward aim to the panel
     // center. Skip it once a laser hit exists, and never use it on the
@@ -12773,7 +12295,7 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
     }
     if (!bmvr::TryCtrlPose())
         return;
-    if (!m_OpenXrHelperBridgeActive && !m_System)
+    if (!m_OpenXrHelperBridgeActive)
         return;
 
     struct Sample
@@ -12839,9 +12361,6 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
             OpenXrPoseToTracked(desc.position, desc.orientation, true),
             idx,
             out);
-    };
-    auto sampleRole = [&](vr::ETrackedControllerRole role, Sample& out) {
-        sampleIndex(m_System->GetTrackedDeviceIndexForControllerRole(role), out);
     };
     auto copyOrientation = [](const Sample& src, Sample& dst) {
         if (!src.valid || !dst.valid)
@@ -12914,53 +12433,6 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
                 rollAroundForward(physRight, roll);
             }
         }
-    }
-    else
-    {
-        const vr::TrackedDeviceIndex_t leftIdx =
-            m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
-        const vr::TrackedDeviceIndex_t rightIdx =
-            m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
-        family = DetectOpenVrControllerFamily(m_System, leftIdx, rightIdx);
-        tilt = bmvr::EffectiveControllerPitchTilt(family);
-        sampleRole(vr::TrackedControllerRole_LeftHand, physLeft);
-        sampleRole(vr::TrackedControllerRole_RightHand, physRight);
-        if (!physLeft.valid || !physRight.valid)
-        {
-            for (uint32_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i)
-            {
-                if (m_System->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller)
-                    continue;
-                if (i == physLeft.idx || i == physRight.idx)
-                    continue;
-                Sample extra{};
-                sampleIndex(i, extra);
-                if (!extra.valid)
-                    continue;
-                const vr::ETrackedControllerRole role = m_System->GetControllerRoleForTrackedDeviceIndex(i);
-                if (!physLeft.valid && (role == vr::TrackedControllerRole_LeftHand || role == vr::TrackedControllerRole_Invalid))
-                    physLeft = extra;
-                else if (!physRight.valid && (role == vr::TrackedControllerRole_RightHand || role == vr::TrackedControllerRole_Invalid))
-                    physRight = extra;
-                if (physLeft.valid && physRight.valid)
-                    break;
-            }
-        }
-        if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_UNKNOWN)
-        {
-            family = DetectOpenVrControllerFamily(m_System, physLeft.idx, physRight.idx);
-            const float retitled = bmvr::EffectiveControllerPitchTilt(family);
-            if (retitled != tilt)
-            {
-                tilt = retitled;
-                if (physLeft.valid)
-                    sampleIndex(physLeft.idx, physLeft);
-                if (physRight.valid)
-                    sampleIndex(physRight.idx, physRight);
-            }
-        }
-        weaponLeft = physLeft;
-        weaponRight = physRight;
     }
     // OpenXR samples are rebuilt from position/orientation only. Linear
     // velocity was already differenced onto m_WaitedPoses[1]/[2]; without
@@ -13159,40 +12631,7 @@ bool VR::GetFingerCurls(vr::VRActionHandle_t skeletonAction, float outCurls[5]) 
             outCurls[i] = (std::max)(kRestCurl, grip);
         return finishOk();
     }
-    if (!m_Input || skeletonAction == vr::k_ulInvalidActionHandle)
-        return applyRightWeaponPose();
-    vr::VRSkeletalSummaryData_t summary{};
-    const vr::EVRInputError err = m_Input->GetSkeletalSummaryData(
-        skeletonAction, vr::VRSummaryType_FromAnimation, &summary);
-    if (err != vr::VRInputError_None)
-        return applyRightWeaponPose();
-    for (int i = 0; i < vr::VRFinger_Count; ++i)
-        outCurls[i] = std::clamp(summary.flFingerCurl[i], 0.f, 1.f);
-    return finishOk();
-}
-
-void VR::TryCompositorPostPresentHandoff(DWORD nowMs, DWORD poseAgeMs)
-{
-    (void)poseAgeMs;
-    if (!m_CompositorAppHandoff || !ShouldCompositorSubmit() || !m_Compositor)
-        return;
-
-    // HL2VR: PostPresentHandoff is unconditional. Do not fall back to runtime
-    // timing — that makes WaitGetPoses touch the GPU queue again.
-    const DWORD t0 = GetTickCount();
-    m_Compositor->PostPresentHandoff();
-    const DWORD dt = GetTickCount() - t0;
-    m_Hl2vrHandoffId.store(m_Hl2vrAwaitedId.load(std::memory_order_acquire), std::memory_order_release);
-    m_Hl2vrFrameCv.notify_all();
-    if (dt >= 40)
-    {
-        ++m_CompositorHandoffSlowCount;
-        if (dt >= 50)
-        {
-            Game::logMsg("Compositor PostPresentHandoff slow dt=%ums poseAge=%ums",
-                dt, nowMs - m_WaitedPoseTick.load(std::memory_order_acquire));
-        }
-    }
+    return applyRightWeaponPose();
 }
 
 namespace
@@ -14028,7 +13467,6 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             aspect,
             m_VRScale,
             bmvr::g_VrHandsModelScale,
-            m_Input,
             m_ActionSkeletonLeft,
             m_ActionSkeletonRight,
             leftOk,
@@ -17081,97 +16519,6 @@ void VR::UpdateAutoMatQueueMode()
         desired, current, ok ? 1 : 0, reason, bmvr::g_MulticoreMode ? 1 : 0, m_McRingReady ? 1 : 0);
 }
 
-void VR::TryApplySteamVrRecommendedEyeSize()
-{
-    if (m_OpenXrHelperBridgeActive)
-        return;
-    vr::IVRSystem* sys = m_System ? m_System : vr::VRSystem();
-    if (!sys)
-        return;
-    uint32_t recW = 0, recH = 0;
-    sys->GetRecommendedRenderTargetSize(&recW, &recH);
-    if (recW < 640 || recH < 360)
-        return;
-    if (recW > 4096)
-        recW = 4096;
-    if (recH > 4096)
-        recH = 4096;
-    if (recW == bmvr::g_RecommendedEyeWidth && recH == bmvr::g_RecommendedEyeHeight)
-        return;
-    const uint32_t prevW = bmvr::g_RecommendedEyeWidth;
-    const uint32_t prevH = bmvr::g_RecommendedEyeHeight;
-    bmvr::g_RecommendedEyeWidth = recW;
-    bmvr::g_RecommendedEyeHeight = recH;
-    Game::logMsg("SteamVR recommended RT %ux%u (was %ux%u)", recW, recH, prevW, prevH);
-    if (prevW >= 640 && prevH >= 360
-        && (recW + 32 < prevW || recH + 32 < prevH || prevW + 32 < recW || prevH + 32 < recH))
-        m_EyeResizeSettleMs = GetTickCount();
-}
-
-void VR::PollSteamVrRecommendedSize()
-{
-    if (m_OpenXrHelperBridgeActive)
-        return;
-    // Reached from EnsureStereoEyeSurfaces on every in-game Present.
-    // GetRecommendedRenderTargetSize is a vrclient IPC round trip and the
-    // SteamVR per-app resolution changes at human speed; 4 Hz is enough
-    // (eye resize already waits a 300 ms settle window).
-    static DWORD s_lastPollMs = 0;
-    const DWORD nowMs = GetTickCount();
-    if (bmvr::g_RecommendedEyeWidth >= 640 && s_lastPollMs != 0 && nowMs - s_lastPollMs < 250)
-        return;
-    s_lastPollMs = nowMs ? nowMs : 1;
-    TryApplySteamVrRecommendedEyeSize();
-}
-
-void VR::ReclaimCompositorFocus(const char* reason)
-{
-    if (!m_Compositor)
-        return;
-    const DWORD now = GetTickCount();
-    if (m_LastCompositorReclaimMs != 0 && (now - m_LastCompositorReclaimMs) < 1000)
-        return;
-    m_LastCompositorReclaimMs = now;
-    m_Compositor->CompositorBringToFront();
-    m_Compositor->SetExplicitTimingMode(m_CompositorAppHandoff
-        ? vr::VRCompositorTimingMode_Explicit_ApplicationPerformsPostPresentHandoff
-        : vr::VRCompositorTimingMode_Explicit_RuntimePerformsPostPresentHandoff);
-    m_Compositor->ForceInterleavedReprojectionOn(false);
-    Game::logMsg("Compositor reclaim (%s) canRender=%d poseErr=%d",
-        reason ? reason : "?",
-        m_Compositor->CanRenderScene() ? 1 : 0,
-        m_LastPoseWaitError.load(std::memory_order_acquire));
-}
-
-void VR::TickCompositorFocus()
-{
-    if (!m_Compositor)
-        return;
-    // CanRenderScene + GetTrackedDeviceActivityLevel are two vrclient IPC
-    // round trips. Focus changes are human-speed; 10 Hz is plenty and keeps
-    // them off the per-Present critical path.
-    static DWORD s_lastTickMs = 0;
-    const DWORD nowMs = GetTickCount();
-    if (s_lastTickMs != 0 && nowMs - s_lastTickMs < 100)
-        return;
-    s_lastTickMs = nowMs ? nowMs : 1;
-    const bool can = m_Compositor->CanRenderScene();
-    if (m_LastCanRenderScene && !can)
-        Game::logMsg("Compositor lost scene focus (alt-tab / dashboard)");
-    if (!m_LastCanRenderScene && can)
-        ReclaimCompositorFocus("CanRenderScene restored");
-    m_LastCanRenderScene = can;
-
-    vr::EDeviceActivityLevel activity = vr::k_EDeviceActivityLevel_Unknown;
-    if (m_System)
-        activity = m_System->GetTrackedDeviceActivityLevel(vr::k_unTrackedDeviceIndex_Hmd);
-    const bool hmdActive = activity == vr::k_EDeviceActivityLevel_UserInteraction
-        || activity == vr::k_EDeviceActivityLevel_UserInteraction_Timeout;
-    const int poseErr = m_LastPoseWaitError.load(std::memory_order_acquire);
-    if (hmdActive && (!can || poseErr == static_cast<int>(vr::VRCompositorError_DoNotHaveFocus)))
-        ReclaimCompositorFocus("HMD active without scene focus");
-}
-
 void VR::NoteEngineScopeFov(float engineFov)
 {
     if (bmvr::g_AimDebug && ViewmodelIsScoped() && fabsf(engineFov - m_EngineViewFov) > 0.05f)
@@ -17600,31 +16947,6 @@ void VR::ApplyFrameCap(int nominalHz, float sourceHz, const char* source)
 // OpenVR backend: the HMD reports its refresh rate (Prop_DisplayFrequency_Float,
 // e.g. 89.99 / 119.88 on the PS VR2), so no measuring as on OpenXR. Checked
 // every 5 s: a FrameCap change from the panel applies without a restart.
-void VR::TickOpenVrFrameCap()
-{
-    if (m_RuntimeBackend != VrRuntimeBackend::OpenVR || !m_System)
-        return;
-    static DWORD s_lastMs = 0;
-    const DWORD nowMs = GetTickCount();
-    if (s_lastMs != 0 && nowMs - s_lastMs < 5000)
-        return;
-    s_lastMs = nowMs ? nowMs : 1;
-    vr::ETrackedPropertyError err = vr::TrackedProp_Success;
-    const float hz = m_System->GetFloatTrackedDeviceProperty(
-        vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_DisplayFrequency_Float, &err);
-    if (err != vr::TrackedProp_Success || !(hz >= 60.f && hz <= 240.f))
-    {
-        static bool s_logged;
-        if (!s_logged)
-        {
-            Game::logMsg("FrameCap: HMD display frequency unavailable (err %d, %.1f)", (int)err, hz);
-            s_logged = true;
-        }
-        return;
-    }
-    ApplyFrameCap(static_cast<int>(hz + 0.5f), hz, "reported");
-}
-
 void VR::NotePublishEvenness()
 {
     PublishEvenness& e = m_PublishEven;
@@ -17806,129 +17128,7 @@ void VR::WaitPosesForStereoFrame(bool allowQueued)
             m_StereoEyesDrawnThisFrame = true;
         return;
     }
-    if (!m_Compositor)
-    {
-        m_PosesWaitedThisFrame = true;
-        return;
-    }
-
-    // HL2VR VRManager::OnFrameBegin (vrmanager.cpp): if queued, wait for the
-    // previous WaitGetPoses, queue this frame's WGP, render with predicted.
-    // If GetCallQueue is null, WaitGetPoses on this thread.
-    const bool wantQueued = allowQueued
-        && bmvr::TryHl2vrQueuedWgp()
-        && m_Game && m_Game->GetMatQueueMode() != 0;
-    if (wantQueued)
-        SyncFrameGetPoses(m_Hl2vrFrameCounter);
-    ++m_Hl2vrFrameCounter;
-    bool queued = false;
-    if (wantQueued)
-        queued = QueueMatAwaitFrame(m_Hl2vrFrameCounter);
-    if (!queued)
-        MatAwaitFrame(m_Hl2vrFrameCounter);
-    ApplyHl2vrWaitedPoses(queued);
-    UpdateTracking();
     m_PosesWaitedThisFrame = true;
-}
-
-void VR::ApplyHl2vrWaitedPoses(bool usePredicted)
-{
-    {
-        std::lock_guard<std::mutex> lock(m_PoseMutex);
-        const vr::TrackedDevicePose_t* src = usePredicted ? m_PredictedPoses : m_RenderPoses;
-        std::memcpy(m_WaitedPoses, src, sizeof(m_WaitedPoses));
-        const vr::TrackedDevicePose_t& hmd = m_WaitedPoses[vr::k_unTrackedDeviceIndex_Hmd];
-        m_HmdTrackingPose = hmd.mDeviceToAbsoluteTracking;
-    }
-}
-
-void VR::SyncFrameGetPoses(uint64_t frameId)
-{
-    BMVR_PROF("wait SyncFrameGetPoses");
-    // HL2VR HL2VRInterop::SyncFrameGetPoses: frame 0 is a no-op.
-    if (frameId == 0)
-        return;
-    std::unique_lock<std::mutex> lock(m_Hl2vrFrameMutex);
-    if (m_Hl2vrAwaitedId.load(std::memory_order_acquire) < frameId)
-    {
-        if (!m_Hl2vrFrameCv.wait_for(lock, std::chrono::milliseconds(500), [this, frameId] {
-                return m_Hl2vrAwaitedId.load(std::memory_order_acquire) >= frameId;
-            }))
-        {
-            static int s_syncTimeout;
-            if (s_syncTimeout < 8)
-            {
-                Game::logMsg("HL2VR SyncFrameGetPoses timeout frame=%llu awaited=%llu",
-                    (unsigned long long)frameId,
-                    (unsigned long long)m_Hl2vrAwaitedId.load(std::memory_order_relaxed));
-                ++s_syncTimeout;
-            }
-        }
-    }
-}
-
-void VR::MatAwaitFrame(uint64_t frameId)
-{
-    BMVR_PROF("wait MatAwaitFrame");
-    if (!m_Compositor)
-        return;
-
-    const uint64_t prev = (frameId > 0) ? (frameId - 1) : 0;
-    if (prev > 0)
-    {
-        std::unique_lock<std::mutex> lock(m_Hl2vrFrameMutex);
-        if (m_Hl2vrHandoffId.load(std::memory_order_acquire) < prev)
-        {
-            if (!m_Hl2vrFrameCv.wait_for(lock, std::chrono::milliseconds(500), [this, prev] {
-                    return m_Hl2vrHandoffId.load(std::memory_order_acquire) >= prev;
-                }))
-            {
-                static int s_handoffSkip;
-                if (s_handoffSkip < 6)
-                {
-                    Game::logMsg("HL2VR MatAwaitFrame: previous handoff missing, WaitGetPoses anyway frame=%llu",
-                        (unsigned long long)frameId);
-                    ++s_handoffSkip;
-                }
-            }
-        }
-    }
-
-    vr::TrackedDevicePose_t renderPoses[vr::k_unMaxTrackedDeviceCount]{};
-    vr::TrackedDevicePose_t predictedPoses[vr::k_unMaxTrackedDeviceCount]{};
-    const DWORD t0 = GetTickCount();
-    const vr::EVRCompositorError err = m_Compositor->WaitGetPoses(
-        renderPoses, vr::k_unMaxTrackedDeviceCount,
-        predictedPoses, vr::k_unMaxTrackedDeviceCount);
-    const DWORD dt = GetTickCount() - t0;
-    {
-        std::lock_guard<std::mutex> lock(m_PoseMutex);
-        std::memcpy(m_RenderPoses, renderPoses, sizeof(renderPoses));
-        std::memcpy(m_PredictedPoses, predictedPoses, sizeof(predictedPoses));
-    }
-    m_LastPoseWaitError.store(static_cast<int>(err), std::memory_order_release);
-    m_WaitedPoseTick.store(GetTickCount(), std::memory_order_release);
-    m_PoseWaitCount.fetch_add(1, std::memory_order_relaxed);
-    if (dt > 50)
-        m_PoseWaitOvershootCount.fetch_add(1, std::memory_order_relaxed);
-    if (m_ActionsReady.load(std::memory_order_acquire) && m_Input)
-        m_Input->UpdateActionState(m_ActiveActionSets, sizeof(vr::VRActiveActionSet_t), 2);
-
-    {
-        std::lock_guard<std::mutex> lock(m_Hl2vrFrameMutex);
-        m_Hl2vrAwaitedId.store(frameId, std::memory_order_release);
-    }
-    m_Hl2vrFrameCv.notify_all();
-
-    static int s_wgpLog;
-    if (s_wgpLog < 6 || dt > 100)
-    {
-        Game::logMsg("HL2VR WaitGetPoses frame=%llu err=%d dt=%ums valid=%d queuedSlot=%d",
-            (unsigned long long)frameId, (int)err, dt,
-            renderPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid ? 1 : 0,
-            m_Hl2vrCallQueueSlot);
-        ++s_wgpLog;
-    }
 }
 
 ICallQueue* VR::ProbeCallQueue()
@@ -17971,37 +17171,6 @@ ICallQueue* VR::ProbeCallQueue()
     }
     SehReleaseMatContext(ctx);
     return q;
-}
-
-bool VR::QueueMatAwaitFrame(uint64_t frameId)
-{
-    ICallQueue* q = ProbeCallQueue();
-    if (!q)
-        return false;
-    auto* functor = new (std::nothrow) Hl2vrAwaitFrameFunctor(this, frameId);
-    if (!functor)
-        return false;
-    functor->AddRef();
-    if (m_Hl2vrQueuedWgpFrames == 0)
-        bmvr::BeginRisky(L"hl2vr_wgp");
-    if (!SehQueueFunctorInternal(q, functor))
-    {
-        functor->Release();
-        Game::logMsg("HL2VR QueueFunctorInternal failed frame=%llu — sync WaitGetPoses",
-            (unsigned long long)frameId);
-        return false;
-    }
-    ++m_Hl2vrQueuedWgpFrames;
-    if (m_Hl2vrQueuedWgpFrames == 120)
-        bmvr::EndRisky(L"hl2vr_wgp");
-    static int s_qLog;
-    if (s_qLog < 4)
-    {
-        Game::logMsg("HL2VR queued WaitGetPoses frame=%llu slot=%d",
-            (unsigned long long)frameId, m_Hl2vrCallQueueSlot);
-        ++s_qLog;
-    }
-    return true;
 }
 
 bool VR::QueueMcMatFunctor(CFunctor* functor, const char* failTag)
@@ -20536,7 +19705,7 @@ void VR::EnsureHudOverlay()
 {
     if (!bmvr::TryHudOverlay())
         return;
-    if (!m_OpenXrHelperBridgeActive && m_HUDTopHandle == vr::k_ulOverlayHandleInvalid)
+    if (!m_OpenXrHelperBridgeActive)
         return;
 
     const UINT wantW = KnownWindowWidth();
@@ -20727,95 +19896,6 @@ void VR::BlitEngineHudRtToOverlay()
     }
     src->Release();
     device->Release();
-}
-
-void VR::SubmitHudOverlay()
-{
-    if (m_OpenXrHelperBridgeActive)
-        return;
-    if (!m_HudOverlayReady || !m_Overlay || m_HUDTopHandle == vr::k_ulOverlayHandleInvalid)
-        return;
-    if (!m_VKHUD.m_VRTexture.handle)
-        return;
-
-    // After UnlockSubmissionQueue only. Nested LockSubmissionQueue deadlocks
-    // DXVK m_mutexQueue. Do not ShowOverlay a cleared-black RT: VGui_Paint
-    // was skipped last launch and this was the opaque black square in the HMD.
-    if (!m_HudPaintedThisFrame.load(std::memory_order_acquire))
-    {
-        m_Overlay->HideOverlay(m_HUDTopHandle);
-        static int s_hideLog;
-        if (s_hideLog < 4)
-        {
-            Game::logMsg("HUD overlay hidden (VGUI has not painted bmvrHUD this frame)");
-            ++s_hideLog;
-        }
-        return;
-    }
-
-    const bool pauseUi = WantPauseWorldOverlay();
-    const bool titleUi = !pauseUi && WantTitleHudOverlay();
-    // Gameplay extra-paint is CEngineVGui PAINT_UIPANELS (GameUI / pause
-    // chrome), not client DRAWHUD / _rt_Hud. Showing that on a transparent
-    // SteamVR overlay every frame is the floating pause-menu glass in the HMD
-    // (log: extra-paint mode=0x7 pause=0, overlay shown). HEV HUD cannot come
-    // from this path. Loading GameUI is not paused and must not stick here.
-    if (!pauseUi && !titleUi)
-    {
-        m_Overlay->HideOverlay(m_HUDTopHandle);
-        static int s_hidePlay;
-        if (s_hidePlay < 4)
-        {
-            Game::logMsg("HUD overlay hidden (gameplay; skip GameUI extra-paint)");
-            ++s_hidePlay;
-        }
-        m_HudPaintedThisFrame.store(false, std::memory_order_release);
-        return;
-    }
-    // Pause needs a readable quad. Do not enlarge until VGUI has painted.
-    float widthM = 0.f, distM = 0.f, downM = 0.f;
-    GetMenuOverlayMetrics(distM, widthM, downM);
-    vr::HmdMatrix34_t rel{};
-    rel.m[0][0] = 1.f;
-    rel.m[1][1] = 1.f;
-    rel.m[2][2] = 1.f;
-    rel.m[1][3] = downM;
-    rel.m[2][3] = -distM;
-    m_Overlay->SetOverlayTransformTrackedDeviceRelative(
-        m_HUDTopHandle, vr::k_unTrackedDeviceIndex_Hmd, &rel);
-    m_Overlay->SetOverlayWidthInMeters(m_HUDTopHandle, widthM);
-    m_Overlay->SetOverlayInputMethod(m_HUDTopHandle,
-        pauseUi ? vr::VROverlayInputMethod_Mouse : vr::VROverlayInputMethod_None);
-    m_Overlay->ShowOverlay(m_HUDTopHandle);
-    static int s_showLog;
-    if (s_showLog < 4)
-    {
-        Game::logMsg("HUD overlay shown distance=%.2f m width=%.2f m pause=%d",
-            distM, widthM, pauseUi ? 1 : 0);
-        ++s_showLog;
-    }
-    m_HudPaintedThisFrame.store(false, std::memory_order_release);
-}
-
-void VR::BindHudOverlayWhileQueueLocked()
-{
-    if (m_OpenXrHelperBridgeActive)
-        return;
-    if (!m_HudOverlayReady || !m_Overlay || m_HUDTopHandle == vr::k_ulOverlayHandleInvalid)
-        return;
-    if (!m_VKHUD.m_VRTexture.handle)
-        return;
-    if (!m_HudPaintedThisFrame.load(std::memory_order_acquire))
-        return;
-    if (!WantHudLayer())
-        return;
-    m_Overlay->SetOverlayTexture(m_HUDTopHandle, &m_VKHUD.m_VRTexture);
-    static int s_hudBindLog;
-    if (s_hudBindLog < 2)
-    {
-        Game::logMsg("HUD overlay SetOverlayTexture while queue locked");
-        ++s_hudBindLog;
-    }
 }
 
 void VR::CreateVRTextures()
@@ -21661,278 +20741,6 @@ void VR::SubmitVRTextures()
         return;
     }
 
-    if (!m_Compositor)
-        return;
-    if (!m_CreatedVRTextures.load(std::memory_order_acquire))
-        return;
-    const int poseErr = m_LastPoseWaitError.load(std::memory_order_acquire);
-    if (poseErr == static_cast<int>(vr::VRCompositorError_DoNotHaveFocus))
-    {
-        if (m_Compositor)
-            m_Compositor->CompositorBringToFront();
-        static int s_focusSubmitLog;
-        if (s_focusSubmitLog < 4)
-        {
-            Game::logMsg("Submit despite DoNotHaveFocus (bring compositor to front)");
-            ++s_focusSubmitLog;
-        }
-    }
-
-    const bool haveNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
-    const bool panel2d = Want2dMenuPanel();
-    const bool pauseKeepEyes = WantPauseWorldOverlay()
-        && m_D9LeftEyeSurface && m_D9RightEyeSurface;
-    const bool directEyes = ((haveNewFrame && m_DirectEyeSubmit && !panel2d)
-        || pauseKeepEyes)
-        && m_D9LeftEyeSurface && m_D9RightEyeSurface;
-    const bool haveFrame = haveNewFrame && m_D9FrameColorSurface;
-    if (!directEyes && !haveFrame)
-        return;
-
-    const uint32_t poseToken = m_PoseWaitCount.load(std::memory_order_acquire);
-    if (poseToken == 0)
-        return;
-    if (poseToken == m_LastSubmittedPoseToken.load(std::memory_order_acquire))
-        return;
-
-    static int s_submitEnter;
-    if (s_submitEnter < 4)
-    {
-        Game::logMsg("Submit enter direct=%d frame=%d named=%d eye=%ux%u",
-            directEyes ? 1 : 0, haveFrame ? 1 : 0, m_UsedNamedRenderTargets ? 1 : 0,
-            m_RenderWidth, m_RenderHeight);
-        ++s_submitEnter;
-    }
-
-    IDirect3DDevice9* device = nullptr;
-    if (FAILED(g_D3DVR9->GetD3DDevice(&device)) || !device)
-        return;
-
-    HRESULT hrL = S_OK, hrR = S_OK;
-    LONG usedOff = 0;
-    D3DSURFACE_DESC srcDesc{};
-    D3DSURFACE_DESC dstDesc{};
-
-    if (!directEyes)
-    {
-        const bool haveSrc = SUCCEEDED(m_D9FrameColorSurface->GetDesc(&srcDesc)) && srcDesc.Width >= 64 && srcDesc.Height >= 64;
-        const bool haveDst = m_D9LeftEyeSurface && SUCCEEDED(m_D9LeftEyeSurface->GetDesc(&dstDesc)) && dstDesc.Width >= 64;
-
-        hrL = E_FAIL;
-        hrR = E_FAIL;
-        if (haveSrc && haveDst && m_D9LeftEyeSurface)
-        {
-            m_CaptureReentry = true;
-            MsaaEyesTo1x(device);
-            if (m_StereoCopyOffset && m_D9RightEyeSurface)
-            {
-                LONG useOff = m_StereoOffsetPx;
-                if (useOff <= 0)
-                    useOff = (std::max)(8L, (LONG)(srcDesc.Width / 64));
-                const LONG maxOff = (LONG)(srcDesc.Width / 8);
-                if (useOff > maxOff) useOff = maxOff;
-                usedOff = useOff;
-                RECT leftSrc{ useOff, 0, (LONG)srcDesc.Width, (LONG)srcDesc.Height };
-                RECT rightSrc{ 0, 0, (LONG)srcDesc.Width - useOff, (LONG)srcDesc.Height };
-                hrL = device->StretchRect(m_D9FrameColorSurface, &leftSrc, m_D9LeftEyeSurface, nullptr, D3DTEXF_LINEAR);
-                hrR = device->StretchRect(m_D9FrameColorSurface, &rightSrc, m_D9RightEyeSurface, nullptr, D3DTEXF_LINEAR);
-                if (SUCCEEDED(hrL))
-                    NoteMsaaEyeScene(m_D9LeftEyeSurface, true);
-                else if (m_D9LeftEyeSubmitSurface)
-                    hrL = device->StretchRect(m_D9FrameColorSurface, &leftSrc, m_D9LeftEyeSubmitSurface, nullptr, D3DTEXF_LINEAR);
-                if (SUCCEEDED(hrR))
-                    NoteMsaaEyeScene(m_D9RightEyeSurface, true);
-                else if (m_D9RightEyeSubmitSurface)
-                    hrR = device->StretchRect(m_D9FrameColorSurface, &rightSrc, m_D9RightEyeSubmitSurface, nullptr, D3DTEXF_LINEAR);
-            }
-            else
-            {
-                DrawMenuCursorOnSurface(device, m_D9FrameColorSurface);
-                hrL = CopySurfaceLetterboxed(device, m_D9FrameColorSurface, m_D9LeftEyeSurface,
-                    bmvr::g_MenuPanelScale) ? S_OK : E_FAIL;
-                hrR = m_D9RightEyeSurface
-                    ? (CopySurfaceLetterboxed(device, m_D9FrameColorSurface, m_D9RightEyeSurface,
-                        bmvr::g_MenuPanelScale) ? S_OK : E_FAIL)
-                    : hrL;
-                if (SUCCEEDED(hrL))
-                    NoteMsaaEyeScene(m_D9LeftEyeSurface, true);
-                if (m_D9RightEyeSurface && SUCCEEDED(hrR))
-                    NoteMsaaEyeScene(m_D9RightEyeSurface, true);
-            }
-            m_CaptureReentry = false;
-        }
-
-        if (FAILED(hrL))
-        {
-            device->Release();
-            m_RenderedNewFrame.store(false, std::memory_order_release);
-            m_FrameCopyLatched = false;
-            return;
-        }
-    }
-    else
-    {
-        if (m_D9LeftEyeSurface)
-            m_D9LeftEyeSurface->GetDesc(&dstDesc);
-        srcDesc = dstDesc;
-        hrR = S_OK;
-    }
-
-    g_D3DVR9->LockDevice();
-    ResolveMsaaEyesToSubmit(device);
-    IDirect3DSurface9* leftSubmit = m_D9LeftEyeSubmitSurface ? m_D9LeftEyeSubmitSurface : m_D9LeftEyeSurface;
-    IDirect3DSurface9* rightSubmit = m_D9RightEyeSubmitSurface ? m_D9RightEyeSubmitSurface : m_D9RightEyeSurface;
-    // No WaitDeviceIdle around the transfer: it stalled the GPU every
-    // submit and coincided with a 1 fps crash during loading (2026-08).
-    const BOOL waitGpu = FALSE;
-    const bool okL = leftSubmit && SUCCEEDED(g_D3DVR9->TransferSurface(leftSubmit, waitGpu))
-        && FillSharedTexture(leftSubmit, m_VKLeftEye);
-    bool okR = false;
-    if (rightSubmit && SUCCEEDED(hrR))
-        okR = SUCCEEDED(g_D3DVR9->TransferSurface(rightSubmit, waitGpu)) && FillSharedTexture(rightSubmit, m_VKRightEye);
-    if (WantPauseWorldOverlay() && m_HudOverlayReady && m_D9HUDSurface
-        && TakeHudPaintFor(0))
-    {
-        g_D3DVR9->TransferSurface(m_D9HUDPublishSurface, FALSE);
-        FillSharedTexture(m_D9HUDPublishSurface, m_VKHUD);
-        m_HudOverlayHasImage = true;
-    }
-    g_D3DVR9->UnlockDevice();
-
-    if (!okL)
-    {
-        device->Release();
-        return;
-    }
-
-    if (WantPauseWorldOverlay())
-        EnsureHudOverlay();
-
-    if (FAILED(g_D3DVR9->LockSubmissionQueue()))
-    {
-        device->Release();
-        return;
-    }
-
-    vr::VRTextureBounds_t leftBounds{};
-    vr::VRTextureBounds_t rightBounds{};
-    const float imgW = srcDesc.Width > 0 ? (float)srcDesc.Width : (float)dstDesc.Width;
-    const float imgH = srcDesc.Height > 0 ? (float)srcDesc.Height : (float)dstDesc.Height;
-    const float imgAspect = (imgW >= 64.f && imgH >= 64.f) ? (imgW / imgH) : 0.f;
-
-    if (directEyes)
-    {
-        // L4D2VR vr_lifecycle_init.inl: eye textures are the hidden-area HMD
-        // frustum (fov=m_Fov, aspect=m_Aspect). Submit GetProjectionRaw UVs.
-        leftBounds = m_TextureBounds[0];
-        rightBounds = m_TextureBounds[1];
-        static int s_directBoundsLog;
-        if (s_directBoundsLog < 3)
-        {
-            Game::logMsg("Direct eye Submit UV L=(%.3f,%.3f)-(%.3f,%.3f) R=(%.3f,%.3f)-(%.3f,%.3f) img=%gx%g",
-                leftBounds.uMin, leftBounds.vMin, leftBounds.uMax, leftBounds.vMax,
-                rightBounds.uMin, rightBounds.vMin, rightBounds.uMax, rightBounds.vMax,
-                imgW, imgH);
-            ++s_directBoundsLog;
-        }
-    }
-    else
-    {
-        // 16:9 game blit is not an HMD-projection eye RT. GetProjectionRaw UVs
-        // showed the left strip of the pause menu, 180° rotated, rest black
-        // (WMR portal 2026-08-16). Keep v unflipped. Crop U so 16:9 matches
-        // HMD aspect (~1.1) instead of stretching vertically into the FOV.
-        leftBounds = { 0.f, 0.f, 1.f, 1.f };
-        const bool inGame = m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
-        // Cropping U to HMD aspect (u=0.191..0.809) ate the left-aligned old
-        // game-UI buttons. Keep full 16:9 on the menu / !inGame capture path.
-        if (inGame && imgAspect > m_Aspect * 1.02f && m_Aspect > 0.1f)
-        {
-            const float vis = m_Aspect / imgAspect;
-            const float du = (1.f - vis) * 0.5f;
-            leftBounds.uMin = du;
-            leftBounds.uMax = 1.f - du;
-        }
-        rightBounds = leftBounds;
-        static int s_boundsLog;
-        if (s_boundsLog < 3)
-        {
-            Game::logMsg("Capture Submit UV u=%.3f..%.3f v=%.3f..%.3f img=%ux%u hmdAspect=%.3f",
-                leftBounds.uMin, leftBounds.uMax, leftBounds.vMin, leftBounds.vMax,
-                srcDesc.Width, srcDesc.Height, m_Aspect);
-            ++s_boundsLog;
-        }
-    }
-
-    vr::EVRCompositorError timingErr = vr::VRCompositorError_None;
-    if (m_CompositorAppHandoff)
-    {
-        timingErr = m_Compositor->SubmitExplicitTimingData();
-        static int s_timingLog;
-        if (s_timingLog < 4 || timingErr != vr::VRCompositorError_None)
-        {
-            Game::logMsg("HL2VR SubmitExplicitTimingData err=%d", (int)timingErr);
-            ++s_timingLog;
-        }
-    }
-
-    vr::EVRSubmitFlags submitFlags = vr::Submit_Default;
-    vr::VRTextureWithPose_t leftWithPose{};
-    vr::VRTextureWithPose_t rightWithPose{};
-    const vr::Texture_t* leftTex = &m_VKLeftEye.m_VRTexture;
-    const vr::Texture_t* rightTex = okR ? &m_VKRightEye.m_VRTexture : &m_VKLeftEye.m_VRTexture;
-    if (m_StereoFrameTrackingPoseValid || m_HmdPoseValid)
-    {
-        const vr::HmdMatrix34_t pose = m_StereoFrameTrackingPoseValid
-            ? m_StereoFrameTrackingPose : m_HmdTrackingPose;
-        leftWithPose.handle = m_VKLeftEye.m_VRTexture.handle;
-        leftWithPose.eType = m_VKLeftEye.m_VRTexture.eType;
-        leftWithPose.eColorSpace = m_VKLeftEye.m_VRTexture.eColorSpace;
-        leftWithPose.mDeviceToAbsoluteTracking = pose;
-        rightWithPose.handle = rightTex->handle;
-        rightWithPose.eType = rightTex->eType;
-        rightWithPose.eColorSpace = rightTex->eColorSpace;
-        rightWithPose.mDeviceToAbsoluteTracking = pose;
-        leftTex = &leftWithPose;
-        rightTex = &rightWithPose;
-        submitFlags = vr::Submit_TextureWithPose;
-    }
-
-    vr::EVRCompositorError eL = m_Compositor->Submit(vr::Eye_Left, leftTex, &leftBounds, submitFlags);
-    vr::EVRCompositorError eR = m_Compositor->Submit(vr::Eye_Right, rightTex, &rightBounds, submitFlags);
-
-    BindHudOverlayWhileQueueLocked();
-
-    g_D3DVR9->UnlockSubmissionQueue();
-    SubmitHudOverlay();
-
-    m_ActualCompositorSubmitCount.fetch_add(1, std::memory_order_relaxed);
-    ++m_SubmitCount;
-    m_LastSubmittedPoseToken.store(poseToken, std::memory_order_release);
-    TryCompositorPostPresentHandoff(GetTickCount(), 0);
-
-    if (!m_LoggedFirstSubmit)
-    {
-        m_LoggedFirstSubmit = true;
-        Game::logMsg("OpenVR Submit %s src=%ux%u eye=%ux%u stereoCopy=%d off=%ld namedRT=%d eL=%d eR=%d pose=%d",
-            directEyes ? "direct-eyes" : "capture",
-            srcDesc.Width, srcDesc.Height, dstDesc.Width, dstDesc.Height,
-            m_StereoCopyOffset ? 1 : 0, usedOff, m_UsedNamedRenderTargets ? 1 : 0, (int)eL, (int)eR,
-            submitFlags == vr::Submit_TextureWithPose ? 1 : 0);
-    }
-    else if ((m_SubmitCount % 120) == 0)
-    {
-        Game::logMsg("OpenVR submit #%d eL=%d eR=%d direct=%d blit=%ux%u eye=%ux%u captured=%ux%u",
-            m_SubmitCount, (int)eL, (int)eR, directEyes ? 1 : 0,
-            m_LastStereoBlitWidth, m_LastStereoBlitHeight,
-            m_RenderWidth, m_RenderHeight, m_FrameCopyWidth, m_FrameCopyHeight);
-    }
-
-    m_RenderedNewFrame.store(false, std::memory_order_release);
-    m_FrameCopyLatched = false;
-    if (eL == vr::VRCompositorError_None || eL == vr::VRCompositorError_AlreadySubmitted)
-        m_HasSubmittedSceneFrame.store(true, std::memory_order_release);
-    device->Release();
 }
 
 void VR::UpdateTracking()
@@ -21964,8 +20772,6 @@ void VR::UpdateTracking()
         return;
     if (err == vr::VRCompositorError_DoNotHaveFocus)
     {
-        if (m_Compositor)
-            m_Compositor->CompositorBringToFront();
         static int s_focusLog;
         if (s_focusLog < 6)
         {
@@ -21996,7 +20802,6 @@ void VR::UpdateTracking()
         hmdGuard.published = true;
     }
     m_IpdScale = bmvr::g_IPDScale;
-    RefreshIpdFromHmd();
     UpdateControllerTracking(hmd);
 
     UpdateScopeZoomSmooth();
@@ -22034,11 +20839,6 @@ void VR::Update()
     if (!m_Game)
         return;
 
-    if (!m_IsVREnabled && m_RequestedRuntimeBackend != VrRuntimeBackend::OpenXR && m_OpenVRInitAttempts < 8)
-        m_IsInitialized = InitOpenVR();
-    if (!m_IsVREnabled && m_RequestedRuntimeBackend == VrRuntimeBackend::OpenXR && m_RuntimeBackend == VrRuntimeBackend::OpenVR
-        && m_OpenVRInitAttempts < 8)
-        m_IsInitialized = InitOpenVR();
     if (!m_IsVREnabled)
         return;
 
@@ -22059,8 +20859,6 @@ void VR::Update()
     if (m_OpenXrHelperBridgeActive && !m_PosesWaitedThisFrame)
         ConsumeOpenXrTracking();
 
-    TickCompositorFocus();
-    TickOpenVrFrameCap();
 
     // QoL cvars go through ICvar from RenderView (game thread). FindVar/SetValue
     // from this Present/DXVK path crashed ~13s after init (2026-08-26).
@@ -22154,18 +20952,6 @@ void VR::Update()
     if (m_GameplayEligible && inGame && m_EligiblePresents == 120 && bmvr::TryHmdNative())
         bmvr::EndRisky(L"hmd_native");
 
-    const DWORD poseTickEarly = m_WaitedPoseTick.load(std::memory_order_acquire);
-    const DWORD poseAgeEarly = poseTickEarly ? (nowMs - poseTickEarly) : 0xffffffffu;
-    if (m_Compositor && poseAgeEarly > 80 && poseAgeEarly <= 2000)
-    {
-        static DWORD s_lastBring = 0;
-        if (nowMs - s_lastBring >= 1000)
-        {
-            m_Compositor->CompositorBringToFront();
-            s_lastBring = nowMs;
-        }
-    }
-
     if (!m_PosesWaitedThisFrame)
     {
         if (m_OpenXrHelperBridgeActive)
@@ -22174,7 +20960,6 @@ void VR::Update()
             WaitPosesForStereoFrame(false);
     }
     SyncGameUiFromEngine();
-    PollVrMenuEvents();
     LatchMenuPanelIfNeeded();
     ProcessInput();
     if (!(bmvr::g_McFrameReset && McPipelineEnabled()))

@@ -61,7 +61,6 @@ namespace bmvr
     uint32_t g_RecommendedEyeHeight = 0;
     uint32_t g_FramebufferWidth = 0;
     uint32_t g_FramebufferHeight = 0;
-    bool g_OpenVRInitedFromCreateDevice = false;
     float g_RenderScale = 1.f;
     float g_TurnSpeed = 0.25f;
     bool g_SnapTurning = false;
@@ -428,11 +427,6 @@ namespace bmvr
     uint32_t g_FullFrameActualHeight = 0;
     uint32_t g_GbActualWidth = 0;
     uint32_t g_GbActualHeight = 0;
-    // false = runtime PostPresentHandoff. true = L4D2VR app handoff (default).
-    // Runtime mode lets the pose-waiter WaitGetPoses touch the Vulkan queue and
-    // stall ~110ms (~20fps). App mode is the 90fps path. First-shot PostPresentHandoff
-    // hitch is separate; do not put WaitGetPoses on the RenderView thread.
-    bool g_CompositorPostPresentHandoff = true;
     bool g_ForceOpenVis = false;
     bool g_MaterialPredraw = false;
     bool g_StereoBlitGpuFlush = true;
@@ -467,7 +461,6 @@ namespace bmvr
     static bool g_TryMenuCompositor = true;
     static bool g_TryRelativeHmdLook = true;
     static bool g_TryMatQueue = true;
-    static bool g_TryHl2vrQueuedWgp = true;
     static bool g_TryCtrlPose = true;
     static bool g_TryCtrlVm = true;
     static bool g_TryVrGloves = true;
@@ -1351,8 +1344,6 @@ namespace bmvr
                 g_VrHandLightRaw = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHandsBlackMesaScale") == 0)
                 g_VrHandsBlackMesaScale = static_cast<float>(std::atof(val));
-            else if (std::strcmp(n, "CompositorPostPresentHandoff") == 0)
-                g_CompositorPostPresentHandoff = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "DesktopLeftoverRender") == 0)
                 g_DesktopLeftoverRender = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ForceOpenVis") == 0)
@@ -1534,8 +1525,6 @@ namespace bmvr
             g_TryDrawHud = false;
         else if (name == "dme")
             g_TryDme = false;
-        else if (name == "hl2vr_wgp")
-            g_TryHl2vrQueuedWgp = false;
         else if (name == "msaa")
         {
             g_MsaaAllowed = false;
@@ -2345,8 +2334,6 @@ namespace bmvr
         for (const auto& dir : FlagDirs())
             DeleteFileW((dir + L"\\bmvr_in_drawhud.flag").c_str());
         Log("Ignoring drawhud crash-sticky (third HWND HUD pass after small-eye stereo)");
-        ConsumeIfStuck(L"hl2vr_wgp", g_TryHl2vrQueuedWgp, "hl2vr_wgp",
-            "HL2VR queued WaitGetPoses on ICallQueue");
         ConsumeIfStuck(L"ctrl_pose", g_TryCtrlPose, "ctrl_pose",
             "first OpenXR/OpenVR controller pose apply", false);
         ConsumeIfStuck(L"ctrl_vm", g_TryCtrlVm, "ctrl_vm",
@@ -2471,7 +2458,6 @@ namespace bmvr
     bool TryGbLeftSkip() { return g_TryGbLeftSkip; }
     bool TryDrawHud() { return g_TryDrawHud; }
     bool TryDrawModelExecute() { return g_TryDme; }
-    bool TryHl2vrQueuedWgp() { return g_TryHl2vrQueuedWgp; }
     bool TryCtrlPose() { return g_TryCtrlPose; }
     bool TryCtrlVm() { return g_TryCtrlVm; }
     bool TryVrGloves() { return g_TryVrGloves; }

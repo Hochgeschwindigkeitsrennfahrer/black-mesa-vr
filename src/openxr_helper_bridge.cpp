@@ -266,10 +266,6 @@ OpenXrHelperLaunchConfig L4D2VR_ReadOpenXrHelperLaunchConfig()
             return it != values.end() ? it->second : std::string();
         };
 
-    if (const std::string value = get("OpenXRHelper"); !value.empty())
-        config.enabled = ParseBool(value, config.enabled);
-    if (bmvr::g_FakeRuntime)
-        config.enabled = true;
     if (const std::string value = get("OpenXRHelperSwapProjectionEyes"); !value.empty())
         config.swapProjectionEyes = ParseFlipSubmitY(value, config.swapProjectionEyes);
     if (const std::string value = get("OpenXRHelperSwapProjectionViewOrder"); !value.empty())

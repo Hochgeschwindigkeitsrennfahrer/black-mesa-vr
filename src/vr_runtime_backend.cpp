@@ -381,33 +381,23 @@ VrRuntimeBackendConfig L4D2VR_ReadRuntimeBackendConfig()
     if (backendIt != values.end() && !backendIt->second.empty())
         config.requestedBackend = backendIt->second;
 
-    config.fallbackToOpenVR = false;
-
     return config;
 }
 
-VrRuntimeBackendSelection L4D2VR_SelectRuntimeBackend(
-    const std::string& requestedBackend,
-    bool)
+VrRuntimeBackendSelection L4D2VR_SelectRuntimeBackend(const std::string& requestedBackend)
 {
     VrRuntimeBackendSelection result{};
-    result.requested = L4D2VR_ParseRuntimeBackend(requestedBackend, VrRuntimeBackend::OpenVR);
-    result.fallbackToOpenVR = false;
+    // The OpenVR backend was removed (2026-11-23); an old VRRuntimeBackend=openvr runs on OpenXR.
+    result.requested = L4D2VR_ParseRuntimeBackend(requestedBackend, VrRuntimeBackend::OpenXR);
     result.openXrBackendImplemented = kOpenXrHelperBackendImplemented;
-
-    if (result.requested == VrRuntimeBackend::OpenVR)
-    {
-        result.active = VrRuntimeBackend::OpenVR;
-        result.canStart = true;
-        result.message = "OpenVR runtime selected";
-        return result;
-    }
+    const char* note = (result.requested == VrRuntimeBackend::OpenVR)
+        ? " (VRRuntimeBackend=openvr is no longer supported)" : "";
 
     if (bmvr::g_FakeRuntime)
     {
         result.active = VrRuntimeBackend::OpenXR;
         result.canStart = true;
-        result.message = "fake OpenXR helper (headless test runtime, no SteamVR)";
+        result.message = std::string("fake OpenXR helper (headless test runtime, no SteamVR)") + note;
         return result;
     }
 
@@ -423,5 +413,6 @@ VrRuntimeBackendSelection L4D2VR_SelectRuntimeBackend(
         result.message = "OpenXR helper backend selected; x64 helper owns the OpenXR session";
     else
         result.message = "OpenXR helper backend selected; 32-bit loader probe skipped (" + loaderDetail + ")";
+    result.message += note;
     return result;
 }

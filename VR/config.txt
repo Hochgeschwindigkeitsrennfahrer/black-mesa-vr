@@ -77,10 +77,6 @@ ControllerPitchTiltVive=-45.0
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
 ViewmodelPosOffsetXTouch=5.5
 
-# openxr = 64-bit helper. openvr = SteamVR compositor.
-VRRuntimeBackend=openxr
-OpenXRHelper=true
-
 # HUD quad, metres, relative to the headset.
 HudDistance=1.05
 HudSize=0.70

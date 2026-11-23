@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+// OpenVR only remains as a parse result, so an old VRRuntimeBackend=openvr can be logged; it runs on OpenXR.
 enum class VrRuntimeBackend
 {
     OpenVR,
@@ -11,10 +12,8 @@ enum class VrRuntimeBackend
 
 struct VrRuntimeBackendSelection
 {
-    VrRuntimeBackend requested = VrRuntimeBackend::OpenVR;
-    VrRuntimeBackend active = VrRuntimeBackend::OpenVR;
-    bool fallbackToOpenVR = false;
-    bool usedFallback = false;
+    VrRuntimeBackend requested = VrRuntimeBackend::OpenXR;
+    VrRuntimeBackend active = VrRuntimeBackend::OpenXR;
     bool canStart = true;
     bool openXrLoaderAvailable = false;
     bool openXrBackendImplemented = false;
@@ -23,8 +22,7 @@ struct VrRuntimeBackendSelection
 
 struct VrRuntimeBackendConfig
 {
-    std::string requestedBackend = "openvr";
-    bool fallbackToOpenVR = false;
+    std::string requestedBackend = "openxr";
 };
 
 struct OpenXrRuntimeProbe
@@ -49,6 +47,4 @@ const char* L4D2VR_RuntimeBackendName(VrRuntimeBackend backend);
 bool L4D2VR_IsOpenXrLoaderAvailable(std::string* detail = nullptr);
 VrRuntimeBackendConfig L4D2VR_ReadRuntimeBackendConfig();
 OpenXrRuntimeProbe L4D2VR_ProbeOpenXrRuntime();
-VrRuntimeBackendSelection L4D2VR_SelectRuntimeBackend(
-    const std::string& requestedBackend,
-    bool fallbackToOpenVR);
+VrRuntimeBackendSelection L4D2VR_SelectRuntimeBackend(const std::string& requestedBackend);

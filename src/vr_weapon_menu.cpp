@@ -2562,8 +2562,6 @@ void VR::PulseHandHapticSeconds(vr::ETrackedControllerRole hand, float seconds, 
         L4D2VR_PublishOpenXrHapticRequest(openXrHand, std::clamp(seconds, 0.02f, 0.5f), 160.0f, amplitude);
         return;
     }
-    // OpenVR has no amplitude; its click length follows the same 0.07 s scale.
-    PulseHandHaptic(hand, static_cast<unsigned short>(std::clamp(seconds / 0.07f * 3999.f, 1.f, 3999.f)), amplitude);
 }
 
 void VR::PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short durationUs, float amplitude)
@@ -2576,7 +2574,7 @@ void VR::PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short duratio
         ? L4D2VR_OPENXR_HAND_LEFT : L4D2VR_OPENXR_HAND_RIGHT;
     if (m_OpenXrHelperBridgeActive)
     {
-        // OpenVR TriggerHapticPulse units are microseconds of a click (1-3999).
+        // durationUs <= 3999: a click length (the old OpenVR TriggerHapticPulse scale, 1-3999).
         // OpenXR duration is real vibration time; 2ms is below SteamVR's floor.
         float seconds = durationUs / 1000000.0f;
         if (durationUs <= 3999)
@@ -2590,16 +2588,6 @@ void VR::PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short duratio
         }
         return;
     }
-    if (!m_System)
-        return;
-    if (durationUs < 1)
-        durationUs = 1;
-    if (durationUs > 3999)
-        durationUs = 3999;
-    const vr::TrackedDeviceIndex_t idx = m_System->GetTrackedDeviceIndexForControllerRole(hand);
-    if (idx == vr::k_unTrackedDeviceIndexInvalid)
-        return;
-    m_System->TriggerHapticPulse(idx, 0, durationUs);
 }
 
 const char* VR::WeaponMenuDrawSoundName(int kind) const

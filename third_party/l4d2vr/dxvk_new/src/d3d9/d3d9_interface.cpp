@@ -402,63 +402,13 @@ namespace dxvk {
     }
     if (!noHmd)
     {
-      bool skipOpenVrInit = false;
-      const VrRuntimeBackendConfig runtimeConfig = L4D2VR_ReadRuntimeBackendConfig();
-      const VrRuntimeBackendSelection runtimeSelection =
-        L4D2VR_SelectRuntimeBackend(runtimeConfig.requestedBackend, true);
-      if (runtimeSelection.active == VrRuntimeBackend::OpenXR)
+      const OpenXrHelperLaunchConfig helperConfig = L4D2VR_ReadOpenXrHelperLaunchConfig();
+      if (helperConfig.enabled)
       {
-        const OpenXrHelperLaunchConfig helperConfig = L4D2VR_ReadOpenXrHelperLaunchConfig();
-        if (helperConfig.enabled)
-        {
-          BootstrapOpenXrRecommendedSize(helperConfig);
-          // FullFrame is created during SetMode after this returns. Hook
-          // CreateNamedRT now so WorldRenderAtEyeSize can LITERAL-grow it.
-          // OpenVR already called InstallEarlyFramebufferHook below; OpenXR
-          // skipped that and left G2 world RTs at the HWND (worldMatch=0).
-          bmvr::InstallEarlyFramebufferHook();
-          // OpenXR owns the SteamVR/OpenXR scene app. VR_Init(Scene) here after
-          // a helper timeout started a second scene app, delayed load ~45s, and
-          // the game closed at the main menu.
-          skipOpenVrInit = true;
-        }
-      }
-
-      if (!skipOpenVrInit)
-      {
-      vr::EVRInitError vrErr = vr::VRInitError_None;
-      vr::IVRSystem* vrSys = vr::VR_Init(&vrErr, vr::VRApplication_Scene);
-      if (vrErr == vr::VRInitError_None && vrSys)
-      {
-        uint32_t recW = 0, recH = 0;
-        vrSys->GetRecommendedRenderTargetSize(&recW, &recH);
-        if (recW >= 640 && recH >= 360)
-        {
-          bmvr::g_RecommendedEyeWidth = recW;
-          bmvr::g_RecommendedEyeHeight = recH;
-          bmvr::g_OpenVRInitedFromCreateDevice = true;
-
-          float lLeft = 0.f, lRight = 0.f, lTop = 0.f, lBottom = 0.f;
-          vrSys->GetProjectionRaw(vr::Eye_Left, &lLeft, &lRight, &lTop, &lBottom);
-          const float tanHalfFovX = (-lLeft > lRight) ? -lLeft : lRight;
-          const float tanHalfFovY = (-lTop > lBottom) ? -lTop : lBottom;
-          const float projAspect = (tanHalfFovY > 0.01f) ? (tanHalfFovX / tanHalfFovY) : 0.f;
-          const uint32_t winW = pPresentationParameters->BackBufferWidth;
-          const uint32_t winH = pPresentationParameters->BackBufferHeight;
-          bmvr::ComputeHmdFramebufferSize(recW, recH, winW, winH, projAspect);
-          bmvr::InstallEarlyFramebufferHook();
-          Logger::info(str::format(
-            "BMVR CreateDevice: OpenVR ready recommended ", recW, "x", recH,
-            " window ", winW, "x", winH,
-            " G-buffer ", bmvr::g_FramebufferWidth, "x", bmvr::g_FramebufferHeight));
-        }
-      }
-      else
-      {
-        Logger::warn(str::format(
-          "BMVR CreateDevice: VR_Init failed (",
-          static_cast<int>(vrErr), ") — keeping desktop swapchain size"));
-      }
+        BootstrapOpenXrRecommendedSize(helperConfig);
+        // FullFrame is created during SetMode after this returns. Hook
+        // CreateNamedRT now so WorldRenderAtEyeSize can LITERAL-grow it.
+        bmvr::InstallEarlyFramebufferHook();
       }
     }
     (void)noHmd;

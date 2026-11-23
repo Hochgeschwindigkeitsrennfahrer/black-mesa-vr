@@ -69,9 +69,8 @@ class VR
 public:
     Game* m_Game = nullptr;
 
-    VrRuntimeBackend m_RuntimeBackend = VrRuntimeBackend::OpenVR;
-    VrRuntimeBackend m_RequestedRuntimeBackend = VrRuntimeBackend::OpenVR;
-    bool m_RuntimeBackendFallbackToOpenVR = true;
+    VrRuntimeBackend m_RuntimeBackend = VrRuntimeBackend::OpenXR;
+    VrRuntimeBackend m_RequestedRuntimeBackend = VrRuntimeBackend::OpenXR;
     bool m_OpenXrLoaderAvailable = false;
     bool m_OpenXrHelperBridgeActive = false;
     DWORD m_OpenXrHelperRestartMs = 0;
@@ -224,11 +223,6 @@ public:
     int m_RestoreSteps = 0;
     DWORD m_RestoreNextMs = 0;
 
-    vr::IVRSystem* m_System = nullptr;
-    vr::IVRInput* m_Input = nullptr;
-    vr::IVROverlay* m_Overlay = nullptr;
-    vr::VROverlayHandle_t m_HUDTopHandle = vr::k_ulOverlayHandleInvalid;
-    vr::IVRCompositor* m_Compositor = nullptr;
 
     // Eye / G-buffer size. L4D2VR uses OpenVR recommended size. Named RTs at
     // that size died on BM, so the blit path matches G-buffer to recommended
@@ -428,17 +422,10 @@ public:
     int m_FirstAttackSpikeLogs = 0;
     std::mutex m_PoseMutex;
     vr::TrackedDevicePose_t m_WaitedPoses[vr::k_unMaxTrackedDeviceCount]{};
-    vr::TrackedDevicePose_t m_RenderPoses[vr::k_unMaxTrackedDeviceCount]{};
-    vr::TrackedDevicePose_t m_PredictedPoses[vr::k_unMaxTrackedDeviceCount]{};
     vr::HmdMatrix34_t m_HmdTrackingPose{};
     vr::HmdMatrix34_t m_StereoFrameTrackingPose{};
     bool m_StereoFrameTrackingPoseValid = false;
     std::atomic<DWORD> m_WaitedPoseTick{ 0 };
-    std::mutex m_Hl2vrFrameMutex;
-    std::condition_variable m_Hl2vrFrameCv;
-    uint64_t m_Hl2vrFrameCounter = 0;
-    std::atomic<uint64_t> m_Hl2vrAwaitedId{ 0 };
-    std::atomic<uint64_t> m_Hl2vrHandoffId{ 0 };
     int m_Hl2vrCallQueueSlot = -1;
     bool m_Hl2vrCallQueueProbed = false;
     // Source slot 146 can return a non-null non-queue on BM. Remember it so
@@ -446,7 +433,6 @@ public:
     int m_McCallQueueFailedSlot = -1;
     bool m_McEyeCopyQueued = false;
     bool m_McEyeCopyDone = false;
-    uint32_t m_Hl2vrQueuedWgpFrames = 0;
     Vector m_SetupOrigin{};
     Vector m_SetupOriginToHMD{};
     float m_StereoZNear = 7.f;
@@ -568,7 +554,7 @@ public:
     std::atomic<uint32_t> m_SubmitVRTexturesEntryCount{ 0 };
     std::atomic<uint32_t> m_SubmitInFlightSkipCount{ 0 };
     std::atomic<uint32_t> m_CompositorFrameIndexDedupSkipCount{ 0 };
-    std::atomic<uint32_t> m_ActualCompositorSubmitCount{ 0 };
+    std::atomic<uint32_t> m_ActualCompositorSubmitCount{ 0 };  // stats line in d3d9_device.cpp; 0 since OpenVR left
     std::atomic<uint32_t> m_SubmitEyeNoneCount{ 0 };
     std::atomic<uint32_t> m_SubmitEyeAlreadySubmittedCount{ 0 };
     std::atomic<uint32_t> m_SubmitEyeOtherErrorCount{ 0 };
@@ -663,9 +649,6 @@ public:
     bool m_SoftPitchLook = false;
     bool m_ProcessInputEnabled = false;
     std::atomic<bool> m_ActionsReady{ false };
-    vr::VRActionSetHandle_t m_ActionSet = vr::k_ulInvalidActionSetHandle;
-    vr::VRActionSetHandle_t m_BaseActionSet = vr::k_ulInvalidActionSetHandle;
-    vr::VRActiveActionSet_t m_ActiveActionSets[2]{};
     vr::VRActionHandle_t m_ActionJump = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionPrimaryAttack = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionSecondaryAttack = vr::k_ulInvalidActionHandle;
@@ -695,7 +678,6 @@ public:
     vr::VRActionHandle_t m_ActionInventoryQuickSwitch = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionSkeletonLeft = vr::k_ulInvalidActionHandle;
     vr::VRActionHandle_t m_ActionSkeletonRight = vr::k_ulInvalidActionHandle;
-    bool m_CompositorAppHandoff = false;
     uint32_t m_CompositorHandoffSlowCount = 0;
     std::atomic<float> m_WalkForward{ 0.f };
     std::atomic<float> m_WalkSide{ 0.f };
@@ -873,7 +855,6 @@ public:
     bool m_CaptureReentry = false;
     bool m_LoggedFirstSubmit = false;
     bool m_LookApplyWanted = true;
-    int m_OpenVRInitAttempts = 0;
     bool m_DirectEyeSubmit = false;
     bool m_UsedNamedRenderTargets = false;
     bool m_StereoRenderViewActive = false;
@@ -918,7 +899,6 @@ public:
     void EndStereoFramePose();
     void LogOpenXrPublishRate();
     void ApplyFrameCap(int nominalHz, float sourceHz, const char* source);
-    void TickOpenVrFrameCap();
     int m_FrameCapApplied = 0;
     void TickOpenXrHelperWatchdog();
     void LogOpenXrPublishSetupFailure(const char* stage, uint32_t eye, uint32_t slot, unsigned hr);
@@ -1305,7 +1285,6 @@ public:
     void SyncLadderUseOnly();
     void FlushPanelEngineCommands();
     void FlushPendingQuit();
-    void PollVrMenuEvents();
     void NoteEngineVGui(void* engineVgui);
     // Intro logo (env_credits -> HudCredits) and env_message / game_text
     // (HudMessage): client HUD panels the eyes never get (DRAWHUD is stripped
@@ -1540,9 +1519,6 @@ public:
     bool TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QAngle& trackingAng) const;
     bool HudOverlayReady() const { return m_HudOverlayReady; }
     void EnsureHudOverlay();
-    void SubmitHudOverlay();
-    // Bind HUD overlay texture. Caller must already hold LockSubmissionQueue.
-    void BindHudOverlayWhileQueueLocked();
     void ClearHudSurface(bool opaque);
     void TickMatQueueFromRenderView();
     // HL2VR hlvr_msaa from VR/config.txt. Scene targets pick it up on the
@@ -1577,18 +1553,11 @@ public:
     IDirect3DBaseTexture9* EyeRtSubstitute(IDirect3DBaseTexture9* texture);
     IDirect3DBaseTexture9* SceneCubemap() const { return m_SceneCubemap; }
     bool GetFingerCurls(vr::VRActionHandle_t skeletonAction, float outCurls[5]) const;
-    void TryCompositorPostPresentHandoff(DWORD nowMs, DWORD poseAgeMs);
 
 private:
-    friend class Hl2vrAwaitFrameFunctor;
     friend class McPauseHudFunctor;
-    void MatAwaitFrame(uint64_t frameId);
-    void SyncFrameGetPoses(uint64_t frameId);
-    bool QueueMatAwaitFrame(uint64_t frameId);
     ICallQueue* ProbeCallQueue();
-    void ApplyHl2vrWaitedPoses(bool usePredicted);
     Vector GetViewOriginUnshifted(const Vector& setupOrigin) const;
-    void SetActionManifest();
     bool GetDigitalActionData(vr::VRActionHandle_t handle, vr::InputDigitalActionData_t& out) const;
     bool GetAnalogActionData(vr::VRActionHandle_t handle, vr::InputAnalogActionData_t& out) const;
     bool PressedDigitalAction(vr::VRActionHandle_t handle, bool onChanged = false) const;
@@ -1621,7 +1590,6 @@ private:
     void TickPhaseDump();
     DWORD m_PoseDiagUntilMs = 0;
     void TickPoseDiag();
-    bool InitOpenVR();
     bool InitOpenXR();
     bool ConsumeOpenXrTracking();
     // Copies the eyes into a free publish slot and either queues the slot
@@ -1651,14 +1619,9 @@ private:
     void NoteMsaaEyeScene(IDirect3DSurface9* dst, bool copied);
     void ResolveMsaaEyesToSubmit(IDirect3DDevice9* device);
     void ApplyVulkanYFlip(vr::VRTextureBounds_t& bounds);
-    void RefreshIpdFromHmd();
     void UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose);
     void UpdateAutoMatQueueMode();
     void ApplyVrQualityOfLifeCvars();
-    void PollSteamVrRecommendedSize();
-    void TryApplySteamVrRecommendedEyeSize();
-    void TickCompositorFocus();
-    void ReclaimCompositorFocus(const char* reason);
     void PulseAimHaptic(unsigned short durationUs = 2500);
     void PulseHandHaptic(vr::ETrackedControllerRole hand, unsigned short durationUs, float amplitude = 0.6f);
     // Real vibration time (OpenXR); OpenVR maps it to its 1-3999 us click.

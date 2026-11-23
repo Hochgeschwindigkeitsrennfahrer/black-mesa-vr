@@ -131,9 +131,6 @@ While the menu is up, point the right controller at it and pull the trigger
 to click. A confirms, B goes back. In-world screens (air support on bm_c2a5i)
 use look for hover and the right trigger as left click.
 
-If sticks or the new pause/sprint bindings do nothing, open SteamVR Bindings for
-this app and reset the layout to the default in VR\SteamVRActionManifest.
-
 The first-person weapon follows the right controller (uncoupled viewmodel).
 HL2 v_ models are oversized in world-space VR; ViewmodelScale=0.68 is the default
 (~25% smaller than the L4D2VR-matched 0.91). Crowbar stays full size.
@@ -160,8 +157,7 @@ Those take effect on the next launch (config is read at DLL load).
 
 The same file also has Haptics, HideCrosshair, VrCrosshair, DisableViewBob,
 LeftHanded, IPDScale, HeightOffset. MSAA (0 / 2 / 4) is set in the VR
-settings panel (Graphics tab). VRRuntimeBackend=openxr uses the 64-bit helper;
-openvr is the SteamVR compositor.
+settings panel (Graphics tab).
 
 Menu and load stay single-threaded. Gameplay switches to mat_queue_mode 2
 after stereo warmup. If that path crashes, bmvr_skip.txt next to bms.exe

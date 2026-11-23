@@ -535,11 +535,8 @@ namespace
             outPalette[i] = identity;
     }
 
-    // BuildSummaryCurlPalette only reads flFingerCurl, so go through
-    // VR::GetFingerCurls, which knows both backends. Calling
-    // GetSkeletalSummaryData directly meant the gloves froze in their bind pose
-    // on OpenXR, where there is no OpenVR input session to ask.
-    bool TryGetSummary(vr::IVRInput* input, vr::VRActionHandle_t action, vr::VRSkeletalSummaryData_t& out)
+    // BuildSummaryCurlPalette only reads flFingerCurl: VR::GetFingerCurls.
+    bool TryGetSummary(vr::VRActionHandle_t action, vr::VRSkeletalSummaryData_t& out)
     {
         out = {};
         if (g_Game && g_Game->m_VR)
@@ -552,10 +549,7 @@ namespace
                 return true;
             }
         }
-        if (!input || action == vr::k_ulInvalidActionHandle)
-            return false;
-        return input->GetSkeletalSummaryData(action, vr::VRSummaryType_FromAnimation, &out)
-            == vr::VRInputError_None;
+        return false;
     }
 
     Vector FlashlightBoostAt(const Vector& palm)
@@ -733,24 +727,6 @@ struct BmVrGloves::Impl
             outPath = path.string();
             return true;
         };
-
-        // openvr_api.dll is delay-loaded and only loaded for the OpenVR backend (bmvr_delayload.cpp):
-        // ask it only when it is already in the process and is the modern one.
-        using GetRuntimePathFn = bool(__cdecl*)(char*, uint32_t, uint32_t*);
-        HMODULE ovr = GetModuleHandleA("openvr_api.dll");
-        auto getRuntimePath = ovr ? reinterpret_cast<GetRuntimePathFn>(GetProcAddress(ovr, "VR_GetRuntimePath")) : nullptr;
-        std::vector<char> buffer(vr::k_unMaxPropertyStringSize, '\0');
-        uint32_t required = 0;
-        if (getRuntimePath && getRuntimePath(buffer.data(), static_cast<uint32_t>(buffer.size()), &required))
-        {
-            if (required > buffer.size())
-            {
-                buffer.assign(static_cast<size_t>(required) + 1u, '\0');
-                getRuntimePath(buffer.data(), static_cast<uint32_t>(buffer.size()), &required);
-            }
-            if (buffer.front() != '\0' && tryRoot(std::filesystem::path(buffer.data())))
-                return true;
-        }
 
         static const char* kFallbacks[] = {
             "C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR",
@@ -1305,7 +1281,6 @@ bool BmVrGloves::DrawForEye(
     float aspectRatio,
     float sourceUnitsPerMeter,
     float modelScale,
-    vr::IVRInput* input,
     vr::VRActionHandle_t leftSkeleton,
     vr::VRActionHandle_t rightSkeleton,
     bool leftOk,
@@ -1401,7 +1376,7 @@ bool BmVrGloves::DrawForEye(
         const bool gripCurl = !rungGrip && g_Game && g_Game->m_VR && (
             (rightHand && g_Game->m_VR->WantsRightGloveWeaponGripCurl())
             || (!rightHand && g_Game->m_VR->WantsOffhandGloveWeaponGripCurl()));
-        if (TryGetSummary(input, actions[i], summary))
+        if (TryGetSummary(actions[i], summary))
         {
             // G-Man in view: grip folds every finger but the middle one.
             // Grip drives the middle/ring/pinky curls, so their max is the

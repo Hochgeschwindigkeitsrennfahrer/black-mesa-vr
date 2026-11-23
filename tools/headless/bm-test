@@ -18,7 +18,6 @@ if [[ ! -f $out/VR/config.txt ]]; then
 	}
 	tr -d '\r' < "$base" > "$out/VR/config.txt"
 	set_kv VRRuntimeBackend fake
-	set_kv OpenXRHelper true
 	set_kv MirrorBothEyes true
 	for kv in ${BMVR_CONFIG_SET:-}; do set_kv "${kv%%=*}" "${kv#*=}"; done
 fi
