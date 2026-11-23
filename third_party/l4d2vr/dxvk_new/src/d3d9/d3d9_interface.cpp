@@ -10,6 +10,8 @@
 
 #include <openvr.h>
 #include "bmvr_flags.h"
+#include <intrin.h>
+#include <cstring>
 #include "openxr_helper_bridge.h"
 #include "vr_runtime_backend.h"
 
@@ -425,8 +427,18 @@ namespace dxvk {
 
     if (SUCCEEDED(result)
      && ppReturnedDeviceInterface != nullptr
-     && *ppReturnedDeviceInterface != nullptr)
-      Direct3DCreateVRImpl(*ppReturnedDeviceInterface, &g_D3DVR9);
+     && *ppReturnedDeviceInterface != nullptr) {
+      // New game UI (Qt Quick on ANGLE) creates a second device with a 1x1
+      // back buffer after the game's. VR must stay on the game's device:
+      // eye RTs made on the UI device cannot be bound by the game's
+      // (D3DERR_INVALIDCALL, black eyes; 2026-11-23).
+      const bool uiDevice = g_D3DVR9 != nullptr && pPresentationParameters
+        && pPresentationParameters->BackBufferWidth <= 1 && pPresentationParameters->BackBufferHeight <= 1;
+      if (uiDevice)
+        bmvr::Log("D3D9 device %p (1x1 back buffer) kept out of VR: new game UI device", static_cast<void*>(*ppReturnedDeviceInterface));
+      else
+        Direct3DCreateVRImpl(*ppReturnedDeviceInterface, &g_D3DVR9);
+    }
 
     return result;
   }
@@ -564,6 +576,27 @@ namespace dxvk {
         return hr;
 
       *ppReturnedDeviceInterface = ref(device);
+      // BMVR: the new game UI (Qt Quick on ANGLE) makes its own D3D9Ex
+      // device next to the game's; log each one so the log says which is
+      // which (2026-11-23 new UI study).
+      {
+        static LONG s_deviceCount = 0;
+        const LONG n = InterlockedIncrement(&s_deviceCount);
+        void* ret = _ReturnAddress();
+        HMODULE mod = nullptr;
+        char path[MAX_PATH] = "?";
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                static_cast<LPCSTR>(ret), &mod) && mod)
+          GetModuleFileNameA(mod, path, MAX_PATH);
+        const char* base = std::strrchr(path, '\\');
+        bmvr::Log("D3D9 device #%ld created: %p bb=%ux%u fmt=%u count=%u windowed=%d hwnd=%p focus=%p flags=0x%X tid=%lu caller=%s+0x%X",
+          n, static_cast<void*>(device), pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight,
+          static_cast<unsigned>(pPresentationParameters->BackBufferFormat), pPresentationParameters->BackBufferCount,
+          pPresentationParameters->Windowed ? 1 : 0, static_cast<void*>(pPresentationParameters->hDeviceWindow),
+          static_cast<void*>(hFocusWindow), static_cast<unsigned>(BehaviorFlags), GetCurrentThreadId(),
+          base ? base + 1 : path,
+          mod ? static_cast<unsigned>(reinterpret_cast<uintptr_t>(ret) - reinterpret_cast<uintptr_t>(mod)) : 0u);
+      }
     }
     catch (const DxvkError& e) {
       Logger::err(e.message());

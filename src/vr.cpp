@@ -21,6 +21,7 @@
 #include "openxr_helper_bridge.h"
 
 #include <d3dcompiler.h>
+#include <intrin.h>
 #include <algorithm>
 #include <array>
 #include <unordered_map>
@@ -1843,6 +1844,36 @@ namespace
     HRESULT __stdcall HookedPresent(IDirect3DDevice9* device, const RECT* src, const RECT* dst, HWND hwnd, const RGNDATA* dirty)
     {
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+        // Which devices present (the new game UI has two, 2026-11-23): a
+        // count per device every 300 Presents of the first one seen, 8 lines.
+        {
+            static IDirect3DDevice9* s_dev[2] = {};
+            static unsigned s_n[2] = {};
+            static int s_lines = 0;
+            int slot = -1;
+            for (int i = 0; i < 2; ++i)
+            {
+                if (s_dev[i] == device || !s_dev[i])
+                {
+                    s_dev[i] = device;
+                    slot = i;
+                    break;
+                }
+            }
+            if (slot >= 0)
+                ++s_n[slot];
+            if (slot == 0 && s_n[0] % 300 == 1 && s_lines < 8)
+            {
+                ++s_lines;
+                IDirect3DDevice9* vrDev = nullptr;
+                if (g_D3DVR9)
+                    g_D3DVR9->GetD3DDevice(&vrDev);
+                Game::logMsg("Present per device: %p n=%u | %p n=%u | VR device %p",
+                    static_cast<void*>(s_dev[0]), s_n[0], static_cast<void*>(s_dev[1]), s_n[1], static_cast<void*>(vrDev));
+                if (vrDev)
+                    vrDev->Release();
+            }
+        }
         if (vr && vr->m_DirectEyeSubmit && !vr->Want2dMenuPanel())
         {
             static int s_presentStereo;
@@ -1879,6 +1910,7 @@ namespace
     HRESULT __stdcall HookedSetRenderTarget(IDirect3DDevice9* device, DWORD index, IDirect3DSurface9* rt)
     {
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
+        IDirect3DSurface9* const inRtForTrace = rt;
         // Extra VGui_Paint of pause GameUI must land on the D3D HUD, not the
         // HWND backbuffer (that was the floating copy of the whole desktop).
         if (index == 0 && vr && device && vr->HudPaintActive() && vr->m_D9HUDSurface
@@ -1969,7 +2001,50 @@ namespace
         }
         if (!g_OrigSetRenderTarget)
             return D3DERR_INVALIDCALL;
+        IDirect3DSurface9* const requestedRt = inRtForTrace;
         const HRESULT hr = g_OrigSetRenderTarget(device, index, rt);
+        // Pass trace (VR/trace.txt): every RT bind with the surface the game
+        // asked for, what was bound, and who called. New game UI study: the
+        // world's "back buffer" binds did not reach the eye (2026-11-23).
+        if (bmvr::g_PassTraceFrames > 0 && index == 0)
+        {
+            D3DSURFACE_DESC inDesc{}, outDesc{};
+            if (requestedRt)
+                requestedRt->GetDesc(&inDesc);
+            if (rt)
+                rt->GetDesc(&outDesc);
+            IDirect3DSurface9* bb = CachedBackBufferPtr(device);
+            HMODULE mod = nullptr;
+            char path[MAX_PATH] = "?";
+            void* caller = _ReturnAddress();
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                    static_cast<LPCSTR>(caller), &mod) && mod)
+                GetModuleFileNameA(mod, path, MAX_PATH);
+            const char* base = std::strrchr(path, '\\');
+            base = base ? base + 1 : path;
+            // Which device each surface belongs to (DXVK rejects a foreign one).
+            int inDev = -1, outDev = -1;
+            IDirect3DDevice9* d = nullptr;
+            if (requestedRt && SUCCEEDED(requestedRt->GetDevice(&d)) && d)
+            {
+                inDev = (d == device) ? 1 : 0;
+                d->Release();
+            }
+            d = nullptr;
+            if (rt && SUCCEEDED(rt->GetDevice(&d)) && d)
+            {
+                outDev = (d == device) ? 1 : 0;
+                d->Release();
+            }
+            Game::logMsg("trace: d3d SetRT0 dev=%p inDev=%d outDev=%d outUsage=0x%X", static_cast<void*>(device), inDev, outDev,
+                static_cast<unsigned>(outDesc.Usage));
+            Game::logMsg("trace: d3d SetRT0 in=%p %ux%u fmt=%u isBB=%d -> %p %ux%u redir=%d hud=%d dest=%p hr=0x%08X caller=%s+0x%X",
+                static_cast<void*>(requestedRt), inDesc.Width, inDesc.Height, static_cast<unsigned>(inDesc.Format),
+                (bb && requestedRt == bb) ? 1 : 0, static_cast<void*>(rt), outDesc.Width, outDesc.Height,
+                redirectedToEye ? 1 : 0, (vr && vr->HudPaintActive()) ? 1 : 0, static_cast<void*>(dest),
+                static_cast<unsigned>(hr), base,
+                mod ? static_cast<unsigned>(reinterpret_cast<uintptr_t>(caller) - reinterpret_cast<uintptr_t>(mod)) : 0u);
+        }
         // Redirecting the 2560x1440 backbuffer onto a taller eye keeps the
         // window viewport (1440). DXVK only forces full-eye size on the next
         // SetViewport while RT0 is already the eye — so do that here.
