@@ -2841,8 +2841,8 @@ void VR::WelcomeStep(bool paused)
         return;
     }
     std::snprintf(m_WelcomeText, sizeof(m_WelcomeText),
-        "%s %s (%s hand) to open the VR menu\nThe game stays paused until you do",
-        hold ? "Hold" : "Press", label, labelHand == 0 ? "left" : "right");
+        "You can %s %s (%s hand) to open the VR menu.\nPlease open it now to set up your playstyle preferences.",
+        hold ? "hold" : "press", label, labelHand == 0 ? "left" : "right");
     m_WelcomeActive = true;
     m_WelcomePaused = true;
     m_PendingPauseCmd.store(1, std::memory_order_release);
