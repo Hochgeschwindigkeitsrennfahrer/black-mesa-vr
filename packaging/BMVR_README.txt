@@ -1,176 +1,137 @@
-Black Mesa VR — drag-and-drop install
-=====================================
+Black Mesa VR
+=============
 
-Quit Black Mesa first. A running bms.exe will not load a DLL you copy over it.
-
-
-1) Copy into the game folder
-----------------------------
-Copy EVERYTHING in this folder into:
-
-  Steam\steamapps\common\Black Mesa
-
-That is the folder that already contains bms.exe. Merge / replace when Windows asks.
-
-This puts d3d9.dll in all three places the game can load it:
-
-  Black Mesa\d3d9.dll
-  Black Mesa\bin\d3d9.dll
-  Black Mesa\bin\thirdparty\dxvk-windows-x86\d3d9.dll
-
-Do not copy d3d9.dll into only one of those. Native Direct3D 9 never loads this mod.
-
-If you already tuned VR\config.txt, keep your copy (do not overwrite it).
-
-To remove the mod later: quit the game and delete, in the Black Mesa folder,
-d3d9.dll, BMVR_README.txt, bmvr_* files, the VR folder, bin\d3d9.dll,
-bms\cfg\bmvr.cfg and bms\sound\bmvr (same under bshift if you played Blue
-Shift). Older installs may also have openvr_api.dll next to bms.exe,
-bin\thirdparty\dxvk-windows-x86\openvr_api.dll and bin\sourcevr.dll.disabled:
-delete those too. Then Steam ->
-Black Mesa -> Properties -> Installed Files -> Verify integrity of game files
-restores the game's own files. Verify alone does not remove the mod.
-
-This zip also includes:
-
-  Black Mesa\VR\hands\            HEV glove meshes
-  Black Mesa\VR\weapon_wheel\     HL2VR radial-menu textures
-  Black Mesa\VR\openxr_helper64\  L4D2VR x64 OpenXR helper (if built)
-  Black Mesa\bms\cfg\bmvr.cfg     crosshair, aim assist and motion blur off; do not sleep
-                                  when the window loses focus
-
-The VR mod runs bmvr.cfg by itself at every game start; nothing to add to
-autoexec.cfg (game updates replace that file). For your own console settings,
-create bms\cfg\bmvr_local.cfg; the mod runs it right after bmvr.cfg.
+A free, unofficial VR mod for the Steam version of Black Mesa (and Blue Shift).
+Full guide, screenshots and bug tracker:
+  https://github.com/Hochgeschwindigkeitsrennfahrer/black-mesa-vr
 
 
-2) Steam launch options
------------------------
-Right-click Black Mesa → Properties → Launch Options:
-
-  -heapsize 524288 -processheap -high -novid -windowed -oldgameui
-
--oldgameui is required. The new game UI is upside-down in the headset and the
-world stays black after the load screen.
-
-If the in-game video / renderer menu is "Direct3D 9", also add:
-
-  -enabledxvk
-
-This DLL is DXVK. Native D3D9 will not show VR.
-
-Blue Shift and Azure Sheep use the same launch options plus:
-
-  -game bshift
-  -game asheep
-
-Those campaigns get the Calhoun-blue wrist HUD and bare (security-guard) hands.
+1) What you need
+----------------
+- Black Mesa on Steam, up to date on the default branch (no beta).
+  On Linux, use the Proton version of the game, not a native build.
+- A PC VR headset with an OpenXR runtime: SteamVR, Meta Link,
+  Virtual Desktop (VDXR), WMR and others.
 
 
-3) OpenXR runtime (Quest / Virtual Desktop / SteamVR)
------------------------------------------------------
-Pick ONE compositor. Mixing them inverts the world or leaves SteamVR in
-the waiting room.
+2) Install
+----------
+1. Quit Black Mesa. A running game does not pick up the new files.
+2. Copy EVERYTHING inside this folder into your Black Mesa folder, the one
+   that contains bms.exe (Steam -> Black Mesa -> Manage -> Browse local
+   files). Replace files when asked.
+   This puts d3d9.dll in all three places it has to be:
+     d3d9.dll
+     bin\d3d9.dll
+     bin\thirdparty\dxvk-windows-x86\d3d9.dll
+3. Steam -> Black Mesa -> Properties -> Launch Options:
+     -heapsize 524288 -processheap -high -novid -windowed -oldgameui
+   -oldgameui is required (the new game UI is upside-down in the headset).
+   If the game's video menu shows "Direct3D 9" as the renderer, also add
+   -enabledxvk.
+4. Turn off Steam Input for Black Mesa
+   (Properties -> Controller -> Disable Steam Input).
+5. Pick ONE OpenXR runtime and start it before the game:
+   - SteamVR: SteamVR -> Settings -> OpenXR -> Set SteamVR as OpenXR runtime.
+   - Meta Link (Quest): uses the Link / Oculus OpenXR runtime.
+   - Virtual Desktop: Streamer -> Options -> OpenXR Runtime = VDXR.
+     "SteamVR" in that dropdown shows the world upside-down.
+6. Launch Black Mesa from Steam. bmvr_log.txt next to bms.exe should appear
+   and start with "BMVR d3d9.dll loaded".
 
-Virtual Desktop (Quest 2/3):
-  Virtual Desktop Streamer → Options → OpenXR Runtime = VDXR
-  SteamVR in that dropdown is a known issue: the game renders upside-down.
+Blue Shift: same install, plus -game bshift in the launch options.
 
-SteamVR / Meta Link / Steam Link:
-  SteamVR → Settings → OpenXR → Set SteamVR as OpenXR runtime
-  Do not leave Oculus/Meta as the Windows ActiveRuntime while SteamVR runs.
-  Steam Link on Quest reports SteamVR OpenXR in Meta compatibility mode.
-  That path must not use the SteamVR+Touch submit Y-flip (upside-down).
-
-Then:
-1. Start SteamVR (Link) or Virtual Desktop with VDXR as above.
-2. Launch Black Mesa from Steam (not a leftover desktop shortcut that skips SteamVR).
-3. Confirm Black Mesa\bmvr_log.txt appears this session and starts with:
-     BMVR d3d9.dll loaded
-4. Look in the headset. Load / tracking alone is not success — you should see the game.
-
-
-4) Resolution (RenderScale)
----------------------------
-Edit:
-
-  Black Mesa\VR\config.txt
-
-Then fully quit and restart the game. Eye size is chosen at CreateDevice; changing
-the file while the game is running does nothing.
-
-RenderScale multiplies SteamVR's recommended per-eye size (not the window),
-then aligns to 16 pixels (cap 4096). WorldRenderAtEyeSize=true grows FullFrame
-+ G-buffer to one eye so that size is real world pixels (log worldMatch=1 /
-grow LITERAL). false squash-blits the 16:9 window into the eyes.
-
-On OpenXR (G2 / Oasis / SteamVR OpenXR) the overlay SS is sampled when the
-helper starts, not live. Change SS, quit the game, relaunch. The in-game
-video slider also does not drive the HMD blit (that copies the window).
-
-  RenderScale=1.0     SteamVR recommended (typical Index/G2 is taller than 1080p)
-  RenderScale=0.75    cheaper if GPU bound
-  RenderScale=1.25    extra SS on top of SteamVR
-
-A 1080p window with a headset recommended height above 1080 is supported.
-After launch, bmvr_log.txt reports the size actually used, for example:
-  Eye RT 3152x3088 (offscreen rec=3152x3088 RenderScale=1.00 window 1920x1080)
+Updating: copy the new files over the old install the same way. Keep your
+VR\config.txt unless the release notes say otherwise; it only holds what
+you changed.
 
 
-5) Controllers (HP Reverb G2 / WMR / Touch)
--------------------------------------------
-Left stick walk, right stick turn, right trigger attack (use when hands are empty),
-left trigger use, right B alt-fire, right A reload, left Y / left menu pause.
-Left-stick click sprint. Right-stick click weapon wheel (tap to recenter).
-Right grip flashlight. Left X previous weapon. Reload is A only.
-Put the off-hand on a rifle/shotgun/MP5/RPG/tau/gluon/crossbow forend and
-hold left grip to two-hand; the glove sits on the gun. Glock / 357: left
-grip next to the gun-hand controller, on the pistol grip. Let go of grip to
-release (resting the hand on the model without grip does not attach).
-While the menu is up, point the right controller at it and pull the trigger
-to click. A confirms, B goes back. In-world screens (air support on bm_c2a5i)
-use look for hover and the right trigger as left click.
+3) Default controls
+-------------------
+PS VR2 button names first, Quest / Touch names in brackets.
 
-The first-person weapon follows the right controller (uncoupled viewmodel).
-HL2 v_ models are oversized in world-space VR; ViewmodelScale=0.68 is the default
-(~25% smaller than the L4D2VR-matched 0.91). Crowbar stays full size.
-Shooting aims with that controller; walking still follows where you look.
-If the gun sits too far forward/back, edit VR\config.txt:
+Left controller                     Right controller
+  Stick         move                  Stick         turn; up jump,
+  Stick click   sprint (toggle)                     down crouch (hold)
+  Trigger       use                   Stick click   weapon menu
+  Grip          hold a gun with       Trigger       fire
+                two hands             Grip          flashlight
+  Triangle (Y)  pause;                Circle (B)    alt-fire
+                hold: VR settings     Cross (A)     reload
+  Square (X)    previous weapon
 
-  ViewmodelPosOffsetX=16.0
-  ViewmodelPosOffsetY=3.0
-  ViewmodelPosOffsetZ=-2.0
-  ControllerPitchTilt=-35.0
-  ControllerPitchTiltTouch=0
-  ViewmodelPosOffsetXTouch=5.5
+Grab gestures: reach behind a shoulder, to a hip or (left hand) to your
+forehead and squeeze grip. By default the right hand draws the crowbar
+(right shoulder), pistol (right hip) and MP5 (left hip); the left hand
+quick saves (left shoulder), takes ammo (left hip) and toggles the
+flashlight (forehead).
 
-Quest / Touch: the G2 -35° grip tilt is not applied. Weapons use the OpenXR
-aim pose plus a 5.5 unit pull-back (aim origin is ahead of grip). Hands sit
-on the grip and point along the aim ray. If you already saved 5.5 extras in
-VR/viewmodel_offsets.txt, reset those weapons (numpad 0) so they do not
-double. Virtual Desktop users should set Streamer Options → OpenXR Runtime
-to VDXR. Meta Link / Quest 3 uses the Link OpenXR runtime. Steam Link uses
-SteamVR OpenXR in Meta compatibility mode and does not Y-flip.
-Add OpenXRHelperFlipSubmitY=true only if a runtime is still upside-down.
+Menus: point the right controller at them and pull the trigger.
 
-Those take effect on the next launch (config is read at DLL load).
-
-The same file also has Haptics, HideCrosshair, VrCrosshair, DisableViewBob,
-LeftHanded, IPDScale, HeightOffset. MSAA (0 / 2 / 4) is set in the VR
-settings panel (Graphics tab).
-
-Menu and load stay single-threaded. Gameplay switches to mat_queue_mode 2
-after stereo warmup. If that path crashes, bmvr_skip.txt next to bms.exe
-skips it on the next launch.
+Every button and gesture can be changed in the VR settings panel.
 
 
-6) If it does not load
+4) VR settings panel
+--------------------
+Hold Triangle (Y) for about half a second, or pick the gear in the weapon
+menu. Tabs: General, Hands & Weapons, Gestures, Controls, Graphics, Debug.
+Most changes apply right away and are saved into VR\config.txt.
+
+Graphics tips:
+- Foveated rendering: Eye-tracked (default). It falls back to the lens
+  centre on headsets without eye tracking.
+- MSAA 2x if your GPU has room. Keep FXAA on next to it (Sharp preset).
+
+
+5) Settings only in VR\config.txt
+---------------------------------
+A few settings set up the eye images when the game starts, so they are
+only in this file. Quit the game fully before you edit it.
+
+  RenderScale=1.0     Multiplier on the headset's recommended eye size.
+                      1.2-1.4 = supersampling: sharper, much less shimmer,
+                      at a GPU cost. 0.8-0.9 if you are GPU-bound.
+  MaxEyeSize=4096     Largest eye side in pixels. Raise only if a high
+                      RenderScale hits it (bmvr_log.txt shows the size used).
+  IPDScale, HeightOffset    world scale and player height.
+
+The file explains every setting in comments.
+
+
+6) If it does not work
 ----------------------
-- Game was still running during the copy. Quit, copy again, relaunch.
-- Video menu is Direct3D 9. Add -enabledxvk, or set Vulkan/DXVK in the launcher.
-- Steam "Verify integrity" restores stock d3d9.dll and dxvk.conf. Copy this folder again.
-- Log next to bms.exe never appears → this DLL did not load.
-- Headset waiting room / black desktop after install → you are on native D3D9 or
-  an old d3d9.dll is still mapped.
+- No bmvr_log.txt next to bms.exe: the mod did not load. Check that the
+  game was closed while you copied, that d3d9.dll is in all three places,
+  and add -enabledxvk if the video menu shows Direct3D 9.
+- Steam "Verify integrity of game files" puts the game's own d3d9.dll
+  back in the DXVK folder: copy the mod files again afterwards.
+- World upside-down with Virtual Desktop: set its OpenXR Runtime to VDXR.
+- The first launch after an update recompiles shaders: expect some hitches
+  in the first minutes.
 
-Need -oldgameui every launch. Do not Y-flip the 2D path to "fix" the new UI.
+Reporting a bug: attach bmvr_log.txt (next to bms.exe). For visual problems,
+VR settings -> Debug -> Capture debug frame while the problem is visible
+helps a lot. Please report problems to our issue tracker on GitHub, not to
+Crowbar Collective or Valve.
+
+
+7) Uninstall
+------------
+Quit the game, then delete in the Black Mesa folder: d3d9.dll,
+BMVR_README.txt, bmvr_* files, the VR folder, bin\d3d9.dll,
+bms\cfg\bmvr.cfg and bms\sound\bmvr (same under bshift if you played
+Blue Shift). Installs from before 2026-11 may also have openvr_api.dll next
+to bms.exe, bin\thirdparty\dxvk-windows-x86\openvr_api.dll and
+bin\sourcevr.dll.disabled: delete those too.
+Then Steam -> Black Mesa -> Properties -> Installed Files -> Verify
+integrity of game files, and remove the launch options.
+
+
+Disclaimer
+----------
+This is an unofficial, free fan project and is not affiliated with,
+endorsed by, or supported by Crowbar Collective or Valve Corporation. You
+need a legitimate copy of Black Mesa. This mod does not include or
+distribute any Black Mesa or Valve game files, code or assets, and it is
+not sold. Black Mesa is a trademark of Crowbar Collective. Half-Life is a
+trademark of Valve Corporation.
