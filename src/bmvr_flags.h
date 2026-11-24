@@ -744,7 +744,7 @@ namespace bmvr
     extern bool g_TitleLevel;
     // TitleGlow (default on, panel DEBUG > FIXES: RENDERING, not saved): the
     // title layer gets flat Black Mesa's hud_post look (bloom + scanlines,
-    // client 0x267c40).
+    // client 0x267c40). Skipped while a boot-up panel shows (HEV / long jump).
     extern bool g_TitleGlow;
     // HEV suit / long jump boot-up sequence on the head-locked title layer
     // (panel DEBUG > FIXES: RENDERING, not saved). BootHudInset: the left and

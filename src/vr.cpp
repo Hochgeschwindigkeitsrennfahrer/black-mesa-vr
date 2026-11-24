@@ -11624,6 +11624,8 @@ int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
     {
         BootHudRects r{};
         const int inset = static_cast<int>(bmvr::g_BootHudInset + 0.5f);
+        for (int i = kBootHudFirst; i < kTitleHudCount && !r.boot; ++i)
+            r.boot = TitleHudPanelShowing(i);
         for (int i = kBootHudFirst; i < kTitleHudCount && inset > 0 && !r.count; ++i)
         {
             int b[4] = {};
@@ -20808,7 +20810,10 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
     D3DSURFACE_DESC desc{};
     if (!device || !surf || FAILED(surf->GetDesc(&desc)))
         return;
-    const bool glow = bmvr::g_TitleGlow;
+    // No glow on the HEV / long jump boot-up text: brighter and harder to read
+    // than flat with it (user headset test 2026-11-24); the intro logo keeps it.
+    const bool glow = bmvr::g_TitleGlow
+        && !g_BootHudRects[g_BootHudRectsSlot.load(std::memory_order_acquire)].boot;
     IDirect3DPixelShader9* ps = glow ? TitleCombineShader(device) : TitlePremultipliedShader(device);
     IDirect3DPixelShader9* psDown = glow ? TitleBloomDownsampleShader(device) : nullptr;
     IDirect3DPixelShader9* psBlur = glow ? TitleBloomBlurShader(device) : nullptr;
