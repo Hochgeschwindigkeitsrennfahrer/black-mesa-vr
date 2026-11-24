@@ -2109,6 +2109,8 @@ namespace
         return hr;
     }
 
+    bool Rt0IsGrownReflection(VR* vr, UINT& w, UINT& h);
+
     HRESULT __stdcall HookedSetDepthStencil(IDirect3DDevice9* device, IDirect3DSurface9* depth)
     {
         VR* vr = (g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr;
@@ -2128,6 +2130,34 @@ namespace
             && SurfaceMatchesWindowOrBackbuffer(device, depth))
         {
             depth = eyeDepth;
+        }
+        // Mono pass (main menu background map) on a grown reflection RT: the
+        // engine binds the window depth (1920x1080), shorter than the RT
+        // (1728x1760), so the remapped full-RT viewport would still only draw
+        // where the depth exists. Lend it the left eye's depth (eye-sized, not
+        // in use outside a stereo pass; the reflection view clears it first).
+        // Shaderapi binds RT0 before the depth, so RT0 is already the new one.
+        UINT reflW = 0, reflH = 0;
+        if (vr && device && !eyeDepth && depth && vr->m_D9LeftEyeDepthSurface
+            && depth != vr->m_D9LeftEyeDepthSurface
+            && !vr->StereoWorldPassActive()
+            && Rt0IsGrownReflection(vr, reflW, reflH)
+            && SurfaceMatchesWindowOrBackbuffer(device, depth))
+        {
+            D3DSURFACE_DESC dd{}, ed{};
+            if (SUCCEEDED(depth->GetDesc(&dd)) && (dd.Width < reflW || dd.Height < reflH)
+                && SUCCEEDED(vr->m_D9LeftEyeDepthSurface->GetDesc(&ed))
+                && ed.Width >= reflW && ed.Height >= reflH)
+            {
+                static int s_monoReflDsLog;
+                if (s_monoReflDsLog < 4)
+                {
+                    Game::logMsg("D3D mono reflection RT %ux%u: depth %ux%u -> left eye depth %ux%u",
+                        reflW, reflH, dd.Width, dd.Height, ed.Width, ed.Height);
+                    ++s_monoReflDsLog;
+                }
+                depth = vr->m_D9LeftEyeDepthSurface;
+            }
         }
         if (!g_OrigSetDepthStencil)
             return D3DERR_INVALIDCALL;
@@ -2159,19 +2189,22 @@ namespace
     }
 
     // RT0 is one of the reflection RTs grown by ReflectionRtScale, in a
-    // stereo eye pass. The reflection/refraction views inherit the main
-    // view's window-sized CViewSetup (1920x1080), so their window-sized
-    // viewports, scissors, clears and texel-size constants must map to this
-    // RT, not to the eye. Left alone, the lobby mirror floor drew only into
-    // the top-left 1920x1080 of its 2000x2048 RTs: floor black below 52 % and
-    // past 96 % of the eye (2026-10-30). At ReflectionRtScale 1 the RT is
-    // eye-sized and the eye path below already handles it.
+    // stereo eye pass or a mono pass (main menu background map). The
+    // reflection/refraction views inherit the main view's window-sized
+    // CViewSetup (1920x1080), so their window-sized viewports, scissors,
+    // clears and texel-size constants must map to this RT, not to the eye.
+    // Left alone, the lobby mirror floor drew only into the top-left
+    // 1920x1080 of its 2000x2048 RTs: floor black below 52 % and past 96 % of
+    // the eye (2026-10-30). Mono too: the menu's lobby background (background02)
+    // filled only the top 1728x1080 of its 1728x1760 RT and the floor went
+    // black (2026-11-24). At ReflectionRtScale 1 the RT is eye-sized and the
+    // eye path below already handles it.
     bool Rt0IsGrownReflection(VR* vr, UINT& w, UINT& h)
     {
         if (!vr || (bmvr::g_ReflectionRtW <= 0 && bmvr::g_RefractCopyRtW <= 0)
             || !g_Rt0ActualKnown || !g_Rt0ActualPtr)
             return false;
-        if (vr->m_CaptureReentry || vr->HudPaintActive() || !vr->StereoWorldPassActive())
+        if (vr->m_CaptureReentry || vr->HudPaintActive())
             return false;
         // Exact size: +-16 px also matched the eye/2 bloom brightpass target
         // (2008x2048 next to 2000x2048) and remapped it every frame.
