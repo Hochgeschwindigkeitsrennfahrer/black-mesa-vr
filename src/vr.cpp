@@ -16018,10 +16018,14 @@ bool VR::UpdateShoulderGestures(bool paused)
         const bool in = leftOn(z) && m_LeftControllerTrackingValid && !m_TwoHandActive && LeftHandInSlotZone(z);
         leftAny = leftAny || in;
         // Ammo: no gesture, the manual-reload grab takes ammo there
-        // (LeftHandInAmmoZone); the zone only keeps the grip out of its
-        // mapped action (m_GestureZoneLeft).
+        // (LeftHandInAmmoZone); the zone keeps the grip out of its mapped
+        // action (m_GestureZoneLeft) and gives the same arming buzz as the
+        // other left zones (user 2026-11-24: none at the ammo zone).
         if (a == bmvr::kGestureAmmo)
+        {
+            step(s_left[z], in, leftGrip, vr::TrackedControllerRole_LeftHand, 250, 0);
             continue;
+        }
         if (!step(s_left[z], in, leftGrip, vr::TrackedControllerRole_LeftHand, 250, a == bmvr::kGestureQuickLoad ? 1000 : 0))
             continue;
         PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 3000, 0.8f);
