@@ -788,16 +788,9 @@ namespace bmvr
     // before). Also on a hand posed on a weapon (it then sits under the gun);
     // never touches the tracked pose, so guns and aim are unaffected.
     extern float g_VrHandsRollDeg;
-    // Classic HUD on hands (off by default): the hand HUD follows the glove's
-    // roll and sits kHandHudClassicDrop lower, on the back of the hand instead
-    // of above the rolled thumb. Glove roll/grip are not affected. The HAND HUD
-    // rows still apply on top.
-    extern bool g_VrHandsClassicPose;
     // VR panel DEBUG "Show developer rows" (VrPanelDevRows, default off): shows the
     // developer groups (A/B switches, tests, engine cvars) on the DEBUG tab.
     extern bool g_PanelDevRows;
-    // HandHudUp was raised 1.05 -> 2.2 only to clear the rolled thumb.
-    constexpr float kHandHudClassicDrop = 1.15f;
     extern float g_VrHandsGunGripRight;
     extern float g_VrHandsGunGripUp;
     extern float g_VrHandsGunGripForward;

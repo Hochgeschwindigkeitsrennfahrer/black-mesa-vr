@@ -209,8 +209,6 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_VrPinchForce, nullptr },
             { "bmvr_hands_blackmesa_size", "VR: size of the Black Mesa hands (1 = the game's first-person size)",
               Kind::Float, 0.4f, 1.5f, nullptr, &g_VrHandsBlackMesaScale },
-            { "bmvr_hand_classic", "VR: classic HUD on hands: the hand HUD sits on the back of the hand (glove pose unchanged)",
-              Kind::Bool, 0.f, 1.f, &g_VrHandsClassicPose, nullptr },
             { "bmvr_gman_gesture", "VR: grip shows a different gesture while the G-Man is in front of you",
               Kind::Bool, 0.f, 1.f, &g_VrGmanGesture, nullptr },
             { "bmvr_gman_finger_straight", "VR: how far the G-Man gesture finger bends back past the glove's relaxed pose (0 = relaxed, slightly curved)",

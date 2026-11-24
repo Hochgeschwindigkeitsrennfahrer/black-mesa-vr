@@ -14365,15 +14365,14 @@ namespace
         up = HudRotate(up, fwd, kRoll);
         // Size/offsets/angles from the panel (Hands & Weapons -> HUD POSITION) / bmvr_hand_hud_*.
         const float size = bmvr::g_HandHudSize;
-        const float lift = bmvr::g_HandHudUp - (bmvr::g_VrHandsClassicPose ? bmvr::kHandHudClassicDrop : 0.f);  // no thumb to clear on the back of the hand
+        const float lift = bmvr::g_HandHudUp;
         Vector offset = up * lift + fwd * bmvr::g_HandHudForward + left * bmvr::g_HandHudSide;
         {
             // The HUD rows place the HUD on the hand as is; the glove roll then turns the
             // whole panel with the hand (same z rule as the glove in vr_hands.cpp), so roll
             // and HUD rows do not fight. Reference roll: the rows were tuned with the
-            // default 90 deg glove roll (unchanged look at 90); Classic HUD on hands
-            // takes them as if the glove were unrolled (0).
-            const float refRoll = bmvr::g_VrHandsClassicPose ? 0.f : 90.f;
+            // default 90 deg glove roll (unchanged look at 90).
+            const float refRoll = 90.f;
             const float dRoll = bmvr::g_VrHandsRollDeg - refRoll;
             QAngle rolled = ctrlAng;
             rolled.z += rightHand ? dRoll : -dRoll;
