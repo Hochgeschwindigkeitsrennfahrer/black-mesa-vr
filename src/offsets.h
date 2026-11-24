@@ -183,6 +183,15 @@ public:
     // beta 26234270. Was a server-byte pattern scan that never matched the client.
     static constexpr int kC_BlackMesaPlayer_GetShootAngles = 0x25E9A0; // beta 26627981 (26234270: 0x25AC20)
     static constexpr int kCGrabController_SetTargetPosition = 0x471FB0; // beta 26627981 (26234270: 0x4715E0)
+    // server.dll CBasePlayer::PlayerUse (stable 26768221, disassembled
+    // 2026-11-24): thiscall, no args; early out unless IN_USE (0x20) is in
+    // m_nButtons 0xAD8 | m_afButtonPressed 0xADC | m_afButtonReleased 0xAE0;
+    // FindUseEntity = vtable +0x6BC, then ObjectCaps (+0x98) and
+    // AcceptInput("Use", this, this, variant_t{0,0,0, eh -1, FIELD_VOID}, useType)
+    // (+0x9C; useType ONOFF 1 / TOGGLE 3, release 0).
+    static constexpr int kCBasePlayer_PlayerUse_Server = 0x12D9C0;
+    static constexpr int kServerEntity_ObjectCapsVtOff = 0x98;
+    static constexpr int kServerEntity_AcceptInputVtOff = 0x9C;
 
     // client.dll DT_BasePlayer RecvTable FUN_100b6a00: m_hUseEntity.
     static constexpr int kCBasePlayer_hUseEntity = 0x1344;

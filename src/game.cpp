@@ -260,6 +260,19 @@ C_BaseEntity* Game::ResolveEntityFromHandle(uint32_t handle)
     return idx > 0 ? static_cast<C_BaseEntity*>(entity) : nullptr;
 }
 
+void* Game::ServerEntityByIndex(int index)
+{
+    static void* s_engineServer = nullptr;
+    if (!s_engineServer)
+        s_engineServer = GetInterfaceAny("engine.dll", { "VEngineServer021" });
+    if (!s_engineServer || index <= 0 || index >= 0x1000)
+        return nullptr;
+    using tPEntityOfEntIndex = void*(__thiscall*)(void*, int);
+    void** vt = *reinterpret_cast<void***>(s_engineServer);
+    void* edict = reinterpret_cast<tPEntityOfEntIndex>(vt[Offsets::kEngineServer_PEntityOfEntIndexVt])(s_engineServer, index);
+    return edict ? *reinterpret_cast<void**>(static_cast<char*>(edict) + Offsets::kEdict_Unknown) : nullptr;
+}
+
 bool Game::SetServerActiveWeaponClip(int expectClip, int newClip)
 {
     void* player = GetLocalPlayerEntity();

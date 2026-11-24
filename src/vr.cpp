@@ -7460,7 +7460,9 @@ void VR::ProcessInput()
             if (m_SprintLatched && nx * nx + ny * ny < 0.5f * 0.5f
                 && GetTickCount() - s_sprintSinceMs > 600)
                 m_SprintLatched = false;
-            if (primaryHeld)
+            // Only as fire: the right trigger as Use (carrying with the right
+            // hand, empty hands) ended the sprint every frame (user 2026-11-24).
+            if (primaryHeld && !rightUse)
                 m_SprintLatched = false;
             if (m_SprintLatched)
                 buttons |= IN_SPEED;
@@ -9933,6 +9935,62 @@ static bool UseEntityIsHeldProp(Game* game)
     return !UseEntityIsWorldToggle(game);
 }
 
+// Free-hand Use target (CreateMove, client): a short thin sweep along the
+// free hand's aim from just behind the hand. Physics props are left out (their
+// Use is a pickup). Hooks::dPlayerUse reads the index on the server tick.
+void VR::UpdateFreeHandUseTarget()
+{
+    int index = 0;
+    const bool held = m_FreeUseHeld.load(std::memory_order_acquire);
+    const bool left = m_FreeUseLeft.load(std::memory_order_relaxed);
+    if (held && m_Game && m_Game->m_EngineTrace && m_Game->m_EngineClient && m_Game->m_ClientEntityList
+        && (left ? m_LeftControllerTrackingValid : m_RightControllerTrackingValid))
+    {
+        Vector body = m_HasStereoBodyOrigin ? m_StereoBodyOrigin : m_SetupOrigin;
+        const Vector hand = left ? GetLeftControllerAbsPos(body) : GetRightControllerAbsPos(body);
+        Vector fwd{};
+        QAngle::AngleVectors(left ? GetLeftControllerAbsAngle() : GetRightControllerAbsAngle(), &fwd, nullptr, nullptr);
+        if (hand.LengthSqr() > 1.f && VectorNormalize(fwd) > 0.01f)
+        {
+            constexpr float kBehind = 8.f, kReach = 64.f, kHull = 3.f;
+            C_BaseEntity* player = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+            CTraceFilterSkipSelf filter(player, 0);
+            CGameTrace tr{};
+            tr.fraction = 1.f;
+            tr.m_pEnt = nullptr;
+            Ray_t ray;
+            ray.Init(hand - fwd * kBehind, hand + fwd * kReach, Vector(-kHull, -kHull, -kHull), Vector(kHull, kHull, kHull));
+            m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT_HULL, &filter, &tr);
+            C_BaseEntity* hit = (tr.fraction < 1.f && tr.m_pEnt && tr.m_pEnt != player) ? static_cast<C_BaseEntity*>(tr.m_pEnt) : nullptr;
+            if (hit)
+            {
+                const int top = m_Game->m_ClientEntityList->GetHighestEntityIndex();
+                for (int i = 1; i <= top && !index; ++i)
+                {
+                    if (m_Game->GetClientEntity(i) == hit)
+                        index = i;
+                }
+                const char* cls = index ? m_Game->GetEntityClientClassName(hit) : nullptr;
+                char lower[96]{};
+                for (size_t k = 0; cls && cls[k] && k + 1 < sizeof(lower); ++k)
+                    lower[k] = static_cast<char>(tolower(static_cast<unsigned char>(cls[k])));
+                if (std::strstr(lower, "phys"))
+                    index = 0;
+                static int s_lastIndex = -1;
+                static int s_log;
+                if (index != s_lastIndex && s_log < 40)
+                {
+                    ++s_log;
+                    const char* mdl = m_Game->GetEntityModelName(hit);
+                    Game::logMsg("Free-hand Use target: %d %s model %s", index, cls ? cls : "?", mdl ? mdl : "-");
+                }
+                s_lastIndex = index;
+            }
+        }
+    }
+    m_FreeUseEntIndex.store(index, std::memory_order_release);
+}
+
 void VR::ClearUseGrab()
 {
     m_GrabLatched = false;
@@ -9952,6 +10010,37 @@ void VR::ClearUseGrab()
 
 void VR::UpdateUseGrab(uint32_t& buttons, bool leftUse, bool rightUse)
 {
+    // Free hand (user 2026-11-24): with Use latched on one hand, the other
+    // hand's Use no longer joins the game's (one) Use. It goes to what that
+    // hand points at through the server (Hooks::dPlayerUse): a door or button
+    // while the first hand carries a prop (a game Use press would drop it),
+    // a second charger next to the first. The hand stays out of the game's
+    // Use until it is let go, so it cannot latch a new Use mid-press.
+    {
+        static bool s_freeLock[2];   // [0] left, [1] right
+        if (!leftUse)
+            s_freeLock[0] = false;
+        if (!rightUse)
+            s_freeLock[1] = false;
+        if (m_GrabLatched && m_UseWasHeld && (m_GrabHandLeft ? rightUse : leftUse))
+            s_freeLock[m_GrabHandLeft ? 1 : 0] = true;
+        const bool freeLeft = s_freeLock[0] && leftUse, freeRight = s_freeLock[1] && rightUse;
+        const bool wasFree = m_FreeUseHeld.load(std::memory_order_relaxed);
+        if ((freeLeft || freeRight) && !wasFree)
+        {
+            m_FreeUseLeft.store(freeLeft, std::memory_order_relaxed);
+            m_FreeUsePressSeq.fetch_add(1, std::memory_order_acq_rel);
+            static int s_freeLog;
+            if (s_freeLog++ < 20)
+                Game::logMsg("Free-hand Use: %s hand pressed (Use latched on the %s hand)",
+                    freeLeft ? "left" : "right", m_GrabHandLeft ? "left" : "right");
+        }
+        m_FreeUseHeld.store(freeLeft || freeRight, std::memory_order_release);
+        if (s_freeLock[0])
+            leftUse = false;
+        if (s_freeLock[1])
+            rightUse = false;
+    }
     const bool useHeld = leftUse || rightUse;
     const double now = QpcNowMs();
     {

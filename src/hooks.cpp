@@ -11283,6 +11283,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
         ZeroPlayerViewRecoil(localPlayer);
     if (m_VR)
         m_VR->ApplyWorldVguiTriggerClick(cmd);
+    if (m_VR)
+        m_VR->UpdateFreeHandUseTarget();
     const bool vguiAteAttack = (buttonsBeforeOriginal & (IN_ATTACK | IN_ATTACK2)) != 0
         && (cmd->buttons & (IN_ATTACK | IN_ATTACK2)) == 0;
     if (m_VR && m_VR->EmptyHands() && !m_VR->OnMountedGun())
@@ -13927,6 +13929,26 @@ void Hooks::EnsureWeaponShootOriginHooks()
             hkGrabSetTarget.pTarget = p;
         }
     }
+    if (server && !hkPlayerUse.pTarget)
+    {
+        auto* p = reinterpret_cast<unsigned char*>(server) + Offsets::kCBasePlayer_PlayerUse_Server;
+        MEMORY_BASIC_INFORMATION mbi{};
+        // aligned-frame prologue, sub esp 0xC8, cookie, mov edi,ecx; mov eax,[edi+0xAD8]
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+            && CodeBytesMatch(p, "538BDC83EC0883E4F083C404558B6B04896C24048BEC81ECC8000000A1????????33C58945FC56578BF98B87D80A0000"))
+        {
+            if (hkPlayerUse.createHook(p, &dPlayerUse) == 0 && hkPlayerUse.enableHook() == 0)
+                Game::logMsg("Hook enabled: server PlayerUse rva=0x%X", Offsets::kCBasePlayer_PlayerUse_Server);
+            else
+                Game::logMsg("server PlayerUse hook failed");
+        }
+        else
+        {
+            Game::logMsg("server PlayerUse skipped (bytes/rva 0x%X)", Offsets::kCBasePlayer_PlayerUse_Server);
+            Game::noteMissingOffset("server PlayerUse");
+        }
+        hkPlayerUse.pTarget = p;
+    }
     if (server && !hkGetShootAngles.pTarget)
     {
         auto* p = reinterpret_cast<unsigned char*>(server) + Offsets::kBlackMesaPlayer_GetShootAngles_Server;
@@ -14044,7 +14066,7 @@ void Hooks::EnsureWeaponShootOriginHooks()
     s_done = vfxDone
         && hkClientWeaponShootPosition.pTarget && hkGetAttachmentVec.pTarget
         && hkGetAttachmentMatrix.pTarget && hkServerWeaponShootPosition.pTarget
-        && hkServerGrabHoldOrigin.pTarget && hkGrabSetTarget.pTarget
+        && hkServerGrabHoldOrigin.pTarget && hkGrabSetTarget.pTarget && hkPlayerUse.pTarget
         && hkGetShootAngles.pTarget && hkClientGetShootAngles.pTarget
         && hkGrenadeCreate.pTarget && hkGrenadeThrowPosition.pTarget;
 }
@@ -14153,6 +14175,70 @@ Vector* __fastcall Hooks::dServerBmShootSource(void* ecx, void* edx, Vector* out
     if (hkServerBmShootSource.fOriginal)
         return hkServerBmShootSource.fOriginal(ecx, out);
     return out;
+}
+
+// Free-hand Use (VR::UpdateUseGrab / UpdateFreeHandUseTarget), on the
+// server tick after the game's own Use: the same AcceptInput("Use") the
+// game's PlayerUse sends, to the entity the free hand points at. Continuous
+// entities (chargers) every tick while held, impulse ones (doors, buttons)
+// once per press, on/off ones on at the press and off at the release.
+void __fastcall Hooks::dPlayerUse(void* ecx, void* edx)
+{
+    (void)edx;
+    if (hkPlayerUse.fOriginal)
+        hkPlayerUse.fOriginal(ecx);
+    if (!m_VR || !m_Game || !ecx)
+        return;
+    struct Variant { uint32_t v[3]; uint32_t ehandle; int fieldType; };
+    using tObjectCaps = int(__thiscall*)(void*);
+    using tAcceptInput = bool(__thiscall*)(void*, const char*, void*, void*, Variant, int);
+    auto serverEntity = [](int index) { return m_Game->ServerEntityByIndex(index); };
+    auto vfn = [](void* ent, int off) { return *reinterpret_cast<void**>(*reinterpret_cast<char**>(ent) + off); };
+    auto use = [&](void* ent, int useType) {
+        const Variant empty{ { 0, 0, 0 }, 0xFFFFFFFFu, 0 };
+        reinterpret_cast<tAcceptInput>(vfn(ent, Offsets::kServerEntity_AcceptInputVtOff))(ent, "Use", ecx, ecx, empty, useType);
+    };
+    constexpr int kCapImpulse = 0x10, kCapContinuous = 0x20, kCapOnOff = 0x40;
+    static uint32_t s_doneSeq = 0;
+    static int s_onOffIndex = 0;
+    static int s_logs = 0;
+    const int index = m_VR->m_FreeUseHeld.load(std::memory_order_acquire)
+        ? m_VR->m_FreeUseEntIndex.load(std::memory_order_acquire) : 0;
+    const uint32_t seq = m_VR->m_FreeUsePressSeq.load(std::memory_order_acquire);
+    BMVR_TRY
+    {
+        if (s_onOffIndex && s_onOffIndex != index)
+        {
+            if (void* ent = serverEntity(s_onOffIndex))
+                use(ent, 0);
+            s_onOffIndex = 0;
+        }
+        void* ent = serverEntity(index);
+        if (ent && ent != ecx)
+        {
+            const int caps = reinterpret_cast<tObjectCaps>(vfn(ent, Offsets::kServerEntity_ObjectCapsVtOff))(ent);
+            if (caps & kCapContinuous)
+                use(ent, 3);
+            else if ((caps & (kCapImpulse | kCapOnOff)) && seq != s_doneSeq)
+            {
+                use(ent, (caps & kCapOnOff) ? 1 : 3);
+                if (caps & kCapOnOff)
+                    s_onOffIndex = index;
+            }
+            if ((caps & (kCapImpulse | kCapContinuous | kCapOnOff)) && seq != s_doneSeq)
+            {
+                s_doneSeq = seq;
+                if (s_logs++ < 30)
+                    Game::logMsg("Free-hand Use: entity %d caps 0x%X -> %s", index, caps,
+                        (caps & kCapContinuous) ? "continuous" : (caps & kCapOnOff) ? "on" : "toggle");
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        if (s_logs++ < 30)
+            Game::logMsg("Free-hand Use: exception (entity %d)", index);
+    }
 }
 
 void __fastcall Hooks::dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang)

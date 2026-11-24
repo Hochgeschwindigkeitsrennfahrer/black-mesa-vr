@@ -60,7 +60,7 @@ MODULES = {
         kUpdateFlashlightState kBmFlashlightUpdate kEyeVectors kFogColorEyeVectorsCall
         kSkyFogColorEyeVectorsCall kPixelVisViewIdCallRvas''',
     'server': '''kCBasePlayer_Weapon_ShootPosition_Server kCBasePlayer_GrabHoldOrigin_Server
-        kBlackMesaPlayer_ShootSource_Server kCGrabController_SetTargetPosition
+        kBlackMesaPlayer_ShootSource_Server kCGrabController_SetTargetPosition kCBasePlayer_PlayerUse_Server
         kBlackMesaPlayer_GetShootAngles_Server kGrenadeCreate_Server kGrenadeThrowPosition_Server
         kProjectileCreate_Server kCBasePlayer_ImpulseCommands kServerWeaponFireOriginReturnRvas
         kSnarkThrow_Server kSnarkPlace_Server kSetAbsVelocity_Server

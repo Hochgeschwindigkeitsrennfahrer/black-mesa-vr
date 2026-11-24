@@ -1060,6 +1060,14 @@ public:
     // gets off), secondary fire shoots, and the barrel swings around its
     // mount opposite to the hands (MountedGunAim).
     bool OnMountedGun() const { return m_OnGun; }
+    // Free-hand Use (VR::UpdateUseGrab): the hand that is not the latched Use
+    // hand, its target (UpdateFreeHandUseTarget, client entity index = server
+    // index, 0 = none) and a press counter for impulse Use (Hooks::dPlayerUse).
+    std::atomic<bool> m_FreeUseHeld{false};
+    std::atomic<bool> m_FreeUseLeft{false};
+    std::atomic<uint32_t> m_FreeUsePressSeq{0};
+    std::atomic<int> m_FreeUseEntIndex{0};
+    void UpdateFreeHandUseTarget();
     // Alt-fire while carrying a prop: the game's throw (fire press) is due.
     bool CarryThrowActive() const { return GetTickCount64() < m_CarryThrowUntilMs.load(std::memory_order_acquire); }
     static constexpr uint64_t kCarryThrowPulseMs = 60;

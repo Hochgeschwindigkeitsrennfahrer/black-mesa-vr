@@ -103,6 +103,7 @@ typedef void(__thiscall* tUpdateFlashlightState)(void* thisptr, void* flashlight
 typedef void(__thiscall* tBmFlashlightUpdate)(void* thisptr, Vector* pos, void* player, Vector* fwd, Vector* right, Vector* up);
 typedef Vector*(__thiscall* tWeaponShootPosition)(void* thisptr, Vector* out);
 typedef void(__thiscall* tGrabSetTarget)(void* thisptr, Vector* pos, QAngle* ang);
+typedef void(__thiscall* tPlayerUse)(void* thisptr);
 typedef void(__thiscall* tGetShootAngles)(void* thisptr, QAngle* out);
 typedef void*(__cdecl* tGrenadeCreate)(int type, Vector* velocity, void* angImpulse, void* owner, void* thrower, int mode);
 typedef bool(__cdecl* tGrenadeThrowPosition)(void* grenade, Vector* pos, QAngle* ang, void* owner);
@@ -201,6 +202,7 @@ public:
     static inline Hook<tWeaponShootPosition> hkServerGrabHoldOrigin;
     static inline Hook<tWeaponShootPosition> hkServerBmShootSource;
     static inline Hook<tGrabSetTarget> hkGrabSetTarget;
+    static inline Hook<tPlayerUse> hkPlayerUse;
     static inline Hook<tGetShootAngles> hkGetShootAngles;
     static inline Hook<tGetShootAngles> hkClientGetShootAngles;
     static inline Hook<tGrenadeCreate> hkGrenadeCreate;
@@ -297,6 +299,7 @@ public:
     static Vector* __fastcall dServerGrabHoldOrigin(void* ecx, void* edx, Vector* out);
     static Vector* __fastcall dServerBmShootSource(void* ecx, void* edx, Vector* out);
     static void __fastcall dGrabSetTarget(void* ecx, void* edx, Vector* pos, QAngle* ang);
+    static void __fastcall dPlayerUse(void* ecx, void* edx);
     static void __fastcall dBmFlashlightUpdate(void* ecx, void* edx, Vector* pos, void* player, Vector* fwd, Vector* right, Vector* up);
     static void __fastcall dGetShootAngles(void* ecx, void* edx, QAngle* out);
     static void __fastcall dClientGetShootAngles(void* ecx, void* edx, QAngle* out);

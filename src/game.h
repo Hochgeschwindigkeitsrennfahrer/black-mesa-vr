@@ -142,6 +142,9 @@ public:
     // own count). Only when the server clip equals expectClip. Returns false
     // (nothing written) when the server weapon cannot be reached safely.
     bool SetServerActiveWeaponClip(int expectClip, int newClip);
+    // Server CBaseEntity of an entity index (single player: the server is in
+    // this process), via VEngineServer021 PEntityOfEntIndex; nullptr if none.
+    void* ServerEntityByIndex(int index);
     // Quick draw: right after the active weapon changed, cuts the server weapon's
     // next primary / secondary attack time (the deploy wait) to curtime + capSec.
     // Call every usercmd; returns true on the tick it shortened a timer.
