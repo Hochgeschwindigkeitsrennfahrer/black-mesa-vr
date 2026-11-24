@@ -358,7 +358,7 @@ namespace bmvr
     bool g_TitleGlow = true;
     bool g_ParticlesLast = true;
     float g_GlowProxyScale = 1.0f;
-    float g_VrRpgRingScale = 0.5f;
+    float g_VrRpgRingScale = 0.25f;
     float g_PoseHoldDeg = 0.f;
     float g_PoseHoldMm = 0.f;
     float g_GlowTraceSeconds = 0.f;

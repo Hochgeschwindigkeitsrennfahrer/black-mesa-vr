@@ -730,7 +730,7 @@ namespace bmvr
     extern float g_GlowProxyScale;
     // VrRpgRingScale (bmvr_rpg_ring_scale): size of the spinning red lines
     // around the RPG laser point. 1 = the flat HUD's size (10-18 px per 1440 px
-    // of eye height); default 0.5. Own setting, not the aim marker size.
+    // of eye height); default 0.25. Own setting, not the aim marker size.
     extern float g_VrRpgRingScale;
     extern float g_PoseHoldDeg;
     extern float g_PoseHoldMm;

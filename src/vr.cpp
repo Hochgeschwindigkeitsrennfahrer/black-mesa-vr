@@ -12873,7 +12873,7 @@ void VR::DrawRpgLockRing(IDirect3DDevice9* device, float sx, float sy, UINT h) c
     // large in the headset, most of all on far targets (user 2026-11-23).
     float scale = bmvr::g_VrRpgRingScale;
     if (!(scale > 0.05f) || scale > 8.f)
-        scale = 0.5f;
+        scale = 0.25f;
     const float px = ((h > 8) ? static_cast<float>(h) : 1440.f) / 1440.f * scale;
     const float inner = 10.f * px;
     const float outer = 18.f * px;
