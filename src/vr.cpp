@@ -15853,9 +15853,11 @@ bool VR::HandInGestureZone(const Vector& hand, GestureZone zone, float growM) co
     case GestureZone::HipAmmo:       b = { -1.f, -0.43f, 0.10f, -1.03f, -0.45f, 0.05f, 0.45f }; break;
     // Left hand, ammo grab at either hip (belt front to hip side; user
     // 2026-11-24: the HipAmmo box ended 10 cm ahead of the eyes, a belt-front
-    // grab at ~0.35 m ahead, 0.35-0.4 m down missed). Gun holsters unchanged.
-    case GestureZone::AmmoWideLeft:  b = { -1.f, -0.43f, 0.45f, -1.03f, -0.25f, 0.05f, 0.45f }; break;
-    case GestureZone::AmmoWideRight: b = { 1.f, -0.43f, 0.45f, -1.03f, -0.25f, 0.05f, 0.45f }; break;
+    // grab at ~0.35 m ahead, 0.35-0.4 m down missed; 0.45 / -0.25 was far too
+    // big, a grab from the whole belly: now 0.25 ahead, down from -0.40).
+    // Gun holsters unchanged.
+    case GestureZone::AmmoWideLeft:  b = { -1.f, -0.43f, 0.25f, -1.03f, -0.40f, 0.10f, 0.45f }; break;
+    case GestureZone::AmmoWideRight: b = { 1.f, -0.43f, 0.25f, -1.03f, -0.40f, 0.10f, 0.45f }; break;
     // Left hand, a bit above the right hip: mirror of the cross draw.
     case GestureZone::HipCrossRight: b = { 1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f }; break;
     }
