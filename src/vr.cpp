@@ -14363,11 +14363,20 @@ namespace
         QAngle::AngleVectors(hudAng, &fwd, &right, &up);
         Vector left = right * -1.f;
         const float kPitch = bmvr::g_HandHudTilt;
-        const float kRoll = rightHand ? bmvr::g_HandHudRoll : -bmvr::g_HandHudRoll;
+        // Classic: the glove's back is already level in the rolled frame, so drop the extra roll.
+        const float hudRoll = bmvr::g_VrHandsClassicPose ? 0.f : bmvr::g_HandHudRoll;
+        const float kRoll = rightHand ? hudRoll : -hudRoll;
         fwd = HudRotate(fwd, left, kPitch);
         up = HudRotate(up, left, kPitch);
         left = HudRotate(left, fwd, kRoll);
         up = HudRotate(up, fwd, kRoll);
+        if (bmvr::g_VrHandsClassicPose)
+        {
+            // Turn the panel a bit counter-clockwise (seen from above the hand) to line up with the glove.
+            const float yaw = rightHand ? 12.f : -12.f;
+            fwd = HudRotate(fwd, up, yaw);
+            left = HudRotate(left, up, yaw);
+        }
         // Size/offsets/angles from the panel (Hands & Weapons -> HUD POSITION) / bmvr_hand_hud_*.
         const float size = bmvr::g_HandHudSize;
         const float lift = bmvr::g_HandHudUp - (bmvr::g_VrHandsClassicPose ? bmvr::kHandHudClassicDrop : 0.f);  // no thumb to clear on the back of the hand
