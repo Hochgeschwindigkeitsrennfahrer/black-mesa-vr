@@ -15851,6 +15851,11 @@ bool VR::HandInGestureZone(const Vector& hand, GestureZone zone, float growM) co
     case GestureZone::HipCrossLeft:  b = { -1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f }; break;
     // Left hand: mirror of the pistol zone (manual-reload ammo).
     case GestureZone::HipAmmo:       b = { -1.f, -0.43f, 0.10f, -1.03f, -0.45f, 0.05f, 0.45f }; break;
+    // Left hand, ammo grab at either hip (belt front to hip side; user
+    // 2026-11-24: the HipAmmo box ended 10 cm ahead of the eyes, a belt-front
+    // grab at ~0.35 m ahead, 0.35-0.4 m down missed). Gun holsters unchanged.
+    case GestureZone::AmmoWideLeft:  b = { -1.f, -0.43f, 0.45f, -1.03f, -0.25f, 0.05f, 0.45f }; break;
+    case GestureZone::AmmoWideRight: b = { 1.f, -0.43f, 0.45f, -1.03f, -0.25f, 0.05f, 0.45f }; break;
     // Left hand, a bit above the right hip: mirror of the cross draw.
     case GestureZone::HipCrossRight: b = { 1.f, -0.25f, 0.20f, -0.80f, -0.35f, 0.00f, 0.40f }; break;
     }
@@ -15865,8 +15870,13 @@ bool VR::LeftHandInSlotZone(int zone, float growM) const
     {
     case bmvr::kGestureShoulderLeft:  return HandInGestureZone(m_LeftControllerPosAbs, GestureZone::ShoulderLeft, growM);
     case bmvr::kGestureShoulderRight: return HandInGestureZone(m_LeftControllerPosAbs, GestureZone::ShoulderRight, growM);
-    case bmvr::kGestureHipLeft:       return HandInGestureZone(m_LeftControllerPosAbs, GestureZone::HipAmmo, growM);
-    case bmvr::kGestureHipRight:      return HandInGestureZone(m_LeftControllerPosAbs, GestureZone::HipCrossRight, growM);
+    // A slot set to Ammo gets the wide ammo box; other actions keep theirs.
+    case bmvr::kGestureHipLeft:
+        return HandInGestureZone(m_LeftControllerPosAbs, static_cast<int>(std::lround(bmvr::g_GestureLeft[zone])) == bmvr::kGestureAmmo
+            ? GestureZone::AmmoWideLeft : GestureZone::HipAmmo, growM);
+    case bmvr::kGestureHipRight:
+        return HandInGestureZone(m_LeftControllerPosAbs, static_cast<int>(std::lround(bmvr::g_GestureLeft[zone])) == bmvr::kGestureAmmo
+            ? GestureZone::AmmoWideRight : GestureZone::HipCrossRight, growM);
     case bmvr::kGestureHead:
     {
         // Forehead: just ahead of the eyes (the headset front is ~8 cm ahead

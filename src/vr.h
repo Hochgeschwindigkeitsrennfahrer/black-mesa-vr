@@ -1730,7 +1730,7 @@ private:
     // g_GestureBodyFrame off: the headset itself (the old head-locked zones).
     // Boxes, per hand: HipCrossLeft = right hand above the left hip, HipAmmo =
     // left hand at the left hip, HipCrossRight = left hand above the right hip.
-    enum class GestureZone { ShoulderLeft, ShoulderRight, HipRight, HipCrossLeft, HipAmmo, HipCrossRight };
+    enum class GestureZone { ShoulderLeft, ShoulderRight, HipRight, HipCrossLeft, HipAmmo, HipCrossRight, AmmoWideLeft, AmmoWideRight };
     void UpdateBodyFrame();
     bool HandInGestureZone(const Vector& hand, GestureZone zone, float growM = 0.f) const;
     // Hand in that slot's zone (bmvr::GestureZoneId); the left hand's forehead
