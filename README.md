@@ -174,12 +174,9 @@ The file explains every setting in comments.
   and its render thread is the limit there.
 - **Your hands disappear below the water surface** when you reach into water.
 - **Some monitors in the world pulse** (their brightness goes subtly up and down).
-- **Stand-up and cutscene scenes rotate your view** with the scene's camera. Turn off
-  **Controls → VIEW → Cutscene cameras move the view** if that bothers you.
 - **Switching to an addon from the game's new menu (Blue Shift, Military, ...) does not work in VR:** the game
   restarts its engine in place, the menu then runs at a few fps and starting a game crashes. Start the addon directly
   instead, e.g. with the Steam launch option `-game bshift`.
-- **Manual (physical) reloading is not implemented**; reload is a button (A).
 - The first launch after an update recompiles shaders: expect some hitches in the first minutes.
 
 **Reporting a bug:** attach `bmvr_log.txt` (next to `bms.exe`). For visual problems, **Debug → Capture debug frame**
