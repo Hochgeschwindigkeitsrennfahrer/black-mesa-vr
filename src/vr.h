@@ -997,6 +997,9 @@ public:
     // ladder, stretched = further). LadderBodyFollowsArms; +-8 units (more
     // where the rungs stand further out than 24 units, up to 24).
     Vector PhysicalLadderViewShift(const Vector& body);
+    // LadderCentreHead (called from PhysicalLadderViewShift): at the start
+    // of a hand climb the head is slid sideways onto the ladder's middle.
+    void PhysicalLadderCentreHead(const Vector& body, ULONGLONG now, float dt);
     struct LadderViewState
     {
         bool active = false;     // climbing by hand (set by PhysicalLadderStep)
@@ -1008,6 +1011,11 @@ public:
         Vector shift{};          // last horizontal shift sent (PhysicalLadderViewShift)
         float limit = 8.f;
         ULONGLONG lastMs = 0;
+        // LadderCentreHead: sideways recentre at the start of a climb.
+        ULONGLONG lastActiveMs = 0;   // last frame climbing by hand
+        ULONGLONG centreStartMs = 0;  // centring window start (0 = none)
+        float centreFrom = 0.f;       // head's sideways offset when it started
+        float centred = 0.f;          // moved so far this climb (units)
     } m_LadderView;
     // ProcessInput: grip state per hand (0 left, 1 right) for PhysicalLadderStep.
     void UpdateLadderGrips();

@@ -134,6 +134,7 @@ namespace
             { "PHYSICAL LADDERS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Physical ladders (beta)", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
             { "Ladder distance follows arms", RowKind::Toggle, "LadderBodyFollowsArms", &bmvr::g_LadderBodyFollowsArms, nullptr, 0, 0, 0, nullptr },
+            { "Centre on the ladder", RowKind::Toggle, "LadderCentreHead", &bmvr::g_LadderCentreHead, nullptr, 0, 0, 0, nullptr },
             { "Gun hand on ladders", RowKind::Choice, "LadderGunHand", nullptr, &bmvr::g_LadderGunHand, 1.f, 0.f, 2.f, "Holster + draw again|Needs empty hand|Holster only" },
             { "Hand wraps the rung", RowKind::Toggle, "LadderHandWrap", &bmvr::g_LadderHandWrap, nullptr, 0, 0, 0, nullptr },
             { "Hand distance from rung", RowKind::Number, "LadderHandBack", nullptr, &bmvr::g_LadderHandBack, 0.5f, 0.f, 10.f, "%.1f" },
@@ -473,7 +474,7 @@ namespace
         if (!k)
             return false;
         static const char* kDev[] = {
-            "LadderBodyFollowsArms", "LadderHandBack", "LadderHandWrap", "VrNearZ", "MenuHeightOffsetMeters", "MenuCursorSmoothSec",
+            "LadderBodyFollowsArms", "LadderCentreHead", "LadderHandBack", "LadderHandWrap", "VrNearZ", "MenuHeightOffsetMeters", "MenuCursorSmoothSec",
             "ControlsPicture", "DamageFlashStrength", "VrHandsBlackMesaScale", "VrGunRightHand", "VrHandsRollDeg",
             "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll",
             "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain", "LastShotHapticStrength", "DryFireHapticStrength", "VrClipHandPose", "VrClipHandSnap",
@@ -1404,7 +1405,7 @@ namespace
             return !g_SnapTurning;
         if (is({ "TurnSpeed" }))
             return g_SnapTurning;
-        if (is({ "LadderBodyFollowsArms", "LadderGunHand", "LadderHandBack", "LadderHandWrap", "LadderStickClimb" }))
+        if (is({ "LadderBodyFollowsArms", "LadderCentreHead", "LadderGunHand", "LadderHandBack", "LadderHandWrap", "LadderStickClimb" }))
             return !g_PhysicalLadders;
         if (is({ "DamageFlashStrength" }))
             return !g_DamageFlash;

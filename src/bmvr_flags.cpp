@@ -438,6 +438,7 @@ namespace bmvr
     float g_VmTuneSeatCm = 6.f, g_VmTuneSeatDeg = 45.f;
     bool g_PhysicalLadderSmooth = true;
     bool g_LadderBodyFollowsArms = true;
+    bool g_LadderCentreHead = true;
     float g_LadderGunHand = 1.f;
     bool g_LadderStickClimb = false;
     float g_LadderHandBack = 1.5f;   // user 2026-11-20 (was 3)
@@ -1332,6 +1333,8 @@ namespace bmvr
                 g_PhysicalLadders = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LadderBodyFollowsArms") == 0)
                 g_LadderBodyFollowsArms = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "LadderCentreHead") == 0)
+                g_LadderCentreHead = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PhysicalLadderSmooth") == 0)
                 g_PhysicalLadderSmooth = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LadderStickClimb") == 0)

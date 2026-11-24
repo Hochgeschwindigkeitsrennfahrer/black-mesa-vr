@@ -9042,6 +9042,74 @@ float VR::PhysicalLadderViewOffset(float renderZ)
     return off;
 }
 
+void VR::PhysicalLadderCentreHead(const Vector& body, ULONGLONG now, float dt)
+{
+    // LadderMove keeps the body on the ladder's middle, but the head is
+    // wherever the player stands from their recenter spot (no room-scale
+    // body follow): 15 cm off made climbing feel lopsided (user 2026-11-24,
+    // capture-20261124-221718 bm_c3a2h: rungs held at y -2086 / -2074, body
+    // -2080, eyes -2085.7). At the start of a climb the tracking zero slides
+    // along the rung so the head sits over the middle, like a sideways-only
+    // recenter. Only in a short window: leaning later is not undone. It
+    // stays after the climb (the body is then simply under the head).
+    LadderViewState& v = m_LadderView;
+    if (!v.active)
+        return;
+    if (now - v.lastActiveMs > 1000)
+    {
+        v.centreStartMs = now;
+        v.centreFrom = 0.f;
+        v.centred = 0.f;
+    }
+    v.lastActiveMs = now;
+    if (!v.centreStartMs || !bmvr::g_PhysicalLadders || !bmvr::g_LadderCentreHead || body.LengthSqr() <= 1.f)
+        return;
+    constexpr ULONGLONG kWindowMs = 700;
+    const bool last = now - v.centreStartMs >= kWindowMs;
+    Vector axis{};
+    bool haveAxis = false;
+    for (int h = 0; h < 2 && !haveAxis; ++h)
+    {
+        if (!m_LadderPin[h].valid || !m_LadderPin[h].hasAxis)
+            continue;
+        axis = m_LadderPin[h].axis;
+        axis.z = 0.f;
+        haveAxis = VectorNormalize(axis) > 0.1f;
+    }
+    float lateral = 0.f;
+    if (haveAxis && !last)
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        const Vector eye = ControllerTrackingToWorld(body, m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs);
+        lateral = (eye - body).Dot(axis);
+        if (v.centred == 0.f)
+        {
+            v.centreFrom = lateral;
+            // Already near the middle: leave the view alone.
+            if (fabsf(lateral) < 2.f)
+            {
+                v.centreStartMs = 0;
+                return;
+            }
+        }
+        // ~120 ms ease; the eye moves by -d when the zero moves by R^-1(d).
+        const float a = dt > 0.f ? 1.f - expf(-dt / 0.12f) : 0.f;
+        const float step = lateral * a;
+        Vector d = axis * step;
+        PivotYaw(d, -m_RotationOffsetY.load(std::memory_order_acquire));
+        m_HmdPosAbsZero.x += d.x;
+        m_HmdPosAbsZero.y += d.y;
+        v.centred += step;
+    }
+    if (last)
+    {
+        if (v.centred != 0.f)
+            Game::logMsg("Ladder centre: head moved %.1f units sideways onto the ladder's middle (was %.1f off)",
+                v.centred, v.centreFrom);
+        v.centreStartMs = 0;
+    }
+}
+
 Vector VR::PhysicalLadderViewShift(const Vector& body)
 {
     // The body hangs at LadderMove's fixed distance from the ladder; the
@@ -9060,6 +9128,7 @@ Vector VR::PhysicalLadderViewShift(const Vector& body)
     s_lastMs = now;
     if (dt > 0.1f)
         dt = 0.1f;
+    PhysicalLadderCentreHead(body, now, dt);
     Vector want(0.f, 0.f, 0.f);
     int n = 0;
     // Cap: 8 units for the usual ladders (rungs ~24 units in front of the
@@ -16188,7 +16257,13 @@ bool VR::UpdateShoulderGestures(bool paused)
     for (int z = 0; z < bmvr::kGestureZoneCount; ++z)
     {
         const int a = leftAction(z);
-        const bool in = leftOn(z) && m_LeftControllerTrackingValid && !m_TwoHandActive && LeftHandInSlotZone(z);
+        // Forehead: not on / at a ladder. Hand over hand, the left hand
+        // passes the forehead on every reach (user 2026-11-24: screenshots
+        // while climbing), and its grip there is a rung grab.
+        const bool ladderBlocked = z == bmvr::kGestureHead
+            && (m_LadderActive.load(std::memory_order_relaxed) || m_LadderView.active
+                || m_LadderPin[0].valid || m_LadderPin[1].valid);
+        const bool in = leftOn(z) && m_LeftControllerTrackingValid && !m_TwoHandActive && !ladderBlocked && LeftHandInSlotZone(z);
         leftAny = leftAny || in;
         // Ammo: no gesture, the manual-reload grab takes ammo there
         // (LeftHandInAmmoZone); the zone keeps the grip out of its mapped
