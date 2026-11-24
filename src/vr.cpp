@@ -22672,6 +22672,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         bool needPump = false;
         bool spentHull = false; // shotgun: a fired hull waits for the back stroke
         bool dryRefill = false; // fired dry: the game's own reload filled its count from the reserve
+        bool slideBack = false; // glock fired dry: slide held back until a short rack lets it go
         int lastReserve = -1;
     };
     static WeaponState s_w[kWeaponCount];
@@ -22829,7 +22830,16 @@ void VR::UpdateMagReload(uint32_t& buttons)
         w.mag = kDry;
         w.chambered = def.boltBone == nullptr; // no bolt/slide to work: nothing to rack
         w.dryRefill = true;
-        Game::logMsg("Mag reload: %s fired dry, swap the magazine", def.name);
+        // Glock: the slide goes back on its own with the slide's pull-back
+        // sound and stays (almost fully) back; a short rack then lets it go
+        // forward (user 2026-11-24: racking a closed slide on an empty gun
+        // was not realistic). A gun with a round left is unchanged.
+        if (weapon == kWeaponGlock)
+        {
+            w.slideBack = true;
+            sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kGlockSlideBack, nullptr));
+        }
+        Game::logMsg("Mag reload: %s fired dry, swap the magazine%s", def.name, w.slideBack ? " (slide held back)" : "");
     }
     const float grip = LeftSupportGripValue();
     const bool gripDown = grip > 0.6f;
@@ -23474,7 +23484,34 @@ void VR::UpdateMagReload(uint32_t& buttons)
             PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 600, 0.3f);
         s_wasNear = atBolt;
     }
-    if (boltGrab)
+    if (boltGrab && w.slideBack)
+    {
+        // Slide held back (glock fired dry): pulled a little further
+        // (~1 cm of hand travel) and let go, or pulled fully back, it snaps
+        // forward with the second half of the slide sound.
+        static bool s_slideArmed = false;
+        const float pull = g_BoltPull.load();
+        if (pull >= 0.2f)
+            s_slideArmed = true;
+        if (pull >= 0.85f || (released && s_slideArmed))
+        {
+            boltGrab = false;
+            s_boltFull = false;
+            s_slideArmed = false;
+            w.slideBack = false;
+            w.chambered = (w.mag == kLoaded) && clip > 0;
+            sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kGlockSlideForward, def.boltSound));
+            ReloadHaptic(ReloadFeel::Chamber);
+            Game::logMsg("Mag reload: %s slide released (pull %.2f), chambered %d", def.name, pull, w.chambered ? 1 : 0);
+        }
+        else if (released)
+        {
+            boltGrab = false;
+            s_slideArmed = false;
+            Game::logMsg("Mag reload: %s slide let go without a rack (pull %.2f), stays back", def.name, pull);
+        }
+    }
+    else if (boltGrab)
     {
         const float pull = g_BoltPull.load();
         if (pull >= 0.85f)
@@ -23537,7 +23574,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_pulseReload = false;
     }
     // Open (locked back) slide: glock with an empty chamber.
-    g_SlideLocked.store(def.slideLocksBack && !w.chambered);
+    g_SlideLocked.store((def.slideLocksBack && !w.chambered) || w.slideBack);
     g_NeedRack.store(!w.chambered);
     g_DisplayClip.store((w.mag == kLoaded) ? clip : 0);
     // After a dry fire the game's own reload already moved a magazine from

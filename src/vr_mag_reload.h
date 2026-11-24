@@ -59,6 +59,9 @@ namespace MagReload
     extern std::atomic<int> g_Weapon;      // weapon the state below is for
     extern std::atomic<int> g_State;
     extern std::atomic<bool> g_SlideLocked; // draw the slide/bolt held back
+    // Held back = this fraction of boltTravel: almost fully, so a short pull
+    // still moves it (glock fired dry).
+    constexpr float kSlideHeldBack = 0.9f;
     extern std::atomic<bool> g_BoltGrab;    // left grip holds the bolt/slide
     extern std::atomic<bool> g_NeedRack;    // chamber empty: the bolt/slide is grabbable
     extern std::atomic<unsigned> g_DropTick; // a magazine left the gun/hand at this GetTickCount

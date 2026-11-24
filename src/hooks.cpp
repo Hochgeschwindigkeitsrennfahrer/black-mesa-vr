@@ -5836,7 +5836,10 @@ namespace
             else
                 s_grabbing = false;
             MagReload::g_BoltPull.store(pull);
-            const float back = MagReload::g_SlideLocked.load() ? travel : (std::min)(handBack, travel);
+            // Held back: almost fully, and the hand pulls it the rest of the way.
+            const float back = MagReload::g_SlideLocked.load()
+                ? (std::min)(travel * MagReload::kSlideHeldBack + handBack, travel)
+                : (std::min)(handBack, travel);
             b[3] -= f.x * back;
             b[7] -= f.y * back;
             b[11] -= f.z * back;

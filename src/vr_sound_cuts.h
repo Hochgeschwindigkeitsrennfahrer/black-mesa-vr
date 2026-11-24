@@ -13,6 +13,8 @@ namespace bmvr::soundcuts
         kCrossbowMagOut,
         kCrossbowMagIn,
         kMp5Bolt,       // MP5 reload_long.wav: charging handle pulled back
+        kGlockSlideBack,    // glock reload.wav: slide pulled back only
+        kGlockSlideForward, // glock reload.wav: slide let go (snaps forward)
         kClipCount
     };
     // Sample name for PlayUiSound ("bmvr/..."), or fallback when the clip

@@ -188,6 +188,11 @@ namespace
         // MP5 reload_long.wav: charging handle back 0.16-0.46 s (then
         // magazine out 1.0, in 1.7, handle slapped 2.3).
         { "sound/weapons/mp5/reload_long.wav", 0.10, 0.52, "bmvr/mp5_bolt.wav" },
+        // Glock slide split at the quiet gap between its two hits (pulled
+        // back 1.58 s, snaps forward 1.76 s; measured 2026-11-24): fired dry,
+        // the slide goes back on its own, a short rack lets it go forward.
+        { "sound/weapons/glock/reload.wav", 1.45, 1.74, "bmvr/glock_slideback.wav" },
+        { "sound/weapons/glock/reload.wav", 1.74, 2.06, "bmvr/glock_slidefwd.wav" },
     };
     bool g_Made[bmvr::soundcuts::kClipCount]{};
     // Played name: "<sample minus .wav>_<t0 ms>_<t1 ms>.wav". A changed cut
