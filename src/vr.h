@@ -711,6 +711,7 @@ public:
     DWORD m_RecoilLastMs = 0;
     DWORD m_RecoilAttackMs = 0;
     void UpdateVrRecoil();
+    bool m_AmmoGrabReady = false;     // UpdateMagReload: a grip at the ammo zone would take ammo now
     bool m_GestureZoneLeft = false;   // last frame: left hand in one of its gesture zones
     bool m_GestureZoneRight = false;  // last frame: right hand in a shoulder/hip zone (or just left one)
     // Saves keep the player's view angles, and gameplay usercmds carry the

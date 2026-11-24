@@ -16023,7 +16023,9 @@ bool VR::UpdateShoulderGestures(bool paused)
         // other left zones (user 2026-11-24: none at the ammo zone).
         if (a == bmvr::kGestureAmmo)
         {
-            step(s_left[z], in, leftGrip, vr::TrackedControllerRole_LeftHand, 250, 0);
+            // Only while a grip there would take ammo (user 2026-11-24:
+            // it buzzed with nothing to grab).
+            step(s_left[z], in && m_AmmoGrabReady, leftGrip, vr::TrackedControllerRole_LeftHand, 250, 0);
             continue;
         }
         if (!step(s_left[z], in, leftGrip, vr::TrackedControllerRole_LeftHand, 250, a == bmvr::kGestureQuickLoad ? 1000 : 0))
@@ -22407,6 +22409,9 @@ int VR::MagReloadWeaponNow() const
 void VR::UpdateMagReload(uint32_t& buttons)
 {
     PumpHapticQueue();
+    // Whether a grip at the hip would take ammo now; the gesture zone buzzes
+    // only then (user 2026-11-24). Every early return leaves it false.
+    m_AmmoGrabReady = false;
     using namespace MagReload;
     // Per weapon, so a gun put away with its magazine out is still empty
     // when it comes back. Reset on a new map / load.
@@ -22551,6 +22556,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // through the hands' swaps, plus the reserve): a new magazine/shell only
     // comes off the hip while there are any (user: manual reloads used no ammo).
     const int gameRounds = (clip >= 0 && reserve >= 0) ? clip + reserve : -1;
+    // Magazine guns; the RPG, shotgun and .357 branches refine it.
+    m_AmmoGrabReady = w.mag == kEmpty && gameRounds != 0 && !def.tube
+        && weapon != kWeaponRpg && weapon != kWeapon357;
     auto outOfAmmo = [&](const char* what) {
         static DWORD s_buzzMs = 0;
         if (now - s_buzzMs > 400)
@@ -22641,6 +22649,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         }
         s_lastNeed = need;
         s_lastRounds = rounds;
+        m_AmmoGrabReady = w.mag == kEmpty && rounds != 0;
         if (w.mag == kEmpty && gripEdge && atLeftHip() && rounds == 0)
             outOfAmmo("rocket");
         else if (w.mag == kEmpty && gripEdge && atLeftHip())
@@ -22757,6 +22766,8 @@ void VR::UpdateMagReload(uint32_t& buttons)
         // The attached support hand works it by moving: toggle hold without
         // a held squeeze, hold mode while the grip (and so the attach) is held.
         const bool handOnPump = PumpFollowsSupportHand() && TwoHandGripActive();
+        m_AmmoGrabReady = !boltGrab && w.mag != kInHand && w.shells < def.maxClip
+            && !(gameRounds >= 0 && w.shells >= gameRounds);
         if (!boltGrab && w.needPump && handOnPump && w.mag != kInHand)
         {
             boltGrab = true;
@@ -22969,6 +22980,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 Game::logMsg("Mag reload: 357 tilted %.0f deg, empties out", pitch);
             }
         }
+        m_AmmoGrabReady = !emptiesIn && w.mag == kEmpty && s_phase == 2 && gameRounds != 0;
         if (emptiesIn && gripEdge && atLeftHip())
         {
             static int s_log;
