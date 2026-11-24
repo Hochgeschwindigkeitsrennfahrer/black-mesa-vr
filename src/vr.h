@@ -1060,6 +1060,10 @@ public:
     // gets off), secondary fire shoots, and the barrel swings around its
     // mount opposite to the hands (MountedGunAim).
     bool OnMountedGun() const { return m_OnGun; }
+    // Alt-fire while carrying a prop: the game's throw (fire press) is due.
+    bool CarryThrowActive() const { return GetTickCount64() < m_CarryThrowUntilMs.load(std::memory_order_acquire); }
+    static constexpr uint64_t kCarryThrowPulseMs = 60;
+    std::atomic<uint64_t> m_CarryThrowUntilMs{0};
     void UpdateMountedGun();
     // Usercmd angles that turn the gun's barrel where the hands push it:
     // hands right = barrel left, hands up = barrel down, relative to where

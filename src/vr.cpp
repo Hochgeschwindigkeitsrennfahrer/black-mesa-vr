@@ -7298,12 +7298,32 @@ void VR::ProcessInput()
         }
         else
             s_detWas = false;
+        // Carried prop (flare, can, crate; user 2026-11-24): alt-fire sends
+        // the game's own flat throw, a fire press on the pickup controller
+        // (fixed strength, along the usercmd angles, which follow the grab
+        // hand while carrying). One short pulse per press, added to the final
+        // usercmd in Hooks::dCreateMove (past the empty-hands fire strip and
+        // the gun filters); never IN_ATTACK2 there, that drops the prop.
+        const bool carrying = m_GrabLatched && GrabControllerRecentlyActive()
+            && !m_OnGun && !m_OnTrainControls;
+        static bool s_carryAltWas = false;
+        const bool carryAlt = !menuOwnsButtons && carrying && PressedDigitalAction(m_ActionSecondaryAttack);
+        if (carryAlt && !s_carryAltWas)
+        {
+            m_CarryThrowUntilMs.store(GetTickCount64() + kCarryThrowPulseMs, std::memory_order_release);
+            static int s_carryThrowLogs;
+            if (s_carryThrowLogs++ < 30)
+                Game::logMsg("Carry throw: alt-fire while carrying (%s hand) -> fire pulse %u ms",
+                    m_GrabHandLeft ? "left" : "right", static_cast<unsigned>(kCarryThrowPulseMs));
+        }
+        // Held on after the throw: no alt-fire for the gun until released.
+        s_carryAltWas = carryAlt || (s_carryAltWas && PressedDigitalAction(m_ActionSecondaryAttack));
         if (!menuOwnsButtons && m_OnGun)
         {
             if (PressedDigitalAction(m_ActionSecondaryAttack))
                 buttons |= IN_ATTACK;
         }
-        else if (!menuOwnsButtons && !emptyHands && PressedDigitalAction(m_ActionSecondaryAttack))
+        else if (!menuOwnsButtons && !emptyHands && !s_carryAltWas && PressedDigitalAction(m_ActionSecondaryAttack))
             buttons |= IN_ATTACK2;
         if (UpdateScopeRaise(!menuOwnsButtons && !emptyHands && !m_OnGun && !paused))
             buttons |= IN_ATTACK2;

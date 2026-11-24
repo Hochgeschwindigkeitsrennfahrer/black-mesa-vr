@@ -11309,6 +11309,10 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             ApplyPistolAltButton(m_Game, m_VR, cmd);
         }
     }
+    // Alt-fire while carrying a prop (VR input): the pickup controller's
+    // throw is a fire press; IN_ATTACK2 would drop it instead.
+    if (m_VR && m_VR->CarryThrowActive())
+        cmd->buttons = (cmd->buttons & ~IN_ATTACK2) | IN_ATTACK;
     // Hands-only physical ladders: a Use press near a ladder (left trigger,
     // or the empty right hand) made HL2's LadderMove mount it and pull the
     // player on (user 2026-11-20). Not on a ladder and not during a hand
