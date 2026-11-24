@@ -260,7 +260,6 @@ namespace bmvr
         }
         return false;
     }
-    bool g_VrHolsterBack = false;
     bool g_GestureBodyFrame = true;
     bool g_MenuRoomFront = true;
     float g_BodyYawDeadzoneDeg = 35.f;
@@ -968,7 +967,7 @@ namespace bmvr
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrHolsterBack") == 0)
-                g_VrHolsterBack = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                ;   // retired 2026-11-24: holstering in the weapon's own zone is always on
             else if (std::strcmp(n, "VrHolsterDynamic") == 0)
             {
                 g_VrHolsterDynamic = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);

@@ -177,6 +177,8 @@ namespace
             { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Reset hands + HUD position", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
+            { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
             { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
@@ -185,13 +187,12 @@ namespace
             { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
-            { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
-            { "GRENADES", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "GRENADES", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
             { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
             { "Throw from whole stroke (test)", RowKind::Toggle, "ThrowStroke", &bmvr::g_ThrowStroke, nullptr, 0, 0, 0, nullptr },
-            // Left column: hands & HUD, aiming, flashlight, grenades (user 2026-11-23: aiming moved left for balance).
+            // Left column: hands & HUD, flashlight, aiming, grenades (user 2026-11-23: aiming moved left for balance;
+            // 2026-11-24: flashlight above aiming, grenades/scope/mounted guns developer-only).
             { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "AMMO FEEDBACK", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Last shot buzz", RowKind::Choice, "LastShotHaptic", nullptr, &bmvr::g_LastShotHaptic, 1.f, 0.f, 2.f, "Off|Double|Long" },
@@ -205,10 +206,10 @@ namespace
             { "PISTOLS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "One shot per trigger pull", RowKind::Toggle, "VrPistolSemiAuto", &bmvr::g_VrPistolSemiAuto, nullptr, 0, 0, 0, nullptr },
             { "Glock: fast pulls = alt-fire", RowKind::Toggle, "VrGlockRapidAlt", &bmvr::g_VrGlockRapidAlt, nullptr, 0, 0, 0, nullptr },
-            { "CROSSBOW SCOPE", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "CROSSBOW SCOPE", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Raise distance", RowKind::Number, "ScopeRaiseMeters", nullptr, &bmvr::g_ScopeRaiseMeters, 0.02f, 0.1f, 0.6f, "%.2f m" },
             { "Zoom smoothing", RowKind::Number, "ScopeGunSmoothSec", nullptr, &bmvr::g_ScopeGunSmoothSec, 0.02f, 0.f, 0.5f, "%.2f s" },
-            { "MOUNTED GUNS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "MOUNTED GUNS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Turn per hand move", RowKind::Number, "MountedGunGain", nullptr, &bmvr::g_MountedGunGain, 0.25f, 0.5f, 4.f, "%.2fx" },
             // Off = the stable release's reloads; the rows below only act while it is on (manual
             // mag/shell/RPG reloads always, snarks thrown from the hand too). The support hand's
@@ -221,8 +222,6 @@ namespace
             // Developer row: A/B for the hand poses taken from Black Mesa's reload clips.
             { "Hand pose from reload clips", RowKind::Toggle, "VrClipHandPose", &bmvr::g_VrClipHandPose, nullptr, 0, 0, 0, nullptr },
             { "Hand locks onto bolt/slide", RowKind::Toggle, "VrClipHandSnap", &bmvr::g_VrClipHandSnap, nullptr, 0, 0, 0, nullptr },
-            { "RPG rocket through the fist", RowKind::Toggle, "VrClipHandRpg", &bmvr::g_VrClipHandRpg, nullptr, 0, 0, 0, nullptr },
-            { "RPG rocket tail out of the pinky side", RowKind::Toggle, "VrClipHandRpgFlip", &bmvr::g_VrClipHandRpgFlip, nullptr, 0, 0, 0, nullptr },
             { "Recoil", RowKind::Toggle, "VrRecoil", &bmvr::g_VrRecoil, nullptr, 0, 0, 0, nullptr },
             { "Recoil strength", RowKind::Number, "VrRecoilScale", nullptr, &bmvr::g_VrRecoilScale, 0.25f, 0.25f, 3.f, "%.2f" },
             // Kick with the second hand on the gun, as a share of one-handed (pistols x5/3, capped at 1).
@@ -237,18 +236,17 @@ namespace
             // 2026-11-23). Left hand: an action (quick load = 1 s hold). Right hand:
             // a weapon, buzzes and takes the grip only while you carry it; Dynamic =
             // the weapon you last put away there (ChoiceText shows which).
-            { "Left shoulder, left hand", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Left shoulder, left hand", RowKind::Choice, "GestureLeftShoulder", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load (hold)|Screenshot|Recenter" },
             { "Left shoulder, right hand", RowKind::Choice, "GestureWeaponShoulderLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Right shoulder, left hand", RowKind::Choice, "GestureLeftHandShoulderRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Right shoulder, left hand", RowKind::Choice, "GestureLeftHandShoulderRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureShoulderRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load (hold)|Screenshot|Recenter" },
             { "Right shoulder, right hand", RowKind::Choice, "GestureWeaponShoulder", nullptr, &bmvr::g_GestureRight[bmvr::kGestureShoulderRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Left hip, left hand", RowKind::Choice, "GestureLeftHandHipLeft", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Left hip, left hand", RowKind::Choice, "GestureLeftHandHipLeft", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipLeft], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load (hold)|Screenshot|Recenter" },
             { "Left hip, right hand", RowKind::Choice, "GestureWeaponHipLeft", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipLeft], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Right hip, left hand", RowKind::Choice, "GestureLeftHandHipRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Right hip, left hand", RowKind::Choice, "GestureLeftHandHipRight", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHipRight], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load (hold)|Screenshot|Recenter" },
             { "Right hip, right hand", RowKind::Choice, "GestureWeaponHipRight", nullptr, &bmvr::g_GestureRight[bmvr::kGestureHipRight], 1.f, -1.f, 11.f, "Off|Crowbar|Pistol|.357|MP5|Shotgun|Crossbow|RPG|Tau|Gluon|Hivehand|Grenade|Dynamic" },
-            { "Forehead, left hand", RowKind::Choice, "GestureLeftHandHead", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHead], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load|Screenshot|Recenter" },
+            { "Forehead, left hand", RowKind::Choice, "GestureLeftHandHead", nullptr, &bmvr::g_GestureLeft[bmvr::kGestureHead], 1.f, -1.f, 5.f, "Off|Quick save|Flashlight|Ammo|Quick load (hold)|Screenshot|Recenter" },
             { "", RowKind::ColumnBreak, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "", RowKind::GestureFigure, nullptr, nullptr, nullptr, 0, 0, 0, "R" },
-            { "Allow holstering", RowKind::Toggle, "VrHolsterBack", &bmvr::g_VrHolsterBack, nullptr, 0, 0, 0, nullptr },
             { "CONTROLS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Left column = left controller, right column = right controller. Headings name
             // the detected controller; button names follow it (A/B, Cross/Circle).
@@ -435,41 +433,15 @@ namespace
             { "Menus face the room front", RowKind::Toggle, nullptr, &bmvr::g_MenuRoomFront, nullptr, 0, 0, 0, nullptr },
             { "Pump stroke at the controller", RowKind::Toggle, nullptr, &bmvr::g_PumpStrokeAtController, nullptr, 0, 0, 0, nullptr },
             { "Tripmine placed along its face", RowKind::Toggle, nullptr, &bmvr::g_TripmineFaceAim, nullptr, 0, 0, 0, nullptr },
-            // Live per-weapon angle trim for the weapon in the hand (saved in
-            // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows).
+            // Live per-weapon support hand + mag seat trim for the weapon in the hand (saved in
+            // VR/viewmodel_offsets.txt by VR::SyncHeldWeaponAngleRows). The angle trims
+            // (pitch/yaw/roll) have no rows since the hand-pose hold (user 2026-11-24);
+            // values in the file still apply.
             { "HELD WEAPON TUNING (SAVED PER WEAPON)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Support hand (+ forward)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSupportCm, 1.f, -20.f, 20.f, "%+.0f cm" },
             { "Mag seat distance", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatCm, 0.5f, 1.f, 30.f, "%.1f cm" },
             { "Mag seat angle (180 = any)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatDeg, 5.f, 5.f, 180.f, "%.0f deg" },
-            { "Pitch", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTunePitch, 2.5f, -90.f, 90.f, "%.1f deg" },
-            { "Yaw", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneYaw, 2.5f, -90.f, 90.f, "%.1f deg" },
-            { "Roll", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneRoll, 2.5f, -90.f, 90.f, "%.1f deg" },
             // Per ladder model, for the last rung held (VR::SyncLadderGripRows).
-            { "RPG ROCKET IN THE HAND (NOT SAVED)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Rocket hand curl", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgFistCurl, 0.05f, 0.f, 1.f, "%.2f" },
-            { "Rocket out of the palm", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgFistOutCm, 0.5f, -5.f, 10.f, "%+.1f cm" },
-            { "Rocket turn (tip toward / away)", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandTurn, 15.f, -180.f, 180.f, "%+.0f deg" },
-            { "Rocket roll (around the knuckles)", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandRoll, 15.f, -180.f, 180.f, "%+.0f deg" },
-            { "Rocket spin (around vertical)", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandSpin, 15.f, -180.f, 180.f, "%+.0f deg" },
-            { "Rocket forward", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandFwdCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
-            { "Rocket up", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandUpCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
-            { "Rocket side (+ = to the right of the hand)", RowKind::Number, nullptr, nullptr, &bmvr::g_RpgHandSideCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
-            { "GLOCK MAGAZINE IN THE HAND (NOT SAVED)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Thumb base bend (whole thumb toward the palm)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockThumbBase, 5.f, -60.f, 90.f, "%+.0f deg" },
-            { "Thumb tip curl (+ = closes toward the palm)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockThumbCurl, 5.f, -60.f, 90.f, "%+.0f deg" },
-            { "Mag turn (top toward / away)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagTurn, 5.f, -180.f, 180.f, "%+.0f deg" },
-            { "Mag roll (around the knuckles)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagRoll, 5.f, -180.f, 180.f, "%+.0f deg" },
-            { "Mag spin (around vertical)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagSpin, 5.f, -180.f, 180.f, "%+.0f deg" },
-            { "Mag forward", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagFwdCm, 0.5f, -15.f, 15.f, "%+.1f cm" },
-            { "Mag up", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagUpCm, 0.5f, -15.f, 15.f, "%+.1f cm" },
-            { "Mag side (+ = to the right of the hand)", RowKind::Number, nullptr, nullptr, &bmvr::g_GlockMagSideCm, 0.5f, -15.f, 15.f, "%+.1f cm" },
-            { "SATCHEL BAG IN THE HAND (NOT SAVED)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Bag turn (tip toward / away)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagTurn, 15.f, -180.f, 180.f, "%+.0f deg" },
-            { "Bag roll (around the knuckles)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagRoll, 15.f, -180.f, 180.f, "%+.0f deg" },
-            { "Bag spin (around vertical)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagSpin, 15.f, -180.f, 180.f, "%+.0f deg" },
-            { "Bag in (toward the fist)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagInCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
-            { "Bag up", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagUpCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
-            { "Bag side (+ = to the right of the hand)", RowKind::Number, nullptr, nullptr, &bmvr::g_SatchelBagSideCm, 0.5f, -30.f, 30.f, "%+.1f cm" },
             { "LADDER GRIP TUNING (SAVED PER LADDER MODEL)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip out (toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneOutCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
             { "Grip up", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneUpCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
@@ -498,7 +470,7 @@ namespace
             "LadderBodyFollowsArms", "LadderHandBack", "LadderHandWrap", "VrNearZ", "MenuHeightOffsetMeters", "MenuCursorSmoothSec",
             "ControlsPicture", "DamageFlashStrength", "VrHandsBlackMesaScale", "VrGunRightHand", "VrHandsRollDeg",
             "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll",
-            "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg", "VrClipHandRpgFlip",
+            "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain", "LastShotHapticStrength", "DryFireHapticStrength", "VrClipHandPose", "VrClipHandSnap",
             "MsaaParticles1x", "FxaaSubpixel", "FxaaEdgeThreshold", "FxaaEdgeThresholdMin",
             "EnvmapScaleWorld", "EnvmapScaleModels", "LodBias",
             "FlareFadeAngle", "FlareLightScale", "FlareHazeScale", "FlareHazeMinSize", "FlareGhostScale", "flare_default",

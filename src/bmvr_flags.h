@@ -500,8 +500,6 @@ namespace bmvr
     const char* GestureActionName(int action);
     // The right-hand slot's weapon now (a Dynamic zone's stored one), -1 = none.
     int GestureWeaponAt(int zone);
-    // Grip in a weapon's own zone while holding that weapon puts it away (empty hands). Off = the grip there does nothing.
-    extern bool g_VrHolsterBack;
     // Grab zones follow an estimated body yaw + neck point, not the headset
     // (debug A/B, not saved; on by default). Tunables in VR/config.txt and the
     // Debug tab TESTS rows.

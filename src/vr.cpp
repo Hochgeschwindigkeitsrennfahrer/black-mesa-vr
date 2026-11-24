@@ -16121,17 +16121,14 @@ bool VR::UpdateShoulderGestures(bool paused)
                 Game::logMsg("Grab gesture: %s already active, hands -> weapon", label);
                 return;
             }
-            // VrHolsterBack (off by default, user 2026-11-20): the grip in
-            // the zone of the weapon in the hand puts it back there, like
-            // the right-stick tap (that tap then draws it again).
-            if (bmvr::g_VrHolsterBack)
-            {
-                ToggleEmptyHands();
-                PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
-                Game::logMsg("Holster gesture: %s put back, empty hands", label);
-                return;
-            }
-            Game::logMsg("Grab gesture: %s already held", label);
+            // The grip in the zone of the weapon in the hand puts it back
+            // there, like the right-stick tap (that tap then draws it
+            // again). Always on since 2026-11-24 (was the VrHolsterBack
+            // toggle, off by default; user: the toggle bought nothing and
+            // made Dynamic zones awkward).
+            ToggleEmptyHands();
+            PulseHandHaptic(vr::TrackedControllerRole_RightHand, 3000, 0.8f);
+            Game::logMsg("Holster gesture: %s put back, empty hands", label);
             return;
         }
         for (int i = 0; i < invN; ++i)
