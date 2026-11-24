@@ -11441,7 +11441,6 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
             // lag/bob and $origin are in the same frame as the hard-lock.
             const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(ladderEye);
             const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
-            m_VR->NoteGunPlacementHand();
             // Crowbar idle-force runs in SuppressViewmodelMovementAnims.
             // MP5 fire sequences must keep playing (never idle-force those).
             if (mp5)
@@ -11460,7 +11459,6 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
         // Feeding HMD origin/angles here parented the weapon to nod.
         const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(ladderEye);
         const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
-        m_VR->NoteGunPlacementHand();
         CallCalcViewModelViewOriginal(ecx, owner, targetOrigin, targetAng);
         const float origin3[3] = { targetOrigin.x, targetOrigin.y, targetOrigin.z };
         const float angles3[3] = { targetAng.x, targetAng.y, targetAng.z };
