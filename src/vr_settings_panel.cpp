@@ -491,7 +491,7 @@ namespace
     // under a texture point (px absolute, ly from the row top), and the grab
     // zones a hand is in now (bit z = left hand, bit 8 + z = right hand; set
     // by VR::DrawSettingsPanel while the tab shows, lights the zone up).
-    constexpr int kGestureFigureH = 900;
+    constexpr int kGestureFigureH = 990;
     int GestureFigureHit(bool rightSide, int px, int ly);
     bool IsGestureSlotRow(const Row& r);
     unsigned g_GestureHot = 0;
@@ -1926,19 +1926,26 @@ namespace
     constexpr int kFigCx = kColW;
     constexpr int kGCardW = 540;
     constexpr int kGCardL0 = 40, kGCardR0 = kTexW - 40 - kGCardW;
+    // The figure sits kFigDy below the row top (user 2026-11-24: lower, so the
+    // hip leader lines run straight; only the forehead's slants).
+    constexpr int kFigDy = 94;
     struct ZoneBox { int x0, y0, x1, y1; };
     ZoneBox GestureZoneBox(int z)
     {
+        ZoneBox b;
         switch (z)
         {
-        // Fitted to VR/panel/gesture_body.png (345x860, drawn from y 10):
+        // Fitted to VR/panel/gesture_body.png (345x860, drawn from y kFigDy):
         // behind the shoulder pads beside the head, the hands / belt sides.
-        case bmvr::kGestureShoulderLeft:  return { kFigCx - 185, 95, kFigCx - 50, 235 };
-        case bmvr::kGestureShoulderRight: return { kFigCx + 50, 95, kFigCx + 185, 235 };
-        case bmvr::kGestureHipLeft:       return { kFigCx - 205, 385, kFigCx - 85, 545 };
-        case bmvr::kGestureHipRight:      return { kFigCx + 85, 385, kFigCx + 205, 545 };
-        default:                          return { kFigCx - 58, 12, kFigCx + 58, 92 };   // forehead (seen through the head)
+        case bmvr::kGestureShoulderLeft:  b = { kFigCx - 185, 85, kFigCx - 50, 225 }; break;
+        case bmvr::kGestureShoulderRight: b = { kFigCx + 50, 85, kFigCx + 185, 225 }; break;
+        case bmvr::kGestureHipLeft:       b = { kFigCx - 205, 375, kFigCx - 85, 535 }; break;
+        case bmvr::kGestureHipRight:      b = { kFigCx + 85, 375, kFigCx + 205, 535 }; break;
+        default:                          b = { kFigCx - 58, 2, kFigCx + 58, 82 }; break;   // forehead (seen through the head)
         }
+        b.y0 += kFigDy;
+        b.y1 += kFigDy;
+        return b;
     }
     bool IsGestureSlotRow(const Row& r)
     {
@@ -1995,12 +2002,12 @@ namespace
         if (!rightSide)
         {
             add(bmvr::kGestureHead, 10, false);
-            add(bmvr::kGestureShoulderLeft, 150, true);
+            add(bmvr::kGestureShoulderLeft, 230, true);
             add(bmvr::kGestureHipLeft, 530, true);
         }
         else
         {
-            add(bmvr::kGestureShoulderRight, 150, true);
+            add(bmvr::kGestureShoulderRight, 230, true);
             add(bmvr::kGestureHipRight, 530, true);
         }
         return cards;
@@ -2104,9 +2111,10 @@ namespace
         const BodyPicture& pic = GestureBodyPicture();
         if (pic.w > 0)
         {
-            BlendPicture(c, pic, cx - pic.w / 2, top + 10);
+            BlendPicture(c, pic, cx - pic.w / 2, top + kFigDy);
             return;
         }
+        top += kFigDy - 10;   // drawn fallback, laid out for the picture at y 10
         const COLORREF body = RGB(66, 74, 86), shade = RGB(50, 57, 67);
         HDC dc = c.dc;
         HBRUSH br = CreateSolidBrush(body);
