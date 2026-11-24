@@ -261,7 +261,7 @@ namespace bmvr
         return false;
     }
     bool g_GestureBodyFrame = true;
-    bool g_MenuRoomFront = true;
+    bool g_MenuRoomFront = false;
     float g_BodyYawDeadzoneDeg = 35.f;
     float g_BodyYawHardLimitDeg = 80.f;
     float g_BodyYawCatchUpSec = 0.8f;
@@ -962,6 +962,8 @@ namespace bmvr
             }
             else if (std::strcmp(n, "WeaponMenuSettingsGear") == 0)
                 g_WeaponMenuSettingsGear = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "MenuRoomFront") == 0)
+                g_MenuRoomFront = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "WeaponMenuTilt") == 0)
                 g_WeaponMenuTilt = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)

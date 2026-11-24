@@ -141,14 +141,17 @@ namespace
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
+            // Main + pause menu at the room's front (STAGE forward) instead of the head (user 2026-11-24: off by default).
+            { "Room-anchored menus", RowKind::Toggle, "MenuRoomFront", &bmvr::g_MenuRoomFront, nullptr, 0, 0, 0, nullptr },
             { "Near clip (7 = game)", RowKind::Number, "VrNearZ", nullptr, &bmvr::g_VrNearZ, 0.5f, 1.f, 7.f, "%.1f" },
             // No key/fmt: the button's default action is a recenter (closes the panel).
             { "Recenter", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "MENUS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Game menu distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
-            { "Game menu size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
-            { "Game menu height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
-            { "Menu pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
+            // Main + pause menu panel tuning (user 2026-11-24: whole section dev-only).
+            { "GAME MENUS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Distance", RowKind::Number, "MenuForwardMeters", nullptr, &bmvr::g_MenuForwardMeters, 0.1f, 0.5f, 3.f, "%.1f m" },
+            { "Size", RowKind::Number, "MenuWidthMeters", nullptr, &bmvr::g_MenuWidthMeters, 0.1f, 0.6f, 3.f, "%.1f m" },
+            { "Height", RowKind::Number, "MenuHeightOffsetMeters", nullptr, &bmvr::g_MenuHeightOffsetMeters, 0.05f, -0.4f, 0.4f, "%+.2f m" },
+            { "Pointer smoothing", RowKind::Number, "MenuCursorSmoothSec", nullptr, &bmvr::g_MenuCursorSmoothSec, 0.01f, 0.02f, 0.3f, "%.2f s" },
             { "THIS PANEL", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // The gear only hides while some button opens this panel (VR settings mapped).
             { "VR gear in weapon menu", RowKind::Toggle, "WeaponMenuSettingsGear", &bmvr::g_WeaponMenuSettingsGear, nullptr, 0, 0, 0, nullptr },
@@ -430,7 +433,6 @@ namespace
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Gun hand cuff closed", RowKind::Toggle, nullptr, &bmvr::g_GunHandCuffCap, nullptr, 0, 0, 0, nullptr },
             { "Grab zones follow the body", RowKind::Toggle, nullptr, &bmvr::g_GestureBodyFrame, nullptr, 0, 0, 0, nullptr },
-            { "Menus face the room front", RowKind::Toggle, nullptr, &bmvr::g_MenuRoomFront, nullptr, 0, 0, 0, nullptr },
             { "Pump stroke at the controller", RowKind::Toggle, nullptr, &bmvr::g_PumpStrokeAtController, nullptr, 0, 0, 0, nullptr },
             { "Tripmine placed along its face", RowKind::Toggle, nullptr, &bmvr::g_TripmineFaceAim, nullptr, 0, 0, 0, nullptr },
             // Live per-weapon support hand + mag seat trim for the weapon in the hand (saved in
