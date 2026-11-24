@@ -167,9 +167,7 @@ namespace
             { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
             { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
             // HUD spot presets (rows Up..Roll below): Default / Back of hand / Palm.
-            { "HUD spot: default", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "hudspot_default" },
-            { "HUD spot: back of hand", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "hudspot_back" },
-            { "HUD spot: palm", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "hudspot_palm" },
+            { "HUD spot", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "hudspot" },
             { "HUD size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
             { "Weapon menu tilt", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
             // Gloves are always built from the installed game's own first-person arms.
@@ -1064,9 +1062,9 @@ namespace
         const char* id;
         int count;                 // values per preset
         int def;                   // index of the built-in default (bmvr_flags.cpp)
-        float* targets[3];
+        float* targets[5];
         int n;                     // presets in items
-        struct { const char* name; float v[3]; } items[4];
+        struct { const char* name; float v[5]; } items[4];
     };
     // Items in order (one direction per click); the default is marked on the panel.
     const std::vector<PresetSet>& Presets()
@@ -1081,6 +1079,11 @@ namespace
                 { "Balanced", { 0.5f, 0.125f, 0.0625f } },
                 { "Smooth", { 0.75f, 0.063f, 0.0312f } },
                 { "Stock", { 0.f, 0.f, 0.f } } } },
+            // Hand HUD spot: Up, Forward, Sideways, Tilt, Roll (size stays).
+            { "hudspot", 5, 0, { &bmvr::g_HandHudUp, &bmvr::g_HandHudForward, &bmvr::g_HandHudSide, &bmvr::g_HandHudTilt, &bmvr::g_HandHudRoll }, 3,
+              { { "Default", { 2.2f, -0.55f, 0.3f, -18.f, 14.f } },
+                { "Back of hand", { 1.25f, -0.75f, 0.3f, 6.f, 116.f } },
+                { "Palm", { 1.25f, -2.25f, 0.f, 6.f, -74.f } } } },
             // Cubemap reflection strength, walls/floors and props/NPCs.
             { "envmap", 2, 1, { &bmvr::g_EnvmapScaleWorld, &bmvr::g_EnvmapScaleModels, nullptr }, 3,
               { { "Full", { 1.f, 1.f, 0.f } },   // as in the game
@@ -3150,26 +3153,6 @@ void VR::UpdateSettingsPanel()
             bmvr::g_HandHudSide = 0.3f;
             bmvr::g_HandHudTilt = -18.f;
             bmvr::g_HandHudRoll = 14.f;
-            break;
-        }
-        if (r.fmt && std::strncmp(r.fmt, "hudspot_", 8) == 0)
-        {
-            // HUD spot presets: Up, Forward, Sideways, Tilt, Roll (size stays).
-            struct Spot { const char* id; float up, fwd, side, tilt, roll; };
-            static const Spot kSpots[] = {
-                { "hudspot_default", 2.2f, -0.55f, 0.3f, -18.f, 14.f },
-                { "hudspot_back", 1.25f, -0.75f, 0.3f, 6.f, 116.f },
-                { "hudspot_palm", 1.25f, -2.25f, 0.f, 6.f, -74.f },
-            };
-            for (const Spot& s : kSpots)
-                if (std::strcmp(r.fmt, s.id) == 0)
-                {
-                    bmvr::g_HandHudUp = s.up;
-                    bmvr::g_HandHudForward = s.fwd;
-                    bmvr::g_HandHudSide = s.side;
-                    bmvr::g_HandHudTilt = s.tilt;
-                    bmvr::g_HandHudRoll = s.roll;
-                }
             break;
         }
         // First click arms, a second one within 3 s resets the tab (nothing is lost by a stray click).
