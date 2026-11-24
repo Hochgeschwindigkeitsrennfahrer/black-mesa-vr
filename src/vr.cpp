@@ -22952,7 +22952,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // Glock: the slide can only be worked once the new magazine is in (user
     // 2026-11-24: arcade, no racking it open before the swap). No grab, no
     // haptic buzz, no hand pose until then.
-    const auto slideReadyNow = [&]() { return !def.slideLocksBack || w.mag == kLoaded; };
+    // Keyed on the weapon, not def.slideLocksBack: the glock's def has that
+    // off (slide forward when empty, 2026-11-18), so 65f9f19 did nothing.
+    const auto slideReadyNow = [&]() { return weapon != kWeaponGlock || w.mag == kLoaded; };
     // The reload button only ejects; the game's reload runs when a magazine
     // is seated (it keeps the ammo count and the reserve the game's own).
     buttons &= ~IN_RELOAD;
