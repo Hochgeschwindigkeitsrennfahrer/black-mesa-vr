@@ -64,9 +64,15 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 
 ### The VR settings panel
 **Hold Triangle/Y** (about half a second) or pick the gear in the weapon wheel. Six tabs:
-- **General:** turning, movement, ladders, view, menus.
-- **Hands & Weapons:** hand HUD and its position, aim marker and laser, flashlight, grenades,
-  ammo feedback, crossbow scope, mounted guns, physical weapons.
+- **General:** turning, ladders, view, menus.
+
+  <img src="docs/images/panel-general.jpg" alt="VR settings: General tab" width="90%">
+
+- **Hands & Weapons:** hand HUD and its position, flashlight, aim marker and laser,
+  ammo feedback, weapon auto-switch, pistols, physical weapons.
+
+  <img src="docs/images/panel-hands.jpg" alt="VR settings: Hands & Weapons tab" width="90%">
+
 - **Gestures:** what each hand does in each grab zone, on a picture of the HEV suit. A zone lights up while your hand
   is in it.
 
@@ -77,10 +83,13 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 
   <img src="docs/images/panel-controls.png" alt="VR settings: Controls tab with PS VR2 Sense controller pictures" width="90%">
 
-- **Graphics:** foveated rendering, frame cap, MSAA, FXAA, bloom, lens flares, light glows, reflections.
+- **Graphics:** foveated rendering, frame cap, MSAA, FXAA, reflections, bloom.
+
+  <img src="docs/images/panel-graphics.jpg" alt="VR settings: Graphics tab" width="90%">
+
 - **Debug:** diagnostics, logs and debug captures for bug reports.
 
-Most changes apply right away. The panel only saves the settings you changed into `VR\config.txt`, so improved
+Most changes apply right away. Settings you changed show in amber (the screenshots show a player's own setup). The panel only saves those into `VR\config.txt`, so improved
 defaults reach you with each update.
 
 ## Install
