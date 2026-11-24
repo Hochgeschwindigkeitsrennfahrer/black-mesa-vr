@@ -22719,9 +22719,10 @@ const MagReload::WeaponDef& MagReload::Def(int weapon)
         { "mp5", "Clip_New", "Bolt_New", 30, 4.0f, false,
           "weapons/mp5/empty.wav", "weapons/smg1/switch_single.wav",
           { 0.00f, -8.93f, -8.32f }, { 1.04f, -14.23f, 1.49f }, false, nullptr, { 0, 0, 0 }, nullptr },
-        // Slide forward when empty (user, 2026-11-18: rack it to chamber,
-        // not a slide already back that a touch closes).
-        { "glock", "bone_clip", "Bone01", 17, 1.8f, false,
+        // Slide locks back when fired dry (user 2026-11-24: realistic, and
+        // shows the gun is empty); a short rack with the new magazine seated
+        // lets it forward.
+        { "glock", "bone_clip", "Bone01", 17, 1.8f, true,
           "weapons/pistol/pistol_empty.wav", "weapons/glock/reload_roundchambered.wav",
           { 3.90f, -0.12f, 0.04f }, { 2.56f, -0.09f, 0.04f }, false, nullptr, { 0, 0, 0 }, nullptr },
         { "shotgun", "bone_shell", "bone_pump", 8, 4.5f, false,
@@ -22861,7 +22862,6 @@ void VR::UpdateMagReload(uint32_t& buttons)
         bool needPump = false;
         bool spentHull = false; // shotgun: a fired hull waits for the back stroke
         bool dryRefill = false; // fired dry: the game's own reload filled its count from the reserve
-        bool slideBack = false; // glock fired dry: slide held back until a short rack lets it go
         int lastReserve = -1;
     };
     static WeaponState s_w[kWeaponCount];
@@ -22949,12 +22949,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
     }
     const WeaponDef& def = Def(weapon);
     WeaponState& w = s_w[weapon];
-    // Glock: the slide can only be worked once the new magazine is in (user
-    // 2026-11-24: arcade, no racking it open before the swap). No grab, no
+    // A locked-back slide can only be worked once the new magazine is in
+    // (user 2026-11-24: arcade, no racking it before the swap). No grab, no
     // haptic buzz, no hand pose until then.
-    // Keyed on the weapon, not def.slideLocksBack: the glock's def has that
-    // off (slide forward when empty, 2026-11-18), so 65f9f19 did nothing.
-    const auto slideReadyNow = [&]() { return weapon != kWeaponGlock || w.mag == kLoaded; };
+    const auto slideReadyNow = [&]() { return !def.slideLocksBack || w.mag == kLoaded; };
     // The reload button only ejects; the game's reload runs when a magazine
     // is seated (it keeps the ammo count and the reserve the game's own).
     buttons &= ~IN_RELOAD;
@@ -23025,16 +23023,13 @@ void VR::UpdateMagReload(uint32_t& buttons)
         w.mag = kDry;
         w.chambered = def.boltBone == nullptr; // no bolt/slide to work: nothing to rack
         w.dryRefill = true;
-        // Glock: the slide goes back on its own with the slide's pull-back
-        // sound and stays (almost fully) back; a short rack then lets it go
-        // forward (user 2026-11-24: racking a closed slide on an empty gun
-        // was not realistic). A gun with a round left is unchanged.
-        if (weapon == kWeaponGlock)
-        {
-            w.slideBack = true;
+        // Locking slide (glock): goes back on its own with the slide's
+        // pull-back sound and stays (almost fully) back; a short rack then
+        // lets it go forward (user 2026-11-24: racking a closed slide on an
+        // empty gun was not realistic).
+        if (def.slideLocksBack)
             sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kGlockSlideBack, nullptr));
-        }
-        Game::logMsg("Mag reload: %s fired dry, swap the magazine%s", def.name, w.slideBack ? " (slide held back)" : "");
+        Game::logMsg("Mag reload: %s fired dry, swap the magazine%s", def.name, def.slideLocksBack ? " (slide held back)" : "");
     }
     const float grip = LeftSupportGripValue();
     const bool gripDown = grip > 0.6f;
@@ -23679,9 +23674,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
             PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 600, 0.3f);
         s_wasNear = atBolt;
     }
-    if (boltGrab && w.slideBack)
+    if (boltGrab && def.slideLocksBack)
     {
-        // Slide held back (glock fired dry): pulled a little further
+        // Slide held back (fired dry): pulled a little further
         // (~1 cm of hand travel) and let go, or pulled fully back, it snaps
         // forward with the second half of the slide sound.
         static bool s_slideArmed = false;
@@ -23693,7 +23688,6 @@ void VR::UpdateMagReload(uint32_t& buttons)
             boltGrab = false;
             s_boltFull = false;
             s_slideArmed = false;
-            w.slideBack = false;
             w.chambered = (w.mag == kLoaded) && clip > 0;
             sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kGlockSlideForward, def.boltSound));
             ReloadHaptic(ReloadFeel::Chamber);
@@ -23717,13 +23711,9 @@ void VR::UpdateMagReload(uint32_t& buttons)
             boltGrab = false;
             s_boltFull = false;
             w.chambered = (w.mag == kLoaded) && clip > 0;
-            // Glock: the slide part of its reload.wav (user 2026-11-20:
-            // reload_roundchambered went on 1.6 s past the hand).
             // MP5: Black Mesa's own charging handle (HL2's smg1 switch was
             // louder on the left).
-            if (weapon == kWeaponGlock)
-                sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kGlockSlide, def.boltSound));
-            else if (weapon == kWeaponMp5)
+            if (weapon == kWeaponMp5)
                 sound(bmvr::soundcuts::Sample(bmvr::soundcuts::kMp5Bolt, def.boltSound));
             else
                 sound(def.boltSound);
@@ -23769,7 +23759,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             s_pulseReload = false;
     }
     // Open (locked back) slide: glock with an empty chamber.
-    g_SlideLocked.store((def.slideLocksBack && !w.chambered) || w.slideBack);
+    g_SlideLocked.store(def.slideLocksBack && !w.chambered);
     g_NeedRack.store(!w.chambered && slideReadyNow());
     g_DisplayClip.store((w.mag == kLoaded) ? clip : 0);
     // After a dry fire the game's own reload already moved a magazine from
