@@ -80,7 +80,7 @@ namespace bmvr
     float g_AimPitchOffset = 0.f;
     bool g_DisableRecoilAim = true;
     float g_IPDScale = 1.f;
-    float g_HeightOffset = 0.f;
+    float g_HeightOffsetCm = 0.f;
     bool g_AutoMatQueueMode = false;
     bool g_MulticoreMode = true;
     uint32_t g_Msaa = 0; // eye MSAA 0/2/4 (private eye targets only; FXAA stays on next to it)
@@ -836,7 +836,7 @@ namespace bmvr
                     g_IPDScale = s;
             }
             else if (std::strcmp(n, "HeightOffset") == 0)
-                g_HeightOffset = static_cast<float>(atof(val));
+                g_HeightOffsetCm = static_cast<float>(atof(val));
             else if (std::strcmp(n, "AutoMatQueueMode") == 0)
                 g_AutoMatQueueMode = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MulticoreMode") == 0)

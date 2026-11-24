@@ -82,7 +82,8 @@ HudDistance=1.05
 HudSize=0.70
 
 IPDScale=1.0
-HeightOffset=0.0
+# Player height in cm (+ = taller); also in the VR panel, General > View.
+HeightOffset=0
 
 # MSAA on the eyes (0 = off / 2 / 4): set it in the VR settings panel,
 # Graphics -> ANTI-ALIASING (MSAA); applies live. Keep FXAA on next to it.

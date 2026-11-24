@@ -204,7 +204,7 @@ namespace bmvr
     // fire stops walking upward. The viewmodel still kicks.
     extern bool g_DisableRecoilAim;
     extern float g_IPDScale;
-    extern float g_HeightOffset;
+    extern float g_HeightOffsetCm;
     extern bool g_AutoMatQueueMode;
     // Default play path: 1x-eye stereo + SetThreadMode(2) after warmup.
     // Menu / load stay queue 0. Config MulticoreMode=false turns it off.

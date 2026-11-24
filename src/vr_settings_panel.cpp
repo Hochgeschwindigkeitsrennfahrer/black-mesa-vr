@@ -139,8 +139,8 @@ namespace
             { "Hand distance from rung", RowKind::Number, "LadderHandBack", nullptr, &bmvr::g_LadderHandBack, 0.5f, 0.f, 10.f, "%.1f" },
             { "Stick climbs ladders too", RowKind::Toggle, "LadderStickClimb", &bmvr::g_LadderStickClimb, nullptr, 0, 0, 0, nullptr },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            // HeightOffset is in game units (1 = 1 inch, ~2.5 cm); applies live to the view and hands.
-            { "Height offset (+ = taller)", RowKind::Number, "HeightOffset", nullptr, &bmvr::g_HeightOffset, 1.f, -24.f, 24.f, "%+.0f in" },
+            // HeightOffset in cm; applies live to the view and hands.
+            { "Height offset (+ = taller)", RowKind::Number, "HeightOffset", nullptr, &bmvr::g_HeightOffsetCm, 2.f, -60.f, 60.f, "%+.0f cm" },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
             // Main + pause menu at the room's front (STAGE forward) instead of the head (user 2026-11-24: off by default).

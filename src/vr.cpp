@@ -5830,8 +5830,8 @@ void VR::WriteCaptureState(const std::string& name, const L4D2VROpenXrPoseDesc* 
         FmtVec(t, "check_eye_left", GetViewOriginLeft(m_SetupOrigin));
         FmtVec(t, "check_eye_right", GetViewOriginRight(m_SetupOrigin));
         FmtVec(t, "check_right_hand", GetRightControllerAbsPos(m_SetupOrigin));
-        std::snprintf(b, sizeof(b), "eye_size %u %u\nheight_offset %.4f\neye_z %.4f\nvr_scale %.4f\nipd_scale %.4f\n",
-            m_RenderWidth, m_RenderHeight, bmvr::g_HeightOffset, m_EyeZ, m_VRScale, m_IpdScale);
+        std::snprintf(b, sizeof(b), "eye_size %u %u\nheight_offset_cm %.2f\neye_z %.4f\nvr_scale %.4f\nipd_scale %.4f\n",
+            m_RenderWidth, m_RenderHeight, bmvr::g_HeightOffsetCm, m_EyeZ, m_VRScale, m_IpdScale);
         t += b;
     }
     const std::string base = bmvr::VrFilePath(name.c_str());
@@ -8084,7 +8084,7 @@ Vector VR::GetViewOriginUnshifted(const Vector& setupOrigin) const
         PivotYaw(delta, yaw);
         center += delta;
     }
-    center.z += bmvr::g_HeightOffset;
+    center.z += bmvr::g_HeightOffsetCm * 0.01f * m_VRScale;   // cm -> game units
     return center;
 }
 
@@ -8160,7 +8160,7 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
         if (!std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
             return GetViewOrigin(setupOrigin);
         world += delta;
-        world.z += bmvr::g_HeightOffset;
+        world.z += bmvr::g_HeightOffsetCm * 0.01f * m_VRScale;
         return world;
     }
     return GetViewOrigin(setupOrigin) + arm;
