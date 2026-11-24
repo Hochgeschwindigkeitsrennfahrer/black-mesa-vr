@@ -896,7 +896,7 @@ namespace bmvr
             else if (std::strcmp(n, "HandHudTilt") == 0)
                 g_HandHudTilt = std::clamp(static_cast<float>(atof(val)), -90.f, 90.f);
             else if (std::strcmp(n, "HandHudRoll") == 0)
-                g_HandHudRoll = std::clamp(static_cast<float>(atof(val)), -90.f, 90.f);
+                g_HandHudRoll = std::clamp(static_cast<float>(atof(val)), -180.f, 180.f);
             else if (std::strcmp(n, "VrCrosshair") == 0)
                 g_VrCrosshair = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrCrosshairScale") == 0)

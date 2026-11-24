@@ -113,7 +113,7 @@ namespace bmvr
             { "bmvr_hand_hud_tilt", "VR: off-hand panel pitch vs the controller, degrees (negative = front edge down)",
               Kind::Float, -90.f, 90.f, nullptr, &g_HandHudTilt },
             { "bmvr_hand_hud_roll", "VR: off-hand panel roll toward the body, degrees (mirrored for the right hand)",
-              Kind::Float, -90.f, 90.f, nullptr, &g_HandHudRoll },
+              Kind::Float, -180.f, 180.f, nullptr, &g_HandHudRoll },
             { "bmvr_hand_roll", "VR: hand models rolled thumb-up around the controller, degrees (90 = palms facing each other; not while holding a weapon)",
               Kind::Float, -135.f, 135.f, nullptr, &g_VrHandsRollDeg },
             { "bmvr_hands_blackmesa", "VR: hands built from Black Mesa's own first-person arms (game files) instead of the glove files",

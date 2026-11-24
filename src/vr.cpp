@@ -14354,34 +14354,38 @@ namespace
     // Runtime: controller-aligned panel sat flat while the HEV gauntlet sloped.
     void BuildHandHudPanel(const Vector& ctrlPos, const QAngle& ctrlAng, bool rightHand, HudPanel& out)
     {
-        // Classic HUD on hands: follow the glove's own roll so the panel lies on
-        // the back of the rolled hand (same z rule as the glove in vr_hands.cpp).
-        QAngle hudAng = ctrlAng;
-        if (bmvr::g_VrHandsClassicPose)
-            hudAng.z += rightHand ? bmvr::g_VrHandsRollDeg : -bmvr::g_VrHandsRollDeg;
         Vector fwd, right, up;
-        QAngle::AngleVectors(hudAng, &fwd, &right, &up);
+        QAngle::AngleVectors(ctrlAng, &fwd, &right, &up);
         Vector left = right * -1.f;
         const float kPitch = bmvr::g_HandHudTilt;
-        // Classic: the glove's back is already level in the rolled frame, so drop the extra roll.
-        const float hudRoll = bmvr::g_VrHandsClassicPose ? 0.f : bmvr::g_HandHudRoll;
-        const float kRoll = rightHand ? hudRoll : -hudRoll;
+        const float kRoll = rightHand ? bmvr::g_HandHudRoll : -bmvr::g_HandHudRoll;
         fwd = HudRotate(fwd, left, kPitch);
         up = HudRotate(up, left, kPitch);
         left = HudRotate(left, fwd, kRoll);
         up = HudRotate(up, fwd, kRoll);
-        if (bmvr::g_VrHandsClassicPose)
-        {
-            // Turn the panel a bit counter-clockwise (seen from above the hand) to line up with the glove.
-            const float yaw = rightHand ? 12.f : -12.f;
-            fwd = HudRotate(fwd, up, yaw);
-            left = HudRotate(left, up, yaw);
-        }
         // Size/offsets/angles from the panel (Hands & Weapons -> HUD POSITION) / bmvr_hand_hud_*.
         const float size = bmvr::g_HandHudSize;
         const float lift = bmvr::g_HandHudUp - (bmvr::g_VrHandsClassicPose ? bmvr::kHandHudClassicDrop : 0.f);  // no thumb to clear on the back of the hand
-        const Vector center = ctrlPos + up * lift + fwd * bmvr::g_HandHudForward
-            + left * bmvr::g_HandHudSide;
+        Vector offset = up * lift + fwd * bmvr::g_HandHudForward + left * bmvr::g_HandHudSide;
+        if (bmvr::g_VrHandsClassicPose)
+        {
+            // Classic HUD on hands: the rows above place the HUD on the hand as is; the
+            // glove roll then turns the whole panel with the hand (same z rule as the
+            // glove in vr_hands.cpp), so roll and HUD rows do not fight.
+            QAngle rolled = ctrlAng;
+            rolled.z += rightHand ? bmvr::g_VrHandsRollDeg : -bmvr::g_VrHandsRollDeg;
+            Vector cf, cr, cu, rf, rr, ru;
+            QAngle::AngleVectors(ctrlAng, &cf, &cr, &cu);
+            QAngle::AngleVectors(rolled, &rf, &rr, &ru);
+            const auto remap = [&](const Vector& v) {
+                return rf * v.Dot(cf) + rr * v.Dot(cr) + ru * v.Dot(cu);
+            };
+            fwd = remap(fwd);
+            left = remap(left);
+            up = remap(up);
+            offset = remap(offset);
+        }
+        const Vector center = ctrlPos + offset;
         const Vector origin = center - fwd * (size * 0.5f) - left * (size * 0.5f);
         HudMakePanel(origin, fwd, left, up, size, out);
     }
