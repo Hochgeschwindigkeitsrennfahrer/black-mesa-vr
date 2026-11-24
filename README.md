@@ -23,6 +23,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **6DOF motion controls**, the gun follows your hand, and you aim with the controller while you walk where you look.
 - **Two-handed weapons:** put your off-hand on the forend of a rifle, shotgun, MP5, crossbow and so on and hold grip;
   the glove sits on the gun and steadies it.
+- **Manual weapon reloads:** reload weapons manually in VR. Optional.
 - **Grab gestures:** a hand behind a shoulder, at a hip or (left hand) at the forehead + grip. Each zone has a setting
   per hand: the right hand draws a weapon (default: right shoulder crowbar, right hip pistol, above the left hip MP5;
   "Dynamic" zones keep what you put away there), the left hand does an action (quick save, flashlight, ammo, quick
@@ -33,8 +34,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **Crossbow scope built for VR:** bring the crossbow to your face with both hands to zoom; the zoomed view follows the
   crossbow, with smoothing for hand tremor.
 - **Mounted guns** (50 cal, TOW) you steer with your hands.
-- **Ladders that work in VR:** push the stick roughly towards a ladder to get on, also while swimming; no need to
-  face it exactly as the game normally wants.
+- **Ladders that work in VR:** push the stick roughly towards a ladder to get on, also while swimming; no need to face it exactly as the game normally wants. Optionally enable Physical Climbing in the VR menu to pull yourself up by the rungs instead.
 - **Per-hand item holding and use.**
 - **Health, suit and ammo on your hands**, an ammo counter on the weapon, and a **short red flash over the view when
   you get hit**.
