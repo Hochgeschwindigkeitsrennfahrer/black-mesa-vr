@@ -166,7 +166,7 @@ namespace
             { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
             { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
             { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
-            // HUD placement presets (rows Up..Roll below): Side / Back of hand / Palm.
+            // HUD placement presets (rows Up..Roll below): On top / Back of hand / Palm.
             { "HUD placement", RowKind::Preset, nullptr, nullptr, nullptr, 0, 0, 0, "hudspot" },
             { "HUD size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
             { "Weapon menu tilt", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
@@ -1081,7 +1081,7 @@ namespace
                 { "Stock", { 0.f, 0.f, 0.f } } } },
             // Hand HUD placement: Up, Forward, Sideways, Tilt, Roll (size stays).
             { "hudspot", 5, 0, { &bmvr::g_HandHudUp, &bmvr::g_HandHudForward, &bmvr::g_HandHudSide, &bmvr::g_HandHudTilt, &bmvr::g_HandHudRoll }, 3,
-              { { "Side", { 2.5f, -0.55f, 0.3f, -18.f, 14.f } },
+              { { "On top", { 2.5f, -0.55f, 0.3f, -18.f, 14.f } },
                 { "Back of hand", { 1.25f, -0.75f, 0.3f, 6.f, 116.f } },
                 { "Palm", { 1.25f, -2.25f, 0.f, 6.f, -74.f } } } },
             // Cubemap reflection strength, walls/floors and props/NPCs.
