@@ -3606,7 +3606,14 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         strncpy_s(detail1, m_ToastDetail, detail2 ? static_cast<size_t>(detail2 - m_ToastDetail) : _TRUNCATE);
     if (detail2)
         ++detail2;
-    const int texH = detail2 ? 180 : detail ? 144 : 96;
+    // First-run welcome sits at the panel's texel density (below), so its
+    // lines use the panel's row font (34 px) and are opaque like the panel;
+    // 24 px there came out ~70% of the panel's text and read blurry (user
+    // 2026-11-24). Other detail toasts keep 24 px at their own scale.
+    const bool welcome = m_WelcomeActive && !m_ToastSmall;
+    const int detailPx = welcome ? 34 : 24;
+    const int lineH = welcome ? 46 : 36;
+    const int texH = detail2 ? 92 + 2 * lineH + 16 : detail ? 144 : 96;
     if (!g_Gfx.toastGpu || std::strcmp(g_Gfx.toastText, m_ToastText) != 0
         || std::strcmp(g_Gfx.toastDetail, m_ToastDetail) != 0)
     {
@@ -3622,9 +3629,9 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                 return;
             int need = probe.textWidth(m_ToastText, titlePx, true) + 32;
             if (detail)
-                need = (std::max)(need, probe.textWidth(detail1, 24, false) + 32);
+                need = (std::max)(need, probe.textWidth(detail1, detailPx, false) + 32);
             if (detail2)
-                need = (std::max)(need, probe.textWidth(detail2, 24, false) + 32);
+                need = (std::max)(need, probe.textWidth(detail2, detailPx, false) + 32);
             if (need > texW)
                 texW = (std::min)(1024, (need + 15) & ~15);
             while (titlePx > 24 && probe.textWidth(m_ToastText, titlePx, true) + 32 > texW)
@@ -3639,12 +3646,12 @@ void VR::DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         c.text(m_ToastText, 0, 5, c.w, 96, kAmber, titlePx, true, DT_CENTER);
         if (detail2)
         {
-            c.text(detail1, 8, 92, c.w - 8, 128, kText, 24, false, DT_CENTER);
-            c.text(detail2, 8, 128, c.w - 8, c.h - 12, kText, 24, false, DT_CENTER);
+            c.text(detail1, 8, 92, c.w - 8, 92 + lineH, kText, detailPx, false, DT_CENTER);
+            c.text(detail2, 8, 92 + lineH, c.w - 8, c.h - 12, kText, detailPx, false, DT_CENTER);
         }
         else if (detail)
-            c.text(detail1, 8, 92, c.w - 8, c.h - 8, kText, 24, false, DT_CENTER);
-        c.setAlpha(225);
+            c.text(detail1, 8, 92, c.w - 8, c.h - 8, kText, detailPx, false, DT_CENTER);
+        c.setAlpha(welcome ? 255 : 225);
         IDirect3DTexture9* sys = nullptr;
         if (!Upload(device, c, sys, g_Gfx.toastGpu) && g_Gfx.toastGpu)
         {
