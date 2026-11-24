@@ -116,7 +116,7 @@ namespace bmvr
     bool g_DamageFlash = true;
     float g_DamageFlashStrength = 0.6f;
     float g_HandHudSize = 2.5f;
-    float g_HandHudUp = 2.2f;
+    float g_HandHudUp = 2.5f;
     float g_HandHudForward = -0.55f;
     float g_HandHudSide = 0.3f;
     float g_HandHudTilt = -18.f;
