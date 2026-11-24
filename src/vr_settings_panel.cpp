@@ -167,7 +167,7 @@ namespace
             { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
             { "Hit flash strength", RowKind::Number, "DamageFlashStrength", nullptr, &bmvr::g_DamageFlashStrength, 0.1f, 0.1f, 1.f, "%.1f" },
             // The original release's look: flat gloves, HUD on the back of the hand.
-            { "Classic flat hands + HUD", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
+            { "Classic HUD on hands", RowKind::Toggle, "VrHandsClassicPose", &bmvr::g_VrHandsClassicPose, nullptr, 0, 0, 0, nullptr },
             { "HUD size", RowKind::Number, "HandHudSize", nullptr, &bmvr::g_HandHudSize, 0.25f, 1.f, 6.f, "%.2f" },
             { "Weapon menu tilt", RowKind::Toggle, "WeaponMenuTilt", &bmvr::g_WeaponMenuTilt, nullptr, 0, 0, 0, nullptr },
             // Gloves are always built from the installed game's own first-person arms.
@@ -1401,9 +1401,6 @@ namespace
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
             return !g_HandHud;
-        // Classic flat hands: no roll, no gun-grip shift (VR::GunGripHandOffset).
-        if (is({ "VrHandsRollDeg" }))
-            return g_VrHandsClassicPose;
         if (is({ "VrRecoil", "VrGrenadePin", "VrMagDiscard", "VrReloadHints", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg", "VrClipHandRpgFlip" }))
             return !g_PhysicalWeapons;
         if (is({ "VrRecoilScale", "VrRecoilTwoHand" }))

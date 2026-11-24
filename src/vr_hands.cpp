@@ -1529,9 +1529,8 @@ bool BmVrGloves::DrawForEye(
         // the glove only adds the difference. Also on a hand holding the gun:
         // rolled, it sits under the gun instead of on its side.
         QAngle gloveAngles = *angles[i];
-        // Classic hands: no glove roll on any controller (Index keeps its pose roll, as originally).
-        float gloveRoll = bmvr::g_VrHandsClassicPose ? 0.f : bmvr::g_VrHandsRollDeg;
-        if (!bmvr::g_VrHandsClassicPose && family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES)
+        float gloveRoll = bmvr::g_VrHandsRollDeg;
+        if (family == L4D2VR_OPENXR_CONTROLLER_FAMILY_KNUCKLES)
             gloveRoll -= bmvr::g_VrHandsIndexRollDeg;
         if (gloveRoll != 0.f)
             gloveAngles.z += rightHand ? gloveRoll : -gloveRoll;

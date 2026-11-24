@@ -14354,8 +14354,13 @@ namespace
     // Runtime: controller-aligned panel sat flat while the HEV gauntlet sloped.
     void BuildHandHudPanel(const Vector& ctrlPos, const QAngle& ctrlAng, bool rightHand, HudPanel& out)
     {
+        // Classic HUD on hands: follow the glove's own roll so the panel lies on
+        // the back of the rolled hand (same z rule as the glove in vr_hands.cpp).
+        QAngle hudAng = ctrlAng;
+        if (bmvr::g_VrHandsClassicPose)
+            hudAng.z += rightHand ? bmvr::g_VrHandsRollDeg : -bmvr::g_VrHandsRollDeg;
         Vector fwd, right, up;
-        QAngle::AngleVectors(ctrlAng, &fwd, &right, &up);
+        QAngle::AngleVectors(hudAng, &fwd, &right, &up);
         Vector left = right * -1.f;
         const float kPitch = bmvr::g_HandHudTilt;
         const float kRoll = rightHand ? bmvr::g_HandHudRoll : -bmvr::g_HandHudRoll;
@@ -14365,7 +14370,7 @@ namespace
         up = HudRotate(up, fwd, kRoll);
         // Size/offsets/angles from the panel (Hands & Weapons -> HUD POSITION) / bmvr_hand_hud_*.
         const float size = bmvr::g_HandHudSize;
-        const float lift = bmvr::g_HandHudUp - (bmvr::g_VrHandsClassicPose ? bmvr::kHandHudClassicDrop : 0.f);
+        const float lift = bmvr::g_HandHudUp - (bmvr::g_VrHandsClassicPose ? bmvr::kHandHudClassicDrop : 0.f);  // no thumb to clear on the back of the hand
         const Vector center = ctrlPos + up * lift + fwd * bmvr::g_HandHudForward
             + left * bmvr::g_HandHudSide;
         const Vector origin = center - fwd * (size * 0.5f) - left * (size * 0.5f);
@@ -16458,9 +16463,6 @@ bool VR::WantsOffhandGloveWeaponGripCurl() const
 
 Vector VR::GunGripHandOffset(bool rightHand, const QAngle& gunAngles) const
 {
-    // Classic hands: the flat glove stays on the controller (glove and hand HUD).
-    if (bmvr::g_VrHandsClassicPose)
-        return Vector(0.f, 0.f, 0.f);
     Vector fwd, right, up;
     QAngle::AngleVectors(gunAngles, &fwd, &right, &up);
     return right * (rightHand ? -bmvr::g_VrHandsGunGripRight : bmvr::g_VrHandsGunGripRight)
