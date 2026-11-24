@@ -22949,6 +22949,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
     }
     const WeaponDef& def = Def(weapon);
     WeaponState& w = s_w[weapon];
+    // Glock: the slide can only be worked once the new magazine is in (user
+    // 2026-11-24: arcade, no racking it open before the swap). No grab, no
+    // haptic buzz, no hand pose until then.
+    const auto slideReadyNow = [&]() { return !def.slideLocksBack || w.mag == kLoaded; };
     // The reload button only ejects; the game's reload runs when a magazine
     // is seated (it keeps the ammo count and the reserve the game's own).
     buttons &= ~IN_RELOAD;
@@ -23621,7 +23625,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // lets go of the handle (also with the two-hand grip toggle: user
     // 2026-11-19, the toggle kept the MP5 handle held after the grip was
     // released and the hand moving back still finished the pull).
-    else if (!boltGrab && gripEdge && w.mag != kInHand && !w.chambered && g_NearBolt.load())
+    else if (!boltGrab && gripEdge && w.mag != kInHand && !w.chambered && slideReadyNow() && g_NearBolt.load())
     {
         boltGrab = true;
         s_boltFull = false;
@@ -23668,7 +23672,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     // (was every 150 ms while there: user 2026-11-19, kept vibrating).
     {
         static bool s_wasNear = false;
-        const bool atBolt = !boltGrab && !w.chambered && w.mag != kInHand && g_NearBolt.load();
+        const bool atBolt = !boltGrab && !w.chambered && w.mag != kInHand && slideReadyNow() && g_NearBolt.load();
         if (atBolt && !s_wasNear)
             PulseHandHaptic(vr::TrackedControllerRole_LeftHand, 600, 0.3f);
         s_wasNear = atBolt;
@@ -23764,7 +23768,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
     }
     // Open (locked back) slide: glock with an empty chamber.
     g_SlideLocked.store((def.slideLocksBack && !w.chambered) || w.slideBack);
-    g_NeedRack.store(!w.chambered);
+    g_NeedRack.store(!w.chambered && slideReadyNow());
     g_DisplayClip.store((w.mag == kLoaded) ? clip : 0);
     // After a dry fire the game's own reload already moved a magazine from
     // the reserve into its count; until the new magazine is seated the HUD
