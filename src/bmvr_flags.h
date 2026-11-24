@@ -746,6 +746,13 @@ namespace bmvr
     // title layer gets flat Black Mesa's hud_post look (bloom + scanlines,
     // client 0x267c40).
     extern bool g_TitleGlow;
+    // HEV suit / long jump boot-up sequence on the head-locked title layer
+    // (panel DEBUG > FIXES: RENDERING, not saved). BootHudInset: the left and
+    // right parts moved this many pixels (of the 1920-wide screen) toward the
+    // centre for the paint, so the text sits inside the clear part of the
+    // lens. BootHudScale: the layer's width while a boot-up shows.
+    extern float g_BootHudInset;
+    extern float g_BootHudScale;
     // ParticlesLast (default true since 2026-11-17, panel DEBUG > FIXES: RENDERING): hold the main view's
     // particles to the end of the translucent pass also when "MSAA skips
     // particles" does not (MSAA 0 or that row off), as a pure draw-order change

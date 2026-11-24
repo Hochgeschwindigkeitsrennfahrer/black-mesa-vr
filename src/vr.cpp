@@ -6350,7 +6350,8 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
     // Title texts stay in front of the eyes; the pause menu stays put in the room.
     // TitleLevel: titles take the pause-menu path too (the helper places the
     // layer level at the head's yaw once per epoch; UpdateTitleHud bumps it).
-    if (!WantPauseWorldOverlay() && WantTitleHudOverlay() && !bmvr::g_TitleLevel)
+    // Suit boot-up sequences are always head-locked (HUD inside the helmet).
+    if (!WantPauseWorldOverlay() && WantTitleHudOverlay() && (!bmvr::g_TitleLevel || m_BootHudActive))
         overlay.reserved1 |= L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED;
     // Title texts are published premultiplied (TitlePremultipliedShader).
     if (!WantPauseWorldOverlay() && WantTitleHudOverlay())
@@ -6360,6 +6361,8 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
 
     float dist = 0.f, width = 0.f, yOff = 0.f;
     GetMenuOverlayMetrics(dist, width, yOff);
+    if (!WantPauseWorldOverlay() && m_BootHudActive)
+        width *= std::clamp(bmvr::g_BootHudScale, 0.5f, 2.f);
     overlay.widthMeters = (std::max)(0.10f, width);
     overlay.heightMeters = overlay.widthMeters *
         (static_cast<float>(hud.m_VulkanData.m_nHeight) /
@@ -10605,7 +10608,10 @@ namespace
     // HudCredits = the "BL@CK MESA" intro logo, HudMessage = chapter titles,
     // CHudIntroCredits = the developer names (bottom left, env_introcredits
     // on the tram ride; BM's own HUD element, not the SDK's intro credits).
-    const char* const kTitleHudNames[kTitleHudCount] = { "HudCredits", "HudMessage", "CHudIntroCredits" };
+    // CHudBootUpSequence = the HEV suit boot-up (bm_c1a0a suit pickup: system
+    // text left, suit figure right); CLJHudBootUpSequence = the long jump one.
+    const char* const kTitleHudNames[kTitleHudCount] = { "HudCredits", "HudMessage", "CHudIntroCredits",
+        "CHudBootUpSequence", "CLJHudBootUpSequence" };
 
     // Depth-first from the vgui root; fills found[i] for kTitleHudNames[i].
     bool SehFindTitleHudPanels(void* ipanel, unsigned int root, unsigned int* found)
@@ -10629,7 +10635,10 @@ namespace
                             found[i] = p;
                     }
                 }
-                if (found[0] && found[1] && found[2])
+                bool all = true;
+                for (int i = 0; i < kTitleHudCount && all; ++i)
+                    all = found[i] != 0;
+                if (all)
                     return true;
                 const int n = PanelCall<int>(ipanel, kPanelGetChildCount, p);
                 for (int c = 0; c < n && sp < 64; ++c)
@@ -10846,6 +10855,44 @@ namespace
                     PanelCall<void, unsigned int, int, int>(ipanel, kPanelSetSize, p, w, h);
                 }
                 p = PanelCall<unsigned int>(ipanel, kPanelGetParent, p);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return count;
+    }
+
+    // Boot-up sequence: the visible children's rects (x, y, w, h, dx) on the
+    // full-screen boot panel. Children left of the centre band get dx = inset,
+    // right of it -inset, the centred title/standby lines 0. Setting the
+    // children's positions for the paint did not move them (they place
+    // themselves while painting, 2026-11-24), so the layer texture is moved
+    // per rect instead (TitleLayerPremultiplied).
+    int SehBootChildRects(void* ipanel, unsigned int p, int screenW, int inset, int (*rects)[5], int cap)
+    {
+        int count = 0;
+        BMVR_TRY
+        {
+            const int n = PanelCall<int>(ipanel, kPanelGetChildCount, p);
+            const int mid = screenW / 2, band = screenW / 20;
+            for (int c = 0; c < n && count < cap; ++c)
+            {
+                const unsigned int child = PanelCall<unsigned int>(ipanel, kPanelGetChild, p, c);
+                if (!child || !PanelCall<bool>(ipanel, kPanelIsVisible, child))
+                    continue;
+                int x = 0, y = 0, w = 0, h = 0;
+                PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetPos, child, &x, &y);
+                PanelCall<void, unsigned int, int*, int*>(ipanel, kPanelGetSize, child, &w, &h);
+                if (w <= 0 || h <= 0)
+                    continue;
+                const int cx = x + w / 2;
+                rects[count][0] = x;
+                rects[count][1] = y;
+                rects[count][2] = w;
+                rects[count][3] = h;
+                rects[count][4] = cx < mid - band ? inset : (cx > mid + band ? -inset : 0);
+                ++count;
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -11254,7 +11301,10 @@ void VR::UpdateTitleHud()
         m_VguiPanel = m_Game->GetInterface("vgui2.dll", "VGUI_Panel009");
     if (!m_VguiPanel || !m_Game->m_EngineVGui)
         return;
-    if (!m_TitleHudPanels[0] || !m_TitleHudPanels[1] || (!m_TitleHudPanels[2] && m_TitleHudSearches < 30))
+    bool lateMissing = false;
+    for (int i = 2; i < kTitleHudCount; ++i)
+        lateMissing = lateMissing || !m_TitleHudPanels[i];
+    if (!m_TitleHudPanels[0] || !m_TitleHudPanels[1] || (lateMissing && m_TitleHudSearches < 30))
     {
         const unsigned long long now = GetTickCount64();
         if (now >= m_TitleHudNextSearchMs)
@@ -11266,16 +11316,27 @@ void VR::UpdateTitleHud()
                 reinterpret_cast<uintptr_t>(m_Game->m_EngineVGui->GetPanel(0)));
             if (root && SehFindTitleHudPanels(m_VguiPanel, root, m_TitleHudPanels))
             {
-                Game::logMsg("Title HUD panels: HudCredits=%08X HudMessage=%08X CHudIntroCredits=%08X",
-                    m_TitleHudPanels[0], m_TitleHudPanels[1], m_TitleHudPanels[2]);
+                Game::logMsg("Title HUD panels: HudCredits=%08X HudMessage=%08X CHudIntroCredits=%08X"
+                    " CHudBootUpSequence=%08X CLJHudBootUpSequence=%08X",
+                    m_TitleHudPanels[0], m_TitleHudPanels[1], m_TitleHudPanels[2], m_TitleHudPanels[3],
+                    m_TitleHudPanels[4]);
             }
         }
     }
+    const bool bootWas = m_BootHudActive;
+    m_BootHudActive = false;
     for (int i = 0; i < kTitleHudCount; ++i)
     {
         if (TitleHudPanelShowing(i))
+        {
             m_TitleHudActive = true;
+            if (i >= kBootHudFirst)
+                m_BootHudActive = true;
+        }
     }
+    LogBootHudChildren();
+    if (m_BootHudActive != bootWas)
+        Game::logMsg("Boot-up HUD %s", m_BootHudActive ? "shown (head-locked title layer)" : "hidden");
     // Subtitle study probe (issue #18): find the caption panel, log its
     // visibility changes and size.
     {
@@ -11312,8 +11373,9 @@ void VR::UpdateTitleHud()
         // the head's yaw once per epoch (otherwise the layer is head-locked).
         if (m_TitleHudActive && ++m_MenuOverlayEpoch == 0)
             m_MenuOverlayEpoch = 1;
-        Game::logMsg("Title HUD %s (credits=%d message=%d names=%d)", m_TitleHudActive ? "shown" : "hidden",
-            TitleHudPanelShowing(0) ? 1 : 0, TitleHudPanelShowing(1) ? 1 : 0, TitleHudPanelShowing(2) ? 1 : 0);
+        Game::logMsg("Title HUD %s (credits=%d message=%d names=%d boot=%d ljboot=%d)",
+            m_TitleHudActive ? "shown" : "hidden", TitleHudPanelShowing(0) ? 1 : 0, TitleHudPanelShowing(1) ? 1 : 0,
+            TitleHudPanelShowing(2) ? 1 : 0, TitleHudPanelShowing(3) ? 1 : 0, TitleHudPanelShowing(4) ? 1 : 0);
         for (int i = 0; m_TitleHudActive && i < kTitleHudCount; ++i)
         {
             int b[4] = {};
@@ -11331,7 +11393,7 @@ bool VR::TitleHudPanelShowing(int i) const
     const unsigned int p = (i >= 0 && i < kTitleHudCount) ? m_TitleHudPanels[i] : 0;
     if (!p || !m_VguiPanel || !SehPanelVisible(m_VguiPanel, p))
         return false;
-    if (i != 2)
+    if (i != 2 && i < kBootHudFirst)
         return true;
     int total = 0;
     return SehVisibleChildren(m_VguiPanel, p, &total, nullptr, 0) > 0;
@@ -11380,7 +11442,73 @@ int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
             ++s_fitLog;
         }
     }
+    // Boot-up: the parts' rects for the texture-space move toward the centre.
+    {
+        BootHudRects r{};
+        const int inset = static_cast<int>(bmvr::g_BootHudInset + 0.5f);
+        for (int i = kBootHudFirst; i < kTitleHudCount && inset > 0 && !r.count; ++i)
+        {
+            int b[4] = {};
+            if (!TitleHudPanelShowing(i) || !SehPanelBounds(m_VguiPanel, m_TitleHudPanels[i], b) || b[2] < 640)
+                continue;
+            r.panelW = b[2];
+            r.panelH = b[3];
+            r.count = SehBootChildRects(m_VguiPanel, m_TitleHudPanels[i], b[2], inset * b[2] / 1920, r.rects,
+                kBootHudMaxRects);
+        }
+        PublishBootHudRects(r);
+    }
     return n ? SehIsolatePanels(m_VguiPanel, targets, n, hidden, cap) : 0;
+}
+
+// Boot-up sequences: log the panel and its children (name, visible, bounds)
+// whenever the visible set changes, to place the parts in VR (left text,
+// suit figure, centre notices). Bounded output.
+void VR::LogBootHudChildren()
+{
+    static unsigned int s_sig[kTitleHudCount];
+    static int s_logs;
+    if (!m_VguiPanel || s_logs >= 80)
+        return;
+    for (int i = kBootHudFirst; i < kTitleHudCount; ++i)
+    {
+        const unsigned int p = m_TitleHudPanels[i];
+        if (!p)
+            continue;
+        const bool vis = SehPanelVisible(m_VguiPanel, p);
+        int total = 0;
+        char names[400];
+        const int visKids = vis ? SehVisibleChildren(m_VguiPanel, p, &total, names, sizeof(names)) : 0;
+        unsigned int sig = (vis ? 1u : 0u) | (static_cast<unsigned int>(visKids) << 1) |
+            (static_cast<unsigned int>(total) << 12);
+        if (sig == s_sig[i])
+            continue;
+        s_sig[i] = sig;
+        ++s_logs;
+        int b[4] = {};
+        SehPanelBounds(m_VguiPanel, p, b);
+        Game::logMsg("Boot HUD %s vis=%d bounds %d,%d %dx%d children %d/%d: %s", kTitleHudNames[i], vis ? 1 : 0,
+            b[0], b[1], b[2], b[3], visKids, total, vis ? names : "");
+        if (!vis)
+            continue;
+        BMVR_TRY
+        {
+            for (int c = 0; c < total && c < 24; ++c)
+            {
+                const unsigned int child = PanelCall<unsigned int>(m_VguiPanel, kPanelGetChild, p, c);
+                if (!child)
+                    continue;
+                int cb[4] = {};
+                SehPanelBounds(m_VguiPanel, child, cb);
+                const char* name = PanelCall<const char*>(m_VguiPanel, kPanelGetName, child);
+                Game::logMsg("Boot HUD   child %d %s vis=%d bounds %d,%d %dx%d", c, name ? name : "?",
+                    SehPanelVisible(m_VguiPanel, child) ? 1 : 0, cb[0], cb[1], cb[2], cb[3]);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
 }
 
 void VR::RestoreTitleHudPanels(const unsigned int* hidden, int count)
@@ -20391,6 +20519,80 @@ static void FixPauseLayerAlpha(IDirect3DDevice9* device, IDirect3DSurface9* surf
 }
 
 // One full-target quad with the bound pixel shader (state saved by the caller).
+// Boot-up part rects, written on the game thread (title paint), read where the
+// layer is finished (material thread with multicore): two slots + index.
+static BootHudRects g_BootHudRects[2];
+static std::atomic<int> g_BootHudRectsSlot{ 0 };
+
+void PublishBootHudRects(const BootHudRects& r)
+{
+    const int next = 1 - g_BootHudRectsSlot.load(std::memory_order_relaxed);
+    g_BootHudRects[next] = r;
+    g_BootHudRectsSlot.store(next, std::memory_order_release);
+}
+
+// Copies the finished layer (surf) into copySurf with the boot-up sides moved
+// toward the centre: the full-height strip left of the centred parts moves
+// right, the strip right of them moves left. Strips, not part rects, because
+// the boot panel draws the suit figure itself (not a child; part rects alone
+// lost it, 2026-11-24). Order: centre band, side strips, then the centred
+// parts again (a moved strip reaches into the band). False = nothing to move.
+static bool BootHudMoveParts(IDirect3DDevice9* device, IDirect3DSurface9* surf, IDirect3DSurface9* copySurf,
+    const D3DSURFACE_DESC& desc)
+{
+    const BootHudRects& r = g_BootHudRects[g_BootHudRectsSlot.load(std::memory_order_acquire)];
+    if (r.count <= 0 || r.panelW <= 0 || r.panelH <= 0)
+        return false;
+    int leftEnd = -1, rightStart = r.panelW + 1, inset = 0;
+    for (int i = 0; i < r.count; ++i)
+    {
+        const int* q = r.rects[i];
+        if (q[4] > 0)
+            leftEnd = (std::max)(leftEnd, q[0] + q[2]);
+        else if (q[4] < 0)
+            rightStart = (std::min)(rightStart, q[0]);
+        if (q[4] != 0)
+            inset = q[4] > 0 ? q[4] : -q[4];
+    }
+    if (!inset || FAILED(device->ColorFill(copySurf, nullptr, D3DCOLOR_ARGB(0, 0, 0, 0))))
+        return false;
+    const float sx = static_cast<float>(desc.Width) / r.panelW, sy = static_cast<float>(desc.Height) / r.panelH;
+    const LONG W = static_cast<LONG>(desc.Width), H = static_cast<LONG>(desc.Height);
+    const LONG d = static_cast<LONG>(inset * sx);
+    const LONG l1 = leftEnd >= 0 ? (std::min)(W - d, static_cast<LONG>(leftEnd * sx)) : 0;
+    const LONG r0 = rightStart <= r.panelW ? (std::max)(d, static_cast<LONG>(rightStart * sx)) : W;
+    int copies = 0;
+    auto blit = [&](RECT src, LONG dx) {
+        if (src.right <= src.left || src.bottom <= src.top)
+            return;
+        RECT dst{ src.left + dx, src.top, src.right + dx, src.bottom };
+        if (SUCCEEDED(device->StretchRect(surf, &src, copySurf, &dst, D3DTEXF_POINT)))
+            ++copies;
+    };
+    blit(RECT{ l1, 0, r0, H }, 0);
+    if (l1 > 0)
+        blit(RECT{ 0, 0, l1, H }, d);
+    if (r0 < W)
+        blit(RECT{ r0, 0, W, H }, -d);
+    for (int i = 0; i < r.count; ++i)
+    {
+        const int* q = r.rects[i];
+        if (q[4] != 0)
+            continue;
+        RECT src{ (std::max)(0L, static_cast<LONG>(q[0] * sx)), (std::max)(0L, static_cast<LONG>(q[1] * sy)),
+            (std::min)(W, static_cast<LONG>((q[0] + q[2]) * sx)), (std::min)(H, static_cast<LONG>((q[1] + q[3]) * sy)) };
+        blit(src, 0);
+    }
+    static int s_log;
+    if (s_log < 3)
+    {
+        Game::logMsg("Boot HUD: layer sides moved %ld px (left strip 0-%ld, right strip %ld-%ld), %d copies",
+            static_cast<long>(d), static_cast<long>(l1), static_cast<long>(r0), static_cast<long>(W), copies);
+        ++s_log;
+    }
+    return true;
+}
+
 static void TitleLayerQuad(IDirect3DDevice9* device, IDirect3DSurface9* target, UINT w, UINT h)
 {
     if (FAILED(device->SetRenderTarget(0, target)))
@@ -20430,7 +20632,8 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
     IDirect3DSurface9* copySurf = nullptr;
     if (!copy || FAILED(copy->GetSurfaceLevel(0, &copySurf)) || !copySurf)
         return;
-    if (FAILED(device->StretchRect(surf, nullptr, copySurf, nullptr, D3DTEXF_POINT)))
+    if (!BootHudMoveParts(device, surf, copySurf, desc)
+        && FAILED(device->StretchRect(surf, nullptr, copySurf, nullptr, D3DTEXF_POINT)))
     {
         copySurf->Release();
         return;
