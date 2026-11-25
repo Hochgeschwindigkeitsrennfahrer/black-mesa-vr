@@ -910,6 +910,12 @@ namespace bmvr
     // scale). Lower = guns/hands held at the face clip later (sights), at
     // some depth precision far away. Only ever lowers the game's value.
     extern float g_VrNearZ;
+    // Subtitles / closed captions (panel GENERAL > VIEW, saved): CaptionHeight
+    // moves the head-locked caption layer up (+) / down (-) in degrees,
+    // CaptionScale sizes it around the caption text. Only while captions
+    // show without a title / logo / boot-up on the same layer.
+    extern float g_CaptionHeightDeg;
+    extern float g_CaptionScale;
     // VR recoil: each shot kicks the gun + aim up (per-weapon amount, back in
     // ~0.15 s); both hands on the gun cut it to 30 % (pistol grip 50 %).
     // Off by default (user A/B). Strength scales every weapon's kick.

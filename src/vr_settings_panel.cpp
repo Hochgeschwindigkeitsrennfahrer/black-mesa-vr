@@ -150,6 +150,9 @@ namespace
             { "Room-anchored menus", RowKind::Toggle, "MenuRoomFront", &bmvr::g_MenuRoomFront, nullptr, 0, 0, 0, nullptr },
             // HeightOffset in cm; applies live to the view and hands.
             { "Height offset", RowKind::Number, "HeightOffset", nullptr, &bmvr::g_HeightOffsetCm, 2.f, -60.f, 60.f, "%+.0f cm" },
+            // Subtitles / closed captions (turn them on in the game's audio options).
+            { "Subtitle height", RowKind::Number, "CaptionHeight", nullptr, &bmvr::g_CaptionHeightDeg, 1.f, -30.f, 30.f, "%+.0f\xB0" },
+            { "Subtitle size", RowKind::Number, "CaptionScale", nullptr, &bmvr::g_CaptionScale, 0.05f, 0.5f, 2.f, "%.2fx" },
             { "Near clip (7 = game)", RowKind::Number, "VrNearZ", nullptr, &bmvr::g_VrNearZ, 0.5f, 1.f, 7.f, "%.1f" },
             // No key/fmt: the button's default action is a recenter (closes the panel).
             { "Recenter", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },

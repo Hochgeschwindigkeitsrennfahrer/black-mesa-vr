@@ -6370,6 +6370,17 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
         (static_cast<float>(hud.m_VulkanData.m_nHeight) /
             static_cast<float>((std::max)(1u, hud.m_VulkanData.m_nWidth)));
     overlay.distanceMeters = (std::max)(0.10f, dist);
+    // Subtitle height / size (GENERAL > VIEW): scale around the caption box
+    // (it sits below the layer centre), then move by the angle.
+    if (!WantPauseWorldOverlay() && m_CaptionOnly)
+    {
+        const float s = std::clamp(bmvr::g_CaptionScale, 0.5f, 2.f);
+        const float h0 = overlay.heightMeters;
+        overlay.widthMeters *= s;
+        overlay.heightMeters *= s;
+        yOff += (m_CaptionCentreY - 0.5f) * h0 * (s - 1.f);
+        yOff += overlay.distanceMeters * std::tan(std::clamp(bmvr::g_CaptionHeightDeg, -30.f, 30.f) * 0.01745329f);
+    }
     overlay.curvature = 0.0f;
     overlay.offsetMeters[0] = 0.0f;
     overlay.offsetMeters[1] = yOff;
@@ -11481,6 +11492,16 @@ void VR::UpdateTitleHud()
             if (i == kCaptionHud)
                 m_CaptionHudActive = true;
         }
+    }
+    m_CaptionOnly = m_CaptionHudActive;
+    for (int i = 0; i < kTitleHudCount && m_CaptionOnly; ++i)
+        if (i != kCaptionHud && TitleHudPanelShowing(i))
+            m_CaptionOnly = false;
+    if (m_CaptionHudActive && !captionWas)
+    {
+        int b[4] = {};
+        if (SehPanelBounds(m_VguiPanel, m_TitleHudPanels[kCaptionHud], b) && b[3] > 0 && b[1] + b[3] <= 1080)
+            m_CaptionCentreY = (b[1] + b[3] * 0.5f) / 1080.f;
     }
     if (m_CaptionHudActive != captionWas)
     {

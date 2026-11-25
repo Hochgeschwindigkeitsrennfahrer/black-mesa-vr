@@ -766,6 +766,8 @@ public:
     bool m_BootHudActive = false;
     // Captions (HudCloseCaption) are on the title layer (head-locked).
     bool m_CaptionHudActive = false;
+    bool m_CaptionOnly = false;          // captions are the only title panel up
+    float m_CaptionCentreY = 0.717f;     // caption box centre, fraction of the screen height
     // The HUD RT paint in flight is the title layer (no menu cursor / colour
     // fix). Read on the material thread for the queued end.
     std::atomic<bool> m_HudPaintTitle{ false };

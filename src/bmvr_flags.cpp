@@ -433,6 +433,8 @@ namespace bmvr
     bool g_VrClipHandRpgFlip = true;
     bool g_VrMagDiscard = true;
     float g_VrNearZ = 4.f;
+    float g_CaptionHeightDeg = 0.f;
+    float g_CaptionScale = 1.f;
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = false;
     bool g_PhysicalCrouch = false;
@@ -1393,6 +1395,10 @@ namespace bmvr
                 g_VrGrenadePin = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrNearZ") == 0)
                 g_VrNearZ = static_cast<float>(std::atof(val));
+            else if (std::strcmp(n, "CaptionHeight") == 0)
+                g_CaptionHeightDeg = std::clamp(static_cast<float>(std::atof(val)), -30.f, 30.f);
+            else if (std::strcmp(n, "CaptionScale") == 0)
+                g_CaptionScale = std::clamp(static_cast<float>(std::atof(val)), 0.5f, 2.f);
             else if (std::strcmp(n, "VrMagDiscard") == 0)
                 g_VrMagDiscard = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrReloadHints") == 0)
