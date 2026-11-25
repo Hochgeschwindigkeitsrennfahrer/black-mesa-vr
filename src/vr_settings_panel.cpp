@@ -196,7 +196,7 @@ namespace
             { "WEAPON GRIP", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Toggle grip", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
             // Developer row: off = a latched grip lets go only on a second squeeze (or weapon/menu change).
-            { "Toggle: let go when hand leaves gun", RowKind::Toggle, "TwoHandToggleAutoRelease", &bmvr::g_TwoHandToggleAutoRelease, nullptr, 0, 0, 0, nullptr },
+            { "Toggle grip auto release", RowKind::Toggle, "TwoHandToggleAutoRelease", &bmvr::g_TwoHandToggleAutoRelease, nullptr, 0, 0, 0, nullptr },
             { "Grip area scale", RowKind::Number, "TwoHandGripScale", nullptr, &bmvr::g_TwoHandGripScale, 0.1f, 0.5f, 2.f, "%.1fx" },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
