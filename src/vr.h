@@ -78,6 +78,7 @@ struct BootHudRects
 {
     int panelW = 0, panelH = 0, count = 0;
     bool boot = false;   // a boot-up panel (HEV suit / long jump) is showing
+    bool noGlow = false; // boot-up, or captions without logo/message/names
     int rects[kBootHudMaxRects][5] = {};
 };
 void PublishBootHudRects(const BootHudRects& r);
