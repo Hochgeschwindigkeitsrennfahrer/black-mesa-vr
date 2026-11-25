@@ -43,6 +43,9 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **Flashlight** on the right grip, optionally in the left hand or on the left Square/X button.
 - Snap or smooth turning, crouch while held or toggle, sprint toggle, recenter. Cutscene cameras can take your view
   with them as the scene was made; turn that off if it is too much for your VR legs.
+- **Physical crouching** (optional, General tab): crouch in real life to crouch in the game.
+- **Subtitles / closed captions** below your view when they are on in the game's audio options; height and size in
+  General > View.
 - **Bare hands until you get the HEV suit** (and throughout Blue Shift), HEV gloves after that.
 - **VR main menu and pause menu** in the world, with a motion-controller pointer, and Black Mesa's loading screens
   as a flat panel.
@@ -176,7 +179,6 @@ The file explains every setting in comments.
 - **Very heavy outdoor views can still drop below the headset's refresh rate:** the game draws every eye separately,
   and its render thread is the limit there.
 - **Your hands disappear below the water surface** when you reach into water.
-- **Some monitors in the world pulse** (their brightness goes subtly up and down).
 - **Switching to an addon from the game's new menu (Blue Shift, Military, ...) does not work in VR:** the game
   restarts its engine in place, the menu then runs at a few fps and starting a game crashes. Start the addon directly
   instead, e.g. with the Steam launch option `-game bshift`.
