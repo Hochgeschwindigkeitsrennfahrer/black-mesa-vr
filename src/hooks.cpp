@@ -3554,14 +3554,15 @@ namespace
         // frame. On the glock, MP5 and 357 the two transition clips carry
         // swapped activities, so the raise plays the lowering clip and idle
         // fades in from a lowered gun: keep the beam off a little longer.
-        // Both hands on the gun: the hands place the gun, so Black Mesa's
-        // lowered clip (aimed at a friendly) is not shown and the laser stays
-        // on (user 2026-11-17: the clip swung the gun ~33 deg across, away
-        // from both real hands; lowering is up to the player's own arms).
+        // The hands place the gun, so Black Mesa's lowered clip (aimed at a
+        // friendly) is not shown and the laser stays on, one- or two-handed
+        // (user 2026-11-17: the clip swung the gun ~33 deg across, away from
+        // the real hands; 2026-11-25: one-handed too, the gun must not move
+        // without the player aiming).
         bool noLower = false;
         if (Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity()))
         {
-            noLower = s_lc.lowered && bmvr::g_TwoHandNoLower && Hooks::m_VR->TwoHandGripActive();
+            noLower = s_lc.lowered && bmvr::g_NoLowerAtFriendly;
             const bool lowered = s_lc.lowered && !noLower;
             static ULONGLONG s_loweredUntil = 0;
             const ULONGLONG now = GetTickCount64();
@@ -3614,7 +3615,7 @@ namespace
             {
                 static int s_log;
                 if (s_log++ < 20)
-                    Game::logMsg("Two-hand: lowered clip '%s' skipped, gun stays in the hands", label ? label : "?");
+                    Game::logMsg("No lower: lowered clip '%s' skipped, gun stays in the hand", label ? label : "?");
             }
         }
         if (noLower)
