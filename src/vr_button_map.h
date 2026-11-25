@@ -31,6 +31,7 @@ namespace bmvr
         SprintToggle,
         Flashlight,
         WeaponMenu,
+        HandsToggle,   // bare hands <-> the weapon held before
         NextWeapon,
         PrevWeapon,
         QuickSave,

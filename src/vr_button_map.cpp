@@ -7,6 +7,7 @@
 #include "game.h"
 #include "openxr_bridge_protocol.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -36,7 +37,8 @@ namespace bmvr
             { "Sprint", "Sprint (hold)" },
             { "SprintToggle", "Sprint (toggle)" },
             { "Flashlight", "Flashlight" },
-            { "WeaponMenu", "Weapon menu (hold)" },   // tap: bare hands <-> last weapon
+            { "WeaponMenu", "Weapon menu" },
+            { "HandsToggle", "Bare hands toggle" },
             { "NextWeapon", "Next weapon" },
             { "PrevWeapon", "Previous weapon" },
             { "QuickSave", "Quick save" },
@@ -244,7 +246,13 @@ namespace bmvr
             case BindInput::Grip: s.press = BindAction::Flashlight; break;
             case BindInput::Face1: if (faces) s.press = BindAction::Reload; break;
             case BindInput::Face2: if (faces) s.press = BindAction::AltFire; break;
-            case BindInput::StickClick: s.press = BindAction::WeaponMenu; break;
+            // Click: bare hands <-> last weapon; held: the weapon menu
+            // (separate rows since 2026-11-25, user: one "Weapon menu" on the
+            // click row hid that a click toggles the hands).
+            case BindInput::StickClick:
+                s.press = BindAction::HandsToggle;
+                s.hold = BindAction::WeaponMenu;
+                break;
             case BindInput::StickUp: s.press = BindAction::Jump; break;
             case BindInput::StickDown:
                 s.press = BindAction::CrouchHold;
@@ -623,6 +631,7 @@ namespace bmvr
 
         const uint32_t holdMs = static_cast<uint32_t>(g_ButtonHoldMs);
         constexpr uint32_t kPulseMs = 80; // a tap's press action when a hold is mapped too
+        constexpr uint32_t kWeaponMenuHoldMs = 180;
         for (int hand = 0; hand < kBindHands; ++hand)
         {
             for (int i = 0; i <= kBindInputCount; ++i)
@@ -671,7 +680,11 @@ namespace bmvr
                 }
                 else
                 {
-                    if (isDown && !st.holdFired && nowMs - st.downMs >= holdMs)
+                    // The weapon menu keeps its quick hold (180 ms, the fixed
+                    // layout's kMenuHoldMs) instead of the generic one.
+                    const uint32_t slotHoldMs = slot.hold == BindAction::WeaponMenu
+                        ? (std::min)(holdMs, kWeaponMenuHoldMs) : holdMs;
+                    if (isDown && !st.holdFired && nowMs - st.downMs >= slotHoldMs)
                         st.holdFired = true;
                     if (isDown && st.holdFired)
                         m_Held[static_cast<int>(slot.hold)] = true;

@@ -7045,6 +7045,10 @@ void VR::UpdateButtonMap()
     }
     if (m_ButtonMapper.Pressed(BindAction::Recenter))
         Recenter("mapped button");
+    // Bare hands toggle: its own action since 2026-11-25 (the fixed layout
+    // still does it on a short stick click, UpdateWeaponMenu).
+    if (m_ButtonMapper.Pressed(BindAction::HandsToggle) && m_Game && !m_WeaponMenuOpen && !PauseUiActive())
+        ToggleEmptyHands();
     if (m_ButtonMapper.Pressed(BindAction::VrSettings) && (!paused || m_WelcomeActive) && !m_WeaponMenuOpen)
     {
         Game::logMsg("Button map: VR settings panel");

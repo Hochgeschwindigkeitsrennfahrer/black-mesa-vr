@@ -1834,7 +1834,10 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
         // No wheel with 0 weapons (user 2026-11-23): nothing to pick, so no
         // menu and no buzz either.
         Game::InventoryWeapon anyWeapon{};
-        if (!m_WeaponMenuOpen && (now - m_WeaponMenuClickStartMs) >= kMenuHoldMs
+        // Button mapping: the mapper already waited for the hold (or the
+        // action sits on a plain press): open at once.
+        const DWORD openMs = m_ButtonMapActive ? 0 : kMenuHoldMs;
+        if (!m_WeaponMenuOpen && (now - m_WeaponMenuClickStartMs) >= openMs
             && m_Game->CollectInventoryWeapons(&anyWeapon, 1) > 0)
         {
             m_WeaponMenuOpen = true;
@@ -2125,7 +2128,9 @@ void VR::UpdateWeaponMenu(bool stickClickHeld, float deltaMs)
             OpenSettingsPanel();
         else if (m_WeaponMenuOpenedThisHold)
             QueueWeaponMenuSound(kWeaponSoundSelect, 0, 0);
-        else if ((now - m_WeaponMenuClickStartMs) < kMenuHoldMs)
+        // Fixed layout: a short click toggles the hands (mapping: its own
+        // HandsToggle action).
+        else if (!m_ButtonMapActive && (now - m_WeaponMenuClickStartMs) < kMenuHoldMs)
             ToggleEmptyHands();
         m_WeaponMenuOpen = false;
         m_WeaponMenuClickHeld = false;
