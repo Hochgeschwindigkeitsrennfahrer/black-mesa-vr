@@ -24,6 +24,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **Two-handed weapons:** put your off-hand on the forend of a rifle, shotgun, MP5, crossbow and so on and hold grip;
   the glove sits on the gun and steadies it. Hands & Weapons tab, Weapon grip: **Toggle grip** (squeeze once to hold,
   again to let go) and **Grip area scale** (a bigger zone if the gun is hard to take).
+- **Manual weapon reloads:** reload weapons manually in VR. Optional.
 - **Grab gestures:** a hand behind a shoulder, at a hip or (left hand) at the forehead + grip. Each zone has a setting
   per hand: the right hand draws a weapon (default: right shoulder crowbar, right hip pistol, above the left hip MP5;
   "Dynamic" zones keep what you put away there), the left hand does an action (quick save, flashlight, ammo, quick
@@ -34,8 +35,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **Crossbow scope built for VR:** bring the crossbow to your face with both hands to zoom; the zoomed view follows the
   crossbow, with smoothing for hand tremor.
 - **Mounted guns** (50 cal, TOW) you steer with your hands.
-- **Ladders that work in VR:** push the stick roughly towards a ladder to get on, also while swimming; no need to
-  face it exactly as the game normally wants.
+- **Ladders that work in VR:** push the stick roughly towards a ladder to get on, also while swimming; no need to face it exactly as the game normally wants. Optionally enable Physical Climbing in the VR menu to pull yourself up by the rungs instead.
 - **Per-hand item holding and use.**
 - **Health, suit and ammo on your hands**, an ammo counter on the weapon, and a **short red flash over the view when
   you get hit**.
@@ -177,12 +177,9 @@ The file explains every setting in comments.
   and its render thread is the limit there.
 - **Your hands disappear below the water surface** when you reach into water.
 - **Some monitors in the world pulse** (their brightness goes subtly up and down).
-- **Stand-up and cutscene scenes rotate your view** with the scene's camera. Turn off
-  **Controls → VIEW → Cutscene cameras move the view** if that bothers you.
 - **Switching to an addon from the game's new menu (Blue Shift, Military, ...) does not work in VR:** the game
   restarts its engine in place, the menu then runs at a few fps and starting a game crashes. Start the addon directly
   instead, e.g. with the Steam launch option `-game bshift`.
-- **Manual (physical) reloading is not implemented**; reload is a button (A).
 - The first launch after an update recompiles shaders: expect some hitches in the first minutes.
 
 **Reporting a bug:** attach `bmvr_log.txt` (next to `bms.exe`). For visual problems, **Debug → Capture debug frame**
