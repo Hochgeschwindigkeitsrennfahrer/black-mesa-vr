@@ -11607,20 +11607,49 @@ int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
         // intro logo / names / messages keep it when they share the layer.
         r.noGlow = r.boot || (TitleHudPanelShowing(kCaptionHud) && !TitleHudPanelShowing(0)
             && !TitleHudPanelShowing(1) && !TitleHudPanelShowing(2));
-        // Captions sharing the layer with a chapter title / logo / names:
-        // keep the glow for those, but not over the caption box (user
-        // 2026-11-25: chapter title glow also hit the subtitles).
-        if (!r.noGlow && TitleHudPanelShowing(kCaptionHud) && tw && th)
+        // Captions sharing the layer with other title panels. Subtitle size /
+        // height scale and move the whole layer only while captions are alone
+        // on it (UpdateOpenXrHudOverlay); with the tram names / credits coming
+        // and going that switched every few seconds (user 2026-11-25: size
+        // "resets", flicker). Here the caption box itself is scaled around its
+        // centre and moved by the same metres inside the layer texture, so it
+        // looks the same in both cases (clipped at the layer edges).
+        // The glow stays on the other titles but not on the caption box
+        // (user 2026-11-25: chapter title glow also hit the subtitles).
+        int cb[4] = {};
+        if (TitleHudPanelShowing(kCaptionHud) && tw && th
+            && SehPanelBounds(m_VguiPanel, m_TitleHudPanels[kCaptionHud], cb) && cb[2] > 0 && cb[3] > 0)
         {
-            int b[4] = {};
-            if (SehPanelBounds(m_VguiPanel, m_TitleHudPanels[kCaptionHud], b) && b[2] > 0 && b[3] > 0)
+            float x0 = static_cast<float>(cb[0]), y0 = static_cast<float>(cb[1]);
+            float x1 = x0 + cb[2], y1 = y0 + cb[3];
+            bool shared = false;
+            for (int i = 0; i < kTitleHudCount && !shared; ++i)
+                shared = i != kCaptionHud && TitleHudPanelShowing(i);
+            const float sc = std::clamp(bmvr::g_CaptionScale, 0.5f, 2.f);
+            const float deg = std::clamp(bmvr::g_CaptionHeightDeg, -30.f, 30.f);
+            if (shared && (sc != 1.f || deg != 0.f))
+            {
+                float dist = 0.f, width = 0.f, yOff = 0.f;
+                GetMenuOverlayMetrics(dist, width, yOff);
+                if (r.boot)
+                    width *= std::clamp(bmvr::g_BootHudScale, 0.5f, 2.f);
+                const float pxPerM = static_cast<float>(tw) / (std::max)(0.10f, width);
+                const float dy = -dist * std::tan(deg * 0.01745329f) * pxPerM;
+                const float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+                const float hw = (x1 - x0) * 0.5f * sc, hh = (y1 - y0) * 0.5f * sc;
+                r.capMove = true;
+                r.capSrc[0] = x0 / tw; r.capSrc[1] = y0 / th; r.capSrc[2] = x1 / tw; r.capSrc[3] = y1 / th;
+                x0 = cx - hw; x1 = cx + hw; y0 = cy + dy - hh; y1 = cy + dy + hh;
+                r.capDst[0] = x0 / tw; r.capDst[1] = y0 / th; r.capDst[2] = x1 / tw; r.capDst[3] = y1 / th;
+            }
+            if (!r.noGlow)
             {
                 const float pad = 8.f;
                 r.capMask = true;
-                r.capRect[0] = (b[0] - pad) / tw;
-                r.capRect[1] = (b[1] - pad) / th;
-                r.capRect[2] = (b[0] + b[2] + pad) / tw;
-                r.capRect[3] = (b[1] + b[3] + pad) / th;
+                r.capRect[0] = (x0 - pad) / tw;
+                r.capRect[1] = (y0 - pad) / th;
+                r.capRect[2] = (x1 + pad) / tw;
+                r.capRect[3] = (y1 + pad) / th;
             }
         }
         for (int i = kBootHudFirst; i < kBootHudEnd && inset > 0 && !r.count; ++i)
@@ -20987,6 +21016,39 @@ void PublishBootHudRects(const BootHudRects& r)
     g_BootHudRectsSlot.store(next, std::memory_order_release);
 }
 
+// Captions sharing the title layer: clear the caption box in copySurf and
+// draw it scaled / moved from surf (rects from IsolateTitleHudPanels, uv).
+// The destination is clipped to the layer, the source clipped to match.
+static void CaptionMoveBox(IDirect3DDevice9* device, IDirect3DSurface9* surf, IDirect3DSurface9* copySurf,
+    const D3DSURFACE_DESC& desc)
+{
+    const BootHudRects& r = g_BootHudRects[g_BootHudRectsSlot.load(std::memory_order_acquire)];
+    if (!r.capMove)
+        return;
+    const float W = static_cast<float>(desc.Width), H = static_cast<float>(desc.Height);
+    float s[4] = { r.capSrc[0] * W, r.capSrc[1] * H, r.capSrc[2] * W, r.capSrc[3] * H };
+    float d[4] = { r.capDst[0] * W, r.capDst[1] * H, r.capDst[2] * W, r.capDst[3] * H };
+    if (s[2] - s[0] < 1.f || s[3] - s[1] < 1.f || d[2] - d[0] < 1.f || d[3] - d[1] < 1.f)
+        return;
+    const RECT clear = { (LONG)std::clamp(s[0], 0.f, W), (LONG)std::clamp(s[1], 0.f, H),
+        (LONG)std::clamp(s[2], 0.f, W), (LONG)std::clamp(s[3], 0.f, H) };
+    const float kx = (s[2] - s[0]) / (d[2] - d[0]), ky = (s[3] - s[1]) / (d[3] - d[1]);
+    const float lim[4] = { 0.f, 0.f, W, H };
+    for (int i = 0; i < 4; ++i)
+    {
+        const bool lo = i < 2;
+        const float c = lo ? (std::max)(d[i], lim[i]) : (std::min)(d[i], lim[i]);
+        s[i] += (c - d[i]) * (i % 2 ? ky : kx);
+        d[i] = c;
+    }
+    if (clear.right > clear.left && clear.bottom > clear.top)
+        device->ColorFill(copySurf, &clear, 0);
+    const RECT sr = { (LONG)(s[0] + 0.5f), (LONG)(s[1] + 0.5f), (LONG)(s[2] + 0.5f), (LONG)(s[3] + 0.5f) };
+    const RECT dr = { (LONG)(d[0] + 0.5f), (LONG)(d[1] + 0.5f), (LONG)(d[2] + 0.5f), (LONG)(d[3] + 0.5f) };
+    if (sr.right > sr.left && sr.bottom > sr.top && dr.right > dr.left && dr.bottom > dr.top)
+        device->StretchRect(surf, &sr, copySurf, &dr, D3DTEXF_LINEAR);
+}
+
 // Copies the finished layer (surf) into copySurf with the boot-up sides moved
 // toward the centre: the full-height strip left of the centred parts moves
 // right, the strip right of them moves left. Strips, not part rects, because
@@ -21098,6 +21160,7 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
         copySurf->Release();
         return;
     }
+    CaptionMoveBox(device, surf, copySurf, desc);
     copySurf->Release();
     const UINT bw = desc.Width / 4 > 0 ? desc.Width / 4 : 1, bh = desc.Height / 4 > 0 ? desc.Height / 4 : 1;
     IDirect3DTexture9* bloom0 = (psDown && psBlur) ? CachedPauseCopy(g_TitleBloomTex[0], device, bw, bh, D3DFMT_A8R8G8B8) : nullptr;

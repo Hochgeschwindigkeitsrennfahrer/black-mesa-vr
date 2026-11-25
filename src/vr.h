@@ -81,6 +81,11 @@ struct BootHudRects
     bool noGlow = false; // boot-up, or captions without logo/message/names
     bool capMask = false; // glow on, but not over the caption box (uv rect)
     float capRect[4] = {}; // u0, v0, u1, v1
+    // Captions sharing the layer with other titles: Subtitle size / height
+    // move the caption box inside the layer texture (uv rects, src -> dst).
+    bool capMove = false;
+    float capSrc[4] = {};
+    float capDst[4] = {};
     int rects[kBootHudMaxRects][5] = {};
 };
 void PublishBootHudRects(const BootHudRects& r);
