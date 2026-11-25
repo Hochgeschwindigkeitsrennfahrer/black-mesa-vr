@@ -36,7 +36,7 @@ namespace bmvr
             { "Sprint", "Sprint (hold)" },
             { "SprintToggle", "Sprint (toggle)" },
             { "Flashlight", "Flashlight" },
-            { "WeaponMenu", "Weapon menu" },
+            { "WeaponMenu", "Weapon menu (hold)" },   // tap: bare hands <-> last weapon
             { "NextWeapon", "Next weapon" },
             { "PrevWeapon", "Previous weapon" },
             { "QuickSave", "Quick save" },
