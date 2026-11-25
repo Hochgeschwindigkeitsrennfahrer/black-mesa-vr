@@ -13650,6 +13650,8 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
         }
         TryGetLadderPinDrawPos(true, s.body, s.leftPos);
         TryGetLadderPinDrawPos(false, s.body, s.rightPos);
+        s.gunHudTwoHand = TwoHandGunHudAngles(
+            bmvr::g_LeftHanded ? s.leftAng : s.rightAng, s.gunHudAng);
     }
     if (m_Game)
         s.hudOk = m_Game->ReadWristHudValues(s.hud[0], s.hud[1], s.hud[2], s.hud[3], s.hud[4], s.hud[5]);
@@ -15136,6 +15138,19 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     const D3DCOLOR redBack = D3DCOLOR_RGBA(255, 48, 32, 60);
     constexpr int kLowHealth = 25;
     const bool rightDominant = !bmvr::g_LeftHanded;
+    // Ammo panel orientation: the gun hand, or the two-hand aim (long guns).
+    QAngle gunHudAng = rightDominant ? rightAng : leftAng;
+    if (t_HandSnap)
+    {
+        if (t_HandSnap->gunHudTwoHand)
+            gunHudAng = t_HandSnap->gunHudAng;
+    }
+    else
+    {
+        QAngle twoHandAng{};
+        if (TwoHandGunHudAngles(gunHudAng, twoHandAng))
+            gunHudAng = twoHandAng;
+    }
 
     auto drawValueIcon = [&](const HudPanel& p, float x0, float yTop, float valueCell,
         float fieldWidth, float rowH, float iconSize, int value, D3DCOLOR color, D3DCOLOR backing,
@@ -15174,7 +15189,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                 // wrist it turned away from the eye).
                 HudPanel gunPanel{};
                 BuildAmmoHudPanel(rightDominant ? rightOrigin : leftOrigin,
-                    rightDominant ? rightAng : leftAng, rightDominant, gunPanel);
+                    gunHudAng, rightDominant, gunPanel);
                 if (gunPanel.valid)
                 {
                     handPanel = gunPanel;
@@ -15233,7 +15248,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
         HudPanel weaponPanel{};
         BuildAmmoHudPanel(
             rightDominant ? rightOrigin : leftOrigin,
-            rightDominant ? rightAng : leftAng,
+            gunHudAng,
             rightDominant, weaponPanel);
         if (weaponPanel.valid && !HudIsBackfacing(weaponPanel, eyeOrig))
         {
@@ -15722,6 +15737,7 @@ void VR::ApplyTwoHandWeaponAim()
         m_TwoHandActive = false;
         m_TwoHandDrawValid = false;
         m_TwoHandSmoothValid = false;
+        m_TwoHandHudValid = false;
     };
 
     // Support-grip press edge for TwoHandGripToggle (down at 0.35, re-armed
@@ -15937,6 +15953,7 @@ void VR::ApplyTwoHandWeaponAim()
     {
         m_TwoHandDrawValid = false;
         m_TwoHandSmoothValid = false;
+        m_TwoHandHudValid = false;
         return;
     }
 
@@ -15957,6 +15974,8 @@ void VR::ApplyTwoHandWeaponAim()
 
     if (pistol)
     {
+        // Pistols keep the gun-hand aim: the ammo panel follows that hand.
+        m_TwoHandHudValid = false;
         finishDraw(F0, R0, U0, gx);
         return;
     }
@@ -16009,6 +16028,13 @@ void VR::ApplyTwoHandWeaponAim()
     m_ViewmodelForward = F;
     m_ViewmodelRight = R;
     m_ViewmodelUp = U;
+    m_TwoHandHudFrom[0] = F0;
+    m_TwoHandHudFrom[1] = R0;
+    m_TwoHandHudFrom[2] = U0;
+    m_TwoHandHudTo[0] = F;
+    m_TwoHandHudTo[1] = R;
+    m_TwoHandHudTo[2] = U;
+    m_TwoHandHudValid = true;
 
     finishDraw(F, R, U, gxSlide);
 }
@@ -16682,6 +16708,31 @@ bool VR::TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QA
     trackingPos = m_TwoHandDrawPos;
     trackingAng = m_TwoHandDrawAng;
     return true;
+}
+
+bool VR::TwoHandGunHudAngles(const QAngle& gunCtrlAng, QAngle& out) const
+{
+    // Ammo panel while a long gun is held with both hands (user 2026-11-25):
+    // locked to the gun's aim, not the gun-hand controller. The controller
+    // axes are expressed in the one-hand gun basis and rebuilt in the
+    // two-hand one, so the per-weapon placement (VR/ammo_hud.txt) keeps its
+    // meaning and nothing moves at the moment the support hand grabs.
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    if (!m_TwoHandActive || !m_TwoHandHudValid || bmvr::g_TwoHandAmmoHudFollowsHand)
+        return false;
+    Vector f, r, u;
+    QAngle::AngleVectors(gunCtrlAng, &f, &r, &u);
+    auto remap = [&](const Vector& v) {
+        return m_TwoHandHudTo[0] * v.Dot(m_TwoHandHudFrom[0])
+            + m_TwoHandHudTo[1] * v.Dot(m_TwoHandHudFrom[1])
+            + m_TwoHandHudTo[2] * v.Dot(m_TwoHandHudFrom[2]);
+    };
+    Vector nf = remap(f), nu = remap(u);
+    if (VectorNormalize(nf) <= 0.01f || VectorNormalize(nu) <= 0.01f)
+        return false;
+    QAngle::VectorAngles(nf, nu, out);
+    out.y = WrapYaw(out.y);
+    return std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
 }
 
 bool VR::TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& trackingPos) const

@@ -1281,6 +1281,10 @@ public:
         // a reload, so the reserve flicked back to its old value.
         bool hudOk = false;
         int hud[6] = { -1, -1, -1, -1, -1, -1 };
+        // Gun-hand angles for the ammo panel: turned with the two-hand aim
+        // while a long gun is held with both hands (TwoHandGunHudAngles).
+        bool gunHudTwoHand = false;
+        QAngle gunHudAng{};
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
     // HUD values for drawing: the drawing frame's snapshot while one is drawn
@@ -1629,6 +1633,9 @@ public:
     // Live L_Wrist (or L_Hand) world origin from DrawModelExecute bone matrices.
     void NoteViewmodelOffhandWorld(const Vector& worldOrigin, bool sideHandle = false);
     bool TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QAngle& trackingAng) const;
+    // Two-handed long gun: gunCtrlAng turned from the one-hand gun basis to the
+    // two-hand aim basis, so the ammo panel stays on the gun, not the hand.
+    bool TwoHandGunHudAngles(const QAngle& gunCtrlAng, QAngle& out) const;
     bool HudOverlayReady() const { return m_HudOverlayReady; }
     void EnsureHudOverlay();
     void ClearHudSurface(bool opaque);
@@ -1818,6 +1825,11 @@ private:
     Vector m_TwoHandSmoothF{};
     Vector m_TwoHandSmoothU{};
     bool m_TwoHandSmoothValid = false;
+    // ApplyTwoHandWeaponAim (long guns): gun basis before / after the two-hand
+    // aim, for TwoHandGunHudAngles.
+    Vector m_TwoHandHudFrom[3]{};
+    Vector m_TwoHandHudTo[3]{};
+    bool m_TwoHandHudValid = false;
     // Viewmodel clip state (NoteViewmodelLowerState) + stock off-hand fingers.
     std::atomic<int> m_VmLowerState{ kVmLowerOther };
     std::atomic<const void*> m_VmLowerHdr{ nullptr };

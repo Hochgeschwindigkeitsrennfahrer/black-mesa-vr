@@ -973,6 +973,9 @@ namespace bmvr
     // Panel row `f` is one of the ammo HUD rows: `def` = its built-in value
     // for the weapon in the hand (what "Reset tab" puts back).
     bool AmmoHudRowDefault(const float* f, float& def);
+    // DEBUG row: two-handed long gun, ammo panel on the gun-hand controller
+    // (old) instead of the gun's two-hand aim (default, user 2026-11-25).
+    extern bool g_TwoHandAmmoHudFollowsHand;
     extern float g_SatchelBagDepth;
     extern float g_RpgFistCurl, g_RpgFistOutCm;
     extern float g_RpgHandTurn, g_RpgHandRoll, g_RpgHandSpin, g_RpgHandFwdCm, g_RpgHandUpCm, g_RpgHandSideCm; // RPG rocket in the left hand: finger curl, rocket out of the palm (cm)

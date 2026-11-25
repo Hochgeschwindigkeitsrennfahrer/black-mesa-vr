@@ -467,6 +467,9 @@ namespace
             { "Ammo HUD turn (front toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTurn, 5.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Ammo HUD roll", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudRoll, 5.f, -180.f, 180.f, "%+.0f\xB0" },
             { "Ammo HUD size", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSize, 0.25f, 0.5f, 6.f, "%.2f" },
+            // A/B (user 2026-11-25): off = with both hands on a long gun the panel
+            // stays on the gun's aim; on = the old gun-hand controller rotation.
+            { "Two hands: ammo HUD follows hand", RowKind::Toggle, nullptr, &bmvr::g_TwoHandAmmoHudFollowsHand, nullptr, 0, 0, 0, nullptr },
             // Per ladder model, for the last rung held (VR::SyncLadderGripRows).
             { "LADDER GRIP TUNING (SAVED PER LADDER MODEL)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip out (toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneOutCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
