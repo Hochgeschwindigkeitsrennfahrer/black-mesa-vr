@@ -1012,6 +1012,22 @@ public:
         float centreFrom = 0.f;       // head's sideways offset when it started
         float centred = 0.f;          // moved so far this climb (units)
     } m_LadderView;
+    // Physical crouching (PhysicalCrouch). ProcessInput: head this far below
+    // the recenter height holds IN_DUCK (hysteresis). RenderView: while the
+    // duck is a physical one, the engine's crouch eye drop is added back so
+    // the view stays at the real head (frozen in the air: a duck there lifts
+    // the origin instead).
+    void UpdatePhysicalCrouch(uint32_t& buttons);
+    float PhysicalCrouchViewOffset(float eyeZ);
+    struct CrouchViewState
+    {
+        bool active = false;      // head below the threshold (holds IN_DUCK)
+        bool otherDuck = false;   // stick/button crouch this tick
+        bool owned = false;       // the duck is ours: compensate the view
+        float standEye = 64.f;    // eye above the origin standing (learnt)
+        float offset = 0.f;       // last offset sent
+        ULONGLONG lastMs = 0;
+    } m_CrouchView;
     // ProcessInput: grip state per hand (0 left, 1 right) for PhysicalLadderStep.
     void UpdateLadderGrips();
     std::atomic<bool> m_LadderGrip[2]{};

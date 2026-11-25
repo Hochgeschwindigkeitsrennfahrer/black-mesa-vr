@@ -916,6 +916,12 @@ namespace bmvr
     // Physical ladders: grip a ladder with either hand and pull/push to
     // climb (the stick still climbs too). On by default.
     extern bool g_PhysicalLadders;
+    // Physical crouching: the head this many cm below the recenter height
+    // crouches the player (back up 6 cm higher stands again). The view stays
+    // at the real head: the engine's lower crouch eye is added back while
+    // the duck is a physical one. Off by default.
+    extern bool g_PhysicalCrouch;
+    extern float g_PhysicalCrouchDropCm;
     // VR panel DEBUG "HELD WEAPON ANGLE": pitch/yaw/roll (degrees) of the held
     // weapon, on top of the built-in table; live, saved per weapon in
     // VR/viewmodel_offsets.txt (ax ay az), not in config.txt.

@@ -9895,6 +9895,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         const Vector shift = m_VR->PhysicalLadderViewShift(setup.origin);
         if (off != 0.f)
             setup.origin.z += off;
+        // Physical crouching: the view stays at the real head.
+        setup.origin.z += m_VR->PhysicalCrouchViewOffset(setup.origin.z - off);
         setup.origin.x += shift.x;
         setup.origin.y += shift.y;
     }
@@ -11387,7 +11389,7 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
         // Hand climbing lifts the view (PhysicalLadderViewOffset, last
         // frame's value): the gun hand moves with it.
         Vector ladderEye = eyePosition;
-        ladderEye.z += m_VR->m_LadderView.offset;
+        ladderEye.z += m_VR->m_LadderView.offset + m_VR->m_CrouchView.offset;
         ladderEye.x += m_VR->m_LadderView.shift.x;
         ladderEye.y += m_VR->m_LadderView.shift.y;
         // Uncoupled viewmodel: same world pose both eyes (sd805 / Portal 2).

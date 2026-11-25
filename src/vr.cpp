@@ -7440,6 +7440,7 @@ void VR::ProcessInput()
             s_crouchAxis = false;
         if (m_CrouchToggled)
             buttons |= IN_DUCK;
+        UpdatePhysicalCrouch(buttons);
         if (m_ButtonMapActive ? m_SprintMapToggle : bmvr::g_SprintToggle)
         {
             // Click latches; letting the move stick back to centre (or a
@@ -9006,6 +9007,83 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         ++s_climbLog;
     }
     return true;
+}
+
+void VR::UpdatePhysicalCrouch(uint32_t& buttons)
+{
+    CrouchViewState& c = m_CrouchView;
+    c.otherDuck = (buttons & IN_DUCK) != 0;
+    bool want = false;
+    float dropCm = 0.f;
+    if (bmvr::g_PhysicalCrouch && m_Game && m_VRScale > 0.f
+        && !m_LadderView.active && !m_LadderActive.load(std::memory_order_acquire)
+        && m_Game->LocalPlayerMoveType() != 9)
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        if (m_HmdOriginLatched && m_HmdPoseValid)
+        {
+            dropCm = (m_HmdPosAbsZero.z - m_HmdPosAbs.z) / m_VRScale * 100.f;
+            const float enter = bmvr::g_PhysicalCrouchDropCm;
+            want = c.active ? dropCm > enter - 6.f : dropCm >= enter;
+        }
+    }
+    if (want != c.active)
+        Game::logMsg("Physical crouch %s (head %.0f cm below the recenter height, threshold %.0f)",
+            want ? "on" : "off", dropCm, bmvr::g_PhysicalCrouchDropCm);
+    c.active = want;
+    if (want)
+    {
+        buttons |= IN_DUCK;
+        c.owned = true;
+    }
+}
+
+float VR::PhysicalCrouchViewOffset(float eyeZ)
+{
+    CrouchViewState& c = m_CrouchView;
+    const ULONGLONG now = GetTickCount64();
+    float dt = c.lastMs ? (now - c.lastMs) * 0.001f : 0.f;
+    c.lastMs = now;
+    if (dt > 0.1f)
+        dt = 0.1f;
+    Vector origin{};
+    if (!bmvr::g_PhysicalCrouch || !m_Game || !m_Game->LocalPlayerAbsOrigin(origin))
+    {
+        c.owned = false;
+        c.offset = 0.f;
+        return 0.f;
+    }
+    const int flags = m_Game->LocalPlayerFlags();
+    const bool onGround = flags < 0 || (flags & 1);   // FL_ONGROUND
+    const bool ducked = flags >= 0 && (flags & 2);    // FL_DUCKING
+    const float eye = eyeZ - origin.z;
+    // Standing eye height (BM: 64), learnt while nothing asks for a duck.
+    if (onGround && !ducked && !c.active && !c.otherDuck && eye > 40.f && eye < 80.f)
+        c.standEye = eye;
+    float target = 0.f;
+    if (c.owned)
+    {
+        target = c.standEye - eye;
+        target = target < 0.f ? 0.f : (target > 40.f ? 40.f : target);
+        // Stood up (or a stick/button crouch took over): not ours any more.
+        if (!c.active && (target < 0.5f || c.otherDuck))
+        {
+            c.owned = false;
+            target = 0.f;
+        }
+    }
+    // On the ground the engine lerps its eye down; follow it exactly (the
+    // limit is far above the duck speed). In the air the engine lifts the
+    // origin instead of lowering the eye: keep the offset, ease on landing.
+    if (onGround)
+    {
+        const float maxStep = 400.f * dt;
+        const float d = target - c.offset;
+        c.offset += d > maxStep ? maxStep : (d < -maxStep ? -maxStep : d);
+    }
+    else if (!c.owned)
+        c.offset = 0.f;
+    return c.offset;
 }
 
 float VR::PhysicalLadderViewOffset(float renderZ)

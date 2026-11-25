@@ -139,6 +139,10 @@ namespace
             { "Hand wraps the rung", RowKind::Toggle, "LadderHandWrap", &bmvr::g_LadderHandWrap, nullptr, 0, 0, 0, nullptr },
             { "Hand distance from rung", RowKind::Number, "LadderHandBack", nullptr, &bmvr::g_LadderHandBack, 0.5f, 0.f, 10.f, "%.1f" },
             { "Stick climbs ladders too", RowKind::Toggle, "LadderStickClimb", &bmvr::g_LadderStickClimb, nullptr, 0, 0, 0, nullptr },
+            // Crouch in real life below the recenter height minus this; the view stays at the real head.
+            { "PHYSICAL CROUCHING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Physical crouching", RowKind::Toggle, "PhysicalCrouch", &bmvr::g_PhysicalCrouch, nullptr, 0, 0, 0, nullptr },
+            { "Head drop to crouch", RowKind::Number, "PhysicalCrouchDropCm", nullptr, &bmvr::g_PhysicalCrouchDropCm, 5.f, 15.f, 80.f, "%.0f cm" },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
@@ -1407,6 +1411,8 @@ namespace
             return g_SnapTurning;
         if (is({ "LadderBodyFollowsArms", "LadderCentreHead", "LadderGunHand", "LadderHandBack", "LadderHandWrap", "LadderStickClimb" }))
             return !g_PhysicalLadders;
+        if (is({ "PhysicalCrouchDropCm" }))
+            return !g_PhysicalCrouch;
         if (is({ "DamageFlashStrength" }))
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))

@@ -434,6 +434,8 @@ namespace bmvr
     float g_VrNearZ = 4.f;
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = false;
+    bool g_PhysicalCrouch = false;
+    float g_PhysicalCrouchDropCm = 35.f;
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
     float g_VmTuneSeatCm = 6.f, g_VmTuneSeatDeg = 45.f;
     bool g_PhysicalLadderSmooth = true;
@@ -1331,6 +1333,14 @@ namespace bmvr
                 g_RpgRocketShown = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PhysicalLadders") == 0)
                 g_PhysicalLadders = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "PhysicalCrouch") == 0)
+                g_PhysicalCrouch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "PhysicalCrouchDropCm") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 15.f && v <= 80.f)
+                    g_PhysicalCrouchDropCm = v;
+            }
             else if (std::strcmp(n, "LadderBodyFollowsArms") == 0)
                 g_LadderBodyFollowsArms = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "LadderCentreHead") == 0)
