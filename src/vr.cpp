@@ -11607,6 +11607,22 @@ int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
         // intro logo / names / messages keep it when they share the layer.
         r.noGlow = r.boot || (TitleHudPanelShowing(kCaptionHud) && !TitleHudPanelShowing(0)
             && !TitleHudPanelShowing(1) && !TitleHudPanelShowing(2));
+        // Captions sharing the layer with a chapter title / logo / names:
+        // keep the glow for those, but not over the caption box (user
+        // 2026-11-25: chapter title glow also hit the subtitles).
+        if (!r.noGlow && TitleHudPanelShowing(kCaptionHud) && tw && th)
+        {
+            int b[4] = {};
+            if (SehPanelBounds(m_VguiPanel, m_TitleHudPanels[kCaptionHud], b) && b[2] > 0 && b[3] > 0)
+            {
+                const float pad = 8.f;
+                r.capMask = true;
+                r.capRect[0] = (b[0] - pad) / tw;
+                r.capRect[1] = (b[1] - pad) / th;
+                r.capRect[2] = (b[0] + b[2] + pad) / tw;
+                r.capRect[3] = (b[1] + b[3] + pad) / th;
+            }
+        }
         for (int i = kBootHudFirst; i < kBootHudEnd && inset > 0 && !r.count; ++i)
         {
             int b[4] = {};
@@ -20702,10 +20718,12 @@ static IDirect3DPixelShader9* TitleBloomDownsampleShader(IDirect3DDevice9* devic
     static const char kSrc[] =
         "sampler2D s : register(s0);\n"
         "float4 k : register(c0);\n"
+        "float4 m : register(c2);\n"
         "float3 f(float3 c) { return pow(max(c, 1e-5), 6.0) * dot(c, float3(0.3, 0.59, 0.11)); }\n"
         "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
         "  float3 r = f(tex2D(s, uv + float2(-k.x, -k.y)).rgb) + f(tex2D(s, uv + float2(k.x, -k.y)).rgb)\n"
         "    + f(tex2D(s, uv + float2(-k.x, k.y)).rgb) + f(tex2D(s, uv + float2(k.x, k.y)).rgb);\n"
+        "  if (uv.x >= m.x && uv.x <= m.z && uv.y >= m.y && uv.y <= m.w) r = 0;\n"
         "  return float4(r * 0.25, 1);\n"
         "}\n";
     return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_bloom_down.hlsl");
@@ -20733,7 +20751,8 @@ static IDirect3DPixelShader9* TitleBloomBlurShader(IDirect3DDevice9* device)
 }
 
 // c0 = (layer height / 2, glow on, 0, 0); c1 = (scanline influence,
-// bloom influence, scanline value, 0). Colour stays premultiplied; alpha =
+// bloom influence, scanline value, 0); c2 = uv rect without glow (the
+// caption box; empty = none): there the output equals the no-glow shader. Colour stays premultiplied; alpha =
 // max(text alpha, brightest channel) so the glow (no alpha of its own) is
 // kept. Flat is additive (alpha 0 here), but SteamVR showed nothing at all
 // for an alpha-0 premultiplied quad (user, 2026-11-23: logo and names gone).
@@ -20745,13 +20764,15 @@ static IDirect3DPixelShader9* TitleCombineShader(IDirect3DDevice9* device)
         "sampler2D b : register(s1);\n"
         "float4 k : register(c0);\n"
         "float4 g : register(c1);\n"
+        "float4 m : register(c2);\n"
         "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
         "  float4 c = tex2D(s, uv);\n"
+        "  float on = (uv.x >= m.x && uv.x <= m.z && uv.y >= m.y && uv.y <= m.w) ? 0.0 : k.y;\n"
         "  float scan = frac(uv.y * k.x) >= 0.5 ? g.z : 0.0;\n"
         "  float3 bl = tex2D(b, uv).rgb;\n"
-        "  float3 rgb = c.rgb + k.y * scan * (c.rgb * g.x + bl * g.y);\n"
+        "  float3 rgb = c.rgb + on * scan * (c.rgb * g.x + bl * g.y);\n"
         "  rgb = saturate(rgb);\n"
-        "  float a = max(sqrt(c.a), max(rgb.r, max(rgb.g, rgb.b)));\n"
+        "  float a = max(sqrt(c.a), on * max(rgb.r, max(rgb.g, rgb.b)));\n"
         "  return float4(rgb, a);\n"
         "}\n";
     return CompileLayerShader(device, s_cache, kSrc, sizeof(kSrc) - 1, "title_combine.hlsl");
@@ -21086,6 +21107,11 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
     if (bloom1 && (FAILED(bloom0->GetSurfaceLevel(0, &b0)) || FAILED(bloom1->GetSurfaceLevel(0, &b1))))
         bloom1 = nullptr;
     const bool doGlow = glow && bloom1 && b0 && b1;
+    // Caption box sharing the layer with a glowing title: uv rect kept out of
+    // the bloom source and the combine (empty rect = none).
+    const BootHudRects& capRects = g_BootHudRects[g_BootHudRectsSlot.load(std::memory_order_acquire)];
+    const float noRect[4] = { 2.f, 2.f, -1.f, -1.f };
+    const float* capMask = capRects.capMask ? capRects.capRect : noRect;
     IDirect3DStateBlock9* saved = nullptr;
     if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &saved)) || !saved)
     {
@@ -21115,6 +21141,7 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
         const float down[4] = { 1.f / desc.Width, 1.f / desc.Height, 0.f, 0.f };
         device->SetPixelShader(psDown);
         device->SetPixelShaderConstantF(0, down, 1);
+        device->SetPixelShaderConstantF(2, capMask, 1);   // caption box: no bloom source
         TitleLayerSampler(device, 0, copy, true);
         TitleLayerQuad(device, b0, bw, bh);
         // Blur radius: BM's offsets are 1/4-screen texels at 1080 rows.
@@ -21136,6 +21163,7 @@ static void TitleLayerPremultiplied(IDirect3DDevice9* device, IDirect3DSurface9*
         const float g[4] = { 0.5f, 8.f, 202.f / 255.f, 0.f };
         device->SetPixelShaderConstantF(0, k, 1);
         device->SetPixelShaderConstantF(1, g, 1);
+        device->SetPixelShaderConstantF(2, capMask, 1);
     }
     TitleLayerSampler(device, 0, copy, false);
     TitleLayerSampler(device, 1, doGlow ? static_cast<IDirect3DBaseTexture9*>(bloom0) : copy, true);
