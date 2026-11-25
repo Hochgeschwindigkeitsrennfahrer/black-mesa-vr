@@ -243,8 +243,6 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_CrowbarHitDrawnBar, nullptr },
             { "bmvr_no_lower_at_friendly", "VR: aiming at a friendly does not lower the gun, one- or two-handed (laser stays on)",
               Kind::Bool, 0.f, 1.f, &g_NoLowerAtFriendly, nullptr },
-            { "bmvr_twohand_lowered_follow", "VR: with both hands on the gun, the support hand follows the gun down when it is lowered at a friendly",
-              Kind::Bool, 0.f, 1.f, &g_TwoHandLoweredFollow, nullptr },
             { "bmvr_scope_clip_idle", "VR: the crossbow stays in the hand while the scope opens/closes (no to-scope animation)",
               Kind::Bool, 0.f, 1.f, &g_ScopeClipIdle, nullptr },
             { "bmvr_mute_fidget_sound", "VR: weapon fidget clips play no sound (the gun does not fidget in VR)",

@@ -9456,7 +9456,7 @@ void VR::NoteViewmodelLowerState(int state, const void* studioHdr)
 
 bool VR::StockOffhandFingersIdleSettled() const
 {
-    // Same settle as the gun-root reference: idle blends in over ~0.2 s and
+    // Idle blends in over ~0.2 s and
     // the render thread draws a frame behind.
     return m_VmLowerState.load(std::memory_order_relaxed) == kVmLowerIdle
         && GetTickCount64() - m_VmLowerIdleSinceMs.load(std::memory_order_relaxed) >= 250;
@@ -9480,83 +9480,6 @@ bool VR::GetStockOffhandFingers(float rel[15][12]) const
         return false;
     std::memcpy(rel, m_StockFingers, sizeof(m_StockFingers));
     return true;
-}
-
-void VR::NoteDrawnWeaponRootLocal(const void* studioHdr, const Vector& pos, const Vector axes[3])
-{
-    // Only the weapon's own viewmodel (Black Mesa draws a second one that idles).
-    if (!studioHdr || studioHdr != m_VmLowerHdr.load(std::memory_order_relaxed))
-        return;
-    const int state = m_VmLowerState.load(std::memory_order_relaxed);
-    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    if (studioHdr != m_GunRootSampleHdr)
-    {
-        m_GunRootSampleHdr = studioHdr;
-        m_GunRootRefValid = false;
-    }
-    m_GunRootLivePos = pos;
-    for (int i = 0; i < 3; ++i)
-        m_GunRootLiveAx[i] = axes[i];
-    m_GunRootLiveValid = true;
-    // Reference = idle pose, once idle has settled: the render thread draws a
-    // frame behind, and idle blends in from the clip before it over ~0.2 s.
-    if (state == kVmLowerIdle
-        && GetTickCount64() - m_VmLowerIdleSinceMs.load(std::memory_order_relaxed) >= 250)
-    {
-        m_GunRootRefPos = pos;
-        for (int i = 0; i < 3; ++i)
-            m_GunRootRefAx[i] = axes[i];
-        m_GunRootRefValid = true;
-    }
-}
-
-void VR::ApplyLoweredOffhand(Vector& gripLocal)
-{
-    const bool lowered = m_VmLowerState.load(std::memory_order_relaxed) == kVmLowerLowered;
-    if (!lowered)
-    {
-        // One line per lowered episode, with the largest wrist move applied.
-        if (m_TwoHandLoweredLogged)
-        {
-            m_TwoHandLoweredLogged = false;
-            static int s_log;
-            if (s_log < 20)
-            {
-                ++s_log;
-                Game::logMsg("Two-hand lowered: glove followed the gun (palm moved up to %.1f, gun turned up to %.0f deg)",
-                    m_TwoHandLoweredMaxMove, m_TwoHandLoweredMaxTurn);
-            }
-        }
-        m_TwoHandLoweredMaxMove = 0.f;
-        m_TwoHandLoweredMaxTurn = 0.f;
-        return;
-    }
-    if (!bmvr::g_TwoHandLoweredFollow || !m_GunRootRefValid || !m_GunRootLiveValid)
-        return;
-    const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
-    const Vector moved = m_GunRootLivePos - m_GunRootRefPos;
-    if (moved.Length() > 0.5f * scale)   // implausible for one gun: leave the glove
-        return;
-    // Points on the gun body: v -> live * ref^-1 (v - refPos) + livePos.
-    auto turn = [&](const Vector& v) {
-        return m_GunRootLiveAx[0] * v.Dot(m_GunRootRefAx[0])
-            + m_GunRootLiveAx[1] * v.Dot(m_GunRootRefAx[1])
-            + m_GunRootLiveAx[2] * v.Dot(m_GunRootRefAx[2]);
-    };
-    // The glove keeps its own pose and tilt (user 2026-11-17): it only moves,
-    // by as much as the gun point under the palm moves. The glove's origin is
-    // at the wrist, ~9 cm behind the palm along the gun; moving the origin
-    // point instead leaves the palm above a gun that pitches down.
-    const Vector palm = gripLocal + Vector(0.09f * scale, 0.f, 0.f);
-    const Vector palmMove = turn(palm - m_GunRootRefPos) + m_GunRootLivePos - palm;
-    gripLocal = gripLocal + palmMove;
-    m_TwoHandLoweredLogged = true;
-    // Rotation angle from the trace of live * ref^-1.
-    const float tr = m_GunRootLiveAx[0].Dot(m_GunRootRefAx[0]) + m_GunRootLiveAx[1].Dot(m_GunRootRefAx[1])
-        + m_GunRootLiveAx[2].Dot(m_GunRootRefAx[2]);
-    const float c = (std::max)(-1.f, (std::min)(1.f, (tr - 1.f) * 0.5f));
-    m_TwoHandLoweredMaxMove = (std::max)(m_TwoHandLoweredMaxMove, palmMove.Length());
-    m_TwoHandLoweredMaxTurn = (std::max)(m_TwoHandLoweredMaxTurn, std::acos(c) * 57.29578f);
 }
 
 bool VR::TryGetRawMuzzleWorld(Vector& origin) const
@@ -15941,7 +15864,6 @@ void VR::ApplyTwoHandWeaponAim()
     auto finishDraw = [&](const Vector& f, const Vector& r, const Vector& u, float gxSlide) {
         const float rotYaw = m_RotationOffsetY.load(std::memory_order_acquire);
         Vector local(gxSlide, gy, gz);
-        ApplyLoweredOffhand(local);
         Vector gripYawed = f * local.x + r * local.y + u * local.z;
         PivotYaw(gripYawed, -rotYaw);
         m_TwoHandDrawPos = gunTracking + gripYawed;

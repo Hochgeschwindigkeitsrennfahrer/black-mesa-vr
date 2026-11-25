@@ -193,7 +193,6 @@ namespace bmvr
     bool g_ScopeClipIdle = true;
     bool g_NoLowerAtFriendly = true;
     bool g_CrowbarHitDrawnBar = true;
-    bool g_TwoHandLoweredFollow = true;
     bool g_ThrowStroke = false;
     bool g_MuteFidgetSounds = true;
     // Optional features: off unless enabled in VR/config.txt.
@@ -1105,8 +1104,6 @@ namespace bmvr
                 g_CrowbarHitDrawnBar = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "NoLowerAtFriendly") == 0)
                 g_NoLowerAtFriendly = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "TwoHandLoweredFollow") == 0)
-                g_TwoHandLoweredFollow = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ScopeClipIdle") == 0)
                 g_ScopeClipIdle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "ThrowStroke") == 0)

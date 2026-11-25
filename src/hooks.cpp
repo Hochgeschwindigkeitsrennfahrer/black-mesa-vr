@@ -3604,8 +3604,8 @@ namespace
             if (s_lc.equip || !s_cmpMatch)
                 s_switchUntil = now + 150;
             Hooks::m_VR->NoteViewmodelBeamHidden(beamHide || now < s_loweredUntil || now < s_switchUntil);
-            // Same 300 ms tail for the support glove: idle blends in from the
-            // lowered pose, and the glove follows the wrist back up.
+            // Same 300 ms tail for the clip state: idle blends in from the
+            // lowered pose.
             const int lowerState = (lowered || now < s_loweredUntil) ? VR::kVmLowerLowered
                 : (!beamHide && !s_lc.action ? VR::kVmLowerIdle : VR::kVmLowerOther);
             Hooks::m_VR->NoteViewmodelLowerState(lowerState, hdr);
@@ -4052,50 +4052,6 @@ namespace
     }
 
     int FindWeaponRootBone(unsigned char* hdr, float rest[3], char (&bestName)[64]);
-
-    // Weapon root bone in the gun frame of this draw (origin + unit axes; the
-    // bones may carry the viewmodel scale), for the two-hand glove while the
-    // lowered clip moves the gun. Matrix columns are the bone's axes.
-    void SampleViewmodelWeaponRoot(unsigned char* hdr, const float* bones12, int nBones,
-        const Vector& gunO, const Vector& gunF, const Vector& gunR, const Vector& gunU)
-    {
-        if (!hdr || !bones12 || nBones <= 0 || !Hooks::m_VR || !Hooks::m_VR->TwoHandGripActive())
-            return;
-        static unsigned char* s_hdr = nullptr;   // render thread only
-        static int s_idx = -1;
-        if (hdr != s_hdr)
-        {
-            s_hdr = hdr;
-            float rest[3]{};
-            char name[64]{};
-            s_idx = FindWeaponRootBone(hdr, rest, name);
-        }
-        if (s_idx < 0 || s_idx >= nBones)
-            return;
-        const float* m = bones12 + s_idx * 12;
-        Vector o, ax[3];
-        BMVR_TRY
-        {
-            o = Vector(m[3], m[7], m[11]);
-            for (int c = 0; c < 3; ++c)
-                ax[c] = Vector(m[c], m[4 + c], m[8 + c]);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return;
-        }
-        if (!std::isfinite(o.x) || !std::isfinite(o.y) || !std::isfinite(o.z))
-            return;
-        for (int c = 0; c < 3; ++c)
-        {
-            Vector w = ax[c];
-            if (!std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z) || VectorNormalize(w) <= 0.01f)
-                return;
-            ax[c] = Vector(w.Dot(gunF), w.Dot(gunR), w.Dot(gunU));
-        }
-        const Vector d = o - gunO;
-        Hooks::m_VR->NoteDrawnWeaponRootLocal(hdr, Vector(d.Dot(gunF), d.Dot(gunR), d.Dot(gunU)), ax);
-    }
 
     // Frag grenade: the grenade is its own root bone (GrenadeSpawn, pins are
     // its children) and the pin-pull/throw animations swing it across the
@@ -11973,7 +11929,6 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
                 }
                 SampleViewmodelOffhandGrip(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
                 SampleStockOffhandFingers(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones);
-                SampleViewmodelWeaponRoot(hdr, &g_ScaledViewmodelBones[slot][0][0][0], nBones, o, gf, gr, gu);
                 if (gunRightHand)
                 {
                 {
