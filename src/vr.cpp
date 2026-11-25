@@ -15749,13 +15749,33 @@ void VR::RefreshActiveWeaponModel()
 void VR::RefreshHeldWeaponState()
 {
     bool held = false;
+    const char* why = "";
     if (!m_EmptyHands && m_Game)
     {
         Game::InventoryWeapon first{};
         held = m_Game->CollectInventoryWeapons(&first, 1) > 0;
+        // Weapons in the inventory but none in hand: after the intro tram
+        // (bm_c1a2a, save loads) the game shows its own HEV hands viewmodel
+        // (models/weapons/v_hands.mdl, 'admire1') until a weapon is picked.
+        // Counted as held, the mod hid those arms as gun arms and drew no
+        // glove: no right hand until R3 (capture-20261125-232648).
+        if (held && !m_Game->GetActiveWeaponEntity())
+        {
+            held = false;
+            why = " (no active weapon)";
+        }
+        if (held)
+        {
+            const char* vm = m_Game->GetEntityModelName(m_Game->GetViewModelEntity());
+            if (vm && std::strstr(vm, "weapons/v_hands.mdl"))
+            {
+                held = false;
+                why = " (hands viewmodel)";
+            }
+        }
     }
     if (held != m_HasHeldWeapon)
-        Game::logMsg("VR held weapon %s", held ? "yes" : "no");
+        Game::logMsg("VR held weapon %s%s", held ? "yes" : "no", why);
     m_HasHeldWeapon = held;
 }
 
