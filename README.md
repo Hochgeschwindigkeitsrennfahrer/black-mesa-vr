@@ -162,6 +162,7 @@ A few settings can only be changed in this file, because they set up the eye ima
 | `ReflectionRtScale` | `0.5` | Resolution of **water and mirror-floor reflections**, as a fraction of the eye size. Higher = sharper reflections and less shimmer at floor and wall edges, but costs GPU in rooms with big reflective floors. `0` = the game's fixed 1024×1024, which shimmers badly at headset resolution. |
 | `RefractCopyRtScale` | `0.5` | Resolution of the screen copy that **shiny floors and wired glass** sample. At the game's 1024×1024 the edges where floors meet walls look jagged. It is only a copy, so it is cheap: leave it at 0.5. |
 | `OffCenterEyes` | `true` | Renders each eye's own field of view instead of one wide view for both eyes. Most headsets see further outward than inward, so this is sharper at the same cost. Set to `false` only if the view looks wrong on your headset. |
+| `DesktopEye` | `right` | Which eye the desktop window (and stream/recording) shows: `right` or `left`. |
 | `IPDScale`, `HeightOffset` | `1.0`, `0.0` | World scale, and player height in cm (+ = taller; also in the VR panel, General > View). |
 
 The file explains every setting in comments.

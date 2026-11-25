@@ -335,6 +335,9 @@ namespace bmvr
     // side, each whole eye texture stretched into one half (tests take
     // screenshots of it).
     extern bool g_MirrorBothEyes;
+    // DesktopEye=right (default) / left: which eye the desktop window shows
+    // (cover-cropped to the window aspect).
+    extern bool g_DesktopEyeRight;
     // VrShotOriginFix=true (default): bullets fired through server player
     // vtable +0x474 leave from the controller ray (TryGetVrShootOrigin), not
     // the head. false = old behaviour (tests compare both).

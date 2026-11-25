@@ -44,6 +44,9 @@ RefractCopyRtScale=0.5
 # false: the world stays at the desktop window and is stretched into the eyes.
 WorldRenderAtEyeSize=true
 
+# Eye shown on the desktop window (and in streams/recordings): right or left.
+DesktopEye=right
+
 # Right-stick turn. Degrees per millisecond at full deflection.
 
 # Cutscene cameras (the fall and drag in the soldier ambush, the tram) take the

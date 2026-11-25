@@ -19947,9 +19947,13 @@ void VR::MirrorStereoToDesktopWindow()
         return;
     }
 
+    // DesktopEye (config, default right): the eye the window shows. Left
+    // eye if the right surface is missing.
+    IDirect3DSurface9* const mirrorEye = bmvr::g_DesktopEyeRight && m_D9RightEyeSurface
+        ? m_D9RightEyeSurface : m_D9LeftEyeSurface;
     D3DSURFACE_DESC bbDesc{};
     UINT eyeW = 0, eyeH = 0;
-    if (FAILED(bb->GetDesc(&bbDesc)) || !ResolveSurfaceSize(m_D9LeftEyeSurface, eyeW, eyeH)
+    if (FAILED(bb->GetDesc(&bbDesc)) || !ResolveSurfaceSize(mirrorEye, eyeW, eyeH)
         || bbDesc.Width < 640 || bbDesc.Height < 360 || eyeW < 640 || eyeH < 360)
     {
         bb->Release();
@@ -20037,10 +20041,10 @@ void VR::MirrorStereoToDesktopWindow()
 
     m_CaptureReentry = true;
     HRESULT hr = StretchRectKeepDeviceState(
-        device, m_D9LeftEyeSurface, srcPtr, dest, nullptr, D3DTEXF_LINEAR);
+        device, mirrorEye, srcPtr, dest, nullptr, D3DTEXF_LINEAR);
     if (FAILED(hr))
         hr = StretchRectKeepDeviceState(
-            device, m_D9LeftEyeSurface, srcPtr, dest, nullptr, D3DTEXF_NONE);
+            device, mirrorEye, srcPtr, dest, nullptr, D3DTEXF_NONE);
     m_CaptureReentry = false;
     if (SUCCEEDED(hr) && dest == m_D9DesktopMirrorSurface)
         m_DesktopMirrorHasImage.store(true, std::memory_order_release);
@@ -20048,7 +20052,8 @@ void VR::MirrorStereoToDesktopWindow()
     static int s_mirrorLog;
     if (s_mirrorLog < 4 || FAILED(hr))
     {
-        Game::logMsg("Desktop cover-crop left eye %ux%u src=%d,%d %ux%u -> %s %ux%u hr=0x%08X",
+        Game::logMsg("Desktop cover-crop %s eye %ux%u src=%d,%d %ux%u -> %s %ux%u hr=0x%08X",
+            mirrorEye == m_D9LeftEyeSurface ? "left" : "right",
             eyeW, eyeH, src.left, src.top, cropW, cropH,
             dest == bb ? "BB" : "offscreen", bbDesc.Width, bbDesc.Height, (unsigned)hr);
         ++s_mirrorLog;

@@ -132,6 +132,7 @@ namespace bmvr
     bool g_OffCenterEyes = true;
     bool g_FakeRuntime = false;
     bool g_MirrorBothEyes = false;
+    bool g_DesktopEyeRight = true;
     // Fixes: on by default, a config key can turn each off.
     bool g_VrShotOriginFix = true;
     bool g_VrShootFromMuzzle = true;
@@ -1114,6 +1115,8 @@ namespace bmvr
                 g_MuteFidgetSounds = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "MirrorBothEyes") == 0)
                 g_MirrorBothEyes = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "DesktopEye") == 0)
+                g_DesktopEyeRight = _strnicmp(val, "left", 4) != 0;
             else if (std::strcmp(n, "VRRuntimeBackend") == 0)
                 g_FakeRuntime = (_strnicmp(val, "fake", 4) == 0
                     && (val[4] == 0 || val[4] == ' ' || val[4] == '\t'));
