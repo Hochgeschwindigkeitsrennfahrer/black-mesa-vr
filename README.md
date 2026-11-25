@@ -22,7 +22,8 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 ### Playing
 - **6DOF motion controls**, the gun follows your hand, and you aim with the controller while you walk where you look.
 - **Two-handed weapons:** put your off-hand on the forend of a rifle, shotgun, MP5, crossbow and so on and hold grip;
-  the glove sits on the gun and steadies it.
+  the glove sits on the gun and steadies it. Hands & Weapons tab, Weapon grip: **Toggle grip** (squeeze once to hold,
+  again to let go) and **Grab area size** (a bigger zone if the gun is hard to take).
 - **Grab gestures:** a hand behind a shoulder, at a hip or (left hand) at the forehead + grip. Each zone has a setting
   per hand: the right hand draws a weapon (default: right shoulder crowbar, right hip pistol, above the left hip MP5;
   "Dynamic" zones keep what you put away there), the left hand does an action (quick save, flashlight, ammo, quick

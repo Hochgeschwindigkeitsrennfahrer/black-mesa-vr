@@ -168,7 +168,7 @@ namespace
             { "HANDS & WEAPONS", RowKind::Tab, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // Hands, hand HUD and the weapon menu (user 2026-11-19: one group). The
             // developer rows (size, gun hand, roll, HUD offsets) only show with
-            // "Show developer rows"; the reset covers them all (classic hands off too).
+            // "Show developer rows"; the tab reset covers them.
             { "HANDS & HUD", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Health/ammo on the hands", RowKind::Toggle, "VrHandHud", &bmvr::g_HandHud, nullptr, 0, 0, 0, nullptr },
             { "Red edges when hit", RowKind::Toggle, "DamageFlash", &bmvr::g_DamageFlash, nullptr, 0, 0, 0, nullptr },
@@ -186,9 +186,13 @@ namespace
             { "Sideways (+ = left)", RowKind::Number, "HandHudSide", nullptr, &bmvr::g_HandHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
             { "Tilt", RowKind::Number, "HandHudTilt", nullptr, &bmvr::g_HandHudTilt, 2.f, -90.f, 90.f, "%+.0f\xB0" },
             { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -180.f, 180.f, "%+.0f\xB0" },
-            { "Reset hands + HUD position", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "handhud_default" },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
+            // Support hand on the gun. Grab area size scales the zone where a squeeze takes the gun
+            // (wider + further forward; its rear end, toward the gun hand, stays put).
+            { "WEAPON GRIP", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Toggle grip", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
+            { "Grab area size", RowKind::Number, "TwoHandGrabScale", nullptr, &bmvr::g_TwoHandGrabScale, 0.1f, 0.5f, 2.f, "%.1fx" },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
             { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
@@ -196,7 +200,6 @@ namespace
             { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
             { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
-            { "Two-hand grip toggles", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
             { "GRENADES", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Throw at hand speed", RowKind::Toggle, "VrHandThrow", &bmvr::g_VrHandThrow, nullptr, 0, 0, 0, nullptr },
             { "Throw strength", RowKind::Number, "ThrowScale", nullptr, &bmvr::g_ThrowScale, 0.25f, 1.f, 8.f, "%.2f" },
@@ -226,7 +229,6 @@ namespace
             // finger pose + lock and the satchel hands are always on (user 2026-11-19).
             { "PHYSICAL WEAPONS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Physical weapons (beta)", RowKind::Toggle, "PhysicalWeapons", &bmvr::g_PhysicalWeapons, nullptr, 0, 0, 0, nullptr },
-            { "Grenade pin by hand", RowKind::Toggle, "VrGrenadePin", &bmvr::g_VrGrenadePin, nullptr, 0, 0, 0, nullptr },
             { "Ejected rounds are lost", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
             { "Reload hints", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
             // Developer row: A/B for the hand poses taken from Black Mesa's reload clips.
@@ -1417,7 +1419,7 @@ namespace
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
             return !g_HandHud;
-        if (is({ "VrRecoil", "VrGrenadePin", "VrMagDiscard", "VrReloadHints", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg", "VrClipHandRpgFlip" }))
+        if (is({ "VrRecoil", "VrMagDiscard", "VrReloadHints", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg", "VrClipHandRpgFlip" }))
             return !g_PhysicalWeapons;
         if (is({ "VrRecoilScale", "VrRecoilTwoHand" }))
             return !PhysicalWeapon(g_VrRecoil);
@@ -3158,22 +3160,6 @@ void VR::UpdateSettingsPanel()
         CloseSettingsPanel("close row");
         return;
     case RowKind::Button:
-        // Hands + hand HUD placement back at their defaults (thumb-up roll,
-        // gun grip, HUD spot); HUD and hit flash on/off stay as they are.
-        if (r.fmt && std::strcmp(r.fmt, "handhud_default") == 0)
-        {
-            bmvr::g_VrHandsRollDeg = 90.f;
-            bmvr::g_VrHandsGunGripRight = 1.2f;
-            bmvr::g_VrHandsGunGripUp = 0.f;
-            bmvr::g_VrHandsGunGripForward = 0.f;
-            bmvr::g_HandHudSize = 2.5f;
-            bmvr::g_HandHudUp = 2.2f;
-            bmvr::g_HandHudForward = -0.55f;
-            bmvr::g_HandHudSide = 0.3f;
-            bmvr::g_HandHudTilt = -18.f;
-            bmvr::g_HandHudRoll = 14.f;
-            break;
-        }
         // First click arms, a second one within 3 s resets the tab (nothing is lost by a stray click).
         if (r_IsTabReset(r))
         {
