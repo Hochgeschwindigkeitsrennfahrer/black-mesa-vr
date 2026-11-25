@@ -347,7 +347,7 @@ namespace bmvr
     // Fixes, default on (a config key can turn each off):
     extern bool g_TwoHandHoldWhileGrip;  // long guns stay two-handed while the grip is held
     extern bool g_TwoHandGripToggle;     // support grip latches: squeeze on the gun = on, squeeze again = off
-    extern float g_TwoHandGrabScale;     // support-hand grab zone size (1 = default; rear end fixed, 0.5..2)
+    extern float g_TwoHandGripScale;     // support-hand grip zone scale (1 = default; rear end fixed, 0.5..2)
     // Pistols (glock, .357): one shot per trigger pull; holding fires no more (off = hold repeats, game default).
     extern bool g_VrPistolSemiAuto;
     // Glock: a pull within VrGlockRapidWindow s of the last one fires Black Mesa's alt-fire (fast, wide spread).

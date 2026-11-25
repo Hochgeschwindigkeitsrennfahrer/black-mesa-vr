@@ -188,11 +188,11 @@ namespace
             { "Roll toward you", RowKind::Number, "HandHudRoll", nullptr, &bmvr::g_HandHudRoll, 2.f, -180.f, 180.f, "%+.0f\xB0" },
             { "FLASHLIGHT", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Flashlight from", RowKind::Choice, "FlashlightFrom", nullptr, &bmvr::g_FlashlightFrom, 1.f, 0.f, 2.f, "Right hand|Left hand|Head" },
-            // Support hand on the gun. Grab area size scales the zone where a squeeze takes the gun
+            // Support hand on the gun. Grip area scale sizes the zone where a squeeze takes the gun
             // (wider + further forward; its rear end, toward the gun hand, stays put).
             { "WEAPON GRIP", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Toggle grip", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
-            { "Grab area size", RowKind::Number, "TwoHandGrabScale", nullptr, &bmvr::g_TwoHandGrabScale, 0.1f, 0.5f, 2.f, "%.1fx" },
+            { "Grip area scale", RowKind::Number, "TwoHandGripScale", nullptr, &bmvr::g_TwoHandGripScale, 0.1f, 0.5f, 2.f, "%.1fx" },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
             { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },

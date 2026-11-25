@@ -138,7 +138,7 @@ namespace bmvr
     bool g_VrShootFromMuzzle = true;
     bool g_TwoHandHoldWhileGrip = true;
     bool g_TwoHandGripToggle = false;
-    float g_TwoHandGrabScale = 1.f;
+    float g_TwoHandGripScale = 1.f;
     bool g_VrPistolSemiAuto = false;
     bool g_VrGlockRapidAlt = false;
     float g_FlashlightFrom = 0.f;
@@ -973,11 +973,11 @@ namespace bmvr
                 g_WeaponMenuTilt = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "TwoHandGrabScale") == 0)
+            else if (std::strcmp(n, "TwoHandGripScale") == 0)
             {
                 const float v = static_cast<float>(atof(val));
                 if (v >= 0.5f && v <= 2.f)
-                    g_TwoHandGrabScale = v;
+                    g_TwoHandGripScale = v;
             }
             else if (std::strcmp(n, "VrHolsterBack") == 0)
                 ;   // retired 2026-11-24: holstering in the weapon's own zone is always on

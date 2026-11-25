@@ -15741,18 +15741,18 @@ void VR::ApplyTwoHandWeaponAim()
     const float lat = std::sqrt(latR * latR + latU * latU);
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
     const bool pistol = m_VmClass.offhandPistol;
-    // TwoHandGrabScale (panel "Grab area size"): wider and longer toward the
+    // TwoHandGripScale (panel "Grip area scale"): wider and longer toward the
     // muzzle; the rear end (alongMin, toward the gun hand) stays where it is,
     // so a bigger zone does not reach back over the magwell / gun hand.
-    const float grabScale = std::clamp(bmvr::g_TwoHandGrabScale, 0.5f, 2.f);
-    const float enterR = (pistol ? 0.07f : m_VmClass.offhandEnterMeters) * grabScale * scale;
+    const float gripScale = std::clamp(bmvr::g_TwoHandGripScale, 0.5f, 2.f);
+    const float enterR = (pistol ? 0.07f : m_VmClass.offhandEnterMeters) * gripScale * scale;
     // Hold zone stays a bit larger than the grab zone, or a big grab zone
     // would let go right after the squeeze.
     const float stayR = (std::max)((pistol ? 0.14f : 0.12f) * scale, enterR + 0.03f * scale);
     const float slop = 0.04f * scale;
     const float railHu = m_VmClass.offhandRailMeters * scale;
     const float alongMin = gx - slop;
-    const float alongMax = gx + (std::max)(railHu, 0.04f * scale) * grabScale;
+    const float alongMax = gx + (std::max)(railHu, 0.04f * scale) * gripScale;
     // Support hand at the gun (a little wider than the grab zone): its grip
     // takes the gun, not a ladder rung behind it.
     m_SupportNearGun.store(m_TwoHandActive || distToGrip < stayR + slop
@@ -15767,7 +15767,7 @@ void VR::ApplyTwoHandWeaponAim()
     const float underY = -0.01f * scale, underZ = -0.127f * scale;
     const float distUnder = pistol
         ? (d - (F0 * underX + R0 * underY + U0 * underZ)).Length() : 1e9f;
-    const float underR = 0.08f * grabScale * scale;
+    const float underR = 0.08f * gripScale * scale;
 
     // One light buzz in the support hand when it reaches the spot where a
     // squeeze takes the gun (user 2026-11-22; like the MP5 bolt buzz).
