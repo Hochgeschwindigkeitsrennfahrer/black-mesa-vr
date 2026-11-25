@@ -14742,20 +14742,23 @@ namespace
         VectorNormalize(xaxis);
         left = CrossProduct(face, xaxis);
         VectorNormalize(left);
-        // Tilt: about the panel's horizontal axis (+ = top toward the viewer, who
-        // sits on the face side). Turn: about its vertical axis (+ = the gun-front
-        // edge toward the viewer). Roll: in the panel plane. Turn and roll are
-        // mirrored for the left gun hand so one file value looks the same.
+        // Turn: about the panel's vertical axis (+ = the gun-front edge toward the
+        // viewer, who sits on the face side). Tilt: then about the turned panel's
+        // horizontal axis (+ = top toward the viewer). Roll: last, in the panel
+        // plane. Each step uses the axes the previous one left, so tilt stays a
+        // tilt at any turn (tilt first locked tilt onto roll at turn 90, RPG
+        // screen, user 2026-11-25). Turn and roll are mirrored for the left gun
+        // hand so one file value looks the same.
         const float mirror = rightHand ? 1.f : -1.f;
-        if (bmvr::g_AmmoHudTilt != 0.f)
-        {
-            face = HudRotate(face, xaxis, -bmvr::g_AmmoHudTilt);
-            left = HudRotate(left, xaxis, -bmvr::g_AmmoHudTilt);
-        }
         if (bmvr::g_AmmoHudTurn != 0.f)
         {
             face = HudRotate(face, left, bmvr::g_AmmoHudTurn * mirror);
             xaxis = HudRotate(xaxis, left, bmvr::g_AmmoHudTurn * mirror);
+        }
+        if (bmvr::g_AmmoHudTilt != 0.f)
+        {
+            face = HudRotate(face, xaxis, -bmvr::g_AmmoHudTilt);
+            left = HudRotate(left, xaxis, -bmvr::g_AmmoHudTilt);
         }
         if (bmvr::g_AmmoHudRoll != 0.f)
         {
