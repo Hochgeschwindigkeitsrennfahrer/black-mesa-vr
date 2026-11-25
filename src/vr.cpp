@@ -6374,12 +6374,16 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
     // (it sits below the layer centre), then move by the angle.
     if (!WantPauseWorldOverlay() && m_CaptionOnly)
     {
-        const float s = std::clamp(bmvr::g_CaptionScale, 0.5f, 2.f);
+        // The rows are relative to the user's headset-tested look (2026-11-25:
+        // height +4 deg, size 1.1x = row values 0 / 1.00).
+        constexpr float kBaseHeightDeg = 4.f, kBaseScale = 1.1f;
+        const float s = kBaseScale * std::clamp(bmvr::g_CaptionScale, 0.5f, 2.f);
+        const float deg = kBaseHeightDeg + std::clamp(bmvr::g_CaptionHeightDeg, -30.f, 30.f);
         const float h0 = overlay.heightMeters;
         overlay.widthMeters *= s;
         overlay.heightMeters *= s;
         yOff += (m_CaptionCentreY - 0.5f) * h0 * (s - 1.f);
-        yOff += overlay.distanceMeters * std::tan(std::clamp(bmvr::g_CaptionHeightDeg, -30.f, 30.f) * 0.01745329f);
+        yOff += overlay.distanceMeters * std::tan(deg * 0.01745329f);
     }
     overlay.curvature = 0.0f;
     overlay.offsetMeters[0] = 0.0f;

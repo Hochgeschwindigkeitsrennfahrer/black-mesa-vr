@@ -913,8 +913,9 @@ namespace bmvr
     extern float g_VrNearZ;
     // Subtitles / closed captions (panel GENERAL > VIEW, saved): CaptionHeight
     // moves the head-locked caption layer up (+) / down (-) in degrees,
-    // CaptionScale sizes it around the caption text. Only while captions
-    // show without a title / logo / boot-up on the same layer.
+    // CaptionScale sizes it around the caption text. Both relative to a
+    // built-in base (+4 deg, 1.1x; vr.cpp). Only while captions show without
+    // a title / logo / boot-up on the same layer.
     extern float g_CaptionHeightDeg;
     extern float g_CaptionScale;
     // VR recoil: each shot kicks the gun + aim up (per-weapon amount, back in
