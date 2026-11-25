@@ -14614,8 +14614,6 @@ namespace
         bool valid = false;
     };
 
-    constexpr float kAmmoHudSize = 2.0f;
-
     void HudMakePanel(const Vector& lowerLeft, const Vector& xaxis, const Vector& left,
         const Vector& face, float size, HudPanel& out)
     {
@@ -14696,8 +14694,13 @@ namespace
         constexpr float kBeside = 1.35f;
         constexpr float kBack = 0.2f;
         constexpr float kUp = 1.15f;
-        const Vector center = ctrlPos + right * (inward * kBeside) - fwd * kBack + up * kUp;
-        const Vector face = right * inward;
+        // Per-weapon placement on top (VR panel DEBUG "AMMO HUD", VR/ammo_hud.txt;
+        // VR::SyncAmmoHudRows keeps the globals on the held weapon's values).
+        // Sideways + = away from the gun.
+        const float size = (std::max)(0.25f, bmvr::g_AmmoHudSize);
+        const Vector center = ctrlPos + right * (inward * (kBeside + bmvr::g_AmmoHudSide))
+            + fwd * (bmvr::g_AmmoHudForward - kBack) + up * (kUp + bmvr::g_AmmoHudUp);
+        Vector face = right * inward;
         Vector left = up - face * up.Dot(face);
         if (left.LengthSqr() < 0.01f)
             left = fwd - face * fwd.Dot(face);
@@ -14708,8 +14711,28 @@ namespace
         VectorNormalize(xaxis);
         left = CrossProduct(face, xaxis);
         VectorNormalize(left);
-        const Vector origin = center - xaxis * (kAmmoHudSize * 0.5f) - left * (kAmmoHudSize * 0.5f);
-        HudMakePanel(origin, xaxis, left, face, kAmmoHudSize, out);
+        // Tilt: about the panel's horizontal axis (+ = top toward the viewer, who
+        // sits on the face side). Turn: about its vertical axis (+ = the gun-front
+        // edge toward the viewer). Roll: in the panel plane. Turn and roll are
+        // mirrored for the left gun hand so one file value looks the same.
+        const float mirror = rightHand ? 1.f : -1.f;
+        if (bmvr::g_AmmoHudTilt != 0.f)
+        {
+            face = HudRotate(face, xaxis, -bmvr::g_AmmoHudTilt);
+            left = HudRotate(left, xaxis, -bmvr::g_AmmoHudTilt);
+        }
+        if (bmvr::g_AmmoHudTurn != 0.f)
+        {
+            face = HudRotate(face, left, bmvr::g_AmmoHudTurn * mirror);
+            xaxis = HudRotate(xaxis, left, bmvr::g_AmmoHudTurn * mirror);
+        }
+        if (bmvr::g_AmmoHudRoll != 0.f)
+        {
+            xaxis = HudRotate(xaxis, face, bmvr::g_AmmoHudRoll * mirror);
+            left = HudRotate(left, face, bmvr::g_AmmoHudRoll * mirror);
+        }
+        const Vector origin = center - xaxis * (size * 0.5f) - left * (size * 0.5f);
+        HudMakePanel(origin, xaxis, left, face, size, out);
     }
 
     int HudGlyphIndex(char c)
@@ -16766,6 +16789,149 @@ void VR::SyncLadderGripRows()
     }
 }
 
+namespace ammo_hud
+{
+    // Per weapon (ViewmodelClass::numpadKey): the ammo panel's placement on top
+    // of BuildAmmoHudPanel's base spot. VR/ammo_hud.txt
+    // ("key forward side up tilt turn roll size"); the file overrides Builtin().
+    struct Place
+    {
+        float fwd = 0.f, side = 0.f, up = 0.f, tilt = 0.f, turn = 0.f, roll = 0.f, size = 2.f;
+    };
+    std::map<std::string, Place> g_Place;
+    std::string g_HeldKey;   // weapon the panel rows show (render thread)
+    bool g_Loaded = false;
+
+    std::string Path() { return bmvr::VrFilePath("ammo_hud.txt"); }
+
+    // Built-in per-weapon values (headset tuning goes here once settled).
+    Place Builtin(const std::string& key)
+    {
+        (void)key;
+        return Place{};
+    }
+
+    void Load()
+    {
+        if (g_Loaded)
+            return;
+        g_Loaded = true;
+        std::ifstream in(Path());
+        std::string line;
+        int n = 0;
+        while (in && std::getline(in, line))
+        {
+            if (line.empty() || line[0] == '#')
+                continue;
+            char key[32]{};
+            Place p;
+            if (sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f", key, static_cast<unsigned>(sizeof(key)),
+                    &p.fwd, &p.side, &p.up, &p.tilt, &p.turn, &p.roll, &p.size) >= 8)
+            {
+                g_Place[key] = p;
+                ++n;
+            }
+        }
+        Game::logMsg("Ammo HUD tuning: %d weapons from %s", n, Path().c_str());
+    }
+
+    void Save()
+    {
+        std::ofstream out(Path(), std::ios::trunc);
+        if (!out)
+        {
+            Game::logMsg("Ammo HUD tuning: save failed %s", Path().c_str());
+            return;
+        }
+        out << "# Ammo HUD placement per weapon (VR panel DEBUG rows \"AMMO HUD\"), on top of the built-in spot.\n";
+        out << "# key forward side(+ = away from the gun) up tilt turn roll size   (units; degrees; size 2 = default)\n";
+        for (const auto& kv : g_Place)
+        {
+            const Place& p = kv.second;
+            out << kv.first << " " << p.fwd << " " << p.side << " " << p.up << " " << p.tilt << " "
+                << p.turn << " " << p.roll << " " << p.size << "\n";
+        }
+    }
+
+    Place For(const std::string& key)
+    {
+        Load();
+        auto it = g_Place.find(key);
+        return it != g_Place.end() ? it->second : Builtin(key);
+    }
+
+    void ToGlobals(const Place& p)
+    {
+        bmvr::g_AmmoHudForward = p.fwd;
+        bmvr::g_AmmoHudSide = p.side;
+        bmvr::g_AmmoHudUp = p.up;
+        bmvr::g_AmmoHudTilt = p.tilt;
+        bmvr::g_AmmoHudTurn = p.turn;
+        bmvr::g_AmmoHudRoll = p.roll;
+        bmvr::g_AmmoHudSize = p.size;
+    }
+
+    Place FromGlobals()
+    {
+        return Place{ bmvr::g_AmmoHudForward, bmvr::g_AmmoHudSide, bmvr::g_AmmoHudUp, bmvr::g_AmmoHudTilt,
+            bmvr::g_AmmoHudTurn, bmvr::g_AmmoHudRoll, bmvr::g_AmmoHudSize };
+    }
+
+    bool Same(const Place& a, const Place& b)
+    {
+        return a.fwd == b.fwd && a.side == b.side && a.up == b.up && a.tilt == b.tilt
+            && a.turn == b.turn && a.roll == b.roll && a.size == b.size;
+    }
+}
+
+bool bmvr::AmmoHudRowDefault(const float* f, float& def)
+{
+    if (!f)
+        return false;
+    const ammo_hud::Place b = ammo_hud::Builtin(ammo_hud::g_HeldKey);
+    if (f == &g_AmmoHudForward) def = b.fwd;
+    else if (f == &g_AmmoHudSide) def = b.side;
+    else if (f == &g_AmmoHudUp) def = b.up;
+    else if (f == &g_AmmoHudTilt) def = b.tilt;
+    else if (f == &g_AmmoHudTurn) def = b.turn;
+    else if (f == &g_AmmoHudRoll) def = b.roll;
+    else if (f == &g_AmmoHudSize) def = b.size;
+    else return false;
+    return true;
+}
+
+// VR panel DEBUG rows "AMMO HUD": the rows (and the panel placement) follow the
+// weapon in the hand; a row change is saved for that weapon right away.
+void VR::SyncAmmoHudRows()
+{
+    std::string key;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        key = m_VmClass.numpadKey;
+    }
+    static ammo_hud::Place s_last;
+    static bool s_init = false;
+    if (!s_init || key != ammo_hud::g_HeldKey)
+    {
+        s_init = true;
+        ammo_hud::g_HeldKey = key;
+        s_last = key.empty() ? ammo_hud::Place{} : ammo_hud::For(key);
+        ammo_hud::ToGlobals(s_last);
+        return;
+    }
+    const ammo_hud::Place now = ammo_hud::FromGlobals();
+    if (key.empty() || ammo_hud::Same(now, s_last))
+        return;
+    s_last = now;
+    if (ammo_hud::Same(now, ammo_hud::Builtin(key)))
+        ammo_hud::g_Place.erase(key);   // back at the built-in values: drop the line
+    else
+        ammo_hud::g_Place[key] = now;
+    ammo_hud::Save();
+    Game::logMsg("Ammo HUD tune %s: fwd %+.2f side %+.2f up %+.2f tilt %+.0f turn %+.0f roll %+.0f size %.2f",
+        key.c_str(), now.fwd, now.side, now.up, now.tilt, now.turn, now.roll, now.size);
+}
+
 void VR::GetRightGlovePalmOffsetMeters(Vector& meters) const
 {
     meters = Vector(0.f, 0.f, 0.f);
@@ -17048,6 +17214,7 @@ void VR::UpdateViewmodelNumpadAdjust(bool paused)
     vm_numpad::Load();
     SyncHeldWeaponAngleRows();
     SyncLadderGripRows();
+    SyncAmmoHudRows();
     if (paused || !m_GameplayEligible)
         return;
 

@@ -1066,6 +1066,7 @@ public:
     // DEBUG "LADDER GRIP TUNING" rows <-> VR/ladder_grip.txt for the ladder
     // model last held (game thread).
     void SyncLadderGripRows();
+    void SyncAmmoHudRows();
     bool UseFollowsLeftHand() const { return m_GrabLatched && m_GrabHandLeft; }
     bool UseGrabActive() const { return m_GrabLatched; }
     // Weapon fire, shoot origin, and flashlight must not follow a leftover

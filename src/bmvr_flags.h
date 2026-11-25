@@ -959,6 +959,14 @@ namespace bmvr
     // VR panel DEBUG "LADDER GRIP TUNING": the last held ladder model's grip
     // (out toward the player / up, cm; curl), saved in VR/ladder_grip.txt.
     extern float g_LadderTuneOutCm, g_LadderTuneUpCm, g_LadderTuneCurl;
+    // VR panel DEBUG "AMMO HUD (SAVED PER WEAPON)": the ammo panel beside the gun
+    // hand, for the weapon in the hand. Forward / sideways (+ = away from the
+    // gun) / up in game units, tilt / turn / roll in degrees, size in game units
+    // (2 = the old fixed size). Live, saved per weapon in VR/ammo_hud.txt.
+    extern float g_AmmoHudForward, g_AmmoHudSide, g_AmmoHudUp, g_AmmoHudTilt, g_AmmoHudTurn, g_AmmoHudRoll, g_AmmoHudSize;
+    // Panel row `f` is one of the ammo HUD rows: `def` = its built-in value
+    // for the weapon in the hand (what "Reset tab" puts back).
+    bool AmmoHudRowDefault(const float* f, float& def);
     extern float g_SatchelBagDepth;
     extern float g_RpgFistCurl, g_RpgFistOutCm;
     extern float g_RpgHandTurn, g_RpgHandRoll, g_RpgHandSpin, g_RpgHandFwdCm, g_RpgHandUpCm, g_RpgHandSideCm; // RPG rocket in the left hand: finger curl, rocket out of the palm (cm)

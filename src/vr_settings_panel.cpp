@@ -454,6 +454,16 @@ namespace
             { "Support hand (+ forward)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSupportCm, 1.f, -20.f, 20.f, "%+.0f cm" },
             { "Mag seat distance", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatCm, 0.5f, 1.f, 30.f, "%.1f cm" },
             { "Mag seat angle (180 = any)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatDeg, 5.f, 5.f, 180.f, "%.0f deg" },
+            // Ammo panel beside the gun hand, for the weapon in the hand (VR/ammo_hud.txt,
+            // VR::SyncAmmoHudRows). User 2026-11-25: tune each weapon while playing.
+            { "AMMO HUD (SAVED PER WEAPON)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Ammo HUD forward (- = back)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudForward, 0.25f, -8.f, 8.f, "%+.2f" },
+            { "Ammo HUD sideways (+ = out)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
+            { "Ammo HUD up", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudUp, 0.25f, -6.f, 6.f, "%+.2f" },
+            { "Ammo HUD tilt (top toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTilt, 5.f, -90.f, 90.f, "%+.0f\xB0" },
+            { "Ammo HUD turn (front toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTurn, 5.f, -90.f, 90.f, "%+.0f\xB0" },
+            { "Ammo HUD roll", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudRoll, 5.f, -180.f, 180.f, "%+.0f\xB0" },
+            { "Ammo HUD size", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSize, 0.25f, 0.5f, 6.f, "%.2f" },
             // Per ladder model, for the last rung held (VR::SyncLadderGripRows).
             { "LADDER GRIP TUNING (SAVED PER LADDER MODEL)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Grip out (toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_LadderTuneOutCm, 0.5f, -10.f, 10.f, "%+.1f cm" },
@@ -1027,6 +1037,16 @@ namespace
                 Game::logMsg("VR settings reset: %s -> %s", r.label, r.defB ? "on" : "off");
                 ++changed;
             }
+            else if (float ammoDef = 0.f; r.kind == RowKind::Number && bmvr::AmmoHudRowDefault(r.f, ammoDef))
+            {
+                // Per-weapon ammo HUD rows: back to the held weapon's built-in values.
+                if (std::fabs(*r.f - ammoDef) > 1e-4f)
+                {
+                    *r.f = ammoDef;
+                    Game::logMsg("VR settings reset: %s -> %g", r.label, ammoDef);
+                    ++changed;
+                }
+            }
             else if ((r.kind == RowKind::Number || r.kind == RowKind::Choice) && r.f
                 && (r.f == &bmvr::g_VmTuneSeatCm || r.f == &bmvr::g_VmTuneSeatDeg))
             {
@@ -1520,6 +1540,8 @@ namespace
             return false;
         // Key-less rows (bmvr_* fixes, tests, tuning) count too: "Reset tab" puts them back,
         // so they must be marked and counted (user 2026-11-22: render fixes were not).
+        if (float ammoDef = 0.f; bmvr::AmmoHudRowDefault(r.f, ammoDef))
+            return std::fabs(*r.f - ammoDef) > 1e-4f;
         if (r.f && (r.f == &bmvr::g_VmTuneSeatCm || r.f == &bmvr::g_VmTuneSeatDeg))
         {
             float cm = 0.f, deg = 0.f;
