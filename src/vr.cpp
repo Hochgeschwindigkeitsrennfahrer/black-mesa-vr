@@ -13655,7 +13655,7 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
         TryGetLadderPinDrawPos(true, s.body, s.leftPos);
         TryGetLadderPinDrawPos(false, s.body, s.rightPos);
         s.gunHudTwoHand = TwoHandGunHudAngles(
-            bmvr::g_LeftHanded ? s.leftAng : s.rightAng, s.gunHudAng);
+            bmvr::g_LeftHanded ? s.leftAng : s.rightAng, s.gunHudAng, s.gunHudShift);
     }
     if (m_Game)
         s.hudOk = m_Game->ReadWristHudValues(s.hud[0], s.hud[1], s.hud[2], s.hud[3], s.hud[4], s.hud[5]);
@@ -15144,16 +15144,24 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     const bool rightDominant = !bmvr::g_LeftHanded;
     // Ammo panel orientation: the gun hand, or the two-hand aim (long guns).
     QAngle gunHudAng = rightDominant ? rightAng : leftAng;
+    Vector gunHudPos = rightDominant ? rightOrigin : leftOrigin;
     if (t_HandSnap)
     {
         if (t_HandSnap->gunHudTwoHand)
+        {
             gunHudAng = t_HandSnap->gunHudAng;
+            gunHudPos += t_HandSnap->gunHudShift;
+        }
     }
     else
     {
         QAngle twoHandAng{};
-        if (TwoHandGunHudAngles(gunHudAng, twoHandAng))
+        Vector shift{};
+        if (TwoHandGunHudAngles(gunHudAng, twoHandAng, shift))
+        {
             gunHudAng = twoHandAng;
+            gunHudPos += shift;
+        }
     }
 
     auto drawValueIcon = [&](const HudPanel& p, float x0, float yTop, float valueCell,
@@ -15192,8 +15200,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                 // it, so both read at once while aiming (on the support
                 // wrist it turned away from the eye).
                 HudPanel gunPanel{};
-                BuildAmmoHudPanel(rightDominant ? rightOrigin : leftOrigin,
-                    gunHudAng, rightDominant, gunPanel);
+                BuildAmmoHudPanel(gunHudPos, gunHudAng, rightDominant, gunPanel);
                 if (gunPanel.valid)
                 {
                     handPanel = gunPanel;
@@ -15250,10 +15257,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
     if (hasAmmoHud && gunOk)
     {
         HudPanel weaponPanel{};
-        BuildAmmoHudPanel(
-            rightDominant ? rightOrigin : leftOrigin,
-            gunHudAng,
-            rightDominant, weaponPanel);
+        BuildAmmoHudPanel(gunHudPos, gunHudAng, rightDominant, weaponPanel);
         if (weaponPanel.valid && !HudIsBackfacing(weaponPanel, eyeOrig))
         {
             std::string weaponModel;
@@ -16038,6 +16042,18 @@ void VR::ApplyTwoHandWeaponAim()
     m_TwoHandHudTo[0] = F;
     m_TwoHandHudTo[1] = R;
     m_TwoHandHudTo[2] = U;
+    {
+        // The gun turns about its aim-pose point (gunTracking); the ammo
+        // panel is placed from the gun hand's grip pose. Carry that lever
+        // with the turn too, or the panel slid along the gun as the
+        // two-hand aim swung left/right (user 2026-11-25). World = tracking
+        // turned by the turn yaw, as `d` above.
+        const Vector gunGrip = leftHanded ? m_LeftControllerPosAbs : m_PhysicalRightPosAbs;
+        Vector lever = gunTracking - gunGrip;
+        PivotYaw(lever, m_RotationOffsetY.load(std::memory_order_acquire));
+        const Vector turned = F * lever.Dot(F0) + R * lever.Dot(R0) + U * lever.Dot(U0);
+        m_TwoHandHudShift = lever - turned;
+    }
     m_TwoHandHudValid = true;
 
     finishDraw(F, R, U, gxSlide);
@@ -16714,7 +16730,7 @@ bool VR::TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QA
     return true;
 }
 
-bool VR::TwoHandGunHudAngles(const QAngle& gunCtrlAng, QAngle& out) const
+bool VR::TwoHandGunHudAngles(const QAngle& gunCtrlAng, QAngle& out, Vector& shift) const
 {
     // Ammo panel while a long gun is held with both hands (user 2026-11-25):
     // locked to the gun's aim, not the gun-hand controller. The controller
@@ -16736,6 +16752,7 @@ bool VR::TwoHandGunHudAngles(const QAngle& gunCtrlAng, QAngle& out) const
         return false;
     QAngle::VectorAngles(nf, nu, out);
     out.y = WrapYaw(out.y);
+    shift = m_TwoHandHudShift;
     return std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
 }
 

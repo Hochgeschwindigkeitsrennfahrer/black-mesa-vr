@@ -1285,6 +1285,7 @@ public:
         // while a long gun is held with both hands (TwoHandGunHudAngles).
         bool gunHudTwoHand = false;
         QAngle gunHudAng{};
+        Vector gunHudShift{};
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
     // HUD values for drawing: the drawing frame's snapshot while one is drawn
@@ -1635,7 +1636,9 @@ public:
     bool TryGetTwoHandOffhandDrawPose(bool physicalLeft, Vector& trackingPos, QAngle& trackingAng) const;
     // Two-handed long gun: gunCtrlAng turned from the one-hand gun basis to the
     // two-hand aim basis, so the ammo panel stays on the gun, not the hand.
-    bool TwoHandGunHudAngles(const QAngle& gunCtrlAng, QAngle& out) const;
+    // shift: move the gun-hand controller position by it (the gun pivots on
+    // the aim pose, the panel hangs off the grip pose).
+    bool TwoHandGunHudAngles(const QAngle& gunCtrlAng, QAngle& out, Vector& shift) const;
     bool HudOverlayReady() const { return m_HudOverlayReady; }
     void EnsureHudOverlay();
     void ClearHudSurface(bool opaque);
@@ -1829,6 +1832,7 @@ private:
     // aim, for TwoHandGunHudAngles.
     Vector m_TwoHandHudFrom[3]{};
     Vector m_TwoHandHudTo[3]{};
+    Vector m_TwoHandHudShift{};   // world, added to the gun-hand controller position
     bool m_TwoHandHudValid = false;
     // Viewmodel clip state (NoteViewmodelLowerState) + stock off-hand fingers.
     std::atomic<int> m_VmLowerState{ kVmLowerOther };
