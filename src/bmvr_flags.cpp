@@ -439,7 +439,7 @@ namespace bmvr
     bool g_VrRecoil = false;
     bool g_PhysicalLadders = false;
     bool g_PhysicalCrouch = false;
-    float g_PhysicalCrouchDropCm = 35.f;
+    float g_PhysicalCrouchDropCm = 50.f; // user 2026-11-25 (was 35)
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
     float g_VmTuneSeatCm = 6.f, g_VmTuneSeatDeg = 45.f;
     bool g_PhysicalLadderSmooth = true;

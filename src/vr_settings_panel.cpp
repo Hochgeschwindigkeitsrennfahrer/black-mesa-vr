@@ -460,15 +460,16 @@ namespace
             { "Mag seat distance", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatCm, 0.5f, 1.f, 30.f, "%.1f cm" },
             { "Mag seat angle (180 = any)", RowKind::Number, nullptr, nullptr, &bmvr::g_VmTuneSeatDeg, 5.f, 5.f, 180.f, "%.0f deg" },
             // Ammo panel beside the gun hand, for the weapon in the hand (VR/ammo_hud.txt,
-            // VR::SyncAmmoHudRows). User 2026-11-25: tune each weapon while playing.
+            // VR::SyncAmmoHudRows). User 2026-11-25: tune each weapon while playing;
+            // ranges +25% (user 2026-11-25: some guns hit the limits).
             { "AMMO HUD (SAVED PER WEAPON)", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Ammo HUD forward (- = back)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudForward, 0.25f, -8.f, 8.f, "%+.2f" },
-            { "Ammo HUD sideways (+ = out)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSide, 0.25f, -6.f, 6.f, "%+.2f" },
-            { "Ammo HUD up", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudUp, 0.25f, -6.f, 6.f, "%+.2f" },
-            { "Ammo HUD tilt (top toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTilt, 5.f, -90.f, 90.f, "%+.0f\xB0" },
-            { "Ammo HUD turn (front toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTurn, 5.f, -90.f, 90.f, "%+.0f\xB0" },
-            { "Ammo HUD roll", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudRoll, 5.f, -180.f, 180.f, "%+.0f\xB0" },
-            { "Ammo HUD size", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSize, 0.25f, 0.5f, 6.f, "%.2f" },
+            { "Ammo HUD forward (- = back)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudForward, 0.25f, -10.f, 10.f, "%+.2f" },
+            { "Ammo HUD sideways (+ = out)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSide, 0.25f, -7.5f, 7.5f, "%+.2f" },
+            { "Ammo HUD up", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudUp, 0.25f, -7.5f, 7.5f, "%+.2f" },
+            { "Ammo HUD tilt (top toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTilt, 5.f, -115.f, 115.f, "%+.0f\xB0" },
+            { "Ammo HUD turn (front toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTurn, 5.f, -115.f, 115.f, "%+.0f\xB0" },
+            { "Ammo HUD roll", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudRoll, 5.f, -225.f, 225.f, "%+.0f\xB0" },
+            { "Ammo HUD size", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSize, 0.25f, 0.4f, 7.5f, "%.2f" },
             // A/B (user 2026-11-25): off = with both hands on a long gun the panel
             // stays on the gun's aim; on = the old gun-hand controller rotation.
             { "Two hands: ammo HUD follows hand", RowKind::Toggle, nullptr, &bmvr::g_TwoHandAmmoHudFollowsHand, nullptr, 0, 0, 0, nullptr },
