@@ -6351,7 +6351,9 @@ bool VR::PublishOpenXrHudOverlay(uint32_t frameId)
     // TitleLevel: titles take the pause-menu path too (the helper places the
     // layer level at the head's yaw once per epoch; UpdateTitleHud bumps it).
     // Suit boot-up sequences are always head-locked (HUD inside the helmet).
-    if (!WantPauseWorldOverlay() && WantTitleHudOverlay() && (!bmvr::g_TitleLevel || m_BootHudActive))
+    // Captions too (head-locked at the bottom of the view, issue #18).
+    if (!WantPauseWorldOverlay() && WantTitleHudOverlay() &&
+        (!bmvr::g_TitleLevel || m_BootHudActive || m_CaptionHudActive))
         overlay.reserved1 |= L4D2VR_OPENXR_OVERLAY_FLAG_HEAD_LOCKED;
     // Title texts are published premultiplied (TitlePremultipliedShader).
     if (!WantPauseWorldOverlay() && WantTitleHudOverlay())
@@ -10789,8 +10791,10 @@ namespace
     // on the tram ride; BM's own HUD element, not the SDK's intro credits).
     // CHudBootUpSequence = the HEV suit boot-up (bm_c1a0a suit pickup: system
     // text left, suit figure right); CLJHudBootUpSequence = the long jump one.
+    // HudCloseCaption = closed captions / subtitles (closecaption 1; cc_subtitles 1 = dialogue only);
+    // the panel hides itself when nothing is said.
     const char* const kTitleHudNames[kTitleHudCount] = { "HudCredits", "HudMessage", "CHudIntroCredits",
-        "CHudBootUpSequence", "CLJHudBootUpSequence" };
+        "CHudBootUpSequence", "CLJHudBootUpSequence", "HudCloseCaption" };
 
     // Depth-first from the vgui root; fills found[i] for kTitleHudNames[i].
     bool SehFindTitleHudPanels(void* ipanel, unsigned int root, unsigned int* found)
@@ -10832,45 +10836,6 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return false;
-        }
-    }
-
-    // Subtitle study (issue #18, 2026-11-23): first panel whose name has
-    // "aption" or "ubtitle" (closed captions). Logs every match once.
-    unsigned int SehFindCaptionPanel(void* ipanel, unsigned int root)
-    {
-        BMVR_TRY
-        {
-            unsigned int stack[64];
-            int sp = 0;
-            int visited = 0;
-            unsigned int found = 0;
-            stack[sp++] = root;
-            while (sp > 0 && visited < 4096)
-            {
-                const unsigned int p = stack[--sp];
-                ++visited;
-                const char* name = PanelCall<const char*>(ipanel, kPanelGetName, p);
-                if (name && std::strcmp(name, "HudCloseCaption") == 0)
-                {
-                    Game::logMsg("Caption panel '%s' = %08X visible=%d", name, p,
-                        PanelCall<bool>(ipanel, kPanelIsVisible, p) ? 1 : 0);
-                    found = p;
-                    break;
-                }
-                const int n = PanelCall<int>(ipanel, kPanelGetChildCount, p);
-                for (int c = 0; c < n && sp < 64; ++c)
-                {
-                    const unsigned int child = PanelCall<unsigned int>(ipanel, kPanelGetChild, p, c);
-                    if (child)
-                        stack[sp++] = child;
-                }
-            }
-            return found;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0;
         }
     }
 
@@ -11496,56 +11461,42 @@ void VR::UpdateTitleHud()
             if (root && SehFindTitleHudPanels(m_VguiPanel, root, m_TitleHudPanels))
             {
                 Game::logMsg("Title HUD panels: HudCredits=%08X HudMessage=%08X CHudIntroCredits=%08X"
-                    " CHudBootUpSequence=%08X CLJHudBootUpSequence=%08X",
+                    " CHudBootUpSequence=%08X CLJHudBootUpSequence=%08X HudCloseCaption=%08X",
                     m_TitleHudPanels[0], m_TitleHudPanels[1], m_TitleHudPanels[2], m_TitleHudPanels[3],
-                    m_TitleHudPanels[4]);
+                    m_TitleHudPanels[4], m_TitleHudPanels[5]);
             }
         }
     }
     const bool bootWas = m_BootHudActive;
+    const bool captionWas = m_CaptionHudActive;
     m_BootHudActive = false;
+    m_CaptionHudActive = false;
     for (int i = 0; i < kTitleHudCount; ++i)
     {
         if (TitleHudPanelShowing(i))
         {
             m_TitleHudActive = true;
-            if (i >= kBootHudFirst)
+            if (i >= kBootHudFirst && i < kBootHudEnd)
                 m_BootHudActive = true;
+            if (i == kCaptionHud)
+                m_CaptionHudActive = true;
+        }
+    }
+    if (m_CaptionHudActive != captionWas)
+    {
+        static int s_capLogs;
+        if (s_capLogs < 60)
+        {
+            ++s_capLogs;
+            int b[4] = {};
+            SehPanelBounds(m_VguiPanel, m_TitleHudPanels[kCaptionHud], b);
+            Game::logMsg("Caption HUD %s bounds %d,%d %dx%d", m_CaptionHudActive ? "shown (head-locked title layer)" :
+                "hidden", b[0], b[1], b[2], b[3]);
         }
     }
     LogBootHudChildren();
     if (m_BootHudActive != bootWas)
         Game::logMsg("Boot-up HUD %s", m_BootHudActive ? "shown (head-locked title layer)" : "hidden");
-    // Subtitle study probe (issue #18): find the caption panel, log its
-    // visibility changes and size.
-    {
-        static unsigned int s_cc;
-        static unsigned long long s_ccNext;
-        static int s_ccVis = -1, s_ccLogs;
-        const unsigned long long now = GetTickCount64();
-        if (!s_cc && now >= s_ccNext)
-        {
-            s_ccNext = now + 5000;
-            const unsigned int root = static_cast<unsigned int>(
-                reinterpret_cast<uintptr_t>(m_Game->m_EngineVGui->GetPanel(0)));
-            if (root)
-                s_cc = SehFindCaptionPanel(m_VguiPanel, root);
-        }
-        if (s_cc)
-        {
-            const int vis = SehPanelVisible(m_VguiPanel, s_cc) ? 1 : 0;
-            int b[4] = {};
-            const bool haveB = SehPanelBounds(m_VguiPanel, s_cc, b);
-            static int s_lastH = -1;
-            if ((vis != s_ccVis || (haveB && b[3] != s_lastH)) && s_ccLogs < 40)
-            {
-                ++s_ccLogs;
-                Game::logMsg("Caption panel visible=%d bounds %d,%d %dx%d", vis, b[0], b[1], b[2], b[3]);
-            }
-            s_ccVis = vis;
-            s_lastH = haveB ? b[3] : -1;
-        }
-    }
     if (m_TitleHudActive != was)
     {
         // New epoch: with TitleLevel the helper places the HUD layer level at
@@ -11572,7 +11523,7 @@ bool VR::TitleHudPanelShowing(int i) const
     const unsigned int p = (i >= 0 && i < kTitleHudCount) ? m_TitleHudPanels[i] : 0;
     if (!p || !m_VguiPanel || !SehPanelVisible(m_VguiPanel, p))
         return false;
-    if (i != 2 && i < kBootHudFirst)
+    if ((i != 2 && i < kBootHudFirst) || i == kCaptionHud)
         return true;
     int total = 0;
     return SehVisibleChildren(m_VguiPanel, p, &total, nullptr, 0) > 0;
@@ -11625,9 +11576,9 @@ int VR::IsolateTitleHudPanels(unsigned int* hidden, int cap)
     {
         BootHudRects r{};
         const int inset = static_cast<int>(bmvr::g_BootHudInset + 0.5f);
-        for (int i = kBootHudFirst; i < kTitleHudCount && !r.boot; ++i)
+        for (int i = kBootHudFirst; i < kBootHudEnd && !r.boot; ++i)
             r.boot = TitleHudPanelShowing(i);
-        for (int i = kBootHudFirst; i < kTitleHudCount && inset > 0 && !r.count; ++i)
+        for (int i = kBootHudFirst; i < kBootHudEnd && inset > 0 && !r.count; ++i)
         {
             int b[4] = {};
             if (!TitleHudPanelShowing(i) || !SehPanelBounds(m_VguiPanel, m_TitleHudPanels[i], b) || b[2] < 640)
@@ -11651,7 +11602,7 @@ void VR::LogBootHudChildren()
     static int s_logs;
     if (!m_VguiPanel || s_logs >= 80)
         return;
-    for (int i = kBootHudFirst; i < kTitleHudCount; ++i)
+    for (int i = kBootHudFirst; i < kBootHudEnd; ++i)
     {
         const unsigned int p = m_TitleHudPanels[i];
         if (!p)

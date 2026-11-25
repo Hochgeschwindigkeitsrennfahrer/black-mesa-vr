@@ -65,9 +65,12 @@ struct D3DAimLineOverlayEyeState
 };
 
 // Title HUD panels: HudCredits, HudMessage, CHudIntroCredits, then the HEV
-// suit and long jump boot-up sequences (kBootHudFirst..).
-constexpr int kTitleHudCount = 5;
+// suit and long jump boot-up sequences (kBootHudFirst..kBootHudEnd-1), then
+// the closed caption / subtitle panel (kCaptionHud, issue #18).
+constexpr int kTitleHudCount = 6;
 constexpr int kBootHudFirst = 3;
+constexpr int kBootHudEnd = 5;
+constexpr int kCaptionHud = 5;
 
 // Boot-up parts for the layer move: x, y, w, h on the boot panel, dx.
 constexpr int kBootHudMaxRects = 32;
@@ -760,6 +763,8 @@ public:
     bool m_TitleHudActive = false;
     // A suit boot-up sequence is on the title layer (head-locked).
     bool m_BootHudActive = false;
+    // Captions (HudCloseCaption) are on the title layer (head-locked).
+    bool m_CaptionHudActive = false;
     // The HUD RT paint in flight is the title layer (no menu cursor / colour
     // fix). Read on the material thread for the queued end.
     std::atomic<bool> m_HudPaintTitle{ false };
