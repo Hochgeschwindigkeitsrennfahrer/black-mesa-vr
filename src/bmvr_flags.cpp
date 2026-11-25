@@ -838,7 +838,7 @@ namespace bmvr
             else if (std::strcmp(n, "IPDScale") == 0)
             {
                 const float s = static_cast<float>(atof(val));
-                if (s >= 0.5f && s <= 2.f)
+                if (s >= 0.8f && s <= 1.2f)
                     g_IPDScale = s;
             }
             else if (std::strcmp(n, "HeightOffset") == 0)

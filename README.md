@@ -164,7 +164,8 @@ A few settings can only be changed in this file, because they set up the eye ima
 | `RefractCopyRtScale` | `0.5` | Resolution of the screen copy that **shiny floors and wired glass** sample. At the game's 1024×1024 the edges where floors meet walls look jagged. It is only a copy, so it is cheap: leave it at 0.5. |
 | `OffCenterEyes` | `true` | Renders each eye's own field of view instead of one wide view for both eyes. Most headsets see further outward than inward, so this is sharper at the same cost. Set to `false` only if the view looks wrong on your headset. |
 | `DesktopEye` | `right` | Which eye the desktop window (and stream/recording) shows: `right` or `left`. |
-| `IPDScale`, `HeightOffset` | `1.0`, `0.0` | World scale, and player height in cm (+ = taller; also in the VR panel, General > View). |
+| `IPDScale` | `1.0` | Stereo depth strength (0.8–1.2): multiplies the eye separation your headset reports. Higher = more depth and a smaller-feeling world. Leave it at 1.0; it does not change movement or hand scale, and it is not the place to fix your headset's IPD. |
+| `HeightOffset` | `0.0` | Player height in cm (+ = taller; also in the VR panel, General > View). |
 
 The file explains every setting in comments.
 

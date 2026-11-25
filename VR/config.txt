@@ -84,6 +84,8 @@ ViewmodelPosOffsetXTouch=5.5
 HudDistance=1.05
 HudSize=0.70
 
+# Stereo depth strength (0.8-1.2, other values are ignored). Leave at 1.0;
+# set your own IPD on the headset or in SteamVR.
 IPDScale=1.0
 # Player height in cm (+ = taller); also in the VR panel, General > View.
 HeightOffset=0

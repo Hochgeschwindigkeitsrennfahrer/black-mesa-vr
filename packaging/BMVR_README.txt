@@ -93,8 +93,10 @@ only in this file. Quit the game fully before you edit it.
                       at a GPU cost. 0.8-0.9 if you are GPU-bound.
   MaxEyeSize=4096     Largest eye side in pixels. Raise only if a high
                       RenderScale hits it (bmvr_log.txt shows the size used).
-  IPDScale, HeightOffset    world scale; player height in cm (+ = taller,
-                            also in the VR panel, General > View).
+  IPDScale=1.0        Stereo depth strength, 0.8-1.2. Leave at 1.0; set your
+                      own IPD on the headset or in SteamVR.
+  HeightOffset=0      Player height in cm (+ = taller; also in the VR panel,
+                      General > View).
 
 The file explains every setting in comments.
 
