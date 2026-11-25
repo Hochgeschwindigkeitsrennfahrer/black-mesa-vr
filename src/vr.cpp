@@ -15861,7 +15861,8 @@ void VR::ApplyTwoHandWeaponAim()
     if (m_TwoHandActive && bmvr::g_TwoHandGripToggle)
     {
         // Latched: a new squeeze lets go, and so does a support hand taken
-        // well off the gun (else the aim would follow a hand that left it).
+        // well off the gun (else the aim would follow a hand that left it;
+        // TwoHandToggleAutoRelease off = squeeze only, developer row).
         // Distance from the grip point held for 0.25 s: the old lateral test
         // against the posed model axis drifted to its 0.30 m limit while the
         // hand still held the shotgun's pump (2026-10-26 log: lat 11.8-12.9).
@@ -15872,7 +15873,7 @@ void VR::ApplyTwoHandWeaponAim()
             m_TwoHandActive = false;
             s_leaveSinceMs = 0;
         }
-        else if (distToGrip > leaveR)
+        else if (bmvr::g_TwoHandToggleAutoRelease && distToGrip > leaveR)
         {
             const DWORD now = GetTickCount();
             if (s_leaveSinceMs == 0)

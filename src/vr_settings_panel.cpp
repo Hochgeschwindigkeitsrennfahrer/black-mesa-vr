@@ -195,6 +195,8 @@ namespace
             // (wider + further forward; its rear end, toward the gun hand, stays put).
             { "WEAPON GRIP", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Toggle grip", RowKind::Toggle, "TwoHandGripToggle", &bmvr::g_TwoHandGripToggle, nullptr, 0, 0, 0, nullptr },
+            // Developer row: off = a latched grip lets go only on a second squeeze (or weapon/menu change).
+            { "Toggle: let go when hand leaves gun", RowKind::Toggle, "TwoHandToggleAutoRelease", &bmvr::g_TwoHandToggleAutoRelease, nullptr, 0, 0, 0, nullptr },
             { "Grip area scale", RowKind::Number, "TwoHandGripScale", nullptr, &bmvr::g_TwoHandGripScale, 0.1f, 0.5f, 2.f, "%.1fx" },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
@@ -500,6 +502,7 @@ namespace
             "ControlsPicture", "DamageFlashStrength", "VrHandsBlackMesaScale", "VrGunRightHand", "VrHandsRollDeg",
             "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll",
             "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain", "LastShotHapticStrength", "DryFireHapticStrength", "VrClipHandPose", "VrClipHandSnap",
+            "TwoHandToggleAutoRelease",
             "MsaaParticles1x", "FxaaSubpixel", "FxaaEdgeThreshold", "FxaaEdgeThresholdMin",
             "EnvmapScaleWorld", "EnvmapScaleModels", "LodBias",
             "FlareFadeAngle", "FlareLightScale", "FlareHazeScale", "FlareHazeMinSize", "FlareGhostScale", "flare_default",

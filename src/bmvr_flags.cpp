@@ -138,6 +138,7 @@ namespace bmvr
     bool g_VrShootFromMuzzle = true;
     bool g_TwoHandHoldWhileGrip = true;
     bool g_TwoHandGripToggle = false;
+    bool g_TwoHandToggleAutoRelease = true;
     float g_TwoHandGripScale = 1.f;
     bool g_VrPistolSemiAuto = false;
     bool g_VrGlockRapidAlt = false;
@@ -977,6 +978,8 @@ namespace bmvr
                 g_WeaponMenuTilt = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripToggle") == 0)
                 g_TwoHandGripToggle = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "TwoHandToggleAutoRelease") == 0)
+                g_TwoHandToggleAutoRelease = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "TwoHandGripScale") == 0)
             {
                 const float v = static_cast<float>(atof(val));
