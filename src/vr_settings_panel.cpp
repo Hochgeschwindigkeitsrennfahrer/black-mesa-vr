@@ -21,6 +21,7 @@
 #include "openxr_helper_bridge.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -131,8 +132,8 @@ namespace
             { "Snap angle", RowKind::Number, "SnapTurnAngle", nullptr, &bmvr::g_SnapTurnAngle, 15.f, 15.f, 90.f, "%.0f\xB0" },
             { "Smooth turn speed", RowKind::Number, "TurnSpeed", nullptr, &bmvr::g_TurnSpeed, 0.05f, 0.05f, 1.f, "%.2f" },
             // Off = stick ladders as in the stable release; the rows below only act while it is on.
-            { "PHYSICAL LADDERS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Physical ladders (beta)", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
+            { "PHYSICAL LADDERS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Physical ladders", RowKind::Toggle, "PhysicalLadders", &bmvr::g_PhysicalLadders, nullptr, 0, 0, 0, nullptr },
             { "Ladder distance follows arms", RowKind::Toggle, "LadderBodyFollowsArms", &bmvr::g_LadderBodyFollowsArms, nullptr, 0, 0, 0, nullptr },
             { "Centre on the ladder", RowKind::Toggle, "LadderCentreHead", &bmvr::g_LadderCentreHead, nullptr, 0, 0, 0, nullptr },
             { "Gun hand on ladders", RowKind::Choice, "LadderGunHand", nullptr, &bmvr::g_LadderGunHand, 1.f, 0.f, 2.f, "Holster + draw again|Needs empty hand|Holster only" },
@@ -153,6 +154,8 @@ namespace
             // Subtitles / closed captions (turn them on in the game's audio options).
             { "Subtitle height", RowKind::Number, "CaptionHeight", nullptr, &bmvr::g_CaptionHeightDeg, 1.f, -30.f, 30.f, "%+.0f\xB0" },
             { "Subtitle size", RowKind::Number, "CaptionScale", nullptr, &bmvr::g_CaptionScale, 0.05f, 0.5f, 2.f, "%.2fx" },
+            // Small toasts: reload steps, first carried prop / mounted gun (VR::ShowUsageHint).
+            { "Usage hints", RowKind::Toggle, "VrUsageHints", &bmvr::g_VrUsageHints, nullptr, 0, 0, 0, nullptr },
             { "Near clip (7 = game)", RowKind::Number, "VrNearZ", nullptr, &bmvr::g_VrNearZ, 0.5f, 1.f, 7.f, "%.1f" },
             // No key/fmt: the button's default action is a recenter (closes the panel).
             { "Recenter", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -232,10 +235,9 @@ namespace
             // Off = the stable release's reloads; the rows below only act while it is on (manual
             // mag/shell/RPG reloads always, snarks thrown from the hand too). The support hand's
             // finger pose + lock and the satchel hands are always on (user 2026-11-19).
-            { "PHYSICAL WEAPONS (BETA)", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Physical weapons (beta)", RowKind::Toggle, "PhysicalWeapons", &bmvr::g_PhysicalWeapons, nullptr, 0, 0, 0, nullptr },
+            { "PHYSICAL WEAPONS", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            { "Physical weapons", RowKind::Toggle, "PhysicalWeapons", &bmvr::g_PhysicalWeapons, nullptr, 0, 0, 0, nullptr },
             { "Ejected rounds are lost", RowKind::Toggle, "VrMagDiscard", &bmvr::g_VrMagDiscard, nullptr, 0, 0, 0, nullptr },
-            { "Reload hints", RowKind::Toggle, "VrReloadHints", &bmvr::g_VrReloadHints, nullptr, 0, 0, 0, nullptr },
             // Developer row: A/B for the hand poses taken from Black Mesa's reload clips.
             { "Hand pose from reload clips", RowKind::Toggle, "VrClipHandPose", &bmvr::g_VrClipHandPose, nullptr, 0, 0, 0, nullptr },
             { "Hand locks onto bolt/slide", RowKind::Toggle, "VrClipHandSnap", &bmvr::g_VrClipHandSnap, nullptr, 0, 0, 0, nullptr },
@@ -1449,7 +1451,7 @@ namespace
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))
             return !g_HandHud;
-        if (is({ "VrRecoil", "VrMagDiscard", "VrReloadHints", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg", "VrClipHandRpgFlip" }))
+        if (is({ "VrRecoil", "VrMagDiscard", "VrClipHandPose", "VrClipHandSnap", "VrClipHandRpg", "VrClipHandRpgFlip" }))
             return !g_PhysicalWeapons;
         if (is({ "VrRecoilScale", "VrRecoilTwoHand" }))
             return !PhysicalWeapon(g_VrRecoil);
@@ -2842,27 +2844,11 @@ void VR::WelcomeStep(bool paused)
     m_WelcomeTriedThisMap = true;
 
     // Name the button that opens the panel on this controller (hold slot first).
-    const L4D2VROpenXrInputStateDesc& in = m_OpenXrLastInputState;
-    const uint32_t family = in.reserved0;
+    const bool mapped = m_ButtonMapActive;
     const char* label = nullptr;
     int labelHand = 0;
     bool hold = false;
-    const bool mapped = m_ButtonMapActive;
-    for (int pass = 0; pass < 2 && !label; ++pass)
-        for (int hand = 0; hand < bmvr::kBindHands && !label; ++hand)
-            for (int i = 0; i < bmvr::kBindInputCount && !label; ++i)
-            {
-                const auto input = static_cast<bmvr::BindInput>(i);
-                const bmvr::BindSlot slot = mapped ? bmvr::EffectiveBind(family, hand, input)
-                                                   : bmvr::DefaultBind(family, hand, input);
-                const bmvr::BindAction a = pass == 0 ? slot.hold : slot.press;
-                if (a == bmvr::BindAction::VrSettings)
-                {
-                    label = bmvr::BindInputLabel(family, in.systemName, hand, input);
-                    labelHand = hand;
-                    hold = pass == 0;
-                }
-            }
+    FindBoundButton(bmvr::BindAction::VrSettings, true, label, labelHand, hold);
     if (!label || !label[0] || (!mapped && !bmvr::g_SettingsTriangleHold))
     {
         Game::logMsg("Welcome: skipped, no button opens the VR panel (mapping=%d)", mapped ? 1 : 0);
@@ -3562,14 +3548,70 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-void VR::ShowReloadHint(int id, const char* text)
+void VR::ShowUsageHint(UsageHint id, const char* text, int maxPerStart)
 {
-    static int s_shown[8]{};
-    if (!bmvr::g_VrReloadHints || id < 0 || id >= 8 || s_shown[id] >= 2)
+    static int s_shown[static_cast<int>(UsageHint::Count)]{};
+    const int i = static_cast<int>(id);
+    if (!bmvr::g_VrUsageHints || i < 0 || i >= static_cast<int>(UsageHint::Count) || s_shown[i] >= maxPerStart)
         return;
-    ++s_shown[id];
+    ++s_shown[i];
     ShowToast(text, 1800);
     m_ToastSmall = true;
+    Game::logMsg("Usage hint %d: \"%s\" (%d/%d this game start)", i, text, s_shown[i], maxPerStart);
+}
+
+bool VR::FindBoundButton(bmvr::BindAction a, bool holdFirst, const char*& label, int& hand, bool& hold) const
+{
+    const L4D2VROpenXrInputStateDesc& in = m_OpenXrLastInputState;
+    const uint32_t family = in.reserved0;
+    const bool mapped = m_ButtonMapActive;
+    label = nullptr;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        const bool wantHold = holdFirst ? pass == 0 : pass == 1;
+        for (int h = 0; h < bmvr::kBindHands; ++h)
+            for (int i = 0; i < bmvr::kBindInputCount; ++i)
+            {
+                const auto input = static_cast<bmvr::BindInput>(i);
+                const bmvr::BindSlot slot = mapped ? bmvr::EffectiveBind(family, h, input)
+                                                   : bmvr::DefaultBind(family, h, input);
+                if ((wantHold ? slot.hold : slot.press) != a)
+                    continue;
+                const char* l = bmvr::BindInputLabel(family, in.systemName, h, input);
+                if (!l || !l[0] || l[0] == '?')
+                    continue;
+                label = l;
+                hand = h;
+                hold = wantHold;
+                return true;
+            }
+    }
+    return false;
+}
+
+void VR::BoundButtonHint(bmvr::BindAction a, const char* fallback, const char* what, char* out, size_t n) const
+{
+    const char* label = nullptr;
+    int hand = 0;
+    bool hold = false;
+    char button[32]{};
+    if (FindBoundButton(a, false, label, hand, hold))
+    {
+        // Name the hand when the other hand's button has the same name (Trigger, Grip, A on Index).
+        const L4D2VROpenXrInputStateDesc& in = m_OpenXrLastInputState;
+        bool shared = false;
+        for (int i = 0; i < bmvr::kBindInputCount && !shared; ++i)
+        {
+            const char* o = bmvr::BindInputLabel(in.reserved0, in.systemName, 1 - hand, static_cast<bmvr::BindInput>(i));
+            shared = o && std::strcmp(o, label) == 0;
+        }
+        std::snprintf(button, sizeof(button), "%s%s%s", hold ? "HOLD " : "", shared ? (hand == 0 ? "LEFT " : "RIGHT ") : "", label);
+    }
+    else
+        strncpy_s(button, fallback, _TRUNCATE);
+    for (char* c = button; *c; ++c)
+        *c = static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
+    std::snprintf(out, n, "%s = %s", button, what);
 }
 
 void VR::ShowToast(const char* text, DWORD ms, const char* detail)

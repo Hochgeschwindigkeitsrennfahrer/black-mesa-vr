@@ -1530,9 +1530,23 @@ public:
     void CloseSettingsPanel(const char* why);
     // Short head-locked message (quick save); detail = optional smaller second line.
     void ShowToast(const char* text, DWORD ms = kToastMs, const char* detail = nullptr);
-    // Manual-reload hint (small toast), each id at most twice per game start;
-    // VrReloadHints off = never.
-    void ShowReloadHint(int id, const char* text);
+    // Usage hint (small toast), each id at most maxPerStart times per game
+    // start (not saved); VrUsageHints off = never.
+    enum class UsageHint : uint8_t
+    {
+        ChargingHandle, RackSlide, Pump, FlickClose, TiltDump, // reload steps
+        CarryThrow, MountedFire,                               // first carry / mounted gun
+        Count
+    };
+    void ShowUsageHint(UsageHint id, const char* text, int maxPerStart = 2);
+    // The button the player has set to action `a` on the detected controller
+    // (press slot first unless holdFirst; the default layout while mapping is
+    // off). False = none bound.
+    bool FindBoundButton(bmvr::BindAction a, bool holdFirst, const char*& label, int& hand, bool& hold) const;
+    // Hint text "<BUTTON> = <what>", e.g. "CIRCLE = THROW", "HOLD B = THROW",
+    // "RIGHT GRIP = FIRE" (hand named when the other hand has the same button);
+    // "<fallback> = <what>" when the action is not bound.
+    void BoundButtonHint(bmvr::BindAction a, const char* fallback, const char* what, char* out, size_t n) const;
     bool m_ToastSmall = false;
     bool ToastVisible() const;
     void DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,

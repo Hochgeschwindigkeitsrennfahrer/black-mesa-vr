@@ -7339,6 +7339,23 @@ void VR::ProcessInput()
         }
         // Held on after the throw: no alt-fire for the gun until released.
         s_carryAltWas = carryAlt || (s_carryAltWas && PressedDigitalAction(m_ActionSecondaryAttack));
+        // First carried prop / mounted gun of a game start: name the player's
+        // alt-fire button (user 2026-11-26: players miss throw and gun fire).
+        static bool s_carryHintWas = false, s_gunHintWas = false;
+        if (carrying && !s_carryHintWas)
+        {
+            char hint[32]{};
+            BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "THROW", hint, sizeof(hint));
+            ShowUsageHint(UsageHint::CarryThrow, hint, 1);
+        }
+        s_carryHintWas = carrying;
+        if (m_OnGun && !s_gunHintWas)
+        {
+            char hint[32]{};
+            BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "FIRE", hint, sizeof(hint));
+            ShowUsageHint(UsageHint::MountedFire, hint, 1);
+        }
+        s_gunHintWas = m_OnGun;
         if (!menuOwnsButtons && m_OnGun)
         {
             if (PressedDigitalAction(m_ActionSecondaryAttack))
@@ -22864,7 +22881,7 @@ void VR::UpdateSnarkThrow(uint32_t& buttons)
     const DWORD now = GetTickCount();
     m_ThrowFromLeft.store(SatchelHandsActive(), std::memory_order_relaxed);
     // Satchel too (VrSatchelHands): thrown from the left hand on the release.
-    // Snarks from the hand only with "Physical weapons (beta)" on.
+    // Snarks from the hand only with "Physical weapons" on.
     const bool snark = bmvr::g_VrHandThrow && !bmvr::g_LeftHanded && m_GameplayEligible
         && ((bmvr::g_PhysicalWeapons && ViewmodelIsSnark()) || SatchelHandsActive());
     if (!snark)
@@ -23616,7 +23633,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             {
                 sound(def.emptyClick);
                 if (w.shells > 0 && w.needPump)
-                    ShowReloadHint(2, "PUMP IT");
+                    ShowUsageHint(UsageHint::Pump, "PUMP IT");
                 Game::logMsg("Mag reload: shotgun fire blocked (tube %d, game %d, needPump %d, pull %.2f, pump grabbed %d)",
                     w.shells, clip, w.needPump ? 1 : 0, pull, boltGrab ? 1 : 0);
             }
@@ -23703,7 +23720,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
             if (!bmvr::g_Vr357Tilt)
                 g_357EjectTick.store(now ? now : 1);
             else
-                ShowReloadHint(4, "TILT UP TO DUMP");
+                ShowUsageHint(UsageHint::TiltDump, "TILT UP TO DUMP");
         }
         else if (s_phase == 2)
             scrub(0.5f, 0.5f, 1.f);
@@ -23808,7 +23825,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         {
             s_phase = 4;
             s_phaseMs = now;
-            ShowReloadHint(3, "FLICK TO CLOSE");
+            ShowUsageHint(UsageHint::FlickClose, "FLICK TO CLOSE");
             Game::logMsg("Mag reload: 357 rounds in, cylinder open until a flick");
         }
         else if (s_phase == 4)
@@ -24041,7 +24058,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
                 def.name, w.mag, w.chambered ? 1 : 0, boltGrab ? 1 : 0, clip);
             // Loaded but nothing chambered: the step people miss.
             if (w.mag == kLoaded && !w.chambered && clip > 0)
-                ShowReloadHint(weapon == kWeaponGlock ? 1 : 0,
+                ShowUsageHint(weapon == kWeaponGlock ? UsageHint::RackSlide : UsageHint::ChargingHandle,
                     weapon == kWeaponGlock ? "RACK THE SLIDE" : "PULL THE CHARGING HANDLE");
         }
         buttons &= ~IN_ATTACK;

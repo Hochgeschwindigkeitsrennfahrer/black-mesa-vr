@@ -140,8 +140,9 @@ namespace bmvr
     bool g_TwoHandGripToggle = false;
     bool g_TwoHandToggleAutoRelease = true;
     float g_TwoHandGripScale = 1.f;
-    bool g_VrPistolSemiAuto = false;
-    bool g_VrGlockRapidAlt = false;
+    // On by default since the 2026-11-26 defaults review (user: immersive VR play).
+    bool g_VrPistolSemiAuto = true;
+    bool g_VrGlockRapidAlt = true;
     float g_FlashlightFrom = 0.f;
     float g_LastShotHaptic = 1.f;
     float g_DryFireHaptic = 2.f;
@@ -203,6 +204,7 @@ namespace bmvr
     static bool g_OldGestureKeysSeen = false;
     static bool g_VrHolsterDynamic = false;    // old switch, read only for the migration
     static bool g_OldHolsterDynamicSeen = false;
+    static bool g_OldReloadHintsSeen = false;  // VrReloadHints, renamed VrUsageHints 2026-11-26
     // Defaults: left shoulder quick save, left hip ammo, forehead flashlight;
     // right shoulder crowbar, above the left hip MP5, right hip pistol.
     float g_GestureLeft[kGestureZoneCount] = { 0.f, -1.f, 2.f, -1.f, 1.f };
@@ -424,20 +426,20 @@ namespace bmvr
     float g_VrPinchThumb = 0.50f;
     float g_VrPinchIndex = 0.30f;
     bool g_VrPinchForce = false;
-    bool g_PhysicalWeapons = false;
+    bool g_PhysicalWeapons = true;   // out of beta, on by default (user 2026-11-26)
     bool g_VrMagReload = true;
     bool g_VrGrenadePin = true;
-    bool g_VrReloadHints = true;
+    bool g_VrUsageHints = true;
     bool g_VrClipHandPose = true;
     bool g_VrClipHandSnap = true;
     bool g_VrClipHandRpg = true;
     bool g_VrClipHandRpgFlip = true;
-    bool g_VrMagDiscard = true;
+    bool g_VrMagDiscard = false;     // user 2026-11-26 (was true)
     float g_VrNearZ = 4.f;
     float g_CaptionHeightDeg = 0.f;
     float g_CaptionScale = 1.f;
     bool g_VrRecoil = false;
-    bool g_PhysicalLadders = false;
+    bool g_PhysicalLadders = true;   // out of beta, on by default (user 2026-11-26)
     bool g_PhysicalCrouch = false;
     float g_PhysicalCrouchDropCm = 50.f; // user 2026-11-25 (was 35)
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
@@ -1405,8 +1407,14 @@ namespace bmvr
                 g_CaptionScale = std::clamp(static_cast<float>(std::atof(val)), 0.5f, 2.f);
             else if (std::strcmp(n, "VrMagDiscard") == 0)
                 g_VrMagDiscard = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "VrUsageHints") == 0)
+                g_VrUsageHints = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrReloadHints") == 0)
-                g_VrReloadHints = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            {
+                // Old name: migrated to VrUsageHints after the config is read.
+                g_VrUsageHints = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                g_OldReloadHintsSeen = true;
+            }
             else if (std::strcmp(n, "VrClipHandPose") == 0)
                 g_VrClipHandPose = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrClipHandSnap") == 0)
@@ -2332,6 +2340,16 @@ namespace bmvr
             const bool ok = WriteVrConfigValues(set, { "VrHolsterDynamic" });
             Log("Grab zones: old VrHolsterDynamic=%d migrated (%zu value%s), %s", g_VrHolsterDynamic ? 1 : 0,
                 set.size(), set.size() == 1 ? "" : "s", ok ? "ok" : "FAILED");
+        }
+        // VrReloadHints became VrUsageHints (2026-11-26: hints beyond reloads).
+        // config.txt keeps only non-defaults, so the new key is written only when off.
+        if (g_OldReloadHintsSeen)
+        {
+            std::vector<std::pair<std::string, std::string>> set;
+            if (!g_VrUsageHints)
+                set.emplace_back("VrUsageHints", "false");
+            const bool ok = WriteVrConfigValues(set, { "VrReloadHints" });
+            Log("Usage hints: old VrReloadHints=%d migrated to VrUsageHints, %s", g_VrUsageHints ? 1 : 0, ok ? "ok" : "FAILED");
         }
         // Panel rows removed in the 2026-11-19 review: their values are fixed
         // at the defaults, whatever an older config.txt still says.

@@ -24,8 +24,8 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **Two-handed weapons:** put your off-hand on the forend of a rifle, shotgun, MP5, crossbow and so on and hold grip;
   the glove sits on the gun and steadies it. Hands & Weapons tab, Weapon grip: **Toggle grip** (squeeze once to hold,
   again to let go) and **Grip area scale** (a bigger zone if the gun is hard to take).
-- **Manual reloads (beta, optional):** pull the magazine, take a new one from your hip and seat it, rack the slide or
-  bolt, load shotgun shells one by one. Hands & Weapons > Physical weapons; off = reload with a button.
+- **Manual reloads:** pull the magazine, take a new one from your hip and seat it, rack the slide or bolt, load
+  shotgun shells one by one. On by default; Hands & Weapons > Physical weapons off = reload with a button.
 - **Grab gestures:** a hand behind a shoulder, at a hip or (left hand) at the forehead + grip. Each zone has a setting
   per hand: the right hand draws a weapon (default: right shoulder crowbar, right hip pistol, above the left hip MP5;
   "Dynamic" zones keep what you put away there), the left hand does an action (quick save, flashlight, ammo, quick
@@ -37,11 +37,13 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
   crossbow, with smoothing for hand tremor.
 - **Mounted guns** (50 cal, TOW) you steer with your hands.
 - **Ladders that work in VR:** push the stick roughly towards a ladder to get on, also while swimming; no need to
-  face it exactly as the game normally wants. Or turn on **Physical ladders** (beta, General tab) and climb hand over
-  hand by the rungs.
+  face it exactly as the game normally wants. With **Physical ladders** (General tab, on by default) you climb hand
+  over hand by the rungs.
 - **Per-hand item holding and use.**
 - **Health, suit and ammo on your hands**, an ammo counter on the weapon, and a **short red flash over the view when
   you get hit**.
+- **Usage hints:** short messages the first times you carry a prop or take a mounted gun, naming your own alt-fire
+  button, and when a reload step is missing ("PUMP IT"). General tab > Usage hints.
 - **Aim marker and laser:** red laser dot, laser beam with adjustable width, or the classic amber ticks; all optional.
 - **Flashlight** on the right grip, optionally in the left hand or on the left Square/X button.
 - Snap or smooth turning, crouch while held or toggle, sprint toggle, recenter. Cutscene cameras can take your view
@@ -71,7 +73,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 
 ### The VR settings panel
 **Hold Triangle/Y** (about half a second) or pick the gear in the weapon wheel. Six tabs:
-- **General:** turning, ladders, view, menus.
+- **General:** turning, ladders, view, usage hints, menus.
 
   <img src="docs/images/panel-general.jpg" alt="VR settings: General tab" width="90%">
 

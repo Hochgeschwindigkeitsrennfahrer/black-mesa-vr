@@ -878,8 +878,8 @@ namespace bmvr
     extern float g_VrPinchThumb;
     extern float g_VrPinchIndex;
     extern bool g_VrPinchForce;
-    // "Physical weapons (beta)" master switch (VR panel HANDS & WEAPONS, off by
-    // default = the stable release's gun handling). The rows under it
+    // "Physical weapons" master switch (VR panel HANDS & WEAPONS; on by default
+    // since 2026-11-26, off = button reloads as in older releases). The rows under it
     // (manual reloads, grenade pin, support hand pose and
     // lock, satchel detonator in the hand, snark hand throw, recoil) only act
     // while it is on; read them through PhysicalWeapon().
@@ -890,9 +890,10 @@ namespace bmvr
     // Frag grenade: pull the pin with the left hand before it can be thrown
     // (only with VrMagReload on). On by default.
     extern bool g_VrGrenadePin;
-    // Small "PUMP IT" / "PULL THE CHARGING HANDLE" toasts on a dead trigger
-    // (twice each per game start). On by default.
-    extern bool g_VrReloadHints;
+    // Small usage hints (VR::ShowUsageHint): reload steps ("PUMP IT"), and the
+    // first carried prop / mounted gun of a game start. On by default.
+    // config.txt key VrUsageHints (old VrReloadHints migrated at startup).
+    extern bool g_VrUsageHints;
     // Left glove takes Black Mesa's own reload-clip hand pose on a held magazine, the MP5 bolt
     // and the glock slide (vr_clip_hand_poses.h); the magazine sits where that hand holds it.
     extern bool g_VrClipHandPose;
