@@ -7342,18 +7342,19 @@ void VR::ProcessInput()
         // First carried prop / mounted gun of a game start: name the player's
         // alt-fire button (user 2026-11-26: players miss throw and gun fire).
         static bool s_carryHintWas = false, s_gunHintWas = false;
+        static constexpr const char* kAltFireUnbound = "Alt-fire is on no button yet.\nSet one in the VR menu, CONTROLS tab.";
         if (carrying && !s_carryHintWas)
         {
             char hint[32]{};
-            BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "THROW", hint, sizeof(hint));
-            ShowUsageHint(UsageHint::CarryThrow, hint, 1);
+            const bool bound = BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "THROW", hint, sizeof(hint));
+            ShowUsageHint(UsageHint::CarryThrow, hint, 1, bound ? nullptr : kAltFireUnbound);
         }
         s_carryHintWas = carrying;
         if (m_OnGun && !s_gunHintWas)
         {
             char hint[32]{};
-            BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "FIRE", hint, sizeof(hint));
-            ShowUsageHint(UsageHint::MountedFire, hint, 1);
+            const bool bound = BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "FIRE", hint, sizeof(hint));
+            ShowUsageHint(UsageHint::MountedFire, hint, 1, bound ? nullptr : kAltFireUnbound);
         }
         s_gunHintWas = m_OnGun;
         if (!menuOwnsButtons && m_OnGun)

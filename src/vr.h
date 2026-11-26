@@ -1538,15 +1538,17 @@ public:
         CarryThrow, MountedFire,                               // first carry / mounted gun
         Count
     };
-    void ShowUsageHint(UsageHint id, const char* text, int maxPerStart = 2);
+    // With `detail`: the larger toast with a second line, 4 s (e.g. the action
+    // is on no button).
+    void ShowUsageHint(UsageHint id, const char* text, int maxPerStart = 2, const char* detail = nullptr);
     // The button the player has set to action `a` on the detected controller
     // (press slot first unless holdFirst; the default layout while mapping is
     // off). False = none bound.
     bool FindBoundButton(bmvr::BindAction a, bool holdFirst, const char*& label, int& hand, bool& hold) const;
     // Hint text "<BUTTON> = <what>", e.g. "CIRCLE = THROW", "HOLD B = THROW",
     // "RIGHT GRIP = FIRE" (hand named when the other hand has the same button);
-    // "<fallback> = <what>" when the action is not bound.
-    void BoundButtonHint(bmvr::BindAction a, const char* fallback, const char* what, char* out, size_t n) const;
+    // "<fallback> = <what>" and false when the action is not bound.
+    bool BoundButtonHint(bmvr::BindAction a, const char* fallback, const char* what, char* out, size_t n) const;
     bool m_ToastSmall = false;
     bool ToastVisible() const;
     void DrawToast(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,

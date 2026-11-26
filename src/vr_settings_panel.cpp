@@ -3548,16 +3548,17 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-void VR::ShowUsageHint(UsageHint id, const char* text, int maxPerStart)
+void VR::ShowUsageHint(UsageHint id, const char* text, int maxPerStart, const char* detail)
 {
     static int s_shown[static_cast<int>(UsageHint::Count)]{};
     const int i = static_cast<int>(id);
     if (!bmvr::g_VrUsageHints || i < 0 || i >= static_cast<int>(UsageHint::Count) || s_shown[i] >= maxPerStart)
         return;
     ++s_shown[i];
-    ShowToast(text, 1800);
-    m_ToastSmall = true;
-    Game::logMsg("Usage hint %d: \"%s\" (%d/%d this game start)", i, text, s_shown[i], maxPerStart);
+    ShowToast(text, detail ? 4000 : 1800, detail);
+    m_ToastSmall = !detail;
+    Game::logMsg("Usage hint %d: \"%s\"%s (%d/%d this game start)", i, text, detail ? " + detail line" : "",
+        s_shown[i], maxPerStart);
 }
 
 bool VR::FindBoundButton(bmvr::BindAction a, bool holdFirst, const char*& label, int& hand, bool& hold) const
@@ -3589,13 +3590,14 @@ bool VR::FindBoundButton(bmvr::BindAction a, bool holdFirst, const char*& label,
     return false;
 }
 
-void VR::BoundButtonHint(bmvr::BindAction a, const char* fallback, const char* what, char* out, size_t n) const
+bool VR::BoundButtonHint(bmvr::BindAction a, const char* fallback, const char* what, char* out, size_t n) const
 {
     const char* label = nullptr;
     int hand = 0;
     bool hold = false;
     char button[32]{};
-    if (FindBoundButton(a, false, label, hand, hold))
+    const bool bound = FindBoundButton(a, false, label, hand, hold);
+    if (bound)
     {
         // Name the hand when the other hand's button has the same name (Trigger, Grip, A on Index).
         const L4D2VROpenXrInputStateDesc& in = m_OpenXrLastInputState;
@@ -3612,6 +3614,7 @@ void VR::BoundButtonHint(bmvr::BindAction a, const char* fallback, const char* w
     for (char* c = button; *c; ++c)
         *c = static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
     std::snprintf(out, n, "%s = %s", button, what);
+    return bound;
 }
 
 void VR::ShowToast(const char* text, DWORD ms, const char* detail)
