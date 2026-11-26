@@ -378,6 +378,8 @@ namespace
             // Back (user 2026-11-20, Xen plant glow that follows the hand): 20 s of every
             // light glow's world position + brightness into VR/glowtrace-*.csv.
             { "Record glow trace (20 s)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "glow_trace" },
+            // Leftover MODEL matrix on world brushes (2026-11-26): A/B when walls look off doors/props. Not saved.
+            { "Reset model each eye", RowKind::Toggle, nullptr, &bmvr::g_DebugModelReset, nullptr, 0, 0, 0, nullptr },
             // One shot: the next Pause press saves 12 eye pairs + 12 menu layers (VR/pausecap-*).
             { "Capture next pause", RowKind::Toggle, nullptr, &bmvr::g_PauseCaptureArm, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },

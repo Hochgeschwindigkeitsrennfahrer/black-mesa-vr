@@ -658,6 +658,10 @@ namespace bmvr
     // matrix; a leftover translation drew the warp / flares shifted for a whole launch (2026-11-17).
     // Also CGlowOverlay::Draw (env_lightglow / sun glow quads): Xen light-stick glows sat ~0.8 deg off (2026-11-26).
     extern bool g_ScreenSpaceModelFix;
+    // Debug (not saved): identity MODEL matrix before each eye pass. Some launches draw world brushes
+    // with a leftover model translation of (+1,+1,0) (2026-11-26: lobby walls ~2.5 cm off doors/props;
+    // Capture debug frame logs "audit world model"); this repairs it headless. A/B row for bad launches.
+    extern bool g_DebugModelReset;
     // Black Mesa's global Xen fog pass (__gbxog0) is not drawn in VR: view-direction noise at infinite stereo
     // depth, also inside rooms where flat shows none. Local fog volumes stay.
     extern bool g_XenGlobalFogOff;

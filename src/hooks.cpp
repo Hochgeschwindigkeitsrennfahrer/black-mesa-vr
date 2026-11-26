@@ -633,6 +633,24 @@ namespace ScreenModel
         ClientCtx(const ClientCtx&) = delete;
         ClientCtx& operator=(const ClientCtx&) = delete;
     };
+
+    // Debug row "Reset model each eye" (bmvr_debug_model_reset): identity MODEL matrix before each eye
+    // pass. Repairs the leftover (+1,+1,0) on world draws headless (2026-11-26); for A/B in a bad launch.
+    inline void ResetEyeModel()
+    {
+        ClientCtx cc;
+        if (!cc.ctx)
+            return;
+        void** vt = Vt(cc.ctx);
+        reinterpret_cast<IntFn>(vt[0x50 / 4])(cc.ctx, kModeModel);
+        reinterpret_cast<VoidFn>(vt[0x7C / 4])(cc.ctx);
+        static bool s_logged;
+        if (!s_logged)
+        {
+            s_logged = true;
+            Game::logMsg("Reset model each eye: on (identity MODEL before each eye pass)");
+        }
+    }
 }
 // Flare log (bmvr::g_FlareLog): every switch-on is a new session, so each
 // logger starts with fresh line caps and forgets what it has seen.
@@ -9833,6 +9851,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         BMVR_PROF("RenderView eye pass (game)");
         if (m_VR)
             ReplayOccluderView(m_VR->m_StereoEye);
+        if (bmvr::g_DebugModelReset)
+            ScreenModel::ResetEyeModel();
         hkRenderView.fOriginal(ecx, view, clearFlags, drawFlags);
     };
 

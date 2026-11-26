@@ -334,6 +334,7 @@ namespace bmvr
     bool g_EyeUnderwaterWorld = true;
     bool g_WaterLineClipFix = true;
     bool g_ScreenSpaceModelFix = true;
+    bool g_DebugModelReset = false;
     bool g_XenGlobalFogOff = true;
     bool g_FlareEyeAxis = true;
     bool g_FlareLevel = true;

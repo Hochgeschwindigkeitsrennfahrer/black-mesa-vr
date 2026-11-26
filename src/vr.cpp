@@ -875,6 +875,55 @@ namespace
             }
             return false;
         };
+        // World draws (material "maps/...", the map's cubemap-patched brush materials) must have an identity
+        // model matrix. Log the model translation implied by cModelViewProj (c4-c7) vs cViewProj (c8-c11)
+        // for the first world draws of each eye: a launch with the leftover model matrix shows ~(+1,+1,0)
+        // (2026-11-26: lobby walls/floor ~2.5 cm off the doors and props, Xen glows ~0.8 deg off).
+        if (AuditLogging() && t_AuditMaterial[0] && std::strncmp(t_AuditMaterial, "maps/", 5) == 0
+            && (eye == 1 || eye == 2) && !hud && g_AuditLines < kAuditMaxLines)
+        {
+            static uint32_t s_worldFrame = 0;
+            static int s_worldLogged[3] = {};
+            if (s_worldFrame != g_AuditFrame)
+            {
+                s_worldFrame = g_AuditFrame;
+                s_worldLogged[1] = s_worldLogged[2] = 0;
+            }
+            if (s_worldLogged[eye] < 3)
+            {
+                ++s_worldLogged[eye];
+                // Rows: clip_i = MVP_i . p = VP_i . (M p). Solve VP * t = MVP_w - VP_w with the 3x3 part of VP
+                // (rows 0, 1, 3: x, y, w) for the translation t of M (rotation assumed identity).
+                const float* vc = g_AuditVsConst;
+                auto at = [&](int reg, int k) { return vc[reg * 4 + k]; };
+                const int rows[3] = { 4, 5, 7 };
+                double A[3][3], b[3];
+                for (int i = 0; i < 3; ++i)
+                {
+                    for (int k = 0; k < 3; ++k)
+                        A[i][k] = at(rows[i] + 4, k);
+                    b[i] = static_cast<double>(at(rows[i], 3)) - at(rows[i] + 4, 3);
+                }
+                const double det = A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1])
+                    - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+                double t[3] = { 0, 0, 0 };
+                if (std::fabs(det) > 1e-12)
+                    for (int j = 0; j < 3; ++j)
+                    {
+                        double M[3][3];
+                        for (int i = 0; i < 3; ++i)
+                            for (int k = 0; k < 3; ++k)
+                                M[i][k] = (k == j) ? b[i] : A[i][k];
+                        t[j] = (M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0])
+                            + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0])) / det;
+                    }
+                const bool bad = std::fabs(t[0]) > 0.1 || std::fabs(t[1]) > 0.1 || std::fabs(t[2]) > 0.1;
+                Game::logMsg("audit world model e%d %s: t=(%+.3f,%+.3f,%+.3f) cModel.w=(%.3g,%.3g,%.3g) %s", eye,
+                    t_AuditMaterial, t[0], t[1], t[2], at(58, 3), at(59, 3), at(60, 3),
+                    bad ? "NOT IDENTITY (leftover model matrix)" : "ok");
+                ++g_AuditLines;
+            }
+        }
         if (AuditLogging() && constMatch() && g_AuditLines < kAuditMaxLines)
         {
             // Non-zero constants, 8 registers per line (log lines are capped
@@ -898,7 +947,7 @@ namespace
                 ++g_AuditLines;
             };
             AuditFlushGroup();
-            dumpConsts("VS", g_AuditVsConst, 48);
+            dumpConsts("VS", g_AuditVsConst, 96);
             dumpConsts("PS", g_AuditPsConst, 64);
             // The bound shaders' bytecode, once per shader, as
             // VR/audit-<vs|ps>-<ptr>.dxso (match against DXVK_SHADER_DUMP_PATH).
