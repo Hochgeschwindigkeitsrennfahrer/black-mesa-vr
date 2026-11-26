@@ -909,6 +909,18 @@ public:
     QAngle m_StereoFrameRightCtrlAng{};
     Vector m_StereoFrameLeftCtrlPos{};
     Vector m_StereoFrameRightCtrlPos{};
+    // Turn, recenter point, height offset and IPD as of BeginStereoFramePose.
+    // MulticoreMode turns on the render thread (VR::Update after Present)
+    // while the main thread draws the pair: both eyes must use one value.
+    float m_StereoFrameYaw = 0.f;
+    Vector m_StereoFrameZero{};
+    bool m_StereoFrameOriginLatched = false;
+    float m_StereoFrameHeightUnits = 0.f;
+    float m_StereoFrameIpd = 0.f;
+    float PairYaw() const;
+    const Vector& PairZero() const;
+    bool PairOriginLatched() const;
+    float PairHeightUnits() const;
     bool m_PosesWaitedThisFrame = false;
     uint32_t m_OpenXrLastSeenHelperSubmitted = 0;
     uint32_t m_OpenXrSubmitAttempts = 0;

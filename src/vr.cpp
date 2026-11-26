@@ -8128,7 +8128,7 @@ Vector VR::GetViewAngle() const
     BMVR_PROF("vr GetViewAngle");
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     const QAngle& ang = m_StereoFramePoseActive ? m_StereoFrameAngles : m_HmdAngAbs;
-    const float offset = m_RotationOffsetY.load(std::memory_order_acquire);
+    const float offset = PairYaw();
     float pitch = ang.x;
     float yaw = ang.y;
     float roll = ang.z;
@@ -8359,20 +8359,41 @@ void VR::GetViewBasis(Vector* forward, Vector* right, Vector* up) const
     QAngle::AngleVectors(ang, forward, right, up);
 }
 
+float VR::PairYaw() const
+{
+    return m_StereoFramePoseActive ? m_StereoFrameYaw : m_RotationOffsetY.load(std::memory_order_acquire);
+}
+
+const Vector& VR::PairZero() const
+{
+    return m_StereoFramePoseActive ? m_StereoFrameZero : m_HmdPosAbsZero;
+}
+
+bool VR::PairOriginLatched() const
+{
+    return m_StereoFramePoseActive ? m_StereoFrameOriginLatched : m_HmdOriginLatched;
+}
+
+float VR::PairHeightUnits() const
+{
+    // cm -> game units
+    return m_StereoFramePoseActive ? m_StereoFrameHeightUnits : bmvr::g_HeightOffsetCm * 0.01f * m_VRScale;
+}
+
 Vector VR::GetViewOriginUnshifted(const Vector& setupOrigin) const
 {
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     Vector center = setupOrigin;
-    if (m_HmdOriginLatched
-        && (m_OpenXrHelperBridgeActive || m_HmdPosAbsZero.z > 24.f))
+    const Vector& zero = PairZero();
+    if (PairOriginLatched()
+        && (m_OpenXrHelperBridgeActive || zero.z > 24.f))
     {
         const Vector& hmdPos = m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs;
-        Vector delta = hmdPos - m_HmdPosAbsZero;
-        const float yaw = m_RotationOffsetY.load(std::memory_order_acquire);
-        PivotYaw(delta, yaw);
+        Vector delta = hmdPos - zero;
+        PivotYaw(delta, PairYaw());
         center += delta;
     }
-    center.z += bmvr::g_HeightOffsetCm * 0.01f * m_VRScale;   // cm -> game units
+    center.z += PairHeightUnits();
     return center;
 }
 
@@ -8387,7 +8408,8 @@ float VR::RenderHalfIpd() const
 {
     if (m_ScopeZoomActive && bmvr::g_ScopeMonoZoom)
         return 0.f;
-    return m_Ipd * m_IpdScale * m_VRScale * 0.5f;
+    const float ipd = m_StereoFramePoseActive ? m_StereoFrameIpd : m_Ipd * m_IpdScale;
+    return ipd * m_VRScale * 0.5f;
 }
 
 Vector VR::GetViewOriginLeft(const Vector& setupOrigin) const
@@ -8411,7 +8433,7 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
     // look-forward; parenting the gun to that pushed every weapon backward.
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     const Vector& hmdPos = m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs;
-    const float yaw = m_RotationOffsetY.load(std::memory_order_acquire);
+    const float yaw = PairYaw();
     if (!m_ControllerPoseValid && !m_StereoFramePoseActive)
     {
         // Diag: in gameplay this fallback puts gun/laser/gloves at the eye.
@@ -8439,16 +8461,17 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
     if (!std::isfinite(arm.x) || !std::isfinite(arm.y) || !std::isfinite(arm.z))
         return GetViewOrigin(setupOrigin);
 
-    if (m_HmdOriginLatched
-        && (m_OpenXrHelperBridgeActive || m_HmdPosAbsZero.z > 24.f))
+    const Vector& zero = PairZero();
+    if (PairOriginLatched()
+        && (m_OpenXrHelperBridgeActive || zero.z > 24.f))
     {
         Vector world = setupOrigin;
-        Vector delta = trackingPos - m_HmdPosAbsZero;
+        Vector delta = trackingPos - zero;
         PivotYaw(delta, yaw);
         if (!std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
             return GetViewOrigin(setupOrigin);
         world += delta;
-        world.z += bmvr::g_HeightOffsetCm * 0.01f * m_VRScale;
+        world.z += PairHeightUnits();
         return world;
     }
     return GetViewOrigin(setupOrigin) + arm;
@@ -13900,7 +13923,7 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
     s.aimBeamHit = m_AimBeamHit;
     s.aimCrosshairValid = m_AimCrosshairValid;
     s.aimCrosshairWorld = m_AimCrosshairWorld;
-    s.rotationOffsetY = m_RotationOffsetY.load(std::memory_order_acquire);
+    s.rotationOffsetY = PairYaw();
     {
         const unsigned ms = MagReload::g_GunWristMs[1].load(std::memory_order_acquire);
         const DWORD now = GetTickCount();
@@ -17022,7 +17045,7 @@ bool VR::TryGetLadderPinDrawPos(bool physicalLeft, const Vector& body, Vector& t
     Vector d = pin.world - handWorld;
     if (d.LengthSqr() > 32.f * 32.f)
         return false;
-    PivotYaw(d, -m_RotationOffsetY.load(std::memory_order_acquire));
+    PivotYaw(d, -PairYaw());
     trackingPos += d;
     return true;
 }
@@ -18477,6 +18500,11 @@ void VR::BeginStereoFramePose()
         m_StereoFrameRightCtrlAng = m_PhysicalRightAngAbs;
         m_StereoFrameLeftCtrlPos = m_LeftControllerPosAbs;
         m_StereoFrameRightCtrlPos = m_PhysicalRightPosAbs;
+        m_StereoFrameYaw = m_RotationOffsetY.load(std::memory_order_acquire);
+        m_StereoFrameZero = m_HmdPosAbsZero;
+        m_StereoFrameOriginLatched = m_HmdOriginLatched;
+        m_StereoFrameHeightUnits = bmvr::g_HeightOffsetCm * 0.01f * m_VRScale;
+        m_StereoFrameIpd = m_Ipd * m_IpdScale;
     }
     m_StereoFramePoseActive = true;
     UpdateScopeZoomSmooth();
