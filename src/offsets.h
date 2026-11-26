@@ -406,9 +406,6 @@ public:
     // DrawSprite. Type 2 (VP_PARALLEL) copies CurrentViewForward/Right/Up.
     // Beta 26234270 only (checked 2026-11-11).
     static constexpr int kGetSpriteAxes = 0xE93F0; // beta 26627981 (26234270: 0xE9380)
-    // client.dll CGlowOverlay::Draw (vtable slot 4 of CGlowOverlay / C_LightGlowOverlay /
-    // C_SunGlowOverlay; SDK glow_overlay.cpp). thiscall(bool cacheFullSceneState), ret 4.
-    static constexpr int kCGlowOverlay_Draw = 0x140A20; // build 26768221
     // CurrentViewOrigin() (FUN_101f6a10) returns this global (client RVA).
     static constexpr int kCurrentViewOriginGlobal = 0x6CDE38; // beta 26627981 (26234270: 0x6CAD58)
     // client.dll CViewRenderBeams::DrawBeam (FUN_101f5be0). thiscall, Beam_t*
