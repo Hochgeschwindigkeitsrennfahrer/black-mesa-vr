@@ -1,5 +1,0 @@
-# Numpad (gameplay): 4/6 Y  8/2 Z  7/9 X. Hold Ctrl for angles.
-# Numpad 5 save, 0 reset this weapon, Shift = fine step.
-# key ox oy oz ax ay az  (added on top of the built-in table)
-# Saved 2026-08-28 poses are now the hardcoded table. Leave this empty
-# unless you are retuning extras on top of that baseline.

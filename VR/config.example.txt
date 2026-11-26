@@ -1,30 +1,31 @@
-# Black Mesa VR. Read once at launch. Quit and restart after edits.
-# Player settings only. Other behavior uses the built-in defaults.
-# Settings in the in-VR settings panel (hold Triangle/Y) are not listed here:
-# the panel writes a line only for a setting you changed from its default and
-# removes it again when you set it back, so improved defaults reach you in
-# updates. Explanations of those settings below are kept for reference.
+# Black Mesa VR: the settings that live only in VR\config.txt, with their defaults.
+# This file is never read. To change a setting, put its line (without the #)
+# in VR\config.txt, or create that file; it holds only the settings you
+# changed, so better defaults reach you with updates. Read once at launch:
+# quit the game fully before you edit it.
+# Settings in the in-VR settings panel (hold Triangle/Y) are saved into
+# config.txt by the panel itself; their notes below are for reference.
 
 # Multiplier on the runtime's recommended per-eye size. 1.0 = recommended.
 # 0.75 if the GPU is bound. Above 1.0 is extra supersampling (sharper, less
 # shimmer, costs GPU). With GPU headroom try 1.2-1.4 together with
 # OpenXRHelperDownsample=box below (PSVR2: 1.39 = 4016x4096 per eye).
-RenderScale=1.0
+#RenderScale=1.0
 
 # Largest eye side in pixels (2048-8192, default 4096). Above it both axes
 # shrink by one factor, so the eye keeps its shape. MulticoreMode caps the
 # height at 5456. Going far above 4096 can run the 32-bit game out of memory.
-MaxEyeSize=4096
+#MaxEyeSize=4096
 
 # box: with RenderScale above 1.0, the OpenXR helper averages the big eye
 # image down to the headset's recommended size itself (cleaner edges, less
 # shimmer). Empty = the big image goes to the runtime, which scales it.
-OpenXRHelperDownsample=
+#OpenXRHelperDownsample=
 
 # Water and mirror-floor reflections as a fraction of the eye size (default
 # 0.5). 0 = the engine's fixed 1024x1024, which shimmers at floor and wall
 # edges at headset resolution. Costs GPU in rooms with big reflective floors.
-ReflectionRtScale=0.5
+#ReflectionRtScale=0.5
 
 # The screen copy shiny floors and wired glass sample (_rt_PowerOfTwoFB) as a
 # fraction of the eye size. At the engine's 1024x1024 the floor next to walls
@@ -32,7 +33,7 @@ ReflectionRtScale=0.5
 # that RenderScale and FXAA cannot fix. Only a copy, so much cheaper than
 # ReflectionRtScale. 0.5 is recommended in every case, also with
 # ReflectionRtScale=0. -1 (or unset) = same as ReflectionRtScale, 0 = 1024x1024.
-RefractCopyRtScale=0.5
+#RefractCopyRtScale=0.5
 
 # Cubemap reflection strength (0..1, 1 = as the game; default 0.4 / 0.8). Lower values
 # calm shiny surfaces that shimmer in the headset, without mat_specular 0
@@ -42,10 +43,10 @@ RefractCopyRtScale=0.5
 
 # true: the world renders at the eye size.
 # false: the world stays at the desktop window and is stretched into the eyes.
-WorldRenderAtEyeSize=true
+#WorldRenderAtEyeSize=true
 
 # Eye shown on the desktop window (and in streams/recordings): right or left.
-DesktopEye=right
+#DesktopEye=right
 
 # Right-stick turn. Degrees per millisecond at full deflection.
 
@@ -55,19 +56,19 @@ DesktopEye=right
 # level and the scene plays around you). Also in the VR settings panel.
 
 # Extra nudge on top of the built-in weapon poses (Source units / degrees).
-ViewmodelPosOffsetX=0.0
-ViewmodelPosOffsetY=0.0
-ViewmodelPosOffsetZ=0.0
-ViewmodelAngOffsetX=0.0
-ViewmodelAngOffsetY=0.0
-ViewmodelAngOffsetZ=0.0
-ViewmodelScale=0.68
+#ViewmodelPosOffsetX=0.0
+#ViewmodelPosOffsetY=0.0
+#ViewmodelPosOffsetZ=0.0
+#ViewmodelAngOffsetX=0.0
+#ViewmodelAngOffsetY=0.0
+#ViewmodelAngOffsetZ=0.0
+#ViewmodelScale=0.68
 
 # Grip tilt, degrees. WMR uses ControllerPitchTilt. Touch and Index use their own.
-ControllerPitchTilt=-35.0
-ControllerPitchTiltTouch=0
-ControllerPitchTiltIndex=0
-ControllerPitchTiltVive=-45.0
+#ControllerPitchTilt=-35.0
+#ControllerPitchTiltTouch=0
+#ControllerPitchTiltIndex=0
+#ControllerPitchTiltVive=-45.0
 # Player preference on top of the per-controller tilt above, in degrees
 # (negative = gun points lower). Also in the VR settings panel (bmvr_gun_pitch).
 # Hand models rolled thumb-up around the controller, in degrees, to match a
@@ -78,17 +79,17 @@ ControllerPitchTiltVive=-45.0
 # (bmvr_hand_gun_right, _up, _forward). Also in the VR settings panel.
 # While the G-Man is in front of you, grip extends only the middle finger.
 # Touch aim origin sits ahead of the grip. Pulls the gun back along -forward.
-ViewmodelPosOffsetXTouch=5.5
+#ViewmodelPosOffsetXTouch=5.5
 
 # HUD quad, metres, relative to the headset.
-HudDistance=1.05
-HudSize=0.70
+#HudDistance=1.05
+#HudSize=0.70
 
 # Stereo depth strength (0.8-1.2, other values are ignored). Leave at 1.0;
 # set your own IPD on the headset or in SteamVR.
-IPDScale=1.0
+#IPDScale=1.0
 # Player height in cm (+ = taller); also in the VR panel, General > View.
-HeightOffset=0
+#HeightOffset=0
 
 # MSAA on the eyes (0 = off / 2 / 4): set it in the VR settings panel,
 # Graphics -> ANTI-ALIASING (MSAA); applies live. Keep FXAA on next to it.
@@ -98,19 +99,19 @@ HeightOffset=0
 # 43.5 deg in) the symmetric frustum wastes ~46 % of the eye pixels, so the
 # same RenderScale gets much sharper. OpenXR helper submits the runtime's
 # per-eye FOV. Restart required. If something looks wrong on your headset, try false.
-OffCenterEyes=true
+#OffCenterEyes=true
 
-Haptics=true
-HideCrosshair=true
+#Haptics=true
+#HideCrosshair=true
 # Aim marker as a red laser dot instead of the amber ticks. Follows the shot
 # (tilt and GunPitchOffset included); guns only. Also in the VR settings panel.
-DisableViewBob=true
-LeftHanded=false
+#DisableViewBob=true
+#LeftHanded=false
 
 # Crossbow zoom as a fraction of the headset field of view. 0.28 is about 3.5x.
-ScopeZoomFovScale=0.28
+#ScopeZoomFovScale=0.28
 # Eye the scoped crossbow bolt starts from, so it lands on that eye's reticle: right, left or center.
-ScopeEye=right
+#ScopeEye=right
 # Zoomed view follows the gun's aim instead of the head: aim by pointing the crossbow (a
 # two-hand grip on the front of the crossbow steadies it). The whole headset view moves with
 # the hand, so it can be less comfortable. ScopeGunSmoothSec smooths hand tremor (seconds,
@@ -167,16 +168,16 @@ ScopeEye=right
 
 # Deferred lights are culled from each eye's view (bmvr_light_cull_eye). false = the main view,
 # which follows the gun aim: lights behind the hand go out.
-LightCullEyeView=true
+#LightCullEyeView=true
 
 # Lens flares laid out around each eye's view axis, so both eyes show the same flare
 # (bmvr_flare_eye_axis). false = around the image centre, as on a flat screen.
-FlareEyeAxis=true
+#FlareEyeAxis=true
 # Lens flare streaks stay level with the horizon when you tilt your head (bmvr_flare_level).
 # false = they turn with the head, as on a flat screen.
-FlareLevel=true
+#FlareLevel=true
 # Both eyes use one flare layout, from the point between them (bmvr_flare_shared).
-FlareSharedLayout=true
+#FlareSharedLayout=true
 # A flat screen shows about 37 degrees up and down, so a flare leaves it and its built-in fade is done.
 # A headset shows far more, and a flat layer that far out looks tilted: fade out by this angle
 # off the view axis (bmvr_flare_fade_angle, 0 = no fade).

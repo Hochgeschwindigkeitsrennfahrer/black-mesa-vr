@@ -41,9 +41,12 @@ Full guide, screenshots and bug tracker:
 
 Blue Shift: same install, plus -game bshift in the launch options.
 
-Updating: copy the new files over the old install the same way. Keep your
-VR\config.txt unless the release notes say otherwise; it only holds what
-you changed.
+Updating: copy the new files over the old install the same way. The zip
+has no VR\config.txt, so your settings are kept: that file holds only what
+you changed (the VR panel writes it). Installs from before 2026-11-26 get
+it cleaned up once on the first start: the old shipped defaults and
+comments are removed, your own changes stay, the old file is kept as
+VR\config.txt.bak.
 
 
 3) Default controls
@@ -86,7 +89,8 @@ Graphics tips:
 5) Settings only in VR\config.txt
 ---------------------------------
 A few settings set up the eye images when the game starts, so they are
-only in this file. Quit the game fully before you edit it.
+only in this file. Quit the game fully before you edit it. If there is no
+VR\config.txt yet, create it (plain text, one Key=value per line).
 
   RenderScale=1.0     Multiplier on the headset's recommended eye size.
                       1.2-1.4 = supersampling: sharper, much less shimmer,
@@ -98,7 +102,8 @@ only in this file. Quit the game fully before you edit it.
   HeightOffset=0      Player height in cm (+ = taller; also in the VR panel,
                       General > View).
 
-The file explains every setting in comments.
+VR\config.example.txt lists these settings and more, with explanations;
+it is never read itself.
 
 
 6) If it does not work

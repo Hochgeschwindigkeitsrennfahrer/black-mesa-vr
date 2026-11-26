@@ -715,6 +715,10 @@ namespace bmvr
     // only values that differ from it, so a later default change reaches players
     // who never touched that setting.
     void CapturePanelDefaults();
+    // Header of VR/config.txt as the mod writes it (new file, or once over the
+    // full file older releases shipped). The marker line says it is done.
+    const char* UserConfigHeader();
+    const char* UserConfigHeaderMarker();
     // Debug capture: the VR panel's switches and engine settings as bm-scenario
     // "cmd" lines (bmvr_* cvars, engine cvars), so a headless restore runs with
     // exactly the session's settings. Game thread (reads engine cvars).

@@ -16,7 +16,7 @@ if [[ ! -f $out/VR/config.txt ]]; then
 		if grep -q "^$1=" "$out/VR/config.txt"; then sed -i "s|^$1=.*|$1=$2|" "$out/VR/config.txt"
 		else echo "$1=$2" >> "$out/VR/config.txt"; fi
 	}
-	tr -d '\r' < "$base" > "$out/VR/config.txt"
+	if [[ -f $base ]]; then tr -d '\r' < "$base" > "$out/VR/config.txt"; else : > "$out/VR/config.txt"; fi  # no config.txt = all defaults
 	set_kv VRRuntimeBackend fake
 	set_kv MirrorBothEyes true
 	for kv in ${BMVR_CONFIG_SET:-}; do set_kv "${kv%%=*}" "${kv#*=}"; done

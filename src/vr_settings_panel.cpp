@@ -1632,6 +1632,8 @@ namespace
                 text.append(buf, n);
             std::fclose(f);
         }
+        if (text.empty())
+            text = bmvr::UserConfigHeader();   // first save: the zip ships no config.txt
         const std::string eol = (text.find("\r\n") != std::string::npos) ? "\r\n" : "\n";
         for (const std::string& key : drop)
         {

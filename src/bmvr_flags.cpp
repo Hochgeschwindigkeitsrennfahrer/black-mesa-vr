@@ -544,12 +544,13 @@ namespace bmvr
     // the HWND (gbmatch squash-blit). LITERAL FullFrame/G-buffer at rec
     // filled only the top HWND slice of the eyes (2026-08-26, user miss).
     static bool g_TryOffscreenHmd = true;
-    static bool g_TryOffscreenWorldGrow = false;
-    // WorldRenderAtEyeSize=true in VR/config.txt opts back into the world-RT
-    // grow. Set it back to false to return to the window-sized world + eye
-    // upscale. The opt-in also overrides the policy hmd_world skip. Leftover
+    // World RTs grown to the eye size: on by default since 2026-11-26 (every
+    // release shipped WorldRenderAtEyeSize=true in config.txt, which no longer
+    // ships). WorldRenderAtEyeSize=false returns to the window-sized world + eye
+    // upscale. On also overrides the policy hmd_world skip. Leftover
     // bmvr_in_hmd_world.flag (install killing bms.exe) is deleted, not honored.
-    static bool g_WorldEyeSizeOptIn = false;
+    static bool g_TryOffscreenWorldGrow = true;
+    static bool g_WorldEyeSizeOptIn = true;
     static bool g_GameplayWorldRts = false;
     // `_rt_FullFrameFB*` is created at map-load *before* client LevelInit.
     // Waiting for that hook (2026-09-01) left FullFrame at 2560x1440 while
@@ -744,11 +745,104 @@ namespace bmvr
     // config.txt (turned into Bind.* mappings once, see InitFromDisk).
     static bool g_LegacyBindKeysSeen = false;
 
+    const char* UserConfigHeaderMarker() { return "# Black Mesa VR: only the settings you changed"; }
+    const char* UserConfigHeader()
+    {
+        return "# Black Mesa VR: only the settings you changed (the VR panel writes here too).\r\n"
+               "# The settings only this file holds, explained: VR\\config.example.txt\r\n"
+               "# Read once at launch: quit the game fully before you edit this file.\r\n";
+    }
+
+    // Releases up to 2026-11 shipped a full VR/config.txt: these lines (all at
+    // the built-in default) plus about 170 comment lines. Since then the zip ships
+    // VR/config.example.txt and config.txt holds only the player's own changes,
+    // so better defaults reach them. Once (no header yet): drop the shipped
+    // lines and comments, keep every other setting, back up the old file.
+    static void MigrateShippedUserConfig(const std::wstring& path)
+    {
+        const std::string text = ReadConfigFileText(path);
+        if (text.empty() || text.find(UserConfigHeaderMarker()) != std::string::npos)
+            return;
+        static const char* const kShipped[] = {
+            "RenderScale=1.0", "MaxEyeSize=4096", "OpenXRHelperDownsample=", "ReflectionRtScale=0.5",
+            "RefractCopyRtScale=0.5", "WorldRenderAtEyeSize=true", "DesktopEye=right",
+            "ViewmodelPosOffsetX=0.0", "ViewmodelPosOffsetY=0.0", "ViewmodelPosOffsetZ=0.0",
+            "ViewmodelAngOffsetX=0.0", "ViewmodelAngOffsetY=0.0", "ViewmodelAngOffsetZ=0.0",
+            "ViewmodelScale=0.68", "ControllerPitchTilt=-35.0", "ControllerPitchTiltTouch=0",
+            "ControllerPitchTiltIndex=0", "ControllerPitchTiltVive=-45.0", "ViewmodelPosOffsetXTouch=5.5",
+            "HudDistance=1.05", "HudSize=0.70", "IPDScale=1.0", "HeightOffset=0", "OffCenterEyes=true",
+            "Haptics=true", "HideCrosshair=true", "DisableViewBob=true", "LeftHanded=false",
+            "ScopeZoomFovScale=0.28", "ScopeEye=right", "LightCullEyeView=true", "FlareEyeAxis=true",
+            "FlareLevel=true", "FlareSharedLayout=true",
+        };
+        auto trim = [](std::string v) {
+            const size_t a = v.find_first_not_of(" \t\r");
+            if (a == std::string::npos)
+                return std::string();
+            const size_t b = v.find_last_not_of(" \t\r");
+            return v.substr(a, b - a + 1);
+        };
+        std::string out = UserConfigHeader();
+        int kept = 0, dropped = 0;
+        size_t pos = 0;
+        while (pos < text.size())
+        {
+            size_t eol = text.find('\n', pos);
+            if (eol == std::string::npos)
+                eol = text.size();
+            const std::string line = trim(text.substr(pos, eol - pos));
+            pos = eol + 1;
+            if (line.empty() || line[0] == '#' || line[0] == ';' || line.compare(0, 2, "//") == 0)
+                continue;
+            const size_t eq = line.find('=');
+            std::string norm = line;
+            if (eq != std::string::npos)
+            {
+                std::string val = line.substr(eq + 1);
+                const size_t cut = val.find('#');
+                if (cut != std::string::npos)
+                    val.erase(cut);
+                norm = trim(line.substr(0, eq)) + "=" + trim(val);
+            }
+            bool shipped = false;
+            for (const char* s : kShipped)
+                shipped = shipped || norm == s;
+            if (shipped)
+            {
+                ++dropped;
+                continue;
+            }
+            out += line + "\r\n";
+            ++kept;
+        }
+        const std::wstring bak = path + L".bak";
+        if (!CopyFileW(path.c_str(), bak.c_str(), FALSE))
+        {
+            Log("VR config: old shipped config.txt not cleaned up (backup failed, error %lu)", GetLastError());
+            return;
+        }
+        const std::wstring tmp = path + L".tmp";
+        FILE* f = nullptr;
+        _wfopen_s(&f, tmp.c_str(), L"wb");
+        bool ok = f && fwrite(out.data(), 1, out.size(), f) == out.size();
+        if (f)
+            fclose(f);
+        ok = ok && MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
+        if (!ok)
+            DeleteFileW(tmp.c_str());
+        Log("VR config: shipped config.txt cleaned up, %d shipped default%s and the comments removed, %d own "
+            "setting%s kept, old file in config.txt.bak: %s",
+            dropped, dropped == 1 ? "" : "s", kept, kept == 1 ? "" : "s", ok ? "ok" : "FAILED");
+    }
+
     static void ReadUserConfig(const std::wstring& path)
     {
         std::string text = ReadConfigFileText(path);
         if (text.empty())
+        {
+            Log("VR config %ls: none, built-in defaults", path.c_str());
             return;
+        }
         for (char& c : text)
         {
             if (c == '\r')
@@ -1534,7 +1628,7 @@ namespace bmvr
             else if (std::strcmp(n, "WorldRenderAtEyeSize") == 0)
             {
                 sawWorldEyeSize = true;
-                g_WorldEyeSizeOptIn = ParseCfgBool(val, false);
+                g_WorldEyeSizeOptIn = ParseCfgBool(val, true);
                 g_TryOffscreenWorldGrow = g_WorldEyeSizeOptIn;
             }
         }
@@ -2394,6 +2488,7 @@ namespace bmvr
             Log("Button map: old button switches migrated (%zu mapping%s), removed from config.txt: %s",
                 set.size(), set.size() == 1 ? "" : "s", ok ? "ok" : "FAILED");
         }
+        MigrateShippedUserConfig(ExeDir() + L"\\VR\\config.txt");   // after the key migrations above
         g_FoveatedAtStart = g_Foveated > 0.f;
         ClearSkipsOnBuildChange();
         ReadSkipFile(SkipPath());

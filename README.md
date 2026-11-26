@@ -129,8 +129,9 @@ defaults reach you with each update.
      world upside-down.
 7. Launch Black Mesa from Steam. `bmvr_log.txt` next to `bms.exe` should appear and start with `BMVR d3d9.dll loaded`.
 
-**Updating:** copy the new zip over the old install the same way. Keep your `VR\config.txt` unless the release notes
-say otherwise; it only holds what you changed.
+**Updating:** copy the new zip over the old install the same way. The zip has no `VR\config.txt`, so your settings
+are kept: that file holds only what you changed. Installs from before 2026-11-26 get it cleaned up once on the first
+start (old shipped defaults and comments removed, your own changes kept, the old file saved as `VR\config.txt.bak`).
 
 **Uninstall:** quit the game, then in the Black Mesa folder delete `d3d9.dll`, `BMVR_README.txt`, `bmvr_*` files,
 the `VR\` folder, `bin\d3d9.dll`, `bms\cfg\bmvr.cfg` and `bms\sound\bmvr\` (same under `bshift\` if you played Blue
@@ -161,7 +162,8 @@ keeps bare hands for the whole campaign, and the weapon wheel and wrist HUD turn
 
 ### In `VR\config.txt` (not in the panel)
 A few settings can only be changed in this file, because they set up the eye images when the game starts.
-**Quit the game fully before you edit it**; it is read once at launch.
+**Quit the game fully before you edit it**; it is read once at launch. No `VR\config.txt` yet: create it (plain
+text, one `Key=value` per line).
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -175,7 +177,7 @@ A few settings can only be changed in this file, because they set up the eye ima
 | `IPDScale` | `1.0` | Stereo depth strength (0.8–1.2): multiplies the eye separation your headset reports. Higher = more depth and a smaller-feeling world. Leave it at 1.0; it does not change movement or hand scale, and it is not the place to fix your headset's IPD. |
 | `HeightOffset` | `0.0` | Player height in cm (+ = taller; also in the VR panel, General > View). |
 
-The file explains every setting in comments.
+`VR\config.example.txt` lists these and more settings with explanations; it is never read itself.
 
 ## Known issues
 - **Thin lit objects stay jagged even with MSAA 4x** (railings, thin bars). Black Mesa lights the scene in a separate
