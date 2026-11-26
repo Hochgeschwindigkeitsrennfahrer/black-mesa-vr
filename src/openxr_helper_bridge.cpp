@@ -27,6 +27,8 @@ namespace
     std::atomic<bool> g_OpenXrHelperStarted{ false };
     std::mutex g_OpenXrBridgeStateMutex;
     L4D2VROpenXrBridgeState* g_OpenXrBridgeState = nullptr;
+    std::mutex g_OpenXrHelperLogMutex;
+    std::wstring g_OpenXrHelperLog;
 
     void Trim(std::string& value)
     {
@@ -371,6 +373,10 @@ bool L4D2VR_StartOpenXrHelper(const OpenXrHelperLaunchConfig& config)
         helperExe = helperDir + L"\\OpenXRHelper64.exe";
     }
     const std::wstring helperLog = helperDir + L"\\openxr_helper64_from_game.log";
+    {
+        std::lock_guard<std::mutex> lock(g_OpenXrHelperLogMutex);
+        g_OpenXrHelperLog = helperLog;
+    }
 
     if (GetFileAttributesW(helperExe.c_str()) == INVALID_FILE_ATTRIBUTES)
     {
@@ -1008,4 +1014,10 @@ void L4D2VR_PublishOpenXrOverlayFrame(uint32_t frameId)
     state->overlayFrameId = frameId;
     L4D2VR_SeqlockEnd(state->overlayFrameGeneration);
     state->heartbeatTickMs = GetTickCount64();
+}
+
+std::wstring L4D2VR_OpenXrHelperLogPath()
+{
+    std::lock_guard<std::mutex> lock(g_OpenXrHelperLogMutex);
+    return g_OpenXrHelperLog;
 }

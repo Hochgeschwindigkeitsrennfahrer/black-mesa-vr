@@ -5952,6 +5952,26 @@ void VR::FlushCaptureEngineState()
             m_SetupVelPrevMs = now;
         }
     }
+    // Copies of the mod and OpenXR helper logs, so a capture looked at later
+    // still has them after the launcher rotated them out. A few seconds after
+    // the capture: the mod log flushes in batches and the save lines follow.
+    if (!m_CaptureLogName.empty() && static_cast<LONG>(GetTickCount() - m_CaptureLogAt) >= 0)
+    {
+        const std::string base = bmvr::VrFilePath(m_CaptureLogName.c_str());
+        auto copyLog = [&](const std::wstring& from, const char* suffix) {
+            if (from.empty())
+                return;
+            const std::string toA = base + suffix;
+            std::wstring to(static_cast<size_t>(MultiByteToWideChar(CP_ACP, 0, toA.c_str(), -1, nullptr, 0)), L'\0');
+            MultiByteToWideChar(CP_ACP, 0, toA.c_str(), -1, to.data(), static_cast<int>(to.size()));
+            const BOOL ok = CopyFileW(from.c_str(), to.c_str(), FALSE);
+            Game::logMsg("debug capture %s: %s copy %s (%ls, err %lu)", m_CaptureLogName.c_str(), suffix,
+                ok ? "written" : "failed", from.c_str(), ok ? 0ul : GetLastError());
+        };
+        copyLog(bmvr::LogFilePath(), "-bmvr_log.txt");
+        copyLog(L4D2VR_OpenXrHelperLogPath(), "-openxr_helper64.log");
+        m_CaptureLogName.clear();
+    }
     std::string name;
     {
         std::lock_guard<std::mutex> lock(m_CaptureMutex);
@@ -5959,6 +5979,8 @@ void VR::FlushCaptureEngineState()
     }
     if (name.empty() || !m_Game)
         return;
+    m_CaptureLogName = name;
+    m_CaptureLogAt = GetTickCount() + 3000;
     std::string t = "# BMVR capture engine state v1 (game thread)\n";
     char b[256];
     FmtVec(t, "engine_setup", m_SetupOrigin);

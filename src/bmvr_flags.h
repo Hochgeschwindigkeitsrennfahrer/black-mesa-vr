@@ -327,6 +327,8 @@ namespace bmvr
     // "<TestDir>\VR\<leaf>" when BMVR_TESTDIR is set, else "VR\<leaf>"
     // (relative to the game folder, as before).
     std::string VrFilePath(const char* leaf);
+    // The mod log this process writes (<exe or TestDir>\bmvr_log.txt).
+    std::wstring LogFilePath();
     // VRRuntimeBackend=fake: the OpenXR helper path with an in-process fake
     // helper (scripted poses/buttons from VR\fake.txt, PSVR2 projection, no
     // SteamVR). See vr_fake_helper.cpp.

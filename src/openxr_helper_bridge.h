@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "openxr_bridge_protocol.h"
 
@@ -48,6 +49,8 @@ bool L4D2VR_ReadOpenXrHmdPose(L4D2VROpenXrPoseDesc& pose, uint32_t* generation =
 // Room (STAGE) origin in the LOCAL app space (bridge v19). False when the
 // helper has not published one or the runtime has no STAGE space.
 bool L4D2VR_ReadOpenXrStagePose(L4D2VROpenXrPoseDesc& pose);
+// The --log file the game started the helper with (empty before the start).
+std::wstring L4D2VR_OpenXrHelperLogPath();
 bool L4D2VR_ReadOpenXrRuntimeViewConfig(L4D2VROpenXrRuntimeViewConfigDesc& config, uint32_t* generation = nullptr);
 bool L4D2VR_PeekOpenXrVisibilityMaskGeneration(uint32_t* generation);
 bool L4D2VR_ReadOpenXrVisibilityMask(L4D2VROpenXrVisibilityMaskDesc& mask, uint32_t* generation = nullptr);

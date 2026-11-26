@@ -236,6 +236,8 @@ public:
     void TickRestoreView();
     std::mutex m_CaptureMutex;
     std::string m_CaptureEngineName;          // set by the render thread, written by the game thread
+    std::string m_CaptureLogName;             // game thread: capture whose logs are copied at m_CaptureLogAt
+    DWORD m_CaptureLogAt = 0;
     Vector m_SetupVelPrev{};
     DWORD m_SetupVelPrevMs = 0;
     Vector m_SetupVelocity{};

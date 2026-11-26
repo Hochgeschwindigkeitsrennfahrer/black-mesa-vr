@@ -607,6 +607,11 @@ namespace bmvr
         return full.substr(0, slash);
     }
 
+    std::wstring LogFilePath()
+    {
+        return ExeDir() + L"\\bmvr_log.txt";
+    }
+
     static std::wstring SkipPath()
     {
         return ExeDir() + L"\\bmvr_skip.txt";
@@ -1821,7 +1826,7 @@ namespace bmvr
         static int s_unflushed = 0;
         if (exeLog.empty())
         {
-            exeLog = ExeDir() + L"\\bmvr_log.txt";
+            exeLog = LogFilePath();
             modLog = ModuleDir() + L"\\bmvr_log.txt";
         }
         static std::string exeLogN;
