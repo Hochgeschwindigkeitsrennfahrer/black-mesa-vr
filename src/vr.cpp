@@ -5665,7 +5665,7 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
     }
     static int s_capturePolls = 0;
     if (bmvr::TestDir().empty() && !bmvr::g_FakeRuntime && !bmvr::g_DebugDumps
-        && !bmvr::g_DebugCaptureAt && !bmvr::g_ScreenshotAt && s_capturePolls <= 0)
+        && !bmvr::g_DebugCaptureAt && !bmvr::g_FogDumpAt && !bmvr::g_ScreenshotAt && s_capturePolls <= 0)
         return;
     static DWORD s_lastCheck = 0;
     const DWORD now = GetTickCount();
@@ -5682,6 +5682,16 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         std::remove(captureTrigger.c_str());
         bmvr::g_DebugCaptureAt = now ? now : 1;
         Game::logMsg("debug capture: triggered by VR/capture.txt");
+    }
+    // VR/fogdump.txt: the panel's "Fog dump", for headless tests.
+    const std::string fogDumpTrigger = bmvr::VrFilePath("fogdump.txt");
+    if (FILE* ff = std::fopen(fogDumpTrigger.c_str(), "rb"))
+    {
+        std::fclose(ff);
+        std::remove(fogDumpTrigger.c_str());
+        if (!bmvr::g_FogDumpAt)
+            bmvr::g_FogDumpAt = now ? now : 1;
+        Game::logMsg("fog dump: triggered by VR/fogdump.txt");
     }
     if (bmvr::g_DebugCaptureAt && static_cast<LONG>(now - bmvr::g_DebugCaptureAt) >= 0)
     {
@@ -5707,6 +5717,100 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         Game::logMsg("debug capture %s: eyes + audit of one frame, files VR/%s*", name, name);
         s_capturePolls = 40;
         return;
+    }
+    // VR panel "Fog dump" (user 2026-11-26): the global Xen fog (__gbxog0) floats
+    // through the floor in VR where flat has none (research camp). Step 1: head
+    // pose frozen, fog drawn whatever the setting -> a full debug capture
+    // (fogdump-<time>: eyes, state + save, audit with the fog constants and its
+    // depth/G-buffer inputs). Step 2: fog hidden -> the eyes again
+    // (fogdump-<time>-nofog), same pose, so the difference is the fog alone.
+    // Then setting and head pose go back.
+    if (bmvr::g_FogDumpAt && static_cast<LONG>(now - bmvr::g_FogDumpAt) >= 0)
+    {
+        static int s_step = 0;
+        static char s_name[64];
+        static bool s_freezeWas = false;
+        static DWORD s_stepStart = 0;
+        s_capturePolls = 40;
+        auto next = [&](int step, DWORD delayMs) {
+            s_step = step;
+            s_stepStart = now;
+            bmvr::g_FogDumpAt = (now + delayMs) ? now + delayMs : 1;
+        };
+        const bool dumpPending = [] {
+            FILE* f = std::fopen(bmvr::VrFilePath("dump.txt").c_str(), "rb");
+            if (f)
+                std::fclose(f);
+            return f != nullptr;
+        }();
+        if (s_step == 0)
+        {
+            SYSTEMTIME st{};
+            GetLocalTime(&st);
+            std::snprintf(s_name, sizeof(s_name), "fogdump-%04u%02u%02u-%02u%02u%02u", st.wYear, st.wMonth,
+                st.wDay, st.wHour, st.wMinute, st.wSecond);
+            s_freezeWas = bmvr::g_FreezeHead;
+            bmvr::g_FreezeHead = true;
+            bmvr::g_FogDumpOverride = 1;
+            Game::logMsg("fog dump %s: head pose frozen, Xen global fog drawn (setting off=%d, debug hide %.0f, map %s)",
+                s_name, bmvr::g_XenGlobalFogOff ? 1 : 0, bmvr::g_DebugHideXog, m_CurrentMapName.c_str());
+            next(1, 500);
+        }
+        else if (s_step == 1)
+        {
+            SetEnvironmentVariableA("BMVR_AUDIT_CONSTS", "liquids/|water|__gbxog");
+            SetEnvironmentVariableA("BMVR_AUDIT_TEXPREFIX", s_name);
+            if (FILE* af = std::fopen(bmvr::VrFilePath("audit.txt").c_str(), "wb"))
+            {
+                std::fputs("1", af);
+                std::fclose(af);
+            }
+            if (FILE* df = std::fopen(bmvr::VrFilePath("dump.txt").c_str(), "wb"))
+            {
+                std::fprintf(df, "%s 1", s_name);
+                std::fclose(df);
+            }
+            Game::logMsg("fog dump %s: capture with fog", s_name);
+            next(2, 750);
+        }
+        else if (s_step == 2)
+        {
+            // Wait for the eye dump and the audit (its texture dumps stall for a while).
+            const bool busy = dumpPending || g_AuditFramesLeft.load(std::memory_order_acquire) > 0;
+            if (busy && now - s_stepStart < 15000)
+                bmvr::g_FogDumpAt = now + 250;
+            else
+            {
+                if (busy)
+                    Game::logMsg("fog dump %s: capture still busy after 15 s, going on", s_name);
+                bmvr::g_FogDumpOverride = 2;
+                Game::logMsg("fog dump %s: Xen global fog hidden", s_name);
+                next(3, 500);
+            }
+        }
+        else if (s_step == 3)
+        {
+            if (FILE* df = std::fopen(bmvr::VrFilePath("dump.txt").c_str(), "wb"))
+            {
+                std::fprintf(df, "%s-nofog 1", s_name);
+                std::fclose(df);
+            }
+            next(4, 750);
+        }
+        else
+        {
+            if (dumpPending && now - s_stepStart < 5000)
+                bmvr::g_FogDumpAt = now + 250;
+            else
+            {
+                bmvr::g_FogDumpOverride = 0;
+                bmvr::g_FreezeHead = s_freezeWas;
+                Game::logMsg("fog dump %s: done, fog setting and head pose back (files VR/%s*)", s_name, s_name);
+                s_step = 0;
+                bmvr::g_FogDumpAt = 0;
+            }
+        }
+        // No return: the audit/dump triggers written above are read further down.
     }
     if (bmvr::g_ScreenshotAt && static_cast<LONG>(now - bmvr::g_ScreenshotAt) >= 0)
     {
@@ -5794,7 +5898,8 @@ void VR::MaybeDebugDumpPublished(uint32_t slot, const L4D2VROpenXrPoseDesc* pose
         Game::logMsg("debug dump %s: tracking pos %.4f %.4f %.4f quat %.4f %.4f %.4f %.4f", name,
             pose->position[0], pose->position[1], pose->position[2],
             pose->orientation[0], pose->orientation[1], pose->orientation[2], pose->orientation[3]);
-    if (std::strncmp(name, "capture-", 8) == 0)
+    if (std::strncmp(name, "capture-", 8) == 0
+        || (std::strncmp(name, "fogdump-", 8) == 0 && !std::strstr(name, "-nofog")))
     {
         // Debug capture: everything a headless run needs to show this exact
         // view again, from the frame dumped below.
@@ -11325,7 +11430,9 @@ void VR::UpdateScreenEffectNoDraw()
         IMaterial* m = m_ScreenFxMaterials[i];
         if (!m)
             continue;
-        const bool want = m_IsVREnabled && (i == 3 ? bmvr::g_XenGlobalFogOff : bmvr::g_VrSkipScreenEffects);
+        const bool fogOff = bmvr::g_FogDumpOverride == 1 ? false
+            : bmvr::g_FogDumpOverride == 2 ? true : bmvr::g_XenGlobalFogOff;
+        const bool want = m_IsVREnabled && (i == 3 ? fogOff : bmvr::g_VrSkipScreenEffects);
         if (want == m_ScreenFxNoDraw[i])
             continue;
         m_ScreenFxNoDraw[i] = want;

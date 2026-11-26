@@ -12,6 +12,7 @@
 #   log                               copy the mod log now
 #   waitlog <regex> [seconds]         wait until the mod log has a line matching <regex> (default 60 s; fails the run if not)
 #   capture                           what the VR panel's "Capture debug frame" button does (eyes, audit, water consts + RTs)
+#   fogdump                           what the VR panel's "Fog dump" button does (capture with Xen global fog, then eyes without)
 #   audit [frames]                    render-target audit: per draw/copy/clear the RT written (size, viewport) and the RT
 #                                     textures sampled, with the eye/frame that last wrote each (OTHER-EYE, PREV-FRAME, UNSEEN flags)
 #   trace [frames]                    mod logs every render pass (RT push/pop, copies, viewports, screen rects) for N frames
@@ -153,6 +154,9 @@ while IFS= read -r line || [[ -n $line ]]; do
 			ok=0
 			for _ in $(seq 1 $((secs * 2))); do grep -qE "$re" "$out/bmvr_log.txt" 2>/dev/null && { ok=1; break; }; sleep 0.5; done
 			if (( ok )); then echo "waitlog '$re'"; else echo "waitlog '$re': TIMEOUT after ${secs}s"; failed=1; fi ;;
+		fogdump) : > "$out/VR/fogdump.txt"   # = VR panel "Fog dump": capture with the Xen global fog + eyes without it, VR/fogdump-*
+			for _ in $(seq 1 40); do [[ -e $out/VR/fogdump.txt ]] || break; sleep 0.25; done
+			[[ -e $out/VR/fogdump.txt ]] && echo "fogdump: not picked up" || echo "fogdump" ;;
 		capture) : > "$out/VR/capture.txt"   # = VR panel "Capture debug frame": eyes + audit + water/fog consts/RTs as VR/capture-*
 			for _ in $(seq 1 40); do [[ -e $out/VR/capture.txt ]] || break; sleep 0.25; done
 			[[ -e $out/VR/capture.txt ]] && echo "capture: not picked up" || echo "capture" ;;

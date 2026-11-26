@@ -374,6 +374,9 @@ namespace
             // OF DATE" toast, debug-only ones (PerfLog stats, profiling) only show here.
             { "Missing hooks", RowKind::Info, nullptr, nullptr, nullptr, 0, 0, 0, "missing_hooks" },
             { "Capture debug frame", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "debug_capture" },
+            // User 2026-11-26 (Xen ground fog through the floor in the research camp): a capture
+            // with the global Xen fog drawn + the same eyes without it (VR/fogdump-*).
+            { "Fog dump", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "fog_dump" },
             { "Screenshot (eyes only)", RowKind::Button, nullptr, nullptr, nullptr, 0, 0, 0, "screenshot" },
             // Back (user 2026-11-20, Xen plant glow that follows the hand): 20 s of every
             // light glow's world position + brightness into VR/glowtrace-*.csv.
@@ -3247,6 +3250,17 @@ void VR::UpdateSettingsPanel()
                 bmvr::g_DebugCaptureAt = 1;
             Game::logMsg("debug capture: armed, in 2 s");
             CloseSettingsPanel("debug capture");
+            return;
+        }
+        // Closes the panel; 2 s later a debug capture with the global Xen fog
+        // drawn, then the eyes again with it hidden (head pose frozen between).
+        if (r.fmt && std::strcmp(r.fmt, "fog_dump") == 0)
+        {
+            bmvr::g_FogDumpAt = GetTickCount() + 2000;
+            if (!bmvr::g_FogDumpAt)
+                bmvr::g_FogDumpAt = 1;
+            Game::logMsg("fog dump: armed, in 2 s");
+            CloseSettingsPanel("fog dump");
             return;
         }
         // Lightweight share (user 2026-11-18): closes the panel, 2 s later the

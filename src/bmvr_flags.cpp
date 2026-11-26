@@ -153,6 +153,8 @@ namespace bmvr
     float g_PauseMenuAlphaPasses = 3.f;
     bool g_PauseMenuColourFromFrame = true;
     unsigned long g_DebugCaptureAt = 0;
+    unsigned long g_FogDumpAt = 0;
+    int g_FogDumpOverride = 0;
     unsigned long g_ScreenshotAt = 0;
     unsigned long g_SteamScreenshotAt = 0;
     float g_DebugBlankEye = 0.f;

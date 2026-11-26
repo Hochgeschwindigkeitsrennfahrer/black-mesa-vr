@@ -358,6 +358,8 @@ namespace bmvr
     extern unsigned long g_ScreenshotAt;     // VR panel "Screenshot": GetTickCount when to dump the eyes (0 = none)
     extern unsigned long g_SteamScreenshotAt; // gesture screenshot: GetTickCount when to send the right eye to Steam (0 = none)
     extern unsigned long g_DebugCaptureAt;   // VR panel "Capture debug frame": GetTickCount when to capture (0 = none)
+    extern unsigned long g_FogDumpAt;        // VR panel "Fog dump": GetTickCount of the next fog dump step (0 = none)
+    extern int g_FogDumpOverride;            // Fog dump: global Xen fog 0 = as set, 1 = drawn, 2 = hidden (not saved)
     extern bool g_FlareLog;              // VR panel DEBUG "Flare position log" / bmvr_flare_log / env BMVR_FLARE_LOG=1: log lens flare positions + visibility; each switch-on starts fresh line caps (not saved)
     extern bool g_FreezeHead;            // VR panel debug row / bmvr_freeze_head: game view keeps the head pose of the moment it was switched on (not saved)
     extern float g_DebugHideXog;         // VR panel debug row: skip Xen fog draws, 1 = global (__gbxog0), 2 = volumes, 3 = both (not saved)
