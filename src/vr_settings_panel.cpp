@@ -478,6 +478,9 @@ namespace
             { "Ammo HUD turn (front toward you)", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudTurn, 5.f, -115.f, 115.f, "%+.0f\xB0" },
             { "Ammo HUD roll", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudRoll, 5.f, -225.f, 225.f, "%+.0f\xB0" },
             { "Ammo HUD size", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudSize, 0.25f, 0.4f, 7.5f, "%.2f" },
+            // Where the health/HEV panel sits next to it with both hands on the gun
+            // (user 2026-11-27), in the ammo panel's plane.
+            { "Health HUD with two hands", RowKind::Choice, nullptr, nullptr, &bmvr::g_AmmoHudHealthSide, 1.f, 0.f, 3.f, "Above ammo|Left of ammo|Right of ammo|Below ammo" },
             // A/B (user 2026-11-25): off = with both hands on a long gun the panel
             // stays on the gun's aim; on = the old gun-hand controller rotation.
             { "Two hands: ammo HUD follows hand", RowKind::Toggle, nullptr, &bmvr::g_TwoHandAmmoHudFollowsHand, nullptr, 0, 0, 0, nullptr },
@@ -1055,7 +1058,7 @@ namespace
                 Game::logMsg("VR settings reset: %s -> %s", r.label, r.defB ? "on" : "off");
                 ++changed;
             }
-            else if (float ammoDef = 0.f; r.kind == RowKind::Number && bmvr::AmmoHudRowDefault(r.f, ammoDef))
+            else if (float ammoDef = 0.f; (r.kind == RowKind::Number || r.kind == RowKind::Choice) && bmvr::AmmoHudRowDefault(r.f, ammoDef))
             {
                 // Per-weapon ammo HUD rows: back to the held weapon's built-in values.
                 if (std::fabs(*r.f - ammoDef) > 1e-4f)

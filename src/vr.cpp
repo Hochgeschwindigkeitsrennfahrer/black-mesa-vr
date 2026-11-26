@@ -15459,8 +15459,18 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                 BuildAmmoHudPanel(gunHudPos, gunHudAng, rightDominant, gunPanel);
                 if (gunPanel.valid)
                 {
+                    // Per weapon (VR panel row "Health HUD with two hands"): above, left,
+                    // right or below, along the ammo panel's own axes, so it turns with it.
                     handPanel = gunPanel;
-                    handPanel.ul = gunPanel.ul - gunPanel.yDown * (gunPanel.height * 1.08f);
+                    const int side = static_cast<int>(bmvr::g_AmmoHudHealthSide + 0.5f);
+                    if (side == 1)
+                        handPanel.ul = gunPanel.ul - gunPanel.xaxis * (gunPanel.width * 1.08f);
+                    else if (side == 2)
+                        handPanel.ul = gunPanel.ul + gunPanel.xaxis * (gunPanel.width * 1.08f);
+                    else if (side == 3)
+                        handPanel.ul = gunPanel.ul + gunPanel.yDown * (gunPanel.height * 1.08f);
+                    else
+                        handPanel.ul = gunPanel.ul - gunPanel.yDown * (gunPanel.height * 1.08f);
                 }
             }
             else
@@ -17167,10 +17177,11 @@ namespace ammo_hud
 {
     // Per weapon (ViewmodelClass::numpadKey): the ammo panel's placement on top
     // of BuildAmmoHudPanel's base spot. VR/ammo_hud.txt
-    // ("key forward side up tilt turn roll size"); the file overrides Builtin().
+    // ("key forward side up tilt turn roll size [health]"); the file overrides Builtin().
     struct Place
     {
         float fwd = 0.f, side = 0.f, up = 0.f, tilt = 0.f, turn = 0.f, roll = 0.f, size = 2.f;
+        float health = 0.f;   // two-hand health panel: 0 above, 1 left, 2 right, 3 below
     };
     std::map<std::string, Place> g_Place;
     std::string g_HeldKey;   // weapon the panel rows show (render thread)
@@ -17218,9 +17229,10 @@ namespace ammo_hud
                 continue;
             char key[32]{};
             Place p;
-            if (sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f", key, static_cast<unsigned>(sizeof(key)),
-                    &p.fwd, &p.side, &p.up, &p.tilt, &p.turn, &p.roll, &p.size) >= 8)
+            if (sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f %f", key, static_cast<unsigned>(sizeof(key)),
+                    &p.fwd, &p.side, &p.up, &p.tilt, &p.turn, &p.roll, &p.size, &p.health) >= 8)
             {
+                // Lines from before the health column (7 values) keep health 0 = above.
                 g_Place[key] = p;
                 ++n;
             }
@@ -17237,12 +17249,13 @@ namespace ammo_hud
             return;
         }
         out << "# Ammo HUD placement per weapon (VR panel DEBUG rows \"AMMO HUD\"), on top of the built-in spot.\n";
-        out << "# key forward side(+ = away from the gun) up tilt turn roll size   (units; degrees; size 2 = default)\n";
+        out << "# key forward side(+ = away from the gun) up tilt turn roll size health   (units; degrees; size 2 = default;\n";
+        out << "# health = health panel beside the ammo panel with both hands on the gun: 0 above, 1 left, 2 right, 3 below)\n";
         for (const auto& kv : g_Place)
         {
             const Place& p = kv.second;
             out << kv.first << " " << p.fwd << " " << p.side << " " << p.up << " " << p.tilt << " "
-                << p.turn << " " << p.roll << " " << p.size << "\n";
+                << p.turn << " " << p.roll << " " << p.size << " " << p.health << "\n";
         }
     }
 
@@ -17262,18 +17275,19 @@ namespace ammo_hud
         bmvr::g_AmmoHudTurn = p.turn;
         bmvr::g_AmmoHudRoll = p.roll;
         bmvr::g_AmmoHudSize = p.size;
+        bmvr::g_AmmoHudHealthSide = p.health;
     }
 
     Place FromGlobals()
     {
         return Place{ bmvr::g_AmmoHudForward, bmvr::g_AmmoHudSide, bmvr::g_AmmoHudUp, bmvr::g_AmmoHudTilt,
-            bmvr::g_AmmoHudTurn, bmvr::g_AmmoHudRoll, bmvr::g_AmmoHudSize };
+            bmvr::g_AmmoHudTurn, bmvr::g_AmmoHudRoll, bmvr::g_AmmoHudSize, bmvr::g_AmmoHudHealthSide };
     }
 
     bool Same(const Place& a, const Place& b)
     {
         return a.fwd == b.fwd && a.side == b.side && a.up == b.up && a.tilt == b.tilt
-            && a.turn == b.turn && a.roll == b.roll && a.size == b.size;
+            && a.turn == b.turn && a.roll == b.roll && a.size == b.size && a.health == b.health;
     }
 }
 
@@ -17289,6 +17303,7 @@ bool bmvr::AmmoHudRowDefault(const float* f, float& def)
     else if (f == &g_AmmoHudTurn) def = b.turn;
     else if (f == &g_AmmoHudRoll) def = b.roll;
     else if (f == &g_AmmoHudSize) def = b.size;
+    else if (f == &g_AmmoHudHealthSide) def = b.health;
     else return false;
     return true;
 }
@@ -17321,8 +17336,8 @@ void VR::SyncAmmoHudRows()
     else
         ammo_hud::g_Place[key] = now;
     ammo_hud::Save();
-    Game::logMsg("Ammo HUD tune %s: fwd %+.2f side %+.2f up %+.2f tilt %+.0f turn %+.0f roll %+.0f size %.2f",
-        key.c_str(), now.fwd, now.side, now.up, now.tilt, now.turn, now.roll, now.size);
+    Game::logMsg("Ammo HUD tune %s: fwd %+.2f side %+.2f up %+.2f tilt %+.0f turn %+.0f roll %+.0f size %.2f health %.0f",
+        key.c_str(), now.fwd, now.side, now.up, now.tilt, now.turn, now.roll, now.size, now.health);
 }
 
 void VR::GetRightGlovePalmOffsetMeters(Vector& meters) const

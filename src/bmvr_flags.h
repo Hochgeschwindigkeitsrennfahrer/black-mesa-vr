@@ -990,6 +990,9 @@ namespace bmvr
     // gun) / up in game units, tilt / turn / roll in degrees, size in game units
     // (2 = the old fixed size). Live, saved per weapon in VR/ammo_hud.txt.
     extern float g_AmmoHudForward, g_AmmoHudSide, g_AmmoHudUp, g_AmmoHudTilt, g_AmmoHudTurn, g_AmmoHudRoll, g_AmmoHudSize;
+    // Health/HEV panel next to the ammo panel while the gun is held with both hands (HudHealthOnGun),
+    // in the ammo panel's plane: 0 above, 1 left, 2 right, 3 below. Saved per weapon (VR/ammo_hud.txt).
+    extern float g_AmmoHudHealthSide;
     // Panel row `f` is one of the ammo HUD rows: `def` = its built-in value
     // for the weapon in the hand (what "Reset tab" puts back).
     bool AmmoHudRowDefault(const float* f, float& def);
