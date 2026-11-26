@@ -662,6 +662,11 @@ namespace bmvr
     // with a leftover model translation of (+1,+1,0) (2026-11-26: lobby walls ~2.5 cm off doors/props;
     // Capture debug frame logs "audit world model"); this repairs it headless. A/B row for bad launches.
     extern bool g_DebugModelReset;
+    // World model leak fix (bmvr_world_model_fix, default on): the VS constant hook sees the leftover
+    // (+1,+1,0) model rows being uploaded (g_ModelLeakSeen set); the next eye pass then loads an identity
+    // MODEL matrix once. A launch without the leak never triggers it.
+    extern bool g_WorldModelFix;
+    extern volatile long g_ModelLeakSeen;
     // Black Mesa's global Xen fog pass (__gbxog0) is not drawn in VR: view-direction noise at infinite stereo
     // depth, also inside rooms where flat shows none. Local fog volumes stay.
     extern bool g_XenGlobalFogOff;

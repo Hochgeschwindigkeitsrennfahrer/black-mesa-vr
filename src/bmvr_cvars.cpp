@@ -273,6 +273,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_WaterLineClipFix, nullptr },
             { "bmvr_screenspace_model_fix", "VR: screen-space quads (underwater warp, post passes, lens flares) and light glows are drawn with an identity model matrix, whatever an earlier draw left (0 = stock: inherit it)",
               Kind::Bool, 0.f, 1.f, &g_ScreenSpaceModelFix, nullptr },
+            { "bmvr_world_model_fix", "VR: when the leftover (+1,+1,0) model matrix is seen on uploads (world ~2.5 cm off doors/props), load an identity model once (0 = leave it)",
+              Kind::Bool, 0.f, 1.f, &g_WorldModelFix, nullptr },
             { "bmvr_debug_model_reset", "VR debug: load an identity MODEL matrix before each eye pass (repairs world brushes drawn with a leftover (+1,+1,0) model offset)",
               Kind::Bool, 0.f, 1.f, &g_DebugModelReset, nullptr },
             { "bmvr_light_cull_eye", "VR: deferred lights are culled from each eye's view, not the main view that follows the aim",

@@ -2607,6 +2607,16 @@ namespace
 
     HRESULT __stdcall HookedSetVertexShaderConstantF(IDirect3DDevice9* device, UINT start, const float* data, UINT vec4Count)
     {
+        // World model leak detector (bmvr::g_WorldModelFix): cModel rows c58/c59 = (1,0,0,1)/(0,1,0,1) is the
+        // leftover translate(1,1,0) (2026-11-26; no real object sits at exactly (1,1,z) unrotated). Two compares
+        // per upload that touches c58/c59.
+        if (data && start <= 58 && start + vec4Count > 59 && bmvr::g_WorldModelFix)
+        {
+            const float* r = data + (58 - start) * 4;
+            if (r[3] == 1.f && r[7] == 1.f && r[0] == 1.f && r[5] == 1.f && r[1] == 0.f && r[2] == 0.f && r[4] == 0.f
+                && r[6] == 0.f)
+                InterlockedExchange(&bmvr::g_ModelLeakSeen, 1);
+        }
         return HookedSetShaderConstantF(device, start, data, vec4Count, g_OrigSetVertexShaderConstantF, "VS");
     }
 

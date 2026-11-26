@@ -636,7 +636,7 @@ namespace ScreenModel
 
     // Debug row "Reset model each eye" (bmvr_debug_model_reset): identity MODEL matrix before each eye
     // pass. Repairs the leftover (+1,+1,0) on world draws headless (2026-11-26); for A/B in a bad launch.
-    inline void ResetEyeModel()
+    inline void ResetEyeModel(bool debugRow = true)
     {
         ClientCtx cc;
         if (!cc.ctx)
@@ -645,7 +645,7 @@ namespace ScreenModel
         reinterpret_cast<IntFn>(vt[0x50 / 4])(cc.ctx, kModeModel);
         reinterpret_cast<VoidFn>(vt[0x7C / 4])(cc.ctx);
         static bool s_logged;
-        if (!s_logged)
+        if (debugRow && !s_logged)
         {
             s_logged = true;
             Game::logMsg("Reset model each eye: on (identity MODEL before each eye pass)");
@@ -9853,6 +9853,17 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             ReplayOccluderView(m_VR->m_StereoEye);
         if (bmvr::g_DebugModelReset)
             ScreenModel::ResetEyeModel();
+        else if (bmvr::g_WorldModelFix && InterlockedExchange(&bmvr::g_ModelLeakSeen, 0))
+        {
+            ScreenModel::ResetEyeModel(false);
+            static int s_fixLog;
+            if (s_fixLog < 20)
+            {
+                ++s_fixLog;
+                Game::logMsg("World model leak: leftover (+1,+1,0) model matrix seen on uploads -> identity model loaded (eye %d)",
+                    m_VR ? m_VR->m_StereoEye : -1);
+            }
+        }
         hkRenderView.fOriginal(ecx, view, clearFlags, drawFlags);
     };
 
