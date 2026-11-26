@@ -14654,12 +14654,25 @@ bool Hooks::EnsureWeaponVfxHooks()
             hkSpriteAxes.pTarget = reinterpret_cast<unsigned char*>(client) + Offsets::kGetSpriteAxes;
         }
     }
+    if (!hkGlowOverlayDraw.pTarget)
+    {
+        auto* p = ResolveCode(client, Offsets::kCGlowOverlay_Draw, "558BEC81EC3C040000A1????????33C58945FCA1");
+        if (p && hkGlowOverlayDraw.createHook(p, &dGlowOverlayDraw) == 0 && hkGlowOverlayDraw.enableHook() == 0)
+            Game::logMsg("Hook enabled: glow overlay draw rva=0x%X",
+                static_cast<unsigned>(p - reinterpret_cast<unsigned char*>(client)));
+        else
+        {
+            Game::logMsg("glow overlay draw skipped (bytes/rva 0x%X)", Offsets::kCGlowOverlay_Draw);
+            Game::noteMissingOffset("glow overlay draw");
+        }
+        hkGlowOverlayDraw.pTarget = p ? p : reinterpret_cast<unsigned char*>(client) + Offsets::kCGlowOverlay_Draw;
+    }
     s_done = hkTauBeamView.pTarget && hkTauBeamWorld.pTarget && hkTauBeamFireTrace.pTarget
         && hkGluonImpactTrace.pTarget && hkGluonBeamUpdate.pTarget && hkGluonBeamFxSet.pTarget
         && hkGluonBeamFxDraw.pTarget && hkParticleSetControlPoint.pTarget
         && hkParticleMgrAddEffect.pTarget && hkRpgUpdateLaser.pTarget
         && hkHudCrosshairPaint.pTarget && hkSpriteRendererDraw.pTarget
-        && hkViewRenderBeamsDraw.pTarget && hkSpriteRenderableDraw.pTarget
+        && hkViewRenderBeamsDraw.pTarget && hkSpriteRenderableDraw.pTarget && hkGlowOverlayDraw.pTarget
         && hkEnvLaserDotDraw.pTarget && hkSpriteQuad.pTarget && hkSpriteAxes.pTarget;
     return s_done;
 }
@@ -15185,6 +15198,24 @@ void __cdecl Hooks::dSpriteAxes(int type, const float* origin, const float* angl
         Game::logMsg("sprite axes: type %d at (%.0f,%.0f,%.0f) eye %d levelled", type, origin[0], origin[1], origin[2],
             m_VR->m_StereoEye);
     }
+}
+
+// Glow overlays (env_lightglow, sun glow) build their quads in world space, 100 units in front of
+// the eye, and draw them with whatever MODEL matrix is current. On the replaying (render thread)
+// context that matrix sometimes still holds a translation of (+1,+1,0) (ScreenModel, top of this
+// file; the client's queued context reports identity): the glow then sat ~0.8 deg left of its
+// light in VR (Xen light sticks), switching with head direction. Identity model around the draw.
+void __fastcall Hooks::dGlowOverlayDraw(void* ecx, void* edx, bool cacheFullSceneState)
+{
+    (void)edx;
+    static ScreenModel::SiteStats s_glowModel{ "glow overlay" };
+    ScreenModel::ClientCtx cc;
+    const bool wrap = ScreenModel::Check(s_glowModel, cc.ctx, "glow");
+    if (wrap)
+        ScreenModel::Begin(cc.ctx);
+    hkGlowOverlayDraw.fOriginal(ecx, cacheFullSceneState);
+    if (wrap)
+        ScreenModel::End(cc.ctx);
 }
 
 void __cdecl Hooks::dSpriteQuad(float* origin, float width, float height, unsigned color)

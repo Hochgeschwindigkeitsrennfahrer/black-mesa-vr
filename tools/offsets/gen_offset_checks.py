@@ -49,7 +49,7 @@ MODULES = {
         kCTauBeam_FireTrace kCWeaponGluon_ImpactTrace kCWeaponGluon_BeamUpdate kCGluonBeamFx_SetBeam
         kCGluonBeamFx_Draw kParticleSetControlPoint kParticleMgr_AddEffect kParticleSystemMgr
         kParticleSystemMgr_Find kClientGpGlobalsPtr kCWeaponRpg_UpdateLaser kCHudCrosshair_Paint
-        kCSpriteRenderer_DrawSprite kCSpriteRenderable_Draw kCEnvLaserDot_Draw kSpriteQuad kGetSpriteAxes
+        kCSpriteRenderer_DrawSprite kCSpriteRenderable_Draw kCEnvLaserDot_Draw kSpriteQuad kGetSpriteAxes kCGlowOverlay_Draw
         kCurrentViewOriginGlobal kCViewRenderBeams_DrawBeam kClientCurrentViewIdRva kPixelVisQueryAgeCmpRva
         kPixelVisSetAgeCmpRva kPixelVisQueryFractionRva kSaveShotWriterRva kSaveShotNowRva
         kPixelVisGetFractionRva kPixelVisQueryForViewRva kClientFrameStartRva kClientSetupBonesRva

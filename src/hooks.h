@@ -136,6 +136,8 @@ typedef int(__stdcall* tSpriteRenderableDraw)(void* renderable, float scale, flo
 typedef int(__thiscall* tEnvLaserDotDraw)(void* thisptr, unsigned flags);
 typedef void(__cdecl* tSpriteQuad)(float* origin, float width, float height, unsigned color);
 typedef void(__cdecl* tSpriteAxes)(int type, const float* origin, const float* angles, float* fwd, float* right, float* up);
+// client.dll CGlowOverlay::Draw (vtable slot 4, light + sun glows), thiscall(bool), ret 4.
+typedef void(__thiscall* tGlowOverlayDraw)(void* thisptr, bool cacheFullSceneState);
 
 class Hooks
 {
@@ -231,6 +233,7 @@ public:
     static inline Hook<tEnvLaserDotDraw> hkEnvLaserDotDraw;
     static inline Hook<tSpriteQuad> hkSpriteQuad;
     static inline Hook<tSpriteAxes> hkSpriteAxes;
+    static inline Hook<tGlowOverlayDraw> hkGlowOverlayDraw;
 
     Hooks() = default;
     explicit Hooks(Game* game);
@@ -337,6 +340,7 @@ public:
     static int __fastcall dEnvLaserDotDraw(void* ecx, void* edx, unsigned flags);
     static void __cdecl dSpriteQuad(float* origin, float width, float height, unsigned color);
     static void __cdecl dSpriteAxes(int type, const float* origin, const float* angles, float* fwd, float* right, float* up);
+    static void __fastcall dGlowOverlayDraw(void* ecx, void* edx, bool cacheFullSceneState);
     static void EnsureServerFlashlightHook();
     static void EnsureClientFlashlightHook();
     static void EnsureBmFlashlightHook();
