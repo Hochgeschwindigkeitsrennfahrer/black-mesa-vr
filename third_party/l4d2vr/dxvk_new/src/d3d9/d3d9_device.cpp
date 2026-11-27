@@ -4844,7 +4844,15 @@ namespace dxvk {
     float m[16];
     for (uint32_t r = 0; r < 4; r++)
       std::memcpy(m + r * 4, pc[52 + r].data, sizeof(float) * 4);
-    float c[8];
+    float c[12] = {};
+    if (bmvr::g_GodRayLog >= 1.f)
+      bmvr::Log("God rays trace: mask state zenable %u zfunc %u zwrite %u vp minz %.4f maxz %.4f clipping %u",
+        unsigned(m_state.renderStates[D3DRS_ZENABLE]), unsigned(m_state.renderStates[D3DRS_ZFUNC]),
+        unsigned(m_state.renderStates[D3DRS_ZWRITEENABLE]), m_state.viewport.MinZ, m_state.viewport.MaxZ,
+        unsigned(m_state.renderStates[D3DRS_CLIPPING]));
+    // c106.xy = 1 / target size for the replacement PS (pixel -> NDC).
+    c[8] = m_state.viewport.Width ? 1.f / float(m_state.viewport.Width) : 0.f;
+    c[9] = m_state.viewport.Height ? 1.f / float(m_state.viewport.Height) : 0.f;
     if (!bmvr::GodRayMaskConstants(eye, m_state.vsConsts->fConsts[27].data[2], pc[51].data, m, c))
       return false;
     if (m_bmvrGrMaskPs == nullptr) {
@@ -4863,7 +4871,7 @@ namespace dxvk {
     saved.psSwapped = true;
     SetPixelShader(m_bmvrGrMaskPs.ptr());
     SetShaderConstants<DxsoProgramTypes::PixelShader, D3D9ConstantType::Float>(
-      bmvr::kGodRayConstReg, c, 2);
+      bmvr::kGodRayConstReg, c, 3);
     return true;
   }
 

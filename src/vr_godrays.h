@@ -37,7 +37,8 @@ namespace bmvr
     // filtering). 1 = stock full size. The blur is 64 taps per pixel at eye
     // resolution (~0.8 ms/frame for both eyes, 2026-11-27).
     int GodRayBlurDivisor();
-    // Replacement mask PS (oC0 = 0, oDepth = radial threshold; c104).
+    // Replacement mask PS (oC0 = 0, oDepth = radial threshold; c104-c105 from
+    // GodRayMaskConstants, c106.xy = 1 / target size from the draw's viewport).
     const uint32_t* GodRayMaskPs(size_t* tokens);
     constexpr unsigned kGodRayConstReg = 104;
     // Blur draw: the light's screen position (c10.xy, 0..1) for this eye.

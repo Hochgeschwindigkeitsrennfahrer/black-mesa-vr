@@ -48,7 +48,10 @@ namespace bmvr
         //   def c1, 0.5, 0, 0, 0
         //   dcl vPos.xy
         //   add r0.xy, vPos, c1.x            pixel centre
-        //   mul r0.xy, r0, c50               0..1 (c50.xy = 1 / target size)
+        //   mul r0.xy, r0, c106              0..1 (c106.xy = 1 / target size, set by us:
+        //                                    the stock mask PS reads no constants, so c50
+        //                                    is whatever an earlier pass left, 2^24 on the
+        //                                    bm_c0a0c tram = every pixel at the light)
         //   mad r0.xy, r0, c0.xy, c0.zw      NDC
         //   mov r0.z, c104.z                 the light's depth
         //   mov r0.w, c0.w
@@ -71,7 +74,7 @@ namespace bmvr
             0x05000051u, 0xA00F0001u, F(0.5f), 0u, 0u, 0u,
             0x0200001Fu, 0x80000000u, 0x90031000u,
             0x03000002u, 0x80030000u, 0x90E41000u, 0xA0000001u,
-            0x03000005u, 0x80030000u, 0x80E40000u, 0xA0E40032u,
+            0x03000005u, 0x80030000u, 0x80E40000u, 0xA0E4006Au,
             0x04000004u, 0x80030000u, 0x80E40000u, 0xA0E40000u, 0xA0EE0000u,
             0x02000001u, 0x80040000u, 0xA0AA0068u,
             0x02000001u, 0x80080000u, 0xA0FF0000u,
@@ -270,7 +273,11 @@ namespace bmvr
         const float dx = w4[0] / w4[3] - c51[0], dy = w4[1] / w4[3] - c51[1], dz = w4[2] / w4[3] - c51[2];
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         const float viewZ = 1.f / w4[3];           // c55 row = 1 / view depth
-        if (!(dist > 1.f && dist < 1e7f) || std::fabs(m[14]) < 1e-12f)
+        // c51-c55 are the game's per-view constants (eye, inverse view-projection)
+        // left by this eye's lighting passes; c55 must be a projection's w row.
+        const bool invOk = std::fabs(m[14]) > 1e-12f && std::fabs(m[12]) < 1e-4f * std::fabs(m[14])
+            && std::fabs(m[13]) < 1e-4f * std::fabs(m[14]);
+        if (!(dist > 1.f && dist < 1e7f) || !invOk)
         {
             if (trace)
                 Game::logMsg("God rays trace %u: mask eye %d #%d/%d uv %.3f,%.3f depth %.6f dist %.1f: rejected, stock mask", g_TraceSeq, eye, k, count, u, v, lightDepth, dist);
@@ -298,6 +305,10 @@ namespace bmvr
             Game::logMsg("God rays trace %u: mask eye %d #%d/%d uv %.3f,%.3f depth %.6f light (%.0f %.0f %.0f) %.0f u away, view depth %.0f, level axis (%.2f %.2f %.2f) along %.0f%s",
                 g_TraceSeq, eye, k, count, u, v, lightDepth, w4[0] / w4[3], w4[1] / w4[3], w4[2] / w4[3], dist, viewZ,
                 a[0], a[1], a[2], along, along > 1.f ? "" : ": rejected, stock mask");
+        if (trace)
+            Game::logMsg("God rays trace %u: depth map A %.6g B %.6g (inv rows c55 %.6g %.6g %.6g %.6g): at the light ours %.6f stock %.6f",
+                g_TraceSeq, -m[15] / m[14], 1.f / m[14], m[12], m[13], m[14], m[15],
+                (1.f / m[14]) * (1.f / viewZ) - m[15] / m[14], lightDepth);
         if (!(along > 1.f))
             return false;
         out[0] = 1.f / m[14];                      // depth = w * (1 / c55.z) - c55.w / c55.z
