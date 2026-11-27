@@ -1,0 +1,58 @@
+#include "vr_xen_fog.h"
+
+#include "bmvr_flags.h"
+#include "game.h"
+
+#include <cstdio>
+#include <set>
+
+namespace bmvr
+{
+    XenFogShader XenFogPatchPixelShader(const uint32_t* t, std::vector<uint32_t>& out)
+    {
+        const XenFogPatchInfo info = XenFogPatchBytecode(t, out);
+        if (!info.fogLike)
+            return XenFogShader::NotFog;
+        if (info.patched)
+        {
+            static int s_logs;
+            if (s_logs++ < 8)
+                Game::logMsg("Xen fog shader: %u bytes, FNV %08X: noise patched to world position (r%u world)",
+                    static_cast<unsigned>(info.bytes), info.fnv, info.worldReg);
+            return XenFogShader::Patched;
+        }
+        // A fog shader this fix does not understand (another game build): its
+        // noise stays view-locked. Counted as a missing gameplay hook (headset
+        // warning); bytecode kept once as VR/xenfog-ps-<fnv>.dxso for the port.
+        static std::set<uint32_t> s_seen;
+        if (s_seen.insert(info.fnv).second && s_seen.size() <= 8)
+        {
+            char name[64];
+            std::snprintf(name, sizeof(name), "xenfog-ps-%08X.dxso", info.fnv);
+            if (FILE* f = std::fopen(VrFilePath(name).c_str(), "wb"))
+            {
+                std::fwrite(t, 1, info.bytes, f);
+                std::fclose(f);
+            }
+            Game::logMsg("Xen fog shader: fog pixel shader %u bytes, FNV %08X not patched (world %d, lookups %d, temps r0-r%u) - Black Mesa updated? Its noise stays view-locked (bytecode: VR/%s)",
+                static_cast<unsigned>(info.bytes), info.fnv, info.worldHits, info.lookupHits, info.maxTemp, name);
+            Game::noteMissingOffset("Xen fog shader (stereo noise)");
+        }
+        return XenFogShader::UnknownFog;
+    }
+
+    void XenFogPatchFailed(uint32_t bytes)
+    {
+        Game::logMsg("Xen fog shader: patched shader (%u bytes) rejected by the shader compiler, original used", bytes);
+        Game::noteMissingOffset("Xen fog shader (stereo noise)");
+    }
+
+    void XenFogShaderConstant(float out[4])
+    {
+        const float size = g_XenFogNoiseSize < 16.f ? 16.f : g_XenFogNoiseSize;
+        out[0] = 1.f / size;
+        out[1] = g_XenFogWorldNoise ? 1.f : 0.f;
+        out[2] = 0.f;
+        out[3] = 0.f;
+    }
+}

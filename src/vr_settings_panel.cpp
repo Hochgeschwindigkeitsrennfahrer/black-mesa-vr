@@ -457,6 +457,9 @@ namespace
             { "Sky water per eye", RowKind::Toggle, nullptr, &bmvr::g_SkyWaterPerEye, nullptr, 0, 0, 0, nullptr },
             { "Underwater world fix", RowKind::Toggle, nullptr, &bmvr::g_EyeUnderwaterWorld, nullptr, 0, 0, 0, nullptr },
             { "Xen ground fog off", RowKind::Toggle, nullptr, &bmvr::g_XenGlobalFogOff, nullptr, 0, 0, 0, nullptr },
+            // User 2026-11-27: fog noise was looked up by view direction (at infinity in stereo).
+            { "Xen fog noise fixed to world", RowKind::Toggle, "XenFogWorldNoise", &bmvr::g_XenFogWorldNoise, nullptr, 0, 0, 0, nullptr },
+            { "Xen fog noise size", RowKind::Number, "XenFogNoiseSize", nullptr, &bmvr::g_XenFogNoiseSize, 32.f, 32.f, 2048.f, "%.0f u" },
             { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
             { "Titles glow + scanlines", RowKind::Toggle, nullptr, &bmvr::g_TitleGlow, nullptr, 0, 0, 0, nullptr },
             { "HEV boot-up HUD inset", RowKind::Number, nullptr, nullptr, &bmvr::g_BootHudInset, 25.f, 0.f, 500.f, "%.0f px" },

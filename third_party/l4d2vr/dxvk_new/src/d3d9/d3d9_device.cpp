@@ -32,6 +32,7 @@
 #include "d3d9_reshade_vr.h"
 #include <intrin.h>
 #include "bmvr_flags.h"
+#include "vr_xen_fog.h"
 #include "bmvr_prof.h"
 
 #include <algorithm>
@@ -5711,21 +5712,43 @@ namespace dxvk {
     DxsoModuleInfo moduleInfo;
     moduleInfo.options = m_dxsoOptions;
 
+    // BMVR: Xen global fog noise from world position (src/vr_xen_fog.cpp).
+    std::vector<uint32_t> bmvrPatched;
+    const bmvr::XenFogShader bmvrFog = bmvr::XenFogPatchPixelShader(
+      reinterpret_cast<const uint32_t*>(pFunction), bmvrPatched);
+    bool bmvrUsePatch = bmvrFog == bmvr::XenFogShader::Patched;
+    const DWORD* function = bmvrUsePatch
+      ? reinterpret_cast<const DWORD*>(bmvrPatched.data()) : pFunction;
+
     D3D9CommonShader module;
     uint32_t bytecodeLength;
 
     if (FAILED(this->CreateShaderModule(&module,
       &bytecodeLength,
       VK_SHADER_STAGE_FRAGMENT_BIT,
-      pFunction,
-      &moduleInfo)))
-      return D3DERR_INVALIDCALL;
+      function,
+      &moduleInfo))) {
+      if (!bmvrUsePatch)
+        return D3DERR_INVALIDCALL;
+      // BMVR: never lose the game's shader over the patch.
+      bmvr::XenFogPatchFailed(uint32_t(bmvrPatched.size() * 4));
+      bmvrUsePatch = false;
+      function = pFunction;
+      if (FAILED(this->CreateShaderModule(&module,
+        &bytecodeLength,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        function,
+        &moduleInfo)))
+        return D3DERR_INVALIDCALL;
+    }
 
-    *ppShader = ref(new D3D9PixelShader(this,
+    auto* shader = new D3D9PixelShader(this,
       &m_shaderAllocator,
       module,
-      pFunction,
-      bytecodeLength));
+      function,
+      bytecodeLength);
+    shader->bmvrXenFog = bmvrUsePatch;
+    *ppShader = ref(shader);
 
     return D3D_OK;
   }
@@ -5738,6 +5761,14 @@ namespace dxvk {
 
     if (unlikely(ShouldRecord()))
       return m_recorder->SetPixelShader(shader);
+
+    // BMVR: the patched Xen fog shader reads its noise scale + mix from c100.
+    if (unlikely(shader != nullptr && shader->bmvrXenFog)) {
+      float c[4];
+      bmvr::XenFogShaderConstant(c);
+      SetShaderConstants<DxsoProgramTypes::PixelShader, D3D9ConstantType::Float>(
+        bmvr::kXenFogConstReg, c, 1);
+    }
 
     if (shader == m_state.pixelShader.ptr())
       return D3D_OK;

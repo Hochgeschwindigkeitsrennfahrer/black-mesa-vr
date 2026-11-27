@@ -197,6 +197,9 @@ namespace dxvk {
             uint32_t             BytecodeLength)
       : D3D9Shader<IDirect3DPixelShader9>( pDevice, pAllocator, CommonShader, pShaderBytecode, BytecodeLength ) { }
 
+    // BMVR: Xen fog shader patched at creation (vr_xen_fog.cpp); c100 on bind.
+    bool bmvrXenFog = false;
+
   };
 
   /**
