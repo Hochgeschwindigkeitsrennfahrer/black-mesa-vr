@@ -44,7 +44,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
   you get hit**.
 - **Usage hints:** short messages the first times you carry a prop or take a mounted gun, naming your own alt-fire
   button, and when a reload step is missing ("PUMP IT"). General tab > Usage hints.
-- **Aim marker and laser:** red laser dot, laser beam with adjustable width, or the classic amber ticks; all optional.
+- **Aim marker and laser:** one preset: off, a red dot only on guns without sights (tau, gluon, crossbow), a red dot (default), or a red dot with a laser beam.
 - **Flashlight** on the right grip, optionally in the left hand or on the left Square/X button.
 - Snap or smooth turning, crouch while held or toggle, sprint toggle, recenter. Cutscene cameras can take your view
   with them as the scene was made; turn that off if it is too much for your VR legs.

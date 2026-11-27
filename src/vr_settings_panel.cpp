@@ -205,10 +205,10 @@ namespace
             { "Toggle grip auto release", RowKind::Toggle, "TwoHandToggleAutoRelease", &bmvr::g_TwoHandToggleAutoRelease, nullptr, 0, 0, 0, nullptr },
             { "Grip area scale", RowKind::Number, "TwoHandGripScale", nullptr, &bmvr::g_TwoHandGripScale, 0.1f, 0.5f, 2.f, "%.1fx" },
             { "AIMING", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
-            { "Aim marker", RowKind::Toggle, "VrCrosshair", &bmvr::g_VrCrosshair, nullptr, 0, 0, 0, nullptr },
-            { "Marker as red dot", RowKind::Toggle, "VrCrosshairDot", &bmvr::g_VrCrosshairDot, nullptr, 0, 0, 0, nullptr },
-            { "Marker size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
-            { "Laser beam", RowKind::Toggle, "VrLaserBeam", &bmvr::g_VrLaserBeam, nullptr, 0, 0, 0, nullptr },
+            // One preset for dot + beam (user 2026-11-27); "without sights" = tau, gluon,
+            // crossbow unscoped. Dot size and beam width are developer rows.
+            { "Aim marker", RowKind::Choice, "AimMarker", nullptr, &bmvr::g_AimMarker, 1.f, 0.f, 3.f, "Off|Guns without sights|Red dot|Dot + laser beam" },
+            { "Red dot size", RowKind::Number, "VrCrosshairScale", nullptr, &bmvr::g_VrCrosshairScale, 0.1f, 0.2f, 3.f, "%.1f" },
             { "Laser width", RowKind::Number, "VrLaserWidth", nullptr, &bmvr::g_VrLaserWidth, 0.01f, 0.01f, 0.3f, "%.2f" },
             { "Gun angle", RowKind::Number, "GunPitchOffset", nullptr, &bmvr::g_GunPitchOffset, 1.f, -45.f, 45.f, "%+.0f\xB0" },
             { "GRENADES", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
@@ -530,7 +530,7 @@ namespace
             "ControlsPicture", "DamageFlashStrength", "VrHandsBlackMesaScale", "VrGunRightHand", "VrHandsRollDeg",
             "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll",
             "ScopeRaiseMeters", "ScopeGunSmoothSec", "ThrowStroke", "MountedGunGain", "LastShotHapticStrength", "DryFireHapticStrength", "VrClipHandPose", "VrClipHandSnap",
-            "TwoHandToggleAutoRelease",
+            "TwoHandToggleAutoRelease", "VrCrosshairScale", "VrLaserWidth",
             "MsaaParticles1x", "FxaaSubpixel", "FxaaEdgeThreshold", "FxaaEdgeThresholdMin",
             "EnvmapScaleWorld", "EnvmapScaleModels", "LodBias",
             "FlareFadeAngle", "FlareLightScale", "FlareHazeScale", "FlareHazeMinSize", "FlareGhostScale", "flare_default",
@@ -1482,10 +1482,10 @@ namespace
             return !g_PhysicalWeapons;
         if (is({ "VrRecoilScale", "VrRecoilTwoHand" }))
             return !PhysicalWeapon(g_VrRecoil);
-        if (is({ "VrCrosshairDot", "VrCrosshairScale" }))
-            return !g_VrCrosshair;
+        if (is({ "VrCrosshairScale" }))
+            return AimMarkerMode() == 0;
         if (is({ "VrLaserWidth" }))
-            return !g_VrLaserBeam;
+            return !AimLaserBeamOn();
         if (is({ "LastShotHapticStrength" }))
             return g_LastShotHaptic < 0.5f;
         if (is({ "DryFireHapticStrength" }))

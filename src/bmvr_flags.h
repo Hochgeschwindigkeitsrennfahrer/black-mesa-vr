@@ -293,15 +293,22 @@ namespace bmvr
     extern float g_HandHudSide;
     extern float g_HandHudTilt;
     extern float g_HandHudRoll;
-    // World-space aim reticle at the controller firing ray. Off by default;
-    // VrCrosshair=true in config.txt turns it on.
-    extern bool g_VrCrosshair;
-    // Reticle size multiplier, for players who want it smaller or bolder.
+    // Aim marker preset (AimMarker, user 2026-11-27): 0 = off, 1 = red dot only
+    // on guns without sights (tau, gluon, unscoped crossbow), 2 = red dot
+    // (default), 3 = red dot + laser beam from the gun to where it points.
+    // Replaces the VrCrosshair / VrLaserBeam switches (still read once as a
+    // migration when AimMarker is missing).
+    extern float g_AimMarker;
+    inline int AimMarkerMode()
+    {
+        const int m = static_cast<int>(g_AimMarker + 0.5f);
+        return m < 0 ? 0 : (m > 3 ? 3 : m);
+    }
+    inline bool AimLaserBeamOn() { return AimMarkerMode() == 3; }
+    // Reticle size multiplier (panel developer row "Red dot size").
     extern float g_VrCrosshairScale;
-    // Reticle drawn as a red laser dot instead of the amber ticks.
+    // Reticle drawn as a red laser dot; false (config.txt only) = the amber ticks.
     extern bool g_VrCrosshairDot;
-    // Thin red beam from the gun along the firing ray to where it lands.
-    extern bool g_VrLaserBeam;
     // Beam half width in game units (1 unit ~ 2.5 cm).
     extern float g_VrLaserWidth;
     // Moves the beam start along the barrel (game units, + = forward).

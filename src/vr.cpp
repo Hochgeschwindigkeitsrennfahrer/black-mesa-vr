@@ -13255,7 +13255,8 @@ void VR::UpdateAimCrosshair()
     // VrShootFromMuzzle needs the muzzle offset (UpdateMuzzleLocal) even with
     // the marker and beam off; without it shots used the raw attachment,
     // which drifts toward the view edges.
-    const bool wantAimAid = bmvr::g_VrCrosshair || bmvr::g_VrLaserBeam;
+    const int aimMode = bmvr::AimMarkerMode();
+    bool wantAimAid = aimMode > 0;
     // No weapon at all (new game, stripped on death): m_VmClass still names
     // the last gun, so without this the laser stayed on bare hands.
     if (!(wantAimAid || bmvr::g_VrShootFromMuzzle) || !m_GameplayEligible || m_EmptyHands || m_WeaponMenuOpen
@@ -13277,7 +13278,12 @@ void VR::UpdateAimCrosshair()
     if (!gun)
         return;
     commit.stage = 2;
-    const bool wantBeam = bmvr::g_VrLaserBeam && weaponKey != "rpg";
+    const bool wantBeam = aimMode == 3 && weaponKey != "rpg";
+    // Preset 1: the dot only on guns without iron sights (tau, gluon, the
+    // crossbow held unscoped; the scope hides it anyway, below).
+    const bool noSights = weaponKey == "gauss" || weaponKey == "gluon" || weaponKey == "crossbow";
+    const bool wantDot = aimMode >= 2 || (aimMode == 1 && noSights);
+    wantAimAid = wantDot || wantBeam;
     // The scope draws its own centred crosshair, and while zoomed the shot no
     // longer follows the controller ray this would trace.
     if (m_ScopeZoomActive)
@@ -13339,7 +13345,7 @@ void VR::UpdateAimCrosshair()
         }
     }
     commit.stage = 10;
-    if (!bmvr::g_VrCrosshair || !hit)
+    if (!wantDot || !hit)
         return;
 
     // Pull the reticle a hair off the surface it landed on. The overlay pass
@@ -14874,7 +14880,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         // Laser dropout log (below): keep entering for 300 ms after a beam.
         static DWORD s_lastDrawn[3];
         static int s_lines;
-        const bool beamRecent = bmvr::g_VrLaserBeam && (stereoEye == 1 || stereoEye == 2) && s_lastDrawn[stereoEye]
+        const bool beamRecent = bmvr::AimLaserBeamOn() && (stereoEye == 1 || stereoEye == 2) && s_lastDrawn[stereoEye]
             && GetTickCount() - s_lastDrawn[stereoEye] < 300;
         if (SettingsPanelOpen() || WeaponMenuOpen())
             s_lastDrawn[1] = s_lastDrawn[2] = 0;
@@ -15001,7 +15007,7 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                     }
                 }
             }
-            if (bmvr::g_AimDebug && bmvr::g_VrLaserBeam && (stereoEye == 1 || stereoEye == 2))
+            if (bmvr::g_AimDebug && bmvr::AimLaserBeamOn() && (stereoEye == 1 || stereoEye == 2))
             {
                 // Laser dropout log (AimDebug only: in normal play these are
                 // intended hides, reloads and beams shorter than 1 unit): a

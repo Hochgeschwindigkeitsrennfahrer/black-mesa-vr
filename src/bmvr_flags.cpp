@@ -121,10 +121,9 @@ namespace bmvr
     float g_HandHudSide = 0.3f;
     float g_HandHudTilt = -18.f;
     float g_HandHudRoll = 14.f;
-    bool g_VrCrosshair = true;
+    float g_AimMarker = 2.f;
     float g_VrCrosshairScale = 0.5f;
     bool g_VrCrosshairDot = true;
-    bool g_VrLaserBeam = true;
     float g_VrLaserWidth = 0.06f;
     float g_VrLaserStartForward = 0.f;
     bool g_AimDebug = false;
@@ -860,6 +859,9 @@ namespace bmvr
                 c = '\n';
         }
         bool sawWorldEyeSize = false;
+        // Old aim switches (-1 = not in the file), mapped onto AimMarker below.
+        bool sawAimMarker = false;
+        int oldCrosshair = -1, oldLaserBeam = -1;
         size_t cursor = 0;
         while (cursor < text.size())
         {
@@ -1024,14 +1026,23 @@ namespace bmvr
                 g_HandHudTilt = std::clamp(static_cast<float>(atof(val)), -90.f, 90.f);
             else if (std::strcmp(n, "HandHudRoll") == 0)
                 g_HandHudRoll = std::clamp(static_cast<float>(atof(val)), -180.f, 180.f);
+            else if (std::strcmp(n, "AimMarker") == 0)
+            {
+                const int v = atoi(val);
+                if (v >= 0 && v <= 3)
+                {
+                    g_AimMarker = static_cast<float>(v);
+                    sawAimMarker = true;
+                }
+            }
             else if (std::strcmp(n, "VrCrosshair") == 0)
-                g_VrCrosshair = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                oldCrosshair = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0) ? 1 : 0;
             else if (std::strcmp(n, "VrCrosshairScale") == 0)
                 g_VrCrosshairScale = static_cast<float>(atof(val));
             else if (std::strcmp(n, "VrCrosshairDot") == 0)
                 g_VrCrosshairDot = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrLaserBeam") == 0)
-                g_VrLaserBeam = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+                oldLaserBeam = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0) ? 1 : 0;
             else if (std::strcmp(n, "VrLaserWidth") == 0)
                 g_VrLaserWidth = static_cast<float>(atof(val));
             else if (std::strcmp(n, "VrLaserStartForward") == 0)
@@ -1670,6 +1681,13 @@ namespace bmvr
                 g_WorldEyeSizeOptIn = ParseCfgBool(val, true);
                 g_TryOffscreenWorldGrow = g_WorldEyeSizeOptIn;
             }
+        }
+        if (!sawAimMarker && (oldCrosshair >= 0 || oldLaserBeam >= 0))
+        {
+            // Old defaults were marker on + beam on.
+            const bool cross = oldCrosshair != 0, beam = oldLaserBeam != 0;
+            g_AimMarker = beam ? 3.f : (cross ? 2.f : 0.f);
+            Log("VR config: VrCrosshair=%d VrLaserBeam=%d -> AimMarker=%.0f", oldCrosshair, oldLaserBeam, g_AimMarker);
         }
         Log("VR config %ls RenderScale=%.2f TurnSpeed=%.2f snap=%d vm=(%.1f,%.1f,%.1f) touchOx=%.1f tilt=%.1f ipd=%.2f autoQueue=%d multicore=%d aa=%u worldEyeSize=%d key=%s",
             path.c_str(), g_RenderScale, g_TurnSpeed, g_SnapTurning ? 1 : 0,

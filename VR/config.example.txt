@@ -103,8 +103,10 @@
 
 #Haptics=true
 #HideCrosshair=true
-# Aim marker as a red laser dot instead of the amber ticks. Follows the shot
-# (tilt and GunPitchOffset included); guns only. Also in the VR settings panel.
+# Aim marker: 0 = off, 1 = red dot only on guns without sights (tau, gluon,
+# crossbow), 2 = red dot, 3 = red dot + laser beam. Follows the shot (tilt and
+# GunPitchOffset included); guns only. Also in the VR settings panel.
+#AimMarker=2
 #DisableViewBob=true
 #LeftHanded=false
 
