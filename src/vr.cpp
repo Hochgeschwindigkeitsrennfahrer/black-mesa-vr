@@ -17847,25 +17847,25 @@ namespace ammo_hud
 
     std::string Path() { return bmvr::VrFilePath("ammo_hud.txt"); }
 
-    // Built-in per-weapon values = the user's headset tuning (2026-11-25,
-    // VR/ammo_hud.txt then); the file still overrides per weapon.
+    // Built-in per-weapon values = the user's headset tuning (2026-11-27,
+    // VR/ammo_hud.txt then, incl. health side + gap); the file still overrides per weapon.
     Place Builtin(const std::string& key)
     {
         struct Row { const char* key; Place p; };
         static const Row kRows[] = {
-            { "357", { 0.f, 0.25f, 0.f, 0.f, 0.f, 0.f, 2.f } },
-            { "crossbow", { 3.25f, 0.75f, 2.5f, 0.f, 0.f, 0.f, 1.5f } },
-            { "gauss", { 6.f, 1.75f, 6.5f, 0.f, 90.f, 60.f, 1.25f } },
-            { "glock", { 0.f, 0.25f, 0.f, 0.f, 0.f, 0.f, 2.f } },
-            { "gluon", { 2.5f, -4.5f, -4.5f, 55.f, 90.f, 0.f, 2.f } },
-            { "grenade", { -1.25f, -0.5f, 0.f, -5.f, 5.f, 0.f, 1.5f } },
-            { "hgun", { 0.25f, 2.25f, 3.f, 10.f, 35.f, 20.f, 2.f } },
-            { "mp5", { 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 2.f } },
-            { "rpg", { 4.75f, 0.75f, 0.25f, 15.f, 90.f, 0.f, 2.f } },
-            { "satchel", { -2.f, -0.25f, -0.25f, 0.f, 30.f, 0.f, 1.75f } },
-            { "shotgun", { 0.f, 0.5f, 0.f, 0.f, 0.f, 0.f, 2.f } },
-            { "snark", { 1.25f, -0.75f, 1.25f, 0.f, 60.f, 0.f, 2.f } },
-            { "tripmine", { 1.f, -0.75f, 2.25f, 0.f, 65.f, -10.f, 2.f } },
+            { "357", { 0.f, 0.25f, 0.f, 0.f, 0.f, 0.f, 2.f, 0.f, 0.f } },
+            { "crossbow", { 3.25f, 0.75f, 2.5f, 0.f, 0.f, 0.f, 1.5f, 0.f, 0.f } },
+            { "gauss", { 6.f, 1.75f, 6.5f, 0.f, 90.f, 60.f, 1.25f, 0.f, 0.f } },
+            { "glock", { 0.f, 0.25f, 0.f, 0.f, 0.f, 0.f, 2.f, 0.f, 0.f } },
+            { "gluon", { 2.5f, -4.5f, -4.5f, 55.f, 90.f, 0.f, 2.f, 0.f, 0.f } },
+            { "grenade", { -1.25f, -0.5f, 0.f, -5.f, 5.f, 0.f, 1.5f, 0.f, 0.f } },
+            { "hgun", { 0.25f, 2.25f, 3.f, 10.f, 35.f, 20.f, 2.f, 0.f, 0.f } },
+            { "mp5", { 0.f, 0.f, 3.f, 0.f, 0.f, 0.f, 2.f, 1.f, 0.f } },
+            { "rpg", { 5.f, 1.75f, 0.25f, 20.f, 90.f, 0.f, 2.f, 0.f, 0.f } },
+            { "satchel", { -2.f, -0.25f, -0.25f, 0.f, 30.f, 0.f, 1.75f, 0.f, 0.f } },
+            { "shotgun", { 3.25f, 0.25f, 2.25f, -5.f, 0.f, 0.f, 2.f, 1.f, 0.f } },
+            { "snark", { 1.25f, -0.75f, 1.25f, 0.f, 60.f, 0.f, 2.f, 0.f, 0.f } },
+            { "tripmine", { 1.f, -0.75f, 2.25f, 0.f, 65.f, -10.f, 2.f, 0.f, 0.f } },
         };
         for (const Row& r : kRows)
             if (key == r.key)
