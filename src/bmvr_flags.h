@@ -1006,7 +1006,7 @@ namespace bmvr
     // head is more than RoomscaleDeadzoneCm from it (engine movement, so
     // walls and steps apply); the view stays within that distance + 10 cm of
     // the body, so walking into a wall does not put the head through it.
-    // Turns pivot around the head. Off by default.
+    // Turns pivot around the head. On by default.
     extern bool g_Roomscale;
     extern float g_RoomscaleDeadzoneCm;
     extern int g_RoomscaleTrace;   // config RoomscaleTrace=N: log N follow steps (tests)

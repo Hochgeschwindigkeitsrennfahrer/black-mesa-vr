@@ -462,7 +462,7 @@ namespace bmvr
     bool g_PhysicalLadders = true;   // out of beta, on by default (user 2026-11-26)
     bool g_PhysicalCrouch = false;
     float g_PhysicalCrouchDropCm = 50.f; // user 2026-11-25 (was 35)
-    bool g_Roomscale = false;            // beta, user 2026-11-27
+    bool g_Roomscale = true;             // beta, on by default (user 2026-11-27)
     float g_RoomscaleDeadzoneCm = 15.f;
     int g_RoomscaleTrace = 0;
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
