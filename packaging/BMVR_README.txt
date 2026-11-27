@@ -76,8 +76,8 @@ Every button and gesture can be changed in the VR settings panel.
 
 4) VR settings panel
 --------------------
-Hold Triangle (Y) for about half a second, or pick the gear in the weapon
-menu. Tabs: General, Hands & Weapons, Gestures, Controls, Graphics, Debug.
+Hold Triangle (Y) for about half a second, or click VR SETTINGS on the
+pause menu. Tabs: General, Hands & Weapons, Gestures, Controls, Graphics, Debug.
 Most changes apply right away and are saved into VR\config.txt.
 
 Graphics tips:

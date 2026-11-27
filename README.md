@@ -31,7 +31,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
   "Dynamic" zones keep what you put away there), the left hand does an action (quick save, flashlight, ammo, quick
   load, screenshot into the Steam library, recenter; default: left shoulder quick save, left hip ammo, forehead flashlight).
 - **Crowbar swinging** that hits where you swing (HL2VR style).
-- **HL2VR-style weapon wheel**, with the VR settings gear below the crowbar.
+- **HL2VR-style weapon wheel** (the VR settings gear below the crowbar is optional, General > This panel).
 - **Grenades thrown at the speed of your hand.**
 - **Crossbow scope built for VR:** bring the crossbow to your face with both hands to zoom; the zoomed view follows the
   crossbow, with smoothing for hand tremor.
@@ -40,6 +40,8 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
   face it exactly as the game normally wants. With **Physical ladders** (General tab, on by default) you climb hand
   over hand by the rungs.
 - **Per-hand item holding and use.**
+- **Gun, hands, HUD and laser locked together:** all drawn from one tracking sample for both eyes, so nothing jitters
+  or lags behind in heavy scenes or fast moves.
 - **Health, suit and ammo on your hands**, an ammo counter on the weapon, and a **short red flash over the view when
   you get hit**.
 - **Usage hints:** short messages the first times you carry a prop or take a mounted gun, naming your own alt-fire
@@ -49,6 +51,8 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - Snap or smooth turning, crouch while held or toggle, sprint toggle, recenter. Cutscene cameras can take your view
   with them as the scene was made; turn that off if it is too much for your VR legs.
 - **Physical crouching** (optional, General tab): crouch in real life to crouch in the game.
+- **Roomscale (beta, on by default):** walk around your play space and your body follows your head, also on trains
+  and trams. General > View.
 - **Subtitles / closed captions** below your view when they are on in the game's audio options; height and size in
   General > View.
 - **Bare hands until you get the HEV suit** (and throughout Blue Shift), HEV gloves after that.
@@ -66,13 +70,15 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **FXAA tuned for VR**, with Sharp / Balanced / Smooth presets.
 - **Less shimmer:** calmer cubemap reflections on shiny walls and floors (Full / Balanced / Subtle), lens flares,
   light glows and smoke that stay level and agree between the eyes.
+- **God rays made for VR:** the blur runs at quarter size (blur 0.80 -> 0.17 ms per frame, same look), and the shafts
+  stay steady when you look up or down.
 - **MulticoreMode:** the game's render thread runs next to the game, and heavy outdoor areas keep a much higher
   frame rate than before.
 - Many fixes for things that only break in VR: water and mirror reflections per eye, objects popping in one eye,
   glows shining through walls, Xen fog, and more.
 
 ### The VR settings panel
-**Hold Triangle/Y** (about half a second) or pick the gear in the weapon wheel. Six tabs:
+**Hold Triangle/Y** (about half a second) or click **VR SETTINGS** on the pause menu. Six tabs:
 - **General:** turning, ladders, view, usage hints, menus.
 
   <img src="docs/images/panel-general.jpg" alt="VR settings: General tab" width="90%">
