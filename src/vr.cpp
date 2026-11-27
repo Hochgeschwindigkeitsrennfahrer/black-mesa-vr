@@ -4133,6 +4133,7 @@ void VR::TickPhaseDump()
 
 void VR::OnLevelShutdown()
 {
+    RestoreGodRaySamples();
     m_GameplayEligible = false;
     bmvr::SetGameplayWorldRts(false);
     m_SeenGameplay = false;
@@ -11139,6 +11140,7 @@ void VR::FlushPendingQuit()
 {
     if (m_PendingQuit.exchange(0, std::memory_order_acq_rel) == 0 || !m_Game)
         return;
+    RestoreGodRaySamples();
     Game::logMsg("SteamVR quit: ClientCmd_Unrestricted(quit)");
     if (!m_Game->ClientCmd_Unrestricted("quit"))
         m_Game->ClientCmd("quit");

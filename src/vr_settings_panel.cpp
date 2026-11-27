@@ -468,6 +468,7 @@ namespace
             { "Xen fog: centre eye from", RowKind::Number, "XenFogWorldFar", nullptr, &bmvr::g_XenFogWorldFar, 100.f, 100.f, 8000.f, "%.0f u" },
             // User 2026-11-27: god rays changed with head pitch (mask depth along the view axis).
             { "God rays steady with head pitch", RowKind::Toggle, "GodRayRadialMask", &bmvr::g_GodRayRadialMask, nullptr, 0, 0, 0, nullptr },
+            { "God rays samples (test)", RowKind::Choice, nullptr, nullptr, &bmvr::g_GodRaySamples, 1.f, 0.f, 2.f, "Game|32|16" },
             { "God rays blur size", RowKind::Choice, "GodRayBlurScale", nullptr, &bmvr::g_GodRayBlurScale, 1.f, 0.f, 2.f, "Full|Half|Quarter" },
             { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
             { "Titles glow + scanlines", RowKind::Toggle, nullptr, &bmvr::g_TitleGlow, nullptr, 0, 0, 0, nullptr },
@@ -2896,6 +2897,45 @@ void bmvr::CapturePanelDefaults()
     g_DefaultsCaptured = true;
 }
 
+namespace
+{
+    // Debug row "God rays samples (test)": np_gr_quality_sample_count is an
+    // archived cvar the menus set to 3 (64 taps). Override it only while a
+    // level runs, keep the game's value, and put it back on level shutdown
+    // (before quit writes config.cfg) or when the row goes back to Game.
+    int g_GrSamplesSaved = -1;   // the game's value while overridden
+
+    void TickGodRaySamples(Game* game, bool inLevel)
+    {
+        const int row = static_cast<int>(bmvr::g_GodRaySamples + 0.5f);
+        const int want = row == 1 ? 2 : row == 2 ? 1 : -1;   // 2 = 32 taps, 1 = 16
+        int cur = -1;
+        if (!game->GetConVarInt("np_gr_quality_sample_count", cur))
+            return;
+        if (want >= 0 && inLevel)
+        {
+            if (g_GrSamplesSaved < 0)
+                g_GrSamplesSaved = cur;
+            if (cur != want && game->SetConVarInt("np_gr_quality_sample_count", want))
+                Game::logMsg("God rays samples: np_gr_quality_sample_count %d -> %d (test row, game value %d kept)",
+                    cur, want, g_GrSamplesSaved);
+        }
+        else if (g_GrSamplesSaved >= 0)
+        {
+            if (cur != g_GrSamplesSaved)
+                game->SetConVarInt("np_gr_quality_sample_count", g_GrSamplesSaved);
+            Game::logMsg("God rays samples: back to the game's %d", g_GrSamplesSaved);
+            g_GrSamplesSaved = -1;
+        }
+    }
+}
+
+void VR::RestoreGodRaySamples()
+{
+    if (m_Game)
+        TickGodRaySamples(m_Game, false);
+}
+
 // Game thread (FlushPendingGameUi): runs the panel's engine console commands
 // and, while the panel is open, reads the engine cvars back into the rows so
 // a refused command (cheat-protected) shows the real value.
@@ -2903,6 +2943,7 @@ void VR::FlushPanelEngineCommands()
 {
     if (!m_Game)
         return;
+    TickGodRaySamples(m_Game, m_GameplayEligible);
     std::vector<std::string> cmds;
     {
         std::lock_guard<std::mutex> lock(g_EngCmdLock);

@@ -297,6 +297,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_McHandSnapshot, nullptr },
             { "bmvr_godray_radial_mask", "VR: god ray mask tested as if the head looked level toward the light (0 = stock depth along the view axis: rays come and go as the head pitches)",
               Kind::Bool, 0.f, 1.f, &g_GodRayRadialMask, nullptr },
+            { "bmvr_godray_samples", "VR test: god ray taps 0 = game's (64), 1 = 32, 2 = 16; only while in a level, the game's value is put back on level shutdown",
+              Kind::Float, 0.f, 2.f, nullptr, &g_GodRaySamples },
             { "bmvr_godray_blur_scale", "VR: god ray blur size: 0 full (stock), 1 half, 2 quarter",
               Kind::Float, 0.f, 2.f, nullptr, &g_GodRayBlurScale },
             { "bmvr_xen_fog_noise", "VR: Xen fog noise: 0 stock (each eye's view direction, at infinity in stereo), 1 from the centre eye (flat look, on the surfaces), 2 fixed to the world (bmvr_xen_fog_noise_size), 3 auto (world near, centre eye far)",

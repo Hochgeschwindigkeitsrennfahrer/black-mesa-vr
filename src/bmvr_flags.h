@@ -714,6 +714,11 @@ namespace bmvr
     // God rays blur size (GodRayBlurScale): 0 full (stock), 1 half, 2 quarter
     // (src/vr_godrays.h GodRayBlurDivisor).
     extern float g_GodRayBlurScale;
+    // Debug A/B (not saved): god ray taps, 0 = the game's (the menus force
+    // np_gr_quality_sample_count 3 = 64), 1 = 32, 2 = 16. Applied only while a
+    // level is loaded; the game's value goes back on level shutdown so the
+    // archived cvar never reaches config.cfg (vr_settings_panel.cpp).
+    extern float g_GodRaySamples;
     extern float g_XenFogNoiseSize;
     extern float g_XenFogWorldNear;
     extern float g_XenFogWorldFar;

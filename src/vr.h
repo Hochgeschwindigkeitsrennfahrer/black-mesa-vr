@@ -1496,6 +1496,7 @@ public:
     void FlushPendingGameUi();
     void SyncLadderUseOnly();
     void FlushPanelEngineCommands();
+    void RestoreGodRaySamples();   // Debug "God rays samples": game value back (level shutdown, quit)
     void FlushPendingQuit();
     void NoteEngineVGui(void* engineVgui);
     // Intro logo (env_credits -> HudCredits) and env_message / game_text

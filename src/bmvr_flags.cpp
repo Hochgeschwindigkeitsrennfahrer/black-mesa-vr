@@ -350,6 +350,7 @@ namespace bmvr
     float g_XenFogNoiseMode = 3.f;
     bool g_GodRayRadialMask = true;
     float g_GodRayBlurScale = 0.f;
+    float g_GodRaySamples = 0.f;
     float g_XenFogNoiseSize = 256.f;
     float g_XenFogWorldNear = 300.f;
     float g_XenFogWorldFar = 1200.f;
