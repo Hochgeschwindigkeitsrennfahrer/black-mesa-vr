@@ -10200,7 +10200,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
             return;
         }
         m_VR->m_StereoEyesDrawnThisFrame = true;
-        m_VR->BeginStereoFramePose();
+        m_VR->BeginStereoFramePose(&setup.origin);
         if (m_VR->ShouldHwndBlitStereo())
         {
             // Simulator 1280 eyes / 2560 G-buffer: do not shrink CViewSetup to
@@ -11166,6 +11166,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             const Vector wish = hmdF * analogF + hmdR * analogS;
             cmd->forwardmove += DotProduct2D(wish, cF);
             cmd->sidemove += DotProduct2D(wish, cR);
+            // Roomscale (beta): walk the body after the real head (world
+            // velocity, same aim basis as the stick; engine collision/steps).
+            Vector roomWish;
+            if (!ladderMode && m_VR->RoomscaleWish(roomWish))
+            {
+                cmd->forwardmove += DotProduct2D(roomWish, cF);
+                cmd->sidemove += DotProduct2D(roomWish, cR);
+            }
             // Swimming: the engine's WaterMove goes along the full 3D view
             // (forward * fmove + right * smove, upmove added to z), and the
             // view is the weapon aim, so a two-handed gun aimed up/down made

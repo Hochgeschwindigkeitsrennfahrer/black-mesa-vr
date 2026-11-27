@@ -949,6 +949,14 @@ namespace bmvr
     // the duck is a physical one. Off by default.
     extern bool g_PhysicalCrouch;
     extern float g_PhysicalCrouchDropCm;
+    // Roomscale (beta): the player's body walks after the real head once the
+    // head is more than RoomscaleDeadzoneCm from it (engine movement, so
+    // walls and steps apply); the view stays within that distance + 10 cm of
+    // the body, so walking into a wall does not put the head through it.
+    // Turns pivot around the head. Off by default.
+    extern bool g_Roomscale;
+    extern float g_RoomscaleDeadzoneCm;
+    extern int g_RoomscaleTrace;   // config RoomscaleTrace=N: log N follow steps (tests)
     // VR panel DEBUG "HELD WEAPON ANGLE": pitch/yaw/roll (degrees) of the held
     // weapon, on top of the built-in table; live, saved per weapon in
     // VR/viewmodel_offsets.txt (ax ay az), not in config.txt.

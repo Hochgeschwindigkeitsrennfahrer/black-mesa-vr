@@ -447,6 +447,9 @@ namespace bmvr
     bool g_PhysicalLadders = true;   // out of beta, on by default (user 2026-11-26)
     bool g_PhysicalCrouch = false;
     float g_PhysicalCrouchDropCm = 50.f; // user 2026-11-25 (was 35)
+    bool g_Roomscale = false;            // beta, user 2026-11-27
+    float g_RoomscaleDeadzoneCm = 15.f;
+    int g_RoomscaleTrace = 0;
     float g_VmTunePitch = 0.f, g_VmTuneYaw = 0.f, g_VmTuneRoll = 0.f, g_VmTuneSupportCm = 0.f;
     float g_VmTuneSeatCm = 6.f, g_VmTuneSeatDeg = 45.f;
     bool g_PhysicalLadderSmooth = true;
@@ -1458,6 +1461,16 @@ namespace bmvr
                 g_PhysicalLadders = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PhysicalCrouch") == 0)
                 g_PhysicalCrouch = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "Roomscale") == 0)
+                g_Roomscale = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "RoomscaleTrace") == 0)
+                g_RoomscaleTrace = atoi(val);
+            else if (std::strcmp(n, "RoomscaleDeadzoneCm") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 5.f && v <= 40.f)
+                    g_RoomscaleDeadzoneCm = v;
+            }
             else if (std::strcmp(n, "PhysicalCrouchDropCm") == 0)
             {
                 const float v = static_cast<float>(atof(val));

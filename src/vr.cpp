@@ -7069,6 +7069,14 @@ void VR::ApplyTurnStick(float stickX, float deltaMs)
             m_PressedTurn = false;
     }
     offset -= 360.f * floorf(offset / 360.f);
+    if (bmvr::g_Roomscale)
+    {
+        // Zero and turn change together: the pair latch reads both under the lock.
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        RoomscaleTurnPivot(m_RotationOffsetY.load(std::memory_order_relaxed), offset);
+        m_RotationOffsetY.store(offset, std::memory_order_release);
+        return;
+    }
     m_RotationOffsetY.store(offset, std::memory_order_release);
 }
 
@@ -9259,6 +9267,189 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
         ++s_climbLog;
     }
     return true;
+}
+
+bool VR::RoomscaleWish(Vector& wish)
+{
+    RoomscaleState& r = m_Roomscale;
+    wish = Vector(0.f, 0.f, 0.f);
+    const char* why = nullptr;
+    if (!bmvr::g_Roomscale)
+        why = "off";
+    else if (!m_Game || m_VRScale <= 0.f)
+        why = "no game";
+    else if (!m_GameplayEligible)
+        why = "not in gameplay";
+    else if (m_ScriptedCamActive)
+        why = "cutscene camera";
+    else if (m_LadderView.active || m_LadderActive.load(std::memory_order_acquire))
+        why = "ladder";
+    else if (m_Game->LocalPlayerMoveType() != 2)   // MOVETYPE_WALK
+        why = "not walking (noclip, ladder, vehicle)";
+    else
+    {
+        const int flags = m_Game->LocalPlayerFlags();
+        if (flags >= 0 && (flags & (16 | 64 | 128)))   // FL_ONTRAIN | FL_FROZEN | FL_ATCONTROLS
+            why = "frozen or at controls";
+        else if (m_Game->LocalPlayerWaterLevel() >= 2)
+            why = "swimming";
+    }
+    // Stick walking and jumps: the body's move is not the head's, so neither
+    // walk nor absorb; the head offset waits (and is held near the body).
+    const bool quiet = why != nullptr;
+    if (!why)
+    {
+        const int flags = m_Game->LocalPlayerFlags();
+        if (fabsf(m_WalkForward.load(std::memory_order_acquire)) + fabsf(m_WalkSide.load(std::memory_order_acquire)) > 0.05f)
+            why = "stick";
+        else if (flags >= 0 && !(flags & 1))   // FL_ONGROUND
+            why = "in the air";
+    }
+    if (quiet != r.paused)
+    {
+        Game::logMsg("Roomscale %s%s%s", quiet ? "paused" : "active",
+            quiet ? ": " : "", quiet ? why : "");
+        r.paused = quiet;
+        r.pauseWhy = why ? why : "";
+        r.haveBody = false;
+    }
+    if (why)
+    {
+        if (!quiet && why[0] == 's')   // stick: its moves are not the head's
+            r.wishUntilMs = 0;
+        return false;
+    }
+
+    float excess = 0.f;
+    Vector dir{};
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        if (!m_HmdOriginLatched || !m_HmdPoseValid)
+            return false;
+        Vector h = m_HmdPosAbs - m_HmdPosAbsZero;
+        h.z = 0.f;
+        PivotYaw(h, m_RotationOffsetY.load(std::memory_order_acquire));
+        const float len = h.Length();
+        const float dead = bmvr::g_RoomscaleDeadzoneCm * 0.01f * m_VRScale;
+        excess = len - dead;
+        if (len > 0.01f)
+            dir = h * (1.f / len);
+    }
+    if (excess < 0.5f)
+        return false;
+    // Engine walking: friction (stopspeed 100, x4) eats wish speeds below
+    // ~45 u/s and stops ~400 u/s^2. Ask for the speed that stops about at
+    // the deadzone edge, at least 60 (stops within ~4.5 u = 11 cm, inside
+    // the deadzone), at most walking speed.
+    float speed = sqrtf(2.f * 300.f * excess);
+    speed = speed < 60.f ? 60.f : (speed > 190.f ? 190.f : speed);
+    wish = dir * speed;
+    r.wishUntilMs = GetTickCount64() + 400;
+    return true;
+}
+
+void VR::RoomscaleFollow(const Vector& viewOrigin)
+{
+    RoomscaleState& r = m_Roomscale;
+    // The player's own (render-interpolated) origin: the view origin passed
+    // in can belong to another view on some frames.
+    Vector body = viewOrigin;
+    if (!bmvr::g_Roomscale || r.paused || m_VRScale <= 0.f || !m_Game || !m_Game->LocalPlayerAbsOrigin(body))
+    {
+        r.haveBody = false;
+        return;
+    }
+    const ULONGLONG now = GetTickCount64();
+    Vector moved = body - r.lastBody;
+    moved.z = 0.f;
+    const bool measured = r.haveBody;
+    r.lastBody = body;
+    r.haveBody = true;
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    if (!m_HmdOriginLatched || !m_HmdPoseValid)
+        return;
+    const float yaw = m_RotationOffsetY.load(std::memory_order_acquire);
+    auto headOffset = [&]() {
+        Vector h = m_HmdPosAbs - m_HmdPosAbsZero;
+        h.z = 0.f;
+        PivotYaw(h, yaw);
+        return h;
+    };
+    auto shiftZero = [&](Vector worldDelta, const char* what) {
+        if (bmvr::g_RoomscaleTrace > 0)
+            Game::logMsg("Roomscale trace: %s shift (%.2f %.2f)", what, worldDelta.x, worldDelta.y);
+        // h = R(yaw)(hmd - zero): h shrinks by d when zero moves by R^-1(d).
+        PivotYaw(worldDelta, -yaw);
+        m_HmdPosAbsZero.x += worldDelta.x;
+        m_HmdPosAbsZero.y += worldDelta.y;
+    };
+    Vector h = headOffset();
+    const float len = h.Length();
+    // Only while walking after the head (+ settle); a teleport, level change
+    // or a big push is not ours.
+    const float step = moved.Length();
+    if (measured && now < r.wishUntilMs && step > 0.001f && step < 12.f && len > 0.01f)
+    {
+        const Vector dir = h * (1.f / len);
+        const float along = moved.Dot(dir);
+        Vector take{};
+        if (along > 0.f)
+        {
+            // Closer to the head (also sliding along a wall): all of it.
+            // Else only the part toward the head, at most up to the head.
+            if ((h - moved).Length() < len)
+                take = moved;
+            else
+                take = dir * (along < len ? along : len);
+        }
+        if (take.x != 0.f || take.y != 0.f)
+        {
+            shiftZero(take, "follow");
+            r.followedUnits += take.Length();
+            h = headOffset();
+        }
+    }
+    if (bmvr::g_RoomscaleTrace > 0 && (h.Length() > 0.05f || moved.Length() > 0.01f))
+    {
+        --bmvr::g_RoomscaleTrace;
+        Game::logMsg("Roomscale trace: body (%.2f %.2f) moved (%.2f %.2f) head offset (%.2f %.2f) yaw %.1f hmd (%.2f %.2f) zero (%.2f %.2f) window %d",
+            body.x, body.y, moved.x, moved.y, h.x, h.y, yaw, m_HmdPosAbs.x, m_HmdPosAbs.y,
+            m_HmdPosAbsZero.x, m_HmdPosAbsZero.y, now < r.wishUntilMs ? 1 : 0);
+    }
+    // View near the body: past deadzone + 10 cm (walking into a wall, or the
+    // body still catching up) the view stops; stepping back moves it again
+    // at once.
+    const float maxLen = (bmvr::g_RoomscaleDeadzoneCm + 10.f) * 0.01f * m_VRScale;
+    const float hl = h.Length();
+    if (hl > maxLen)
+    {
+        shiftZero(h * (1.f - maxLen / hl), "hold");
+        r.clampedUnits += hl - maxLen;
+    }
+    if (r.followedUnits + r.clampedUnits > 0.5f && now - r.lastLogMs > 5000)
+    {
+        Game::logMsg("Roomscale: body followed the head %.1f u, view held at the body %.1f u (deadzone %.0f cm)",
+            r.followedUnits, r.clampedUnits, bmvr::g_RoomscaleDeadzoneCm);
+        r.followedUnits = 0.f;
+        r.clampedUnits = 0.f;
+        r.lastLogMs = now;
+    }
+}
+
+void VR::RoomscaleTurnPivot(float yawBefore, float yawAfter)
+{
+    if (!bmvr::g_Roomscale || !m_HmdOriginLatched || yawBefore == yawAfter)
+        return;
+    // World head offset R(before)(hmd - zero) kept: the turn pivots at the
+    // real head, not the recenter point.
+    if (bmvr::g_RoomscaleTrace > 0)
+        Game::logMsg("Roomscale trace: turn pivot %.3f -> %.3f", yawBefore, yawAfter);
+    Vector v = m_HmdPosAbs - m_HmdPosAbsZero;
+    v.z = 0.f;
+    PivotYaw(v, yawBefore);
+    PivotYaw(v, -yawAfter);
+    m_HmdPosAbsZero.x = m_HmdPosAbs.x - v.x;
+    m_HmdPosAbsZero.y = m_HmdPosAbs.y - v.y;
 }
 
 void VR::UpdatePhysicalCrouch(uint32_t& buttons)
@@ -18487,7 +18678,7 @@ float VR::HorizontalFovForAspect(float targetAspect) const
     return 2.0f * atanf(tanHalfY * targetAspect) * (180.0f / 3.14159265358979323846f);
 }
 
-void VR::BeginStereoFramePose()
+void VR::BeginStereoFramePose(const Vector* body)
 {
     BMVR_PROF("vr BeginStereoFramePose");
     m_McEyeCopyQueued = false;
@@ -18503,6 +18694,10 @@ void VR::BeginStereoFramePose()
         m_OpenXrPairThread = GetCurrentThreadId();
     }
     UpdateTracking();
+    if (body)
+        RoomscaleFollow(*body);
+    else
+        m_Roomscale.haveBody = false;
     {
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
         m_StereoFrameAngles = m_HmdAngAbs;

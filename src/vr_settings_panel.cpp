@@ -145,6 +145,9 @@ namespace
             { "Physical crouching", RowKind::Toggle, "PhysicalCrouch", &bmvr::g_PhysicalCrouch, nullptr, 0, 0, 0, nullptr },
             { "Head drop to crouch", RowKind::Number, "PhysicalCrouchDropCm", nullptr, &bmvr::g_PhysicalCrouchDropCm, 5.f, 15.f, 80.f, "%.0f cm" },
             { "VIEW", RowKind::Section, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
+            // Body walks after the real head past the deadzone; view kept near the body (VR::RoomscaleWish/RoomscaleFollow).
+            { "Roomscale (beta)", RowKind::Toggle, "Roomscale", &bmvr::g_Roomscale, nullptr, 0, 0, 0, nullptr },
+            { "Body follows head past", RowKind::Number, "RoomscaleDeadzoneCm", nullptr, &bmvr::g_RoomscaleDeadzoneCm, 1.f, 5.f, 40.f, "%.0f cm" },
             { "Recenter after pause menu", RowKind::Toggle, "AutoRecenterOnResume", &bmvr::g_AutoRecenterOnResume, nullptr, 0, 0, 0, nullptr },
             { "Cutscene cameras move the view", RowKind::Toggle, "FollowScriptedCamera", &bmvr::g_FollowScriptedCamera, nullptr, 0, 0, 0, nullptr },
             // Main + pause menu at the room's front (STAGE forward) instead of the head (user 2026-11-24: off by default).
@@ -1456,6 +1459,8 @@ namespace
             return !g_PhysicalLadders;
         if (is({ "PhysicalCrouchDropCm" }))
             return !g_PhysicalCrouch;
+        if (is({ "RoomscaleDeadzoneCm" }))
+            return !g_Roomscale;
         if (is({ "DamageFlashStrength" }))
             return !g_DamageFlash;
         if (is({ "HandHudSize", "HandHudUp", "HandHudForward", "HandHudSide", "HandHudTilt", "HandHudRoll" }))

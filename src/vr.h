@@ -949,7 +949,9 @@ public:
     void CreateVRTextures();
     void SubmitVRTextures();
     void WaitPosesForStereoFrame(bool allowQueued = true);
-    void BeginStereoFramePose();
+    // body = this frame's engine view origin (the body the eyes hang on);
+    // roomscale measures how far it moved since the last pair.
+    void BeginStereoFramePose(const Vector* body = nullptr);
     void EndStereoFramePose();
     void LogOpenXrPublishRate();
     void ApplyFrameCap(int nominalHz, float sourceHz, const char* source);
@@ -1052,6 +1054,30 @@ public:
         float offset = 0.f;       // last offset sent
         ULONGLONG lastMs = 0;
     } m_CrouchView;
+    // Roomscale (bmvr::g_Roomscale). CreateMove: world-space horizontal
+    // velocity (units/s) that walks the body toward the real head, false =
+    // nothing to send (off, paused, stick in use, head inside the deadzone).
+    bool RoomscaleWish(Vector& wish);
+    // Stereo pair latch (main thread, before the zero is latched): the part
+    // of the body's move since the last pair that went toward the head is
+    // taken out of the head offset (zero shifts), so the view stays where
+    // the real head is; then the head offset is held within deadzone + 10 cm.
+    void RoomscaleFollow(const Vector& viewOrigin);
+    // Turn around the head instead of the recenter point (roomscale on):
+    // rebases the zero for a turn offset change before -> after. Caller
+    // holds m_ControllerMutex.
+    void RoomscaleTurnPivot(float yawBefore, float yawAfter);
+    struct RoomscaleState
+    {
+        bool haveBody = false;
+        Vector lastBody{};
+        ULONGLONG wishUntilMs = 0;  // absorb body moves until (wish + settle)
+        bool paused = true;         // last RoomscaleWish verdict, for the log
+        const char* pauseWhy = "";
+        float followedUnits = 0.f;  // since the last summary line
+        float clampedUnits = 0.f;
+        ULONGLONG lastLogMs = 0;
+    } m_Roomscale;
     // ProcessInput: grip state per hand (0 left, 1 right) for PhysicalLadderStep.
     void UpdateLadderGrips();
     std::atomic<bool> m_LadderGrip[2]{};
