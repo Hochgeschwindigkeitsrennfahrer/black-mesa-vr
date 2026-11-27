@@ -1605,6 +1605,8 @@ public:
     bool SettingsPanelOpen() const { return m_SettingsOpen; }
     void OpenSettingsPanel();
     void CloseSettingsPanel(const char* why);
+    // Map or save load: god / notarget rows back to off (server flags, not read back).
+    void ResetDevCheatRows();
     // Short head-locked message (quick save); detail = optional smaller second line.
     void ShowToast(const char* text, DWORD ms = kToastMs, const char* detail = nullptr);
     // Usage hint (small toast), each id at most maxPerStart times per game

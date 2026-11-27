@@ -72,7 +72,8 @@ namespace
     // Toggle console commands (god, noclip, notarget): "cmd:" rows send the
     // command on every click and are never saved. Noclip is read back from
     // the player's move type; god/notarget live only in server flags, so
-    // their rows show what the panel last set this run.
+    // their rows show what the panel last set since the last map/save load
+    // (ResetDevCheatRows).
     bool g_DevGod = false;
     bool g_DevNoclip = false;
     bool g_DevNotarget = false;
@@ -1827,6 +1828,107 @@ namespace
         return SUCCEEDED(device->UpdateTexture(sys, gpu));
     }
 
+    // Panel canvases, kept between repaints while the panel is open. Each
+    // repaint used to create two fresh DIB sections (~27 MB each for the
+    // 3354 px Debug tab); late in a long session the 32-bit game ran out of
+    // contiguous address space for them (2026-11-27 headset: clicks applied
+    // without feedback, then no panel at all and ~20 ms render work per frame
+    // from repainting every frame, until a map load freed memory).
+    std::unique_ptr<Canvas> g_BodyCanvas, g_WideCanvas;
+
+    Canvas* PanelCanvas(std::unique_ptr<Canvas>& c, int w, int h)
+    {
+        if (!c || c->w != w || c->h != h)
+        {
+            c.reset();   // free the old one before asking for the new size
+            c = std::make_unique<Canvas>(w, h);
+        }
+        return c->ok() ? c.get() : nullptr;
+    }
+
+    // Closed panel: give the big buffers back (the GPU texture stays for the next open).
+    void ReleasePanelBuffers()
+    {
+        g_BodyCanvas.reset();
+        g_WideCanvas.reset();
+        if (g_Gfx.sys)
+        {
+            g_Gfx.sys->Release();
+            g_Gfx.sys = nullptr;
+        }
+    }
+
+    // Largest free block of the process address space, MB (failure reports).
+    unsigned LargestFreeVaMb()
+    {
+        size_t best = 0;
+        MEMORY_BASIC_INFORMATION mbi{};
+        for (uintptr_t a = 0x10000; VirtualQuery(reinterpret_cast<void*>(a), &mbi, sizeof(mbi)) == sizeof(mbi);)
+        {
+            if (mbi.State == MEM_FREE && mbi.RegionSize > best)
+                best = mbi.RegionSize;
+            const uintptr_t next = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if (next <= a)
+                break;
+            a = next;
+        }
+        return static_cast<unsigned>(best >> 20);
+    }
+
+    // Upload into the panel textures. New-size textures are made before the
+    // old GPU texture goes, so a failed allocation keeps the last panel image
+    // on screen. Returns nullptr or the step that failed.
+    const char* UploadPanel(IDirect3DDevice9* device, const Canvas& c)
+    {
+        const bool sameSize = g_Gfx.w == c.w && g_Gfx.h == c.h;
+        if (!sameSize && g_Gfx.sys)
+        {
+            g_Gfx.sys->Release();   // only the GPU texture is needed to draw
+            g_Gfx.sys = nullptr;
+        }
+        IDirect3DTexture9* gpu = sameSize ? g_Gfx.gpu : nullptr;
+        bool newGpu = false;
+        if (!g_Gfx.sys && FAILED(device->CreateTexture(c.w, c.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &g_Gfx.sys, nullptr)))
+        {
+            g_Gfx.sys = nullptr;
+            return "system-memory texture";
+        }
+        if (!gpu)
+        {
+            if (FAILED(device->CreateTexture(c.w, c.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &gpu, nullptr)))
+                return "GPU texture";
+            newGpu = true;
+        }
+        const char* fail = nullptr;
+        D3DLOCKED_RECT lr{};
+        if (FAILED(g_Gfx.sys->LockRect(0, &lr, nullptr, 0)))
+            fail = "lock";
+        else
+        {
+            for (int y = 0; y < c.h; ++y)
+                std::memcpy(static_cast<uint8_t*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch,
+                    c.px + static_cast<size_t>(y) * c.w, static_cast<size_t>(c.w) * 4u);
+            g_Gfx.sys->UnlockRect(0);
+            if (FAILED(device->UpdateTexture(g_Gfx.sys, gpu)))
+                fail = "update";
+        }
+        if (fail)
+        {
+            if (newGpu)
+                gpu->Release();
+            return fail;
+        }
+        if (newGpu)
+        {
+            if (g_Gfx.gpu)
+                g_Gfx.gpu->Release();
+            g_Gfx.gpu = gpu;
+            g_Gfx.w = c.w;
+            g_Gfx.h = c.h;
+        }
+        return nullptr;
+    }
+
     constexpr COLORREF kBg = RGB(18, 22, 27);
     constexpr COLORREF kRowHover = RGB(46, 54, 64);
     constexpr COLORREF kAmber = RGB(255, 176, 0);
@@ -2839,6 +2941,20 @@ void VR::OpenSettingsPanel()
     Game::logMsg("VR settings panel opened pause=%d", m_SettingsPausedGame ? 1 : 0);
 }
 
+void VR::ResetDevCheatRows()
+{
+    // User 2026-11-27: after a load or map change the rows still said on while
+    // god / notarget were off. The flags are server-only (not in the client's
+    // 11 networked player-flag bits), so the rows follow the load instead.
+    if (!g_DevGod && !g_DevNotarget)
+        return;
+    Game::logMsg("VR settings: map load, God mode / No target rows reset to off (were %d/%d)",
+        g_DevGod ? 1 : 0, g_DevNotarget ? 1 : 0);
+    g_DevGod = false;
+    g_DevNotarget = false;
+    m_SettingsDirty = true;
+}
+
 void VR::CloseSettingsPanel(const char* why)
 {
     if (!m_SettingsOpen)
@@ -3447,9 +3563,17 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up)
 {
     if (!m_SettingsOpen || !device)
+    {
+        if (!m_SettingsOpen && (g_BodyCanvas || g_WideCanvas || g_Gfx.sys) && device && g_Gfx.device == device)
+            ReleasePanelBuffers();
         return;
+    }
     if (g_Gfx.device && g_Gfx.device != device)
+    {
+        g_BodyCanvas.reset();
+        g_WideCanvas.reset();
         ReleaseGfx();
+    }
     g_Gfx.device = device;
     // exchange before Paint: a click on the game thread while this paints
     // sets the flag again, so it is drawn next frame. (A plain bool cleared
@@ -3493,17 +3617,30 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
         s_paintedModelGen = bmvr::ctlmodel::Generation();
         m_SettingsDirty = true;
     }
-    if (m_SettingsDirty.exchange(false) || !g_Gfx.gpu)
+    // After a failed repaint, retry every 500 ms instead of every frame.
+    static DWORD s_gfxRetryAt = 0;
+    static int s_gfxFailLog = 0;
+    static DWORD s_gfxFailSince = 0;
+    const DWORD nowMs = GetTickCount();
+    const bool backoff = s_gfxRetryAt != 0 && static_cast<int32_t>(s_gfxRetryAt - nowMs) > 0;
+    if (!backoff && (m_SettingsDirty.exchange(false) || !g_Gfx.gpu))
     {
-        Canvas body(kTexW, TexH());
+        const char* fail = nullptr;
         const int wing = WingPx();
-        Canvas wide(wing ? kTexW + 2 * wing : 1, wing ? TexH() : 1);
-        if (body.ok() && (!wing || wide.ok()))
+        if (!wing)
+            g_WideCanvas.reset();
+        Canvas* body = PanelCanvas(g_BodyCanvas, kTexW, TexH());
+        Canvas* wide = (body && wing) ? PanelCanvas(g_WideCanvas, kTexW + 2 * wing, TexH()) : nullptr;
+        if (!body)
+            fail = "panel canvas";
+        else if (wing && !wide)
+            fail = "controller-picture canvas";
+        else
         {
-            Paint(body, m_SettingsHover, m_SettingsHoverZone);
+            Paint(*body, m_SettingsHover, m_SettingsHoverZone);
             if (wing)
-                ComposeWings(body, wide, m_SettingsHover);
-            Canvas& c = wing ? wide : body;
+                ComposeWings(*body, *wide, m_SettingsHover);
+            Canvas& c = wing ? *wide : *body;
             // Test only: BMVR_TEST_PANEL_DUMP=1 saves every repaint as
             // VR/panel-tab<N>[-picker].bmp (full size, for screenshots).
             static int s_dumpPanel = -1;
@@ -3541,18 +3678,28 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
                     std::fclose(f);
                 }
             }
-            if (g_Gfx.w != c.w || g_Gfx.h != c.h)
-            {
-                if (g_Gfx.sys) { g_Gfx.sys->Release(); g_Gfx.sys = nullptr; }
-                if (g_Gfx.gpu) { g_Gfx.gpu->Release(); g_Gfx.gpu = nullptr; }
-                g_Gfx.w = c.w;
-                g_Gfx.h = c.h;
-            }
-            if (!Upload(device, c, g_Gfx.sys, g_Gfx.gpu))
-                m_SettingsDirty = true;
+            fail = UploadPanel(device, c);
         }
-        else
+        if (fail)
+        {
             m_SettingsDirty = true;
+            s_gfxRetryAt = nowMs + 500;
+            if (!s_gfxFailSince)
+                s_gfxFailSince = nowMs;
+            if (s_gfxFailLog < 20)
+            {
+                ++s_gfxFailLog;
+                Game::logMsg("VR settings panel: repaint failed (%s), %dx%d tab %d, largest free address block %u MB; %s, retry in 500 ms",
+                    fail, kTexW + 2 * wing, TexH(), g_Tab, LargestFreeVaMb(),
+                    g_Gfx.gpu ? "last image kept" : "no image to show");
+            }
+        }
+        else if (s_gfxFailSince)
+        {
+            Game::logMsg("VR settings panel: repaint ok again after %u ms", static_cast<unsigned>(nowMs - s_gfxFailSince));
+            s_gfxFailSince = 0;
+            s_gfxRetryAt = 0;
+        }
     }
     if (!g_Gfx.gpu)
         return;

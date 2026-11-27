@@ -3947,6 +3947,7 @@ void VR::OnLevelInit(const char* newmap)
     m_GmanEntityCount = 0;
     m_GmanGestureActive.store(false, std::memory_order_relaxed);
     Game::logMsg("LevelInit map=%s eligible=%d", m_CurrentMapName.c_str(), m_GameplayEligible ? 1 : 0);
+    ResetDevCheatRows();
     m_DmgMapLoaded = true;
     ScanMapForGman();
     m_PhysicalCrowbarModel = nullptr;
@@ -6856,7 +6857,8 @@ void VR::UpdateScriptedCamera(const Vector& engineAngles)
     // entity. Death (the view rolled onto the floor; followed, it turned the
     // whole view over), view punch, shakes and grabs never do.
     bool viewEntitySet = true;
-    if (m_Game && m_Game->ReadLocalPlayerViewEntitySet(viewEntitySet) && !viewEntitySet)
+    const bool viewEntityRead = m_Game && m_Game->ReadLocalPlayerViewEntitySet(viewEntitySet);
+    if (viewEntityRead && !viewEntitySet)
     {
         if (m_ScriptedCamActive)
         {
@@ -6884,8 +6886,16 @@ void VR::UpdateScriptedCamera(const Vector& engineAngles)
         return;
     }
     // Clear of view punch and screen shake (a few degrees, mostly roll).
-    const bool differs = fabsf(WrapYaw(engineAngles.y - m_LastCmdYaw)) > 8.f
-        || fabsf(engineAngles.x - m_LastCmdPitch) > 8.f || fabsf(engineAngles.z) > 8.f;
+    // With the view entity known to be set (a real cutscene camera), punch
+    // does not apply: engine angles that follow our usercmd again match it
+    // within rounding, so 1.5 deg. The 8 deg window dropped the Xen arrival
+    // stand-up camera (5.5 deg yaw / 2.3 deg pitch from the last aim, 2026-11-27
+    // headset) to the normal view for 45+ frames mid-scene: the view flashed
+    // toward the pre-scene heading.
+    const bool viewEntityKnown = viewEntityRead && viewEntitySet;
+    const float matchDeg = viewEntityKnown ? 1.5f : 8.f;
+    const bool differs = fabsf(WrapYaw(engineAngles.y - m_LastCmdYaw)) > matchDeg
+        || fabsf(engineAngles.x - m_LastCmdPitch) > matchDeg || fabsf(engineAngles.z) > 8.f;
     QAngle hmd{};
     {
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
@@ -6900,13 +6910,23 @@ void VR::UpdateScriptedCamera(const Vector& engineAngles)
         m_ScriptedCamFrames = m_ScriptedCamActive ? 0 : m_ScriptedCamFrames + 1;
     else
         m_ScriptedCamFrames = m_ScriptedCamActive ? m_ScriptedCamFrames + 1 : 0;
-    if (!m_ScriptedCamActive && m_ScriptedCamFrames >= 10)
+    // Diagnostic: the normal view shows mid-scene while the camera matches the aim.
+    static int s_matchLog;
+    if (m_ScriptedCamActive && !differs && m_ScriptedCamFrames == 1 && s_matchLog < 40)
+    {
+        ++s_matchLog;
+        Game::logMsg("Scripted camera matches the aim (yaw %.1f pitch %.1f off, window %.1f, view entity %s): normal view until it differs",
+            WrapYaw(engineAngles.y - m_LastCmdYaw), engineAngles.x - m_LastCmdPitch, matchDeg,
+            viewEntityKnown ? "set" : viewEntityRead ? "clear" : "unknown");
+    }
+    if (!m_ScriptedCamActive && m_ScriptedCamFrames >= (viewEntityKnown ? 2 : 10))
     {
         m_ScriptedCamActive = true;
         m_ScriptedCamFrames = 0;
         m_ScriptedCamHmdYaw0 = hmd.y;
-        Game::logMsg("Scripted camera on: engine angles (%.1f %.1f %.1f), last sent (%.1f %.1f)",
-            engineAngles.x, engineAngles.y, engineAngles.z, m_LastCmdPitch, m_LastCmdYaw);
+        Game::logMsg("Scripted camera on: engine angles (%.1f %.1f %.1f), last sent (%.1f %.1f), view entity %s",
+            engineAngles.x, engineAngles.y, engineAngles.z, m_LastCmdPitch, m_LastCmdYaw,
+            viewEntityKnown ? "set" : viewEntityRead ? "clear" : "unknown");
     }
     else if (m_ScriptedCamActive && m_ScriptedCamFrames >= 45)
     {
