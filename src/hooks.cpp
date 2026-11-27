@@ -8338,6 +8338,65 @@ namespace
         CallSetAbsOriginAngles(vm, origin3, angles3);
     }
 
+    // Viewmodels our CalcViewModelView hook placed this frame (BM can call
+    // it per viewmodel index); PlaceViewmodelsAtPair re-places them.
+    void* g_VmPlaced[2] = { nullptr, nullptr };
+
+    void NoteViewmodelPlaced(void* vm)
+    {
+        if (g_VmPlaced[0] == vm || g_VmPlaced[1] == vm)
+            return;
+        if (!g_VmPlaced[0])
+            g_VmPlaced[0] = vm;
+        else if (!g_VmPlaced[1])
+            g_VmPlaced[1] = vm;
+    }
+
+    // At the stereo pair latch (after the pair's UpdateTracking and with
+    // m_StereoBodyOrigin set): the gun goes to the pose the laser
+    // (GunFrameNow), ammo HUD and gloves are drawn from. Only origin and
+    // angles: the engine's CalcViewModelView ends with our SetAbsOrigin/
+    // Angles to the target anyway (bob/lag overridden), so re-running it
+    // would only repeat its side effects.
+    void PlaceViewmodelsAtPair()
+    {
+        void* placed[2] = { g_VmPlaced[0], g_VmPlaced[1] };
+        g_VmPlaced[0] = g_VmPlaced[1] = nullptr;
+        if (!bmvr::g_GunPoseAtPair || !placed[0] || !Hooks::m_VR || !Hooks::m_Game)
+            return;
+        if (!Hooks::m_VR->m_ControllerPoseValid || !Hooks::m_VR->IsGameplayEligible())
+            return;
+        // Only the active viewmodel entity (a stale pointer from a removed
+        // one is never written).
+        C_BaseEntity* active = Hooks::m_Game->GetViewModelEntity();
+        if (!active)
+            return;
+        Vector body = Hooks::m_VR->m_HasStereoBodyOrigin ? Hooks::m_VR->m_StereoBodyOrigin : Hooks::m_VR->m_SetupOrigin;
+        if (body.LengthSqr() <= 1.f)
+            return;
+        const Vector targetOrigin = Hooks::m_VR->GetRecommendedViewmodelAbsPos(body);
+        const QAngle targetAng = Hooks::m_VR->GetRecommendedViewmodelAbsAngle();
+        const float origin3[3] = { targetOrigin.x, targetOrigin.y, targetOrigin.z };
+        const float angles3[3] = { targetAng.x, targetAng.y, targetAng.z };
+        int n = 0;
+        for (void* vm : placed)
+        {
+            if (vm && vm == static_cast<void*>(active))
+            {
+                CallSetAbsOriginAngles(vm, origin3, angles3);
+                ++n;
+            }
+        }
+        if (n > 0)
+            Hooks::m_VR->NoteViewmodelPoseForSync();
+        static int s_log;
+        if (s_log < 3)
+        {
+            ++s_log;
+            Game::logMsg("Gun pose at pair: %d viewmodel(s) re-placed from the pair's tracking", n);
+        }
+    }
+
     void CallCalcViewModelViewOriginal(void* ecx, void* owner, const Vector& eyePosition, const QAngle& eyeAngles)
     {
         if (!Hooks::hkCalcViewModelView.fOriginal)
@@ -10361,6 +10420,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         }
         m_VR->m_StereoBodyOrigin = setup.origin;
         m_VR->m_HasStereoBodyOrigin = true;
+        PlaceViewmodelsAtPair();
         StereoCostBegin();
         // RightEyeFirst (test aid, MulticoreMode only): same two passes, right
         // eye recorded first, to see whether culling follows the first view.
@@ -11546,6 +11606,7 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
             const float origin3[3] = { targetOrigin.x, targetOrigin.y, targetOrigin.z };
             const float angles3[3] = { targetAng.x, targetAng.y, targetAng.z };
             CallSetAbsOriginAngles(ecx, origin3, angles3);
+            NoteViewmodelPlaced(ecx);
             if (mp5)
                 ZeroPlayerViewRecoil(owner);
             SuppressViewmodelMovementAnims(ecx);

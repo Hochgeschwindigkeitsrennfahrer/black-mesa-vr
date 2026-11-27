@@ -278,14 +278,12 @@ private:
 #endif
 };
 
+// BMVR: zeroed (the Source SDK leaves it uninitialised for speed; our code
+// wrote `Vector v{}` expecting zero and read stack garbage, 2026-11-27).
+// Layout unchanged, so structs that mirror game memory are unaffected.
 inline Vector::Vector(void)
+	: x(0.f), y(0.f), z(0.f)
 {
-#ifdef _DEBUG
-#ifdef VECTOR_PARANOIA
-	// Initialize to NAN to catch errors
-	x = y = z = VEC_T_NAN;
-#endif
-#endif
 }
 
 FORCEINLINE Vector::Vector(vec_t X, vec_t Y, vec_t Z)
@@ -943,14 +941,10 @@ private:
 
 
 
+// BMVR: zeroed, as Vector() above.
 inline QAngle::QAngle()
+	: x(0.f), y(0.f), z(0.f)
 {
-#ifdef _DEBUG
-#ifdef VECTOR_PARANOIA
-	// Initialize to NAN to catch errors
-	x = y = z = VEC_T_NAN;
-#endif
-#endif
 }
 
 inline QAngle::QAngle(vec_t X, vec_t Y, vec_t Z)

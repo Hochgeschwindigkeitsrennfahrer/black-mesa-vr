@@ -334,6 +334,7 @@ namespace bmvr
     bool g_GlowCountDepthFix = true;
     // MulticoreMode: hands/laser of both eyes drawn from one per-frame snapshot (VR::HandDrawSnap).
     bool g_McHandSnapshot = true;
+    bool g_GunPoseAtPair = true;
     bool g_SkyWaterPerEye = true;
     bool g_EyeUnderwaterWorld = true;
     bool g_WaterLineClipFix = true;
