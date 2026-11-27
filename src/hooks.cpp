@@ -11064,7 +11064,23 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             else if (physLadderOn && physLadder.topExit)
                 pitch = 0.f;     // level head view: the dismount faced, or forward over the edge
             else if (ladderMountAssist)
+            {
                 yaw = ladderMountYaw;
+                // Hand mount fully under water: the use press and the
+                // engine's forced move onto the ladder (movetype NONE) look
+                // straight up. The first ladder tick after that move is
+                // processed with this view, and FullLadderMove floats the
+                // player off to an info_ladder_dismount faced within 40 u
+                // (see the hand-climb case above). At the bm_c2a5a dam
+                // ladder a node at its foot (-5048,-660,785) sits right
+                // behind the rungs, so grabs at the lower rungs mounted and
+                // were then pushed there (LadderTrace, user 2026-11-27).
+                // The use still mounts: LookingAtLadder only checks the
+                // flat view direction, and Findladder ignores the view.
+                if (physLadderOn && m_Game && m_Game->LocalPlayerWaterLevel() >= 3
+                    && (physLadder.useEdge || m_Game->LocalPlayerMoveType() == 0))
+                    pitch = -89.f;
+            }
             static int s_ladderLog;
             if (s_ladderLog < 24)
             {
@@ -11314,11 +11330,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
             if (s_traceStart && tNow < s_traceStart + 15000)
                 s_traceUntil = tNow + 3000;
         }
+        static ULONGLONG s_oursMs = 0;   // our drop / top exit (a mount's use press is not an exit)
+        if (physLadderOn && (physLadder.drop || physLadder.topExit))
+            s_oursMs = tNow;
         if (mtChange && tNow < s_traceUntil)
         {
-            const bool ours = physLadderOn && (physLadder.drop || physLadder.topExit || physLadder.useEdge);
+            const bool ours = s_oursMs && tNow - s_oursMs < 300;
             Game::logMsg("LadderTrace: movetype %d -> %d, water %d, %s", s_prevMt, mt, wl,
-                mt == 9 ? "mounted" : (ours ? "our exit (drop / top / use)" : "ENGINE EXIT (not asked for by us)"));
+                mt == 9 ? "mounted" : (ours ? "our exit (drop / top)" : "ENGINE EXIT (not asked for by us)"));
         }
         if (tNow < s_traceUntil && haveOrg)
         {
