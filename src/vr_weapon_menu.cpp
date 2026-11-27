@@ -560,8 +560,21 @@ namespace
             return false;
         if (format != 0 && format != 3 && format != 11 && format != 12 && format != 13 && format != 15)
             return false;
+        unsigned verMinor = 0;
+        memcpy(&verMinor, vtf.data() + 8, 4);
         unsigned imageOff = headerSize;
-        if (headerSize >= 80 && vtf.size() >= headerSize)
+        // v7.2 and older have no resource list: the low-res thumbnail (DXT1,
+        // usually 16x16) sits between the header and the mips. Not skipping it
+        // shifted ammo_grenade_satchel (v7.2) by 32 px, wrapped and clipped.
+        if (verMinor < 3)
+        {
+            int lowFmt = -1;
+            memcpy(&lowFmt, vtf.data() + 57, 4);
+            const int lw = vtf[61], lh = vtf[62];
+            if (lowFmt >= 0 && lw > 0 && lh > 0)
+                imageOff += static_cast<unsigned>(MipByteSize(static_cast<unsigned>(lowFmt), lw, lh));
+        }
+        else if (headerSize >= 80 && vtf.size() >= headerSize)
         {
             unsigned numRes = 0;
             memcpy(&numRes, vtf.data() + 68, 4);
@@ -798,99 +811,6 @@ namespace
         bgra.swap(dst);
         w = nw;
         h = nh;
-    }
-
-    // Blue Shift's hud_hev_overlay is a wrapping wipe atlas: the heater
-    // shield straddles the right edge, and its missing right side is the
-    // fragment on the left. Stitch those two column-runs into one glyph.
-    // Non-wrapping overlays (HEV suit) fall through to the largest run.
-    void UnwrapOrCropHudOverlay(int& w, int& h, std::vector<unsigned char>& bgra)
-    {
-        if (w < 12 || h < 8 || bgra.size() < static_cast<size_t>(w) * h * 4u)
-            return;
-        std::vector<int> occ(static_cast<size_t>(w), 0);
-        for (int y = 0; y < h; ++y)
-        {
-            const unsigned char* row = bgra.data() + static_cast<size_t>(y) * w * 4;
-            for (int x = 0; x < w; ++x)
-            {
-                if (row[x * 4 + 3] > 24)
-                    ++occ[x];
-            }
-        }
-        const int minOcc = (std::max)(3, h / 20);
-        struct Run { int x0, x1, area; };
-        std::vector<Run> runs;
-        int run0 = -1, runArea = 0;
-        auto close = [&](int x) {
-            if (run0 < 0)
-                return;
-            runs.push_back({ run0, x - 1, runArea });
-            run0 = -1;
-            runArea = 0;
-        };
-        for (int x = 0; x < w; ++x)
-        {
-            if (occ[x] >= minOcc)
-            {
-                if (run0 < 0)
-                    run0 = x;
-                runArea += occ[x];
-            }
-            else
-                close(x);
-        }
-        close(w);
-        if (runs.empty())
-            return;
-
-        auto copyCols = [&](int src0, int src1) {
-            const int nw = src1 - src0 + 1;
-            std::vector<unsigned char> cropped(static_cast<size_t>(nw) * h * 4u);
-            for (int y = 0; y < h; ++y)
-            {
-                memcpy(cropped.data() + static_cast<size_t>(y) * nw * 4,
-                    bgra.data() + (static_cast<size_t>(y) * w + src0) * 4,
-                    static_cast<size_t>(nw) * 4u);
-            }
-            bgra.swap(cropped);
-            w = nw;
-        };
-
-        if (runs.size() >= 2 && runs.front().x0 <= 2 && runs.back().x1 >= w - 3)
-        {
-            const Run& left = runs.front();
-            const Run& right = runs.back();
-            const int leftW = left.x1 - left.x0 + 1;
-            const int rightW = right.x1 - right.x0 + 1;
-            const int nw = leftW + rightW;
-            std::vector<unsigned char> out(static_cast<size_t>(nw) * h * 4u, 0);
-            for (int y = 0; y < h; ++y)
-            {
-                memcpy(out.data() + static_cast<size_t>(y) * nw * 4,
-                    bgra.data() + (static_cast<size_t>(y) * w + right.x0) * 4,
-                    static_cast<size_t>(rightW) * 4u);
-                memcpy(out.data() + (static_cast<size_t>(y) * nw + rightW) * 4,
-                    bgra.data() + (static_cast<size_t>(y) * w + left.x0) * 4,
-                    static_cast<size_t>(leftW) * 4u);
-            }
-            bgra.swap(out);
-            w = nw;
-            CropBgraToAlpha(w, h, bgra);
-            return;
-        }
-
-        int best = 0;
-        for (int i = 1; i < static_cast<int>(runs.size()); ++i)
-        {
-            if (runs[i].area > runs[best].area)
-                best = i;
-        }
-        const int minx = (std::max)(0, runs[best].x0 - 2);
-        const int maxx = (std::min)(w - 1, runs[best].x1 + 2);
-        if (maxx - minx + 1 < w)
-            copyCols(minx, maxx);
-        CropBgraToAlpha(w, h, bgra);
     }
 
     // White-on-alpha heater shield matching Blue Shift's CHudArmor icon, used
@@ -1357,8 +1277,6 @@ namespace
             return false;
         }
         CropBgraToAlpha(w, h, bgra);
-        if (name && _stricmp(name, "hud_hev_overlay.vtf") == 0)
-            UnwrapOrCropHudOverlay(w, h, bgra);
         if (wantBlue)
             RemapHevAmberToCalhoun(bgra);
         UpscaleBgraForVr(w, h, bgra, wrist);

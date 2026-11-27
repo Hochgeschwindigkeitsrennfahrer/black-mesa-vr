@@ -122,6 +122,7 @@ namespace bmvr
     float g_HandHudTilt = -18.f;
     float g_HandHudRoll = 14.f;
     float g_AimMarker = 2.f;
+    float g_HudLeadingZeros = 0.f;
     float g_VrCrosshairScale = 0.5f;
     bool g_VrCrosshairDot = true;
     float g_VrLaserWidth = 0.06f;
@@ -1026,6 +1027,8 @@ namespace bmvr
                 g_HandHudTilt = std::clamp(static_cast<float>(atof(val)), -90.f, 90.f);
             else if (std::strcmp(n, "HandHudRoll") == 0)
                 g_HandHudRoll = std::clamp(static_cast<float>(atof(val)), -180.f, 180.f);
+            else if (std::strcmp(n, "HudLeadingZeros") == 0)
+                g_HudLeadingZeros = static_cast<float>(std::clamp(atoi(val), 0, 2));
             else if (std::strcmp(n, "AimMarker") == 0)
             {
                 const int v = atoi(val);

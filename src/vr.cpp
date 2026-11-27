@@ -15917,6 +15917,10 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             iconSize, iconSize, color);
     };
 
+    const int leadingZeros = static_cast<int>(bmvr::g_HudLeadingZeros + 0.5f);
+    const bool ammoZeros = leadingZeros < 1;
+    const bool healthZeros = leadingZeros < 2;
+
     auto layoutRow = [&](const HudPanel& p, float pad, float yTop, float rowH, float cell,
         int value, D3DCOLOR color, D3DCOLOR backing, IDirect3DTexture9* icon) {
         const float gap = p.width * 0.04f;
@@ -16003,13 +16007,13 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                 float y = pad;
                 const bool low = health <= kLowHealth;
                 layoutRow(handPanel, pad, y, rowH, cell, health,
-                    low ? red : theme, low ? redBack : themeBack,
+                    low ? red : theme, healthZeros ? (low ? redBack : themeBack) : 0,
                     bmvr::AcquireHudIcon(device, "hud_health_overlay.vtf"));
                 y += rowH + gap;
                 if (showArmor)
                 {
                     layoutRow(handPanel, pad, y, rowH, cell, armor,
-                        theme, themeBack,
+                        theme, healthZeros ? themeBack : 0,
                         bmvr::AcquireHudIcon(device, "hud_hev_overlay.vtf"));
                     y += rowH + gap;
                 }
@@ -16017,7 +16021,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                 {
                     const bool lowAir = air <= 25;
                     layoutRow(handPanel, pad, y, rowH, cell, air,
-                        lowAir ? red : theme, lowAir ? redBack : themeBack,
+                        lowAir ? red : theme, healthZeros ? (lowAir ? redBack : themeBack) : 0,
                         bmvr::AcquireHudIcon(device, "damage_drown.vtf"));
                 }
             }
@@ -16054,7 +16058,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             // Nothing left in the gun: the count goes red, as low health does.
             if (primary >= 0 && primary <= 999)
                 layoutRow(weaponPanel, pad, pad, primaryH, cell, primary,
-                    primary == 0 ? red : theme, primary == 0 ? redBack : themeBack, ammoIcon);
+                    primary == 0 ? red : theme, ammoZeros ? (primary == 0 ? redBack : themeBack) : 0, ammoIcon);
 
             const bool showRes = showClip && reserve >= 0 && reserve <= 999;
             const bool showSec = secondary >= 0 && secondary <= 999;
@@ -16072,7 +16076,7 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
             if (showRes)
             {
                 drawValueIcon(weaponPanel, cursor, y1, smallCell, smallFieldW, lowerH, smallIconS,
-                    reserve, themeDim, themeBack, ammoIcon);
+                    reserve, themeDim, ammoZeros ? themeBack : 0, ammoIcon);
                 cursor += cellW + smallGap * 2.f;
             }
             if (showSec)

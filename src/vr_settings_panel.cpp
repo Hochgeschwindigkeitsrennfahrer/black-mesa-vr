@@ -422,6 +422,8 @@ namespace
             // Experiments; saved like the other settings, off by default.
             { "TESTS", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Glow test area size", RowKind::Number, "GlowProxyScale", nullptr, &bmvr::g_GlowProxyScale, 0.5f, 1.f, 8.f, "%.1fx" },
+            // User 2026-11-27: "006" rockets; A/B the HUD without the dim leading zeros.
+            { "HUD leading zeros", RowKind::Choice, "HudLeadingZeros", nullptr, &bmvr::g_HudLeadingZeros, 1.f, 0.f, 2.f, "Shown|Off on ammo|Off on ammo + health" },
             { "RPG laser ring size", RowKind::Number, "VrRpgRingScale", nullptr, &bmvr::g_VrRpgRingScale, 0.05f, 0.1f, 3.f, "%.2fx" },
             // Grab-zone body frame (see "Grab zones follow the body" under FIXES).
             { "Body yaw: dead zone", RowKind::Number, "BodyYawDeadzoneDeg", nullptr, &bmvr::g_BodyYawDeadzoneDeg, 5.f, 0.f, 90.f, "%.0f\xB0" },

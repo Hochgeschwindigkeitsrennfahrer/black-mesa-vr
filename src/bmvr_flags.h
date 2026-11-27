@@ -299,6 +299,9 @@ namespace bmvr
     // Replaces the VrCrosshair / VrLaserBeam switches (still read once as a
     // migration when AimMarker is missing).
     extern float g_AimMarker;
+    // Dim "0" backing digits on the wrist HUD (HudLeadingZeros, TESTS row, user 2026-11-27:
+    // "006" rockets looks lame): 0 = shown everywhere, 1 = off on ammo, 2 = off on ammo + health.
+    extern float g_HudLeadingZeros;
     inline int AimMarkerMode()
     {
         const int m = static_cast<int>(g_AimMarker + 0.5f);
