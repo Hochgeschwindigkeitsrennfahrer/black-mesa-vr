@@ -139,7 +139,7 @@
 # Also in the VR settings panel (MOUNTED GUNS).
 # Main menu / pause panel: distance and width in metres, height offset (+ = up), and menu
 # pointer smoothing in seconds (lower = more direct). Also in the VR settings panel (MENU).
-# The VR settings panel (weapon menu: the VR SETTINGS slot below the crowbar)
+# The VR settings panel (hold the VR settings button, or the weapon menu gear if enabled)
 # changes several of these live and writes the ones you changed back here.
 # They are also bmvr_* console cvars.
 
@@ -159,8 +159,8 @@
 # into such lines once on start and then removed.
 
 # Weapon menu: VR gear slot below the crowbar (opens the VR settings panel).
-# false hides it, but only while some button is mapped to VR settings (else
-# the panel could not be opened at all).
+# Off by default (WeaponMenuSettingsGear=true shows it); it shows anyway while
+# no button is mapped to VR settings (else the panel could not be opened at all).
 # Weapon menu opened low (hand by the hip) tilts back to face the eye
 # (max 60 degrees); false = always upright.
 # The VR settings panel pauses the game while it is open (VrSettingsPause; in the panel:

@@ -300,7 +300,7 @@ namespace bmvr
         return kGestureWeapons[(index >= 0 && index < kGestureWeaponCount) ? index : 0].parts;
     }
     bool g_SettingsTriangleHold = true;
-    bool g_WeaponMenuSettingsGear = true;
+    bool g_WeaponMenuSettingsGear = false; // off by default (user 2026-11-27); shown anyway when no button opens the panel
     bool g_WeaponMenuTilt = true;
     bool g_CrouchStickHold = true;
     float g_StickJumpCrouchThreshold = 0.8f;
