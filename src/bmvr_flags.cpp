@@ -346,7 +346,7 @@ namespace bmvr
     bool g_DebugModelReset = false;
     bool g_WorldModelFix = true;
     volatile long g_ModelLeakSeen = 0;
-    bool g_XenGlobalFogOff = true;
+    bool g_XenGlobalFogOff = false;   // on since the Auto noise fix (user 2026-11-27)
     float g_XenFogNoiseMode = 3.f;
     bool g_GodRayRadialMask = true;
     float g_GodRayBlurScale = 0.f;

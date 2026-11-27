@@ -696,8 +696,9 @@ namespace bmvr
     // MODEL matrix once. A launch without the leak never triggers it.
     extern bool g_WorldModelFix;
     extern volatile long g_ModelLeakSeen;
-    // Black Mesa's global Xen fog pass (__gbxog0) is not drawn in VR: view-direction noise at infinite stereo
-    // depth, also inside rooms where flat shows none. Local fog volumes stay.
+    // true = Black Mesa's global Xen fog pass (__gbxog0) is not drawn in VR. Default false since its noise is
+    // looked up per world position / centre eye (g_XenFogNoiseMode Auto, vr_xen_fog.cpp); stock noise was by view
+    // direction = infinite stereo depth. Local fog volumes are drawn either way.
     extern bool g_XenGlobalFogOff;
     // Xen fog stereo fix (src/vr_xen_fog.cpp), XenFogNoise: 0 stock (each
     // eye's view direction, noise at infinity), 1 direction from the centre eye
