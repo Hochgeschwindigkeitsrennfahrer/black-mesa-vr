@@ -21,5 +21,7 @@ namespace bmvr
     XenFogPatchInfo XenFogPatchBytecode(const uint32_t* bytecode, std::vector<uint32_t>& out);
     constexpr unsigned kXenFogConstReg = 100;    // c100 + c101
     constexpr unsigned kXenFogConstCount = 2;
-    constexpr size_t kXenFogInsertTokens = 40;
+    constexpr size_t kXenFogInsertTokens = 35;   // after the world instruction
+    // b15 = run the world-noise copy (World and Auto modes), set on bind.
+    constexpr unsigned kXenFogBoolReg = 15;
 }

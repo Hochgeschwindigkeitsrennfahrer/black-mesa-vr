@@ -38,6 +38,7 @@ set(BMVR_SOURCES
   src/vr_controller_models.cpp
   src/vr_crowbar.cpp
   src/vr_xen_fog.cpp
+  src/vr_godrays.cpp
   src/vr_xen_fog_patch.cpp
   src/vr_ladder_rungs.cpp
   src/vr_sound_cuts.cpp

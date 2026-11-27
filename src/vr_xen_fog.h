@@ -21,6 +21,8 @@ namespace bmvr
     // c100/c101 for the patched shader: c100.x = 1 / noise size, .y = world
     // mix, .z = anchor mix; c101.xyz = anchor (centre eye, SetXenFogAnchor).
     void XenFogShaderConstant(float out[8]);
+    // b15: the patched shader runs its world-noise lookups (World, Auto).
+    bool XenFogWorldLookups();
     // Centre eye of the frame being drawn (RenderView, main view).
     void SetXenFogAnchor(float x, float y, float z);
     // CreatePixelShader: DXVK refused the patched bytecode (original used).

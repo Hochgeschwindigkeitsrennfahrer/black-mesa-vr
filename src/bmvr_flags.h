@@ -707,6 +707,10 @@ namespace bmvr
     // centre-eye direction from XenFogWorldFar on, faded between. Live, Debug
     // FIXES rows.
     extern float g_XenFogNoiseMode;
+    // God rays (GodRayRadialMask, default on): mask depth tested as if the head
+    // looked level toward the light (src/vr_godrays.h). false = stock depth
+    // along the view axis (rays come and go with head pitch).
+    extern bool g_GodRayRadialMask;
     extern float g_XenFogNoiseSize;
     extern float g_XenFogWorldNear;
     extern float g_XenFogWorldFar;

@@ -295,6 +295,8 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_GlowCountDepthFix, nullptr },
             { "bmvr_mc_hand_snapshot", "VR (MulticoreMode): hands and laser of both eyes come from one snapshot per frame (0 = live state, can differ per eye)",
               Kind::Bool, 0.f, 1.f, &g_McHandSnapshot, nullptr },
+            { "bmvr_godray_radial_mask", "VR: god ray mask tested as if the head looked level toward the light (0 = stock depth along the view axis: rays come and go as the head pitches)",
+              Kind::Bool, 0.f, 1.f, &g_GodRayRadialMask, nullptr },
             { "bmvr_xen_fog_noise", "VR: Xen fog noise: 0 stock (each eye's view direction, at infinity in stereo), 1 from the centre eye (flat look, on the surfaces), 2 fixed to the world (bmvr_xen_fog_noise_size), 3 auto (world near, centre eye far)",
               Kind::Float, 0.f, 3.f, nullptr, &g_XenFogNoiseMode },
             { "bmvr_xen_fog_world_near", "VR: Xen fog noise auto mode: fixed to the world up to this distance from the eye, units",

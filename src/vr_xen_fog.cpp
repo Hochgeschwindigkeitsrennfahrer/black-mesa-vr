@@ -3,6 +3,8 @@
 #include "bmvr_flags.h"
 #include "game.h"
 
+#include <windows.h>
+
 #include <cstdio>
 #include <set>
 
@@ -13,6 +15,22 @@ namespace bmvr
         const XenFogPatchInfo info = XenFogPatchBytecode(t, out);
         if (!info.fogLike)
             return XenFogShader::NotFog;
+        // Test aid: BMVR_XENFOG_DUMP=1 keeps every fog shader's original
+        // bytecode (VR/xenfog-orig-<fnv>.dxso) for the host test.
+        static const bool s_dump = [] {
+            char v[8] = {};
+            return GetEnvironmentVariableA("BMVR_XENFOG_DUMP", v, sizeof(v)) > 0 && v[0] == '1';
+        }();
+        if (s_dump)
+        {
+            char name[64];
+            std::snprintf(name, sizeof(name), "xenfog-orig-%08X.dxso", info.fnv);
+            if (FILE* f = std::fopen(VrFilePath(name).c_str(), "wb"))
+            {
+                std::fwrite(t, 1, info.bytes, f);
+                std::fclose(f);
+            }
+        }
         if (info.patched)
         {
             static int s_logs;
@@ -57,6 +75,12 @@ namespace bmvr
         g_Anchor[0] = x;
         g_Anchor[1] = y;
         g_Anchor[2] = z;
+    }
+
+    bool XenFogWorldLookups()
+    {
+        const int mode = static_cast<int>(g_XenFogNoiseMode + 0.5f);
+        return mode == 2 || mode == 3;
     }
 
     void XenFogShaderConstant(float out[8])

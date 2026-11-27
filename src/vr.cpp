@@ -44,6 +44,8 @@ namespace ladder_tune { void NoteHeld(int model); }
 #include <vector>
 #include "bmvr_seh.h"
 
+namespace bmvr { int CurrentDrawEye(); }
+
 namespace
 {
     using tPresent = HRESULT(__stdcall*)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
@@ -25012,4 +25014,10 @@ void VR::UpdateMagReload(uint32_t& buttons)
     s_reloadWas = reload;
     s_gripWas = gripDown;
     s_attackWas = attack;
+}
+
+// vr_godrays.h: the eye being drawn (MulticoreMode playback aware).
+int bmvr::CurrentDrawEye()
+{
+    return GpuTimerEye((g_Game && g_Game->m_VR) ? g_Game->m_VR : nullptr);
 }

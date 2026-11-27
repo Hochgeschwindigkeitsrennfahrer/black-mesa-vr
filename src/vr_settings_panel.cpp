@@ -466,6 +466,8 @@ namespace
             { "Xen fog noise size", RowKind::Number, "XenFogNoiseSize", nullptr, &bmvr::g_XenFogNoiseSize, 32.f, 32.f, 2048.f, "%.0f u" },
             { "Xen fog: world noise up to", RowKind::Number, "XenFogWorldNear", nullptr, &bmvr::g_XenFogWorldNear, 50.f, 0.f, 4000.f, "%.0f u" },
             { "Xen fog: centre eye from", RowKind::Number, "XenFogWorldFar", nullptr, &bmvr::g_XenFogWorldFar, 100.f, 100.f, 8000.f, "%.0f u" },
+            // User 2026-11-27: god rays changed with head pitch (mask depth along the view axis).
+            { "God rays steady with head pitch", RowKind::Toggle, "GodRayRadialMask", &bmvr::g_GodRayRadialMask, nullptr, 0, 0, 0, nullptr },
             { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
             { "Titles glow + scanlines", RowKind::Toggle, nullptr, &bmvr::g_TitleGlow, nullptr, 0, 0, 0, nullptr },
             { "HEV boot-up HUD inset", RowKind::Number, nullptr, nullptr, &bmvr::g_BootHudInset, 25.f, 0.f, 500.f, "%.0f px" },

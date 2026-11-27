@@ -635,6 +635,9 @@ namespace dxvk {
     void BmvrViewProjNormalsEnd(const float saved[12]);
     // Screen-aligned particles stay level with world up (see d3d9_device.cpp).
     bool BmvrParticleLevelBegin(float saved[28]);
+    // God ray mask drawn with the radial-depth PS (vr_godrays.h); End restores the game's PS.
+    bool BmvrGodRayBegin(Com<D3D9PixelShader, false>& saved);
+    void BmvrGodRayEnd(Com<D3D9PixelShader, false>& saved);
     void BmvrParticleLevelEnd(const float saved[28]);
 
     HRESULT STDMETHODCALLTYPE SetPixelShaderConstantF(
@@ -1101,6 +1104,8 @@ namespace dxvk {
     void BmvrApplyHl2vrMsaa(D3D9_COMMON_TEXTURE_DESC& desc);
     void BmvrNoteMsaaAttachmentsWritten();
     bool m_bmvrMsRaster = false;
+    Com<D3D9PixelShader, false> m_bmvrGrMaskPs;   // radial god ray mask (created on first use)
+    bool m_bmvrGrMaskPsFailed = false;
     float m_bmvrLodBias = 0.0f;   // bmvr::g_LodBias as applied to the bound samplers (0 off the 3D views)
     void BmvrSetMsaaEyeRetired(IDirect3DSurface9* color, IDirect3DSurface9* depth, bool retire);
     void BmvrResolveMsaaForSample(D3D9CommonTexture* tex, bool force = false);
