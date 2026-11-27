@@ -1813,7 +1813,37 @@ namespace
             for (int i = 0; i < w * h; ++i)
                 px[i] = (px[i] & 0x00FFFFFFu) | (static_cast<uint32_t>(a) << 24);
         }
+        void setAlpha(uint8_t a, const RECT& r)
+        {
+            GdiFlush();
+            const int x0 = (std::max)(0, static_cast<int>(r.left)), x1 = (std::min)(w, static_cast<int>(r.right));
+            for (int y = (std::max)(0, static_cast<int>(r.top)); y < (std::min)(h, static_cast<int>(r.bottom)); ++y)
+                for (int x = x0; x < x1; ++x)
+                {
+                    uint32_t& p = px[static_cast<size_t>(y) * w + x];
+                    p = (p & 0x00FFFFFFu) | (static_cast<uint32_t>(a) << 24);
+                }
+        }
     };
+
+    // Hover-only repaints (2026-11-27 handover: a full repaint per hover change
+    // cost ~41 ms on the render thread on the DEBUG tab): body-texture rects
+    // that are redrawn, nullptr = whole panel.
+    using PanelClip = std::vector<RECT>;
+    bool RectsOverlap(const RECT& a, const RECT& b)
+    {
+        return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    }
+    bool ClipHits(const PanelClip* clip, int x0, int y0, int x1, int y1)
+    {
+        if (!clip)
+            return true;
+        const RECT r{ x0, y0, x1, y1 };
+        for (const RECT& c : *clip)
+            if (RectsOverlap(c, r))
+                return true;
+        return false;
+    }
 
     bool Upload(IDirect3DDevice9* device, const Canvas& c, IDirect3DTexture9*& sys, IDirect3DTexture9*& gpu)
     {
@@ -1930,6 +1960,51 @@ namespace
             g_Gfx.h = c.h;
         }
         return nullptr;
+    }
+
+    // Hover-only repaint upload: only `rects` (body coordinates, shifted by
+    // xOff into c) go to the GPU. The locked rect is the system texture's
+    // dirty box, and UpdateTexture copies only that, so one update per rect
+    // (two far-apart rows would otherwise send everything between them).
+    const char* UploadPanelRects(IDirect3DDevice9* device, const Canvas& c, const PanelClip& rects, int xOff)
+    {
+        if (!g_Gfx.sys || !g_Gfx.gpu || g_Gfx.w != c.w || g_Gfx.h != c.h)
+            return "partial upload without textures";
+        for (const RECT& r0 : rects)
+        {
+            RECT r{ (std::max)(0L, r0.left + xOff), (std::max)(0L, r0.top),
+                (std::min)(static_cast<LONG>(c.w), r0.right + xOff), (std::min)(static_cast<LONG>(c.h), r0.bottom) };
+            if (r.left >= r.right || r.top >= r.bottom)
+                continue;
+            D3DLOCKED_RECT lr{};
+            if (FAILED(g_Gfx.sys->LockRect(0, &lr, &r, 0)))
+                return "lock";
+            const size_t bytes = static_cast<size_t>(r.right - r.left) * 4u;
+            for (int y = r.top; y < r.bottom; ++y)
+                std::memcpy(static_cast<uint8_t*>(lr.pBits) + static_cast<size_t>(y - r.top) * lr.Pitch,
+                    c.px + static_cast<size_t>(y) * c.w + r.left, bytes);
+            g_Gfx.sys->UnlockRect(0);
+            if (FAILED(device->UpdateTexture(g_Gfx.sys, g_Gfx.gpu)))
+                return "update";
+        }
+        return nullptr;
+    }
+
+    // Hover-only repaint with wings: the body rects into the wide canvas
+    // (the wings themselves do not change; TabHasFigures tabs repaint fully).
+    void CopyBodyRects(const Canvas& body, Canvas& out, const PanelClip& rects)
+    {
+        const int wing = (out.w - body.w) / 2;
+        GdiFlush();
+        for (const RECT& r0 : rects)
+        {
+            const int x0 = (std::max)(0, static_cast<int>(r0.left)), x1 = (std::min)(body.w, static_cast<int>(r0.right));
+            if (x0 >= x1)
+                continue;
+            for (int y = (std::max)(0, static_cast<int>(r0.top)); y < (std::min)((std::min)(body.h, out.h), static_cast<int>(r0.bottom)); ++y)
+                std::memcpy(out.px + static_cast<size_t>(y) * out.w + wing + x0, body.px + static_cast<size_t>(y) * body.w + x0,
+                    static_cast<size_t>(x1 - x0) * 4u);
+        }
     }
 
     constexpr COLORREF kBg = RGB(18, 22, 27);
@@ -2411,8 +2486,80 @@ namespace
         return false;
     }
 
-    void Paint(Canvas& c, int hoverRow, int hoverZone)
+    // Body-texture rect a row paints into (Paint below draws nothing outside it).
+    RECT RowPaintRect(int i)
     {
+        const Row& r = Rows()[i];
+        const Layout& l = GetLayout();
+        if (r.kind == RowKind::Tab)   // with the missing-hooks frame
+            return RECT{ l.x0[i] - 6, l.top[i] - 2, l.x1[i] + 6, l.top[i] + kTabPx + 6 };
+        if (r_IsTabReset(r))          // with the "+N dev rows changed" note
+            return RECT{ l.x0[i], l.top[i], l.x1[i] + 340, l.top[i] + kRowPx };
+        if (r.kind == RowKind::Close)
+            return RECT{ 0, l.top[i], kTexW, l.top[i] + kRowPx };
+        const int x = RowX(i), y = RowTop(i);
+        return RECT{ x, y, x + kColW, y + RowHeight(r) };
+    }
+
+    // Where hover state `hover` (row, 1000 + picker cell, -1) is drawn, for a
+    // hover-only repaint. False: not a plain rect (controller-picture card
+    // lines and leader lines, gesture zones): repaint everything.
+    bool HoverPaintRect(int hover, std::vector<RECT>& out)
+    {
+        if (hover < 0)
+            return true;
+        if (hover >= 1000)
+        {
+            if (g_PickerRow < 0)
+                return false;
+            const int a = hover - 1000;
+            if (a == kPickerCancel)
+            {
+                const int cy = PickerCancelY();
+                out.push_back(RECT{ kTexW / 2 - 200, cy, kTexW / 2 + 200, cy + kPickerCellH });
+                return true;
+            }
+            const int cx0 = PickerX0() + (a % kPickerCols) * (kPickerCellW + kPickerGap);
+            const int cy0 = PickerGridY() + (a / kPickerCols) * (kPickerCellH + kPickerGap);
+            out.push_back(RECT{ cx0 - 4, cy0 - 4, cx0 + kPickerCellW + 4, cy0 + kPickerCellH + 4 });
+            return true;
+        }
+        const auto& rows = Rows();
+        if (hover >= static_cast<int>(rows.size()) || g_PickerRow >= 0)
+            return false;
+        const Row& r = rows[hover];
+        const bool always = r.kind == RowKind::Tab || r.kind == RowKind::Close || r_IsTabReset(r);
+        if (!always && (GetLayout().tab[hover] != g_Tab || r.kind == RowKind::BindPicture || r.kind == RowKind::GestureFigure))
+            return false;
+        out.push_back(RowPaintRect(hover));
+        return true;
+    }
+
+    // Tab shows controller pictures (ComposeWings draws over the body) or the gesture figure.
+    bool TabHasFigures()
+    {
+        const auto& rows = Rows();
+        const Layout& l = GetLayout();
+        for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+            if ((rows[i].kind == RowKind::BindPicture || rows[i].kind == RowKind::GestureFigure) && l.tab[i] == g_Tab)
+                return true;
+        return false;
+    }
+
+    void Paint(Canvas& c, int hoverRow, int hoverZone, const PanelClip* clip = nullptr)
+    {
+        HRGN clipRgn = nullptr;
+        if (clip)
+        {
+            clipRgn = CreateRectRgn(0, 0, 0, 0);
+            for (const RECT& r : *clip)
+            {
+                HRGN one = CreateRectRgnIndirect(&r);
+                CombineRgn(clipRgn, clipRgn, one, RGN_OR);
+                DeleteObject(one);
+            }
+            SelectClipRgn(c.dc, clipRgn);
+        }
         c.fill(0, 0, c.w, c.h, kBg);
         c.fill(0, 0, c.w, 6, kAmber);
         c.text("VR SETTINGS", 40, 10, c.w - 40, kHeaderPx - 10, kAmber, 46, true, DT_LEFT);
@@ -2430,6 +2577,12 @@ namespace
             if (r.kind == RowKind::Tab)
             {
                 const bool active = (tabIndex++ == g_Tab);
+                if (clip)
+                {
+                    const RECT pr = RowPaintRect(i);
+                    if (!ClipHits(clip, pr.left, pr.top, pr.right, pr.bottom))
+                        continue;
+                }
                 const int y0 = l.top[i], y1 = y0 + kTabPx;
                 // Missing hooks: the DEBUG tab button is filled red (gameplay) or amber (debug only)
                 // with "!" on both sides, so it shows from any tab; selected, a red/amber frame.
@@ -2455,6 +2608,12 @@ namespace
                 if (TabChangedCount(tabIndex - 1) > 0)
                     c.fill(l.x1[i] - 22, y0 + 12, l.x1[i] - 10, y0 + 24, active ? RGB(0, 0, 0) : kAmber);
                 continue;
+            }
+            if (clip && (r_IsTabReset(r) || RowVisible(i)))
+            {
+                const RECT pr = RowPaintRect(i);
+                if (!ClipHits(clip, pr.left, pr.top, pr.right, pr.bottom))
+                    continue;
             }
             if (r_IsTabReset(r))
             {
@@ -2648,7 +2807,15 @@ namespace
             c.fill(c.w / 2 - 200, cy, c.w / 2 + 200, cy + kPickerCellH, hvCancel ? kBtnHover : kOff);
             c.text("Cancel", c.w / 2 - 200, cy, c.w / 2 + 200, cy + kPickerCellH, hvCancel ? RGB(0, 0, 0) : kText, 32, true, DT_CENTER);
         }
-        c.setAlpha(238);
+        if (!clip)
+        {
+            c.setAlpha(238);
+            return;
+        }
+        for (const RECT& r : *clip)
+            c.setAlpha(238, r);
+        SelectClipRgn(c.dc, nullptr);
+        DeleteObject(clipRgn);
     }
 
     struct MenuVertTex
@@ -3173,7 +3340,7 @@ void VR::UpdateSettingsPanel()
             PulseHandHaptic(vr::TrackedControllerRole_RightHand, 300, 0.15f);
         m_SettingsHover = row;
         m_SettingsHoverZone = zone;
-        m_SettingsDirty = true;
+        m_SettingsHoverDirty = true;
     }
 
     // Trigger only, full pull (Cross and a resting finger on the trigger
@@ -3623,8 +3790,10 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     // Repaint cost (render thread, inside the eye's overlay): per 10 s while
     // the panel is open, count + mean/max ms of paint, wings, upload (user
     // 2026-11-27: panel frames p99 ~40 ms vs ~20 in play).
-    struct RepaintStats { int n = 0; double sum[3]{}, max[3]{}; DWORD since = 0; };
-    static RepaintStats s_rs;
+    // [0] full repaints, [1] hover-only ones.
+    struct RepaintStats { int n = 0; double sum[3]{}, max[3]{}; };
+    static RepaintStats s_rs[2];
+    static DWORD s_rsSince = 0;
     auto qpcMs = []() {
         LARGE_INTEGER f, c;
         QueryPerformanceFrequency(&f);
@@ -3633,15 +3802,19 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     };
     {
         const DWORD t = GetTickCount();
-        if (!s_rs.since)
-            s_rs.since = t;
-        else if (t - s_rs.since >= 10000)
+        if (!s_rsSince)
+            s_rsSince = t;
+        else if (t - s_rsSince >= 10000)
         {
-            if (s_rs.n > 0)
-                Game::logMsg("VR settings panel repaints (10 s): %d, paint %.1f ms mean / %.1f max, wings %.1f / %.1f, upload %.1f / %.1f (tab %d)",
-                    s_rs.n, s_rs.sum[0] / s_rs.n, s_rs.max[0], s_rs.sum[1] / s_rs.n, s_rs.max[1], s_rs.sum[2] / s_rs.n, s_rs.max[2], g_Tab);
-            s_rs = RepaintStats{};
-            s_rs.since = t;
+            for (int k = 0; k < 2; ++k)
+            {
+                const RepaintStats& rs = s_rs[k];
+                if (rs.n > 0)
+                    Game::logMsg("VR settings panel %s repaints (10 s): %d, paint %.1f ms mean / %.1f max, wings %.1f / %.1f, upload %.1f / %.1f (tab %d)",
+                        k ? "hover" : "full", rs.n, rs.sum[0] / rs.n, rs.max[0], rs.sum[1] / rs.n, rs.max[1], rs.sum[2] / rs.n, rs.max[2], g_Tab);
+                s_rs[k] = RepaintStats{};
+            }
+            s_rsSince = t;
         }
     }
     // After a failed repaint, retry every 500 ms instead of every frame.
@@ -3650,10 +3823,30 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
     static DWORD s_gfxFailSince = 0;
     const DWORD nowMs = GetTickCount();
     const bool backoff = s_gfxRetryAt != 0 && static_cast<int32_t>(s_gfxRetryAt - nowMs) > 0;
-    if (!backoff && (m_SettingsDirty.exchange(false) || !g_Gfx.gpu))
+    // Hover painted into the kept canvases; s_paintedValid false = they are
+    // not a complete image (new canvas, failed repaint), so no partial repaint.
+    static int s_paintedHover = -1, s_paintedZone = -1;
+    static bool s_paintedValid = false;
+    if (!g_BodyCanvas || !g_Gfx.gpu)
+        s_paintedValid = false;
+    // Flags exchanged before the hover is read (see above).
+    const bool fullDirty = !backoff && m_SettingsDirty.exchange(false);
+    const bool hoverDirty = !backoff && m_SettingsHoverDirty.exchange(false);
+    if (!backoff && (fullDirty || hoverDirty || !g_Gfx.gpu))
     {
+        const int hover = m_SettingsHover, hoverZone = m_SettingsHoverZone;
         const char* fail = nullptr;
         const int wing = WingPx();
+        // Hover-only: old + new hover rects, when both are plain rects and the
+        // canvases still hold the last full image at this size.
+        PanelClip clipRects;
+        const bool canvasesKept = !fullDirty && g_Gfx.gpu && s_paintedValid && g_BodyCanvas
+            && g_BodyCanvas->w == kTexW && g_BodyCanvas->h == TexH()
+            && (!wing || (g_WideCanvas && g_WideCanvas->w == kTexW + 2 * wing && g_WideCanvas->h == TexH()));
+        // Hover moved and came back before this frame: the image is already right.
+        const bool unchanged = canvasesKept && s_paintedHover == hover && s_paintedZone == hoverZone;
+        const bool partial = canvasesKept && !unchanged && !TabHasFigures()
+            && HoverPaintRect(s_paintedHover, clipRects) && HoverPaintRect(hover, clipRects) && !clipRects.empty();
         if (!wing)
             g_WideCanvas.reset();
         Canvas* body = PanelCanvas(g_BodyCanvas, kTexW, TexH());
@@ -3662,14 +3855,18 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
             fail = "panel canvas";
         else if (wing && !wide)
             fail = "controller-picture canvas";
+        else if (unchanged)
+            ;
         else
         {
             const double t0 = qpcMs();
-            Paint(*body, m_SettingsHover, m_SettingsHoverZone);
+            Paint(*body, hover, hoverZone, partial ? &clipRects : nullptr);
             GdiFlush();
             const double t1 = qpcMs();
-            if (wing)
-                ComposeWings(*body, *wide, m_SettingsHover);
+            if (wing && partial)
+                CopyBodyRects(*body, *wide, clipRects);
+            else if (wing)
+                ComposeWings(*body, *wide, hover);
             const double t2 = qpcMs();
             Canvas& c = wing ? *wide : *body;
             // Test only: BMVR_TEST_PANEL_DUMP=1 saves every repaint as
@@ -3709,15 +3906,66 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
                     std::fclose(f);
                 }
             }
-            fail = UploadPanel(device, c);
-            const double ms[3] = { t1 - t0, t2 - t1, qpcMs() - t2 };
-            ++s_rs.n;
+            // Test only: BMVR_TEST_PANEL_VERIFY=1 paints every hover-only
+            // repaint again in full into scratch canvases and logs the
+            // pixels that differ (expect 0).
+            static int s_verifyPanel = -1;
+            if (s_verifyPanel < 0)
+            {
+                char v[8]{};
+                s_verifyPanel = GetEnvironmentVariableA("BMVR_TEST_PANEL_VERIFY", v, sizeof(v)) && v[0] == '1' ? 1 : 0;
+            }
+            if (partial && s_verifyPanel == 1)
+            {
+                Canvas refBody(body->w, body->h);
+                std::unique_ptr<Canvas> refWide = wing ? std::make_unique<Canvas>(wide->w, wide->h) : nullptr;
+                if (refBody.ok() && (!wing || refWide->ok()))
+                {
+                    Paint(refBody, hover, hoverZone);
+                    if (wing)
+                        ComposeWings(refBody, *refWide, hover);
+                    GdiFlush();
+                    const Canvas& ref = wing ? *refWide : refBody;
+                    int diff = 0, bx0 = ref.w, by0 = ref.h, bx1 = -1, by1 = -1;
+                    for (int y = 0; y < ref.h; ++y)
+                        for (int x = 0; x < ref.w; ++x)
+                            if (ref.px[static_cast<size_t>(y) * ref.w + x] != c.px[static_cast<size_t>(y) * c.w + x])
+                            {
+                                ++diff;
+                                bx0 = (std::min)(bx0, x); by0 = (std::min)(by0, y);
+                                bx1 = (std::max)(bx1, x); by1 = (std::max)(by1, y);
+                            }
+                    Game::logMsg("VR settings panel verify: hover %d -> %d (zone %d), %d rect(s), %d px differ%s",
+                        s_paintedHover, hover, hoverZone, static_cast<int>(clipRects.size()), diff, diff ? "" : " (ok)");
+                    if (diff)
+                        Game::logMsg("VR settings panel verify: differences in %d,%d - %d,%d", bx0, by0, bx1, by1);
+                }
+            }
+            const double t3 = qpcMs();   // the verify paint above is not counted
+            fail = partial ? UploadPanelRects(device, c, clipRects, wing) : UploadPanel(device, c);
+            if (partial && fail)
+            {
+                // Fall back to a full upload of the (complete) canvas.
+                Game::logMsg("VR settings panel: hover upload failed (%s), full upload", fail);
+                fail = UploadPanel(device, c);
+            }
+            const double ms[3] = { t1 - t0, t2 - t1, qpcMs() - t3 };
+            RepaintStats& rs = s_rs[partial ? 1 : 0];
+            ++rs.n;
             for (int k = 0; k < 3; ++k)
             {
-                s_rs.sum[k] += ms[k];
-                s_rs.max[k] = (std::max)(s_rs.max[k], ms[k]);
+                rs.sum[k] += ms[k];
+                rs.max[k] = (std::max)(rs.max[k], ms[k]);
             }
         }
+        if (!fail)
+        {
+            s_paintedHover = hover;
+            s_paintedZone = hoverZone;
+            s_paintedValid = true;
+        }
+        else
+            s_paintedValid = false;
         if (fail)
         {
             m_SettingsDirty = true;

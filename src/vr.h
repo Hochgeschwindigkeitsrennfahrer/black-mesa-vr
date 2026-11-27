@@ -1713,6 +1713,9 @@ public:
     // Set by the game thread, cleared by the render thread before it paints:
     // a change during a paint stays set and is painted next frame.
     std::atomic<bool> m_SettingsDirty{ false };
+    // Only the hover row/zone changed: the render thread repaints just the
+    // old and new hover rects (full repaint if it cannot).
+    std::atomic<bool> m_SettingsHoverDirty{ false };
     bool m_SettingsChanged = false;
     bool m_SettingsClickHeld = false;
     bool m_SettingsBackHeld = false;
