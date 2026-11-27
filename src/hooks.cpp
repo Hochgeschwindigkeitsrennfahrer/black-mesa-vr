@@ -11279,6 +11279,71 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
     applyControllerAim();
     if (m_VR)
         ZeroPlayerViewRecoil(localPlayer);
+    // Ladder trace, wet ladders only (user 2026-11-27: a grab under water
+    // pushes the player sideways instead of climbing; headless swimming is
+    // impractical, so the headset run logs it). A grab near a ladder or a
+    // ladder movetype change with water at the feet or higher opens a 3 s
+    // window that logs every tick: the final usercmd, our ladder step, and
+    // where the player went. A movetype change off the ladder that we did
+    // not ask for (no drop / top exit / use) is the engine's own exit, e.g.
+    // HL2 FullLadderMove's underwater float to a dismount node.
+    if (m_VR && m_Game)
+    {
+        static ULONGLONG s_traceUntil = 0, s_traceStart = 0, s_lastGrab = 0;
+        static int s_windows = 0, s_prevMt = -1;
+        static Vector s_prevOrg{};
+        static bool s_havePrev = false;
+        const ULONGLONG tNow = GetTickCount64();
+        const int wl = m_Game->LocalPlayerWaterLevel();
+        const int mt = m_Game->LocalPlayerMoveType();
+        Vector org{};
+        const bool haveOrg = m_Game->LocalPlayerAbsOrigin(org);
+        const ULONGLONG grab = m_VR->m_LadderGrabMs.load(std::memory_order_relaxed);
+        const bool freshGrab = grab != s_lastGrab;
+        s_lastGrab = grab;
+        const bool mtChange = s_prevMt >= 0 && mt != s_prevMt && (mt == 9 || s_prevMt == 9);
+        if ((freshGrab || mtChange) && wl >= 1)
+        {
+            if (tNow >= s_traceUntil && s_windows < 40)
+            {
+                ++s_windows;
+                s_traceStart = tNow;
+                Game::logMsg("LadderTrace: window %d (%s), water %d, movetype %d, origin (%.1f,%.1f,%.1f)",
+                    s_windows, freshGrab ? "grab" : "movetype change", wl, mt, org.x, org.y, org.z);
+            }
+            if (s_traceStart && tNow < s_traceStart + 15000)
+                s_traceUntil = tNow + 3000;
+        }
+        if (mtChange && tNow < s_traceUntil)
+        {
+            const bool ours = physLadderOn && (physLadder.drop || physLadder.topExit || physLadder.useEdge);
+            Game::logMsg("LadderTrace: movetype %d -> %d, water %d, %s", s_prevMt, mt, wl,
+                mt == 9 ? "mounted" : (ours ? "our exit (drop / top / use)" : "ENGINE EXIT (not asked for by us)"));
+        }
+        if (tNow < s_traceUntil && haveOrg)
+        {
+            const Vector d = s_havePrev ? org - s_prevOrg : Vector(0.f, 0.f, 0.f);
+            const float ti = m_Game->TickInterval();
+            const int b = cmd->buttons;
+            Game::logMsg("LadderTrace +%.3f wl %d mt %d org (%.1f,%.1f,%.1f) v (%.0f,%.0f,%.0f) "
+                "cmd f %.0f s %.0f u %.0f ang %.0f/%.0f btn%s%s%s%s%s | step %d%s%s%s%s%s%s dir %d | pins %d%d touch %d%d",
+                (tNow - s_traceStart) * 0.001f, wl, mt, org.x, org.y, org.z,
+                d.x / ti, d.y / ti, d.z / ti,
+                cmd->forwardmove, cmd->sidemove, cmd->upmove, cmd->viewangles.x, cmd->viewangles.y,
+                (b & IN_USE) ? " USE" : "", (b & IN_FORWARD) ? " FWD" : "", (b & IN_BACK) ? " BACK" : "",
+                (b & IN_JUMP) ? " JUMP" : "", (b & (IN_MOVELEFT | IN_MOVERIGHT)) ? " STRAFE" : "",
+                physLadderOn ? 1 : 0,
+                physLadder.onLadder ? " on" : "", physLadder.mountPush ? " push" : "", physLadder.mountRise ? " rise" : "",
+                physLadder.useEdge ? " use" : "", physLadder.drop ? " drop" : "", physLadder.topExit ? " top" : "",
+                physLadder.dir,
+                m_VR->m_LadderPin[0].valid ? 1 : 0, m_VR->m_LadderPin[1].valid ? 1 : 0,
+                m_VR->m_LadderTouch[0].load(std::memory_order_relaxed) ? 1 : 0,
+                m_VR->m_LadderTouch[1].load(std::memory_order_relaxed) ? 1 : 0);
+        }
+        s_prevMt = mt;
+        s_prevOrg = org;
+        s_havePrev = haveOrg;
+    }
     if (m_VR)
         m_VR->ApplyWorldVguiTriggerClick(cmd);
     if (m_VR)

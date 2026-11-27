@@ -1091,6 +1091,10 @@ public:
     // runs; ms of the last time): a right-grip flashlight press waits a
     // moment there in case it is a ladder grab.
     std::atomic<unsigned long long> m_LadderNearMs{ 0 };
+    // Ladder trace (hooks.cpp CreateMove, wet ladders only): ms of the last
+    // fresh grip with a hand near a ladder line, rung or not; starts a
+    // per-tick log window.
+    std::atomic<unsigned long long> m_LadderGrabMs{ 0 };
     // Hand climbing: the rung each hand took hold of (world), from the
     // map's ladder props (vr_ladder_rungs). The glove is drawn there.
     struct LadderPin

@@ -8928,6 +8928,8 @@ bool VR::PhysicalLadderStep(PhysicalLadderCmd& out)
                     h == 0 ? "left" : "right", rungDist, d, world[h].x, world[h].y, world[h].z, onRung.x, onRung.y, onRung.z);
             }
         }
+        if (grip[h] && !s_prevGrip[h] && lineTouch[h])
+            m_LadderGrabMs.store(now, std::memory_order_relaxed);
         const bool holding = grip[h] && s_prevGrip[h] && h == s_climbHand;
         // The gun hand with "needs empty hand": its grip stays the mapped
         // action. The support hand at the gun (two-hand grab): the gun
