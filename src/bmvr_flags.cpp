@@ -128,6 +128,7 @@ namespace bmvr
     float g_VrLaserWidth = 0.06f;
     float g_VrLaserStartForward = 0.f;
     bool g_AimDebug = false;
+    bool g_AimHitLog = false;
     bool g_OffCenterTest = false;
     bool g_OffCenterEyes = true;
     bool g_FakeRuntime = false;
@@ -1031,6 +1032,8 @@ namespace bmvr
                 g_VrLaserStartForward = static_cast<float>(atof(val));
             else if (std::strcmp(n, "AimDebug") == 0)
                 g_AimDebug = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "AimHitLog") == 0)
+                g_AimHitLog = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrShotOriginFix") == 0)
                 g_VrShotOriginFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "CrouchStickHold") == 0)

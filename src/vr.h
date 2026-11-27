@@ -31,6 +31,7 @@ class ICallQueue;
 class CFunctor;
 class CViewSetup;
 class CUserCmd;
+class CGameTrace;
 class Hl2vrAwaitFrameFunctor;
 class McPauseHudFunctor;
 
@@ -1527,6 +1528,8 @@ public:
     bool TryGetAimCrosshairWorld(Vector& out) const;
     // Controller position + aim basis right now (render thread safe).
     bool AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const;
+    // AimHitLog: one log line per trigger press about what the shot ray hit.
+    void LogAimHit(const std::string& weaponKey, const Vector& origin, const Vector& dir, const CGameTrace& tr, void* player);
     // Beam ends and marker from the current pose and the last trace.
     bool AimOverlayPointsNow(Vector& beamStart, Vector& beamEnd, Vector& dot) const;
     bool GunFrameNow(Vector& origin, Vector& f, Vector& r, Vector& u) const;

@@ -309,6 +309,11 @@ namespace bmvr
     // AimDebug=true: per shot, log the server bullet origin/direction and its
     // traced hit next to the reticle ray and hit (bmvr_log "AimDebug").
     extern bool g_AimDebug;
+    // AimHitLog=true (Debug tab "Log what the laser hits"): on every trigger
+    // press, one bmvr_log "AimHit" line with what the laser/bullet ray hit
+    // (class, model, surface, contents, distance) and the same aim traced from
+    // the eye, to tell clip brushes and prop hulls from the muzzle sitting lower.
+    extern bool g_AimHitLog;
     // OffCenterTest=true (flat only, diagnostic): while VR/offcenter_test_on
     // exists, the main view renders the PSVR2 left-eye off-centre subrect
     // (left 0, right 0.758 of the frustum) to check the engine's off-centre

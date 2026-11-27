@@ -388,6 +388,9 @@ namespace
             { "Reset model each eye", RowKind::Toggle, nullptr, &bmvr::g_DebugModelReset, nullptr, 0, 0, 0, nullptr },
             // One shot: the next Pause press saves 12 eye pairs + 12 menu layers (VR/pausecap-*).
             { "Capture next pause", RowKind::Toggle, nullptr, &bmvr::g_PauseCaptureArm, nullptr, 0, 0, 0, nullptr },
+            // User 2026-11-27 (laser stops in mid-air next to cover): per trigger press, what the
+            // shot ray hit + the same aim from the eye (bmvr_log "AimHit"). Saved, so it can stay on.
+            { "Log what the laser hits", RowKind::Toggle, "AimHitLog", &bmvr::g_AimHitLog, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
             // Eye GPU ms every ~5 s (timestamp queries); with the always-on "Frame budget" CPU line it shows
             // whether a scene is CPU- or GPU-limited.

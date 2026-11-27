@@ -13286,6 +13286,8 @@ void VR::UpdateAimCrosshair()
     CGameTrace tr{};
     m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &tr);
     const bool hit = tr.fraction < 1.f;
+    if (bmvr::g_AimHitLog)
+        LogAimHit(weaponKey, origin, dir, tr, player);
 
     // Everything is kept relative to the aim frame (controller position +
     // aim angles) and rebuilt from the current pose when drawn, so beam and
@@ -13315,6 +13317,83 @@ void VR::UpdateAimCrosshair()
     // geometry the glove pass does depth-test against.
     m_AimCrosshairWorld = tr.endpos - dir * 1.5f;
     commit.cross = true;
+}
+
+// User 2026-11-27: the laser (and the bullet, same ray) sometimes ends in
+// mid-air next to cover, which flat play never seems to show. One line per
+// trigger press says what the ray hit, so the next playtest tells a clip
+// brush ("tools/..." surface on the world), a static prop's collision hull
+// ("**studio**" on the world) or a prop/brush entity's hull (its class and
+// model) from the muzzle simply sitting lower than the eye. "eye" = the same
+// aim traced from the head; "eyeSees" = nothing between the eye and the hit.
+void VR::LogAimHit(const std::string& weaponKey, const Vector& origin, const Vector& dir, const CGameTrace& tr, void* playerPtr)
+{
+    C_BaseEntity* player = static_cast<C_BaseEntity*>(playerPtr);
+    static bool s_wasDown = false;
+    static int s_lines = 0;
+    const bool down = (m_HeldButtons.load(std::memory_order_acquire) & IN_ATTACK) != 0;
+    const bool press = down && !s_wasDown;
+    s_wasDown = down;
+    if (!press || s_lines >= 500 || !m_Game || !m_Game->m_EngineTrace)
+        return;
+    ++s_lines;
+
+    auto describe = [&](const CGameTrace& t, char* buf, size_t n) {
+        C_BaseEntity* ent = reinterpret_cast<C_BaseEntity*>(t.m_pEnt);
+        const char* cls = ent ? m_Game->GetEntityClientClassName(ent) : nullptr;
+        const char* mdl = ent ? m_Game->GetEntityModelName(ent) : nullptr;
+        const char* surf = nullptr;
+        BMVR_TRY
+        {
+            surf = t.surface.name;
+            if (surf && !surf[0])
+                surf = nullptr;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            surf = nullptr;
+        }
+        std::snprintf(buf, n, "dist=%.0f at=(%.0f,%.0f,%.0f) n=(%.2f,%.2f,%.2f) class=%s model=%s surf=%s contents=0x%X hitbox=%d hitgroup=%d bone=%d startsolid=%d",
+            t.fraction < 1.f ? (t.endpos - t.startpos).Length() : -1.f,
+            t.endpos.x, t.endpos.y, t.endpos.z, t.plane.normal.x, t.plane.normal.y, t.plane.normal.z,
+            cls ? cls : "-", mdl ? mdl : "-", surf ? surf : "-",
+            static_cast<unsigned>(t.contents), t.hitbox, t.hitgroup, static_cast<int>(t.physicsbone), t.startsolid ? 1 : 0);
+    };
+
+    char shot[512];
+    describe(tr, shot, sizeof(shot));
+
+    const Vector eye = GetViewOrigin(m_SetupOrigin);
+    CTraceFilterSkipSelf filter(player, 0);
+    CGameTrace eyeTr{};
+    {
+        Ray_t ray;
+        ray.Init(eye, eye + dir * 8192.f);
+        m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &eyeTr);
+    }
+    char fromEye[512];
+    describe(eyeTr, fromEye, sizeof(fromEye));
+
+    int eyeSees = -1;
+    if (tr.fraction < 1.f)
+    {
+        Vector to = tr.endpos - eye;
+        const float len = VectorNormalize(to);
+        if (len > 4.f)
+        {
+            CGameTrace seeTr{};
+            Ray_t ray;
+            ray.Init(eye, eye + to * (len - 2.f));
+            m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &seeTr);
+            eyeSees = seeTr.fraction >= 1.f ? 1 : 0;
+        }
+    }
+
+    const char* map = m_Game->m_EngineClient ? m_Game->m_EngineClient->GetLevelNameShort() : nullptr;
+    const Vector d = origin - eye;
+    Game::logMsg("AimHit #%d map=%s weapon=%s muzzle=(%.0f,%.0f,%.0f) muzzleFromEye=(%.1f,%.1f,%.1f) dir=(%.3f,%.3f,%.3f) | shot %s | eye %s | eyeSees=%d",
+        s_lines, map ? map : "-", weaponKey.c_str(), origin.x, origin.y, origin.z, d.x, d.y, d.z,
+        dir.x, dir.y, dir.z, shot, fromEye, eyeSees);
 }
 
 bool VR::AimFrameNow(Vector& pivot, Vector& f, Vector& r, Vector& u) const
