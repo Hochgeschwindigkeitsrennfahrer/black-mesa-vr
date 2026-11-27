@@ -702,11 +702,11 @@ namespace bmvr
     // Black Mesa's global Xen fog pass (__gbxog0) is not drawn in VR: view-direction noise at infinite stereo
     // depth, also inside rooms where flat shows none. Local fog volumes stay.
     extern bool g_XenGlobalFogOff;
-    // Xen fog stereo fix (src/vr_xen_fog.cpp): the fog shader's noise from
-    // world position instead of view direction (XenFogWorldNoise, default
-    // on), noise size in units per texture repeat (XenFogNoiseSize, 256).
-    // Live: the shader reads both from c100. Debug FIXES rows.
-    extern bool g_XenFogWorldNoise;
+    // Xen fog stereo fix (src/vr_xen_fog.cpp), XenFogNoise: 0 stock (each
+    // eye's view direction, noise at infinity), 1 direction from the centre eye
+    // (stock look, on the surfaces in stereo; default), 2 fixed to the world
+    // with XenFogNoiseSize units per repeat. Live, Debug FIXES rows.
+    extern float g_XenFogNoiseMode;
     extern float g_XenFogNoiseSize;
     extern bool g_FlareEyeAxis;
     // Lens flare layers are turned so their streaks stay level with the world

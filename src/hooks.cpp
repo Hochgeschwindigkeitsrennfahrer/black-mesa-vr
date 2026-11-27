@@ -4,6 +4,7 @@
 #include "game.h"
 #include "sdk.h"
 #include "bmvr_seh.h"
+#include "vr_xen_fog.h"
 #include "vr.h"
 #include "offsets.h"
 
@@ -9995,7 +9996,12 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, int 
         setup.origin.y += shift.y;
     }
     if (m_VR && mainView)
+    {
         m_VR->m_SetupOrigin = setup.origin;
+        // Xen fog noise "Centre eye": one point both eyes' fog passes share.
+        const Vector centre = m_VR->GetViewOrigin(setup.origin);
+        bmvr::SetXenFogAnchor(centre.x, centre.y, centre.z);
+    }
     {
         // Headless diagnostic (BMVR_VIEW_TRACE=1): the engine's view for the
         // main pass ~4x per second, to compare scripted cameras with ours.

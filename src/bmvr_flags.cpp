@@ -343,7 +343,7 @@ namespace bmvr
     bool g_WorldModelFix = true;
     volatile long g_ModelLeakSeen = 0;
     bool g_XenGlobalFogOff = true;
-    bool g_XenFogWorldNoise = true;
+    float g_XenFogNoiseMode = 1.f;
     float g_XenFogNoiseSize = 256.f;
     bool g_FlareEyeAxis = true;
     bool g_FlareLevel = true;
@@ -1346,8 +1346,12 @@ namespace bmvr
                 g_EyeUnderwaterWorld = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "XenGlobalFogOff") == 0)
                 g_XenGlobalFogOff = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
-            else if (std::strcmp(n, "XenFogWorldNoise") == 0)
-                g_XenFogWorldNoise = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "XenFogNoise") == 0)
+            {
+                const int v = std::atoi(val);
+                if (v >= 0 && v <= 2)
+                    g_XenFogNoiseMode = static_cast<float>(v);
+            }
             else if (std::strcmp(n, "XenFogNoiseSize") == 0)
             {
                 const float v = static_cast<float>(atof(val));

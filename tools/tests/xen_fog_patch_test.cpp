@@ -3,7 +3,7 @@
 //   /tmp/xfp <shader.dxso>... [--write-dir DIR]
 // Shaders: VR/audit-ps-*.dxso or VR/xenfog-ps-*.dxso from a game run (game
 // bytecode, never committed). Prints per file: fog-like / patched / skipped,
-// checks the patch inserts 16 tokens and only touches the two lookups, and
+// checks the patch inserts kXenFogInsertTokens tokens and only touches the two lookups, and
 // with --write-dir writes <name>.patched.dxso for a disassembler.
 #include "vr_xen_fog_patch.h"
 
@@ -46,9 +46,9 @@ int main(int argc, char** argv)
             continue;
         ++patched;
         const size_t n = info.bytes / 4;
-        if (out.size() != n + 16)
+        if (out.size() != n + bmvr::kXenFogInsertTokens)
         {
-            std::printf("  FAIL: %zu tokens, expected %zu\n", out.size(), n + 16);
+            std::printf("  FAIL: %zu tokens, expected %zu\n", out.size(), n + bmvr::kXenFogInsertTokens);
             ++failures;
         }
         if (!writeDir.empty())

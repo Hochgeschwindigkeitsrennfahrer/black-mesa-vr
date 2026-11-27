@@ -47,12 +47,29 @@ namespace bmvr
         Game::noteMissingOffset("Xen fog shader (stereo noise)");
     }
 
-    void XenFogShaderConstant(float out[4])
+    namespace
+    {
+        float g_Anchor[3] = { 0.f, 0.f, 0.f };
+    }
+
+    void SetXenFogAnchor(float x, float y, float z)
+    {
+        g_Anchor[0] = x;
+        g_Anchor[1] = y;
+        g_Anchor[2] = z;
+    }
+
+    void XenFogShaderConstant(float out[8])
     {
         const float size = g_XenFogNoiseSize < 16.f ? 16.f : g_XenFogNoiseSize;
+        const int mode = static_cast<int>(g_XenFogNoiseMode + 0.5f);
         out[0] = 1.f / size;
-        out[1] = g_XenFogWorldNoise ? 1.f : 0.f;
-        out[2] = 0.f;
+        out[1] = mode == 2 ? 1.f : 0.f;   // fixed to the world
+        out[2] = mode == 1 ? 1.f : 0.f;   // direction from the shared centre eye
         out[3] = 0.f;
+        out[4] = g_Anchor[0];
+        out[5] = g_Anchor[1];
+        out[6] = g_Anchor[2];
+        out[7] = 0.f;
     }
 }

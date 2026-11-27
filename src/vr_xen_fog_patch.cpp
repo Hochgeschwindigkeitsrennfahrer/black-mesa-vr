@@ -12,10 +12,16 @@ namespace
     //   world:  the one `mad rW.<3 comps>, .., -c51` (world - eye)
     //   lookups: the two `mad .., <dir>, c15|c17, ..` (noise scale)
     // After the world instruction:
+    //   add r7.xyz, c51, -c101          eye - anchor
+    //   mad r7.xyz, r7, c100.z, rW      world - (anchor mix: z 0 = this eye, 1 = c101)
     //   add r6.xyz, rW.<comps>, c51     world position
     //   mul r6.xyz, r6, c100.x          x 1 / noise size
-    //   nrm r7.xyz, rW.<comps>          view direction (as the shader's own)
-    //   lrp r6.xyz, c100.y, r6, r7      world mix (0 = stock look)
+    //   nrm r8.xyz, r7                  direction from the anchor
+    //   lrp r6.xyz, c100.y, r6, r8      world mix (0 = direction)
+    // c100.y 0 + c100.z 0 = stock (each eye's own view direction, noise at
+    // infinity in stereo); c100.z 1 with c101 = the centre eye = the stock
+    // look from one point both eyes share (noise on the surfaces, follows the
+    // player like flat); c100.y 1 = fixed to the world, size c100.x.
     // and the lookups read r6: the k-th component they write gets r6's k-th
     // (they compute dir * scale + time * scroll per component).
     constexpr uint32_t kTemp = 0u, kConst = 2u;
@@ -173,11 +179,14 @@ namespace bmvr
             return info;
         const uint32_t wYzww = 0x80000000u | (worldSwz << 16) | worldReg;   // world - eye as .xyz
         const uint32_t insert[] = {
+            0x03000002u, 0x80070007u, 0xA0E40033u, 0xA1E40065u,        // add r7.xyz, c51, -c101
+            0x04000004u, 0x80070007u, 0x80E40007u, 0xA0AA0064u, wYzww, // mad r7.xyz, r7, c100.z, rW.<comps>
             0x03000002u, 0x80070006u, wYzww, 0xA0E40033u,              // add r6.xyz, rW.<comps>, c51
             0x03000005u, 0x80070006u, 0x80E40006u, 0xA0000064u,        // mul r6.xyz, r6, c100.x
-            0x02000024u, 0x80070007u, wYzww,                           // nrm r7.xyz, rW.<comps>
-            0x04000012u, 0x80070006u, 0xA0550064u, 0x80E40006u, 0x80E40007u,   // lrp r6.xyz, c100.y, r6, r7
+            0x02000024u, 0x80070008u, 0x80E40007u,                     // nrm r8.xyz, r7
+            0x04000012u, 0x80070006u, 0xA0550064u, 0x80E40006u, 0x80E40008u,   // lrp r6.xyz, c100.y, r6, r8
         };
+        static_assert(std::size(insert) == kXenFogInsertTokens, "insert size");
         out.clear();
         out.reserve(n + 32);
         for (size_t i = 0; i < n; ++i)

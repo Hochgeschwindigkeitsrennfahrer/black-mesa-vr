@@ -5762,12 +5762,12 @@ namespace dxvk {
     if (unlikely(ShouldRecord()))
       return m_recorder->SetPixelShader(shader);
 
-    // BMVR: the patched Xen fog shader reads its noise scale + mix from c100.
+    // BMVR: the patched Xen fog shader reads its noise mode + anchor from c100/c101.
     if (unlikely(shader != nullptr && shader->bmvrXenFog)) {
-      float c[4];
+      float c[8];
       bmvr::XenFogShaderConstant(c);
       SetShaderConstants<DxsoProgramTypes::PixelShader, D3D9ConstantType::Float>(
-        bmvr::kXenFogConstReg, c, 1);
+        bmvr::kXenFogConstReg, c, bmvr::kXenFogConstCount);
     }
 
     if (shader == m_state.pixelShader.ptr())
