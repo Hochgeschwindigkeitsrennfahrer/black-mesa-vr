@@ -677,13 +677,6 @@ namespace bmvr
     // false = glows behind objects show full bright when a sliver peeks out.
     extern bool g_GlowCountDepthFix;
     extern bool g_McHandSnapshot;
-    // GunPoseAtPair (default true, user 2026-11-27): the gun viewmodel is
-    // placed again at the stereo pair latch, from that pair's tracking + body
-    // origin (the ones the laser, ammo HUD and gloves draw with). The engine
-    // places it in CalcViewModelView before the frame's pose wait = one
-    // frame older (gun behind the HUD while the hand moves). Cvar
-    // bmvr_gun_pose_at_pair, Debug FIXES row.
-    extern bool g_GunPoseAtPair;
     extern bool g_SkyWaterPerEye;
     extern bool g_EyeUnderwaterWorld;
     // Eye at the water line (near plane crosses the surface): the eye view drops the engine's

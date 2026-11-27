@@ -914,6 +914,18 @@ public:
     // MulticoreMode turns on the render thread (VR::Update after Present)
     // while the main thread draws the pair: both eyes must use one value.
     float m_StereoFrameYaw = 0.f;
+    // Sync probe: tracking update count at the pair latch, and the turn yaw
+    // the last UpdateControllerTracking built the gun axes with.
+    uint32_t m_StereoFrameSeq = 0;
+    // Turn yaw the published controller poses and viewmodel axes were built
+    // with (UpdateControllerTracking, under m_ControllerMutex). The pair
+    // latches it as its yaw, so a turn step from the other thread between that
+    // update and the latch cannot rotate gun vs view/HUD (stick-turn jitter).
+    float m_CtrlYawUsed = 0.f;
+    bool m_CtrlYawSet = false;
+    Vector m_StereoFrameGunPos{};
+    QAngle m_StereoFrameGunAng{};
+    Vector m_StereoFrameVmF{}, m_StereoFrameVmR{}, m_StereoFrameVmU{};
     Vector m_StereoFrameZero{};
     bool m_StereoFrameOriginLatched = false;
     float m_StereoFrameHeightUnits = 0.f;
@@ -969,7 +981,33 @@ public:
     void GetViewBasis(Vector* forward, Vector* right, Vector* up) const;
     Vector GetViewOriginLeft(const Vector& setupOrigin) const;
     Vector GetViewOriginRight(const Vector& setupOrigin) const;
-    Vector ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& trackingPos) const;
+    // Pair state ControllerTrackingToWorld converts with (head, recenter point,
+    // turn, height). The MulticoreMode render thread draws the hand overlay of
+    // the pair before the one the game thread is latching now, so it passes the
+    // frame its HandDrawSnap captured instead of reading the live pair state
+    // (that turned the HUD/gloves with the next pair's yaw while stick turning).
+    struct TrackFrame
+    {
+        bool valid = false;
+        Vector hmdPos{}, zero{};
+        bool originLatched = false;
+        float yaw = 0.f, heightUnits = 0.f;
+    };
+    TrackFrame CurrentTrackFrame() const;
+    Vector ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& trackingPos,
+        const TrackFrame* frame = nullptr) const;
+    // Gun-hand aim pose and viewmodel axes as of the stereo pair latch while a
+    // pair is drawn (live otherwise): the gun's draw-time bone re-target, the
+    // laser start and the shot direction use the same tracking sample as the
+    // HUD and gloves, also when the render thread updates tracking mid-pair.
+    const Vector& GunTrackPos() const { return m_StereoFramePoseActive ? m_StereoFrameGunPos : m_RightControllerPosAbs; }
+    const QAngle& GunTrackAng() const { return m_StereoFramePoseActive ? m_StereoFrameGunAng : m_RightControllerAngAbs; }
+    void GunBasis(Vector& f, Vector& r, Vector& u) const
+    {
+        f = m_StereoFramePoseActive ? m_StereoFrameVmF : m_ViewmodelForward;
+        r = m_StereoFramePoseActive ? m_StereoFrameVmR : m_ViewmodelRight;
+        u = m_StereoFramePoseActive ? m_StereoFrameVmU : m_ViewmodelUp;
+    }
     Vector GetRightControllerAbsPos(const Vector& eyePosition) const;
     QAngle GetRightControllerAbsAngle() const;
     Vector GetLeftControllerAbsPos(const Vector& eyePosition) const;
@@ -1337,6 +1375,10 @@ public:
         bool gunHudTwoHand = false;
         QAngle gunHudAng{};
         Vector gunHudShift{};
+        // Sync probe: pair counter + tracking seq at capture.
+        uint32_t pairId = 0, seq = 0;
+        // Pair frame toWorld uses on the render thread (CurrentTrackFrame at capture).
+        TrackFrame track{};
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
     // HandSyncLog (bmvr::g_HandSyncLog). CalcViewModelView: the gun-hand
@@ -1344,6 +1386,8 @@ public:
     // compared with the pose the HUD/gloves draw with; StereoCostLog: the
     // pair's viewmodel draws per eye.
     void NoteViewmodelPoseForSync();
+    // bmvr_sync_probe: one line per gun placement (where = cvmv / pair).
+    void SyncProbePlacement(const char* where, const Vector& base, const Vector& org, const QAngle& ang) const;
     void CheckHandSync(const HandDrawSnap& s);
     void NoteViewmodelDrawsForSync(int vmLeft, int vmRight, double pairMs);
     struct HandSyncState

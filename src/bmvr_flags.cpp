@@ -338,7 +338,6 @@ namespace bmvr
     // pair, the drawn gun trailed the HUD/laser by ~0.7 frame of walking
     // (1.6 u at 2.3 u/frame); off + the per-frame snapshot kept gun, HUD,
     // laser and cuff cap on the same frame for hand steps and walking.
-    bool g_GunPoseAtPair = false;
     float g_SyncProbeEyes = 0.f;
     bool g_SkyWaterPerEye = true;
     bool g_EyeUnderwaterWorld = true;

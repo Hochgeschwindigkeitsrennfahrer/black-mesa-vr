@@ -472,8 +472,6 @@ namespace
             { "HEV boot-up HUD size", RowKind::Number, nullptr, nullptr, &bmvr::g_BootHudScale, 0.05f, 0.5f, 2.f, "%.2fx" },
             { "FIXES: TRACKING, WEAPONS, GAME", RowKind::DevSection, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             { "Hands + laser per-frame snapshot", RowKind::Toggle, nullptr, &bmvr::g_McHandSnapshot, nullptr, 0, 0, 0, nullptr },
-            // User 2026-11-27 (ammo HUD a frame ahead of the gun): off = the engine's own, older placement.
-            { "Gun placed with the eye pair", RowKind::Toggle, nullptr, &bmvr::g_GunPoseAtPair, nullptr, 0, 0, 0, nullptr },
             { "No stun/blur overlays", RowKind::Toggle, nullptr, &bmvr::g_VrSkipScreenEffects, nullptr, 0, 0, 0, nullptr },
             { "Gun hand cuff closed", RowKind::Toggle, nullptr, &bmvr::g_GunHandCuffCap, nullptr, 0, 0, 0, nullptr },
             { "Grab zones follow the body", RowKind::Toggle, nullptr, &bmvr::g_GestureBodyFrame, nullptr, 0, 0, 0, nullptr },

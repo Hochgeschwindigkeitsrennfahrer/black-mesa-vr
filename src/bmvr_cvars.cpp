@@ -305,8 +305,6 @@ namespace bmvr
               Kind::Float, 16.f, 4096.f, nullptr, &g_XenFogNoiseSize },
             { "bmvr_sync_probe", "VR test: the next N eye draws log SyncProbe lines (eye, HUD hand, gun wrist, cuff cap, laser start)",
               Kind::Float, 0.f, 20000.f, nullptr, &g_SyncProbeEyes },
-            { "bmvr_gun_pose_at_pair", "VR: gun placed from the same tracking as laser/HUD/gloves at the start of each eye pair (0 = engine's earlier placement, a frame older)",
-              Kind::Bool, 0.f, 1.f, &g_GunPoseAtPair, nullptr },
             { "bmvr_viewproj_normal_fix", "VR: ropes get the same normals in both off-centre eyes (0 = stock: one eye's ropes can sit in their own shadow)",
               Kind::Bool, 0.f, 1.f, &g_ViewProjNormalFix, nullptr },
             { "bmvr_eye_bloom", "VR: bloom + auto-exposure on the eyes (0 = skipped on the eyes)",

@@ -8455,15 +8455,30 @@ Vector VR::GetViewOriginRight(const Vector& setupOrigin) const
     return GetViewOrigin(setupOrigin) + (right * RenderHalfIpd());
 }
 
-Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& trackingPos) const
+VR::TrackFrame VR::CurrentTrackFrame() const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    TrackFrame f;
+    f.valid = true;
+    f.hmdPos = m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs;
+    f.zero = PairZero();
+    f.originLatched = PairOriginLatched();
+    f.yaw = PairYaw();
+    f.heightUnits = PairHeightUnits();
+    return f;
+}
+
+Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& trackingPos,
+    const TrackFrame* frame) const
 {
     // Baked viewmodel ox/oy/oz are authored on engine eye + (controller -
     // recenter), not on GetViewOrigin. GetViewOrigin also adds EyeZ along
     // look-forward; parenting the gun to that pushed every weapon backward.
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    const Vector& hmdPos = m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs;
-    const float yaw = PairYaw();
-    if (!m_ControllerPoseValid && !m_StereoFramePoseActive)
+    const bool fixed = frame && frame->valid;
+    const Vector& hmdPos = fixed ? frame->hmdPos : m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs;
+    const float yaw = fixed ? frame->yaw : PairYaw();
+    if (!fixed && !m_ControllerPoseValid && !m_StereoFramePoseActive)
     {
         // Diag: in gameplay this fallback puts gun/laser/gloves at the eye.
         // Counted so a blinking "pose valid" flag shows in the log.
@@ -8490,8 +8505,8 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
     if (!std::isfinite(arm.x) || !std::isfinite(arm.y) || !std::isfinite(arm.z))
         return GetViewOrigin(setupOrigin);
 
-    const Vector& zero = PairZero();
-    if (PairOriginLatched()
+    const Vector& zero = fixed ? frame->zero : PairZero();
+    if ((fixed ? frame->originLatched : PairOriginLatched())
         && (m_OpenXrHelperBridgeActive || zero.z > 24.f))
     {
         Vector world = setupOrigin;
@@ -8500,7 +8515,7 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
         if (!std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
             return GetViewOrigin(setupOrigin);
         world += delta;
-        world.z += PairHeightUnits();
+        world.z += fixed ? frame->heightUnits : PairHeightUnits();
         return world;
     }
     return GetViewOrigin(setupOrigin) + arm;
@@ -8509,7 +8524,7 @@ Vector VR::ControllerTrackingToWorld(const Vector& setupOrigin, const Vector& tr
 Vector VR::GetRightControllerAbsPos(const Vector& eyePosition) const
 {
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    return ControllerTrackingToWorld(eyePosition, m_RightControllerPosAbs);
+    return ControllerTrackingToWorld(eyePosition, GunTrackPos());
 }
 
 Vector VR::GetLeftControllerAbsPos(const Vector& eyePosition) const
@@ -8593,7 +8608,8 @@ QAngle VR::GetAimAngles() const
             // the barrel, 2026-10-15).
             float ox = 0.f, oy = 0.f, oz = 0.f, ax = 0.f, ay = 0.f, az = 0.f;
             ResolveWeaponViewmodelPose(ox, oy, oz, ax, ay, az);
-            Vector f = m_ViewmodelForward, r = m_ViewmodelRight, u = m_ViewmodelUp;
+            Vector f, r, u;
+            GunBasis(f, r, u);
             r = VectorRotate(r, f, -az);
             u = VectorRotate(u, f, -az);
             f = VectorRotate(f, r, -ax);
@@ -9881,7 +9897,7 @@ Vector VR::GetRecommendedViewmodelAbsPos(const Vector& eyePosition) const
             base = m_StereoBodyOrigin;
         else if (m_SetupOrigin.LengthSqr() > 1.f)
             base = m_SetupOrigin;
-        aimTracking = m_RightControllerPosAbs;
+        aimTracking = GunTrackPos();
     }
     Vector p0 = ControllerTrackingToWorld(base, aimTracking);
     float ox = 0.f, oy = 0.f, oz = 0.f, ax = 0.f, ay = 0.f, az = 0.f;
@@ -9894,9 +9910,11 @@ Vector VR::GetRecommendedViewmodelAbsPos(const Vector& eyePosition) const
         ++s_poseLog;
     }
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    p0 -= m_ViewmodelForward * ox;
-    p0 -= m_ViewmodelRight * oy;
-    p0 -= m_ViewmodelUp * oz;
+    Vector vf, vr, vu;
+    GunBasis(vf, vr, vu);
+    p0 -= vf * ox;
+    p0 -= vr * oy;
+    p0 -= vu * oz;
     return p0;
 }
 
@@ -10818,7 +10836,7 @@ void VR::FlushPendingWeaponSounds()
 QAngle VR::GetRightControllerAbsAngle() const
 {
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
-    return m_RightControllerAngAbs;
+    return GunTrackAng();
 }
 
 QAngle VR::GetLeftControllerAbsAngle() const
@@ -10827,11 +10845,32 @@ QAngle VR::GetLeftControllerAbsAngle() const
     return m_LeftControllerAngAbs;
 }
 
+void VR::SyncProbePlacement(const char* where, const Vector& base, const Vector& org, const QAngle& ang) const
+{
+    if (!(bmvr::g_SyncProbeEyes >= 1.f))
+        return;
+    Vector aim{}, phys{};
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+        aim = m_RightControllerPosAbs;
+        phys = m_PhysicalRightPosAbs;
+    }
+    Game::logMsg("SyncPlace %s pairs=%u act=%d seq=%u latchSeq=%u t=%.2f base=%.2f,%.2f,%.2f aim=%.2f,%.2f,%.2f phys=%.2f,%.2f,%.2f"
+        " latchPhys=%.2f,%.2f,%.2f yawCtrl=%.3f yawLive=%.3f pairYaw=%.3f org=%.2f,%.2f,%.2f ang=%.3f,%.3f,%.3f thr=%lu",
+        where, m_OpenXrStereoPairs, m_StereoFramePoseActive ? 1 : 0, m_TrackingUpdateSeq.load(std::memory_order_relaxed),
+        m_StereoFrameSeq, QpcNowMs(), base.x, base.y, base.z, aim.x, aim.y, aim.z, phys.x, phys.y, phys.z,
+        m_StereoFrameRightCtrlPos.x, m_StereoFrameRightCtrlPos.y, m_StereoFrameRightCtrlPos.z,
+        m_CtrlYawUsed, m_RotationOffsetY.load(std::memory_order_acquire), PairYaw(),
+        org.x, org.y, org.z, ang.x, ang.y, ang.z, GetCurrentThreadId());
+}
+
 QAngle VR::GetRecommendedViewmodelAbsAngle() const
 {
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     QAngle result{};
-    QAngle::VectorAngles(m_ViewmodelForward, m_ViewmodelUp, result);
+    Vector vf, vr, vu;
+    GunBasis(vf, vr, vu);
+    QAngle::VectorAngles(vf, vu, result);
     return result;
 }
 
@@ -13973,6 +14012,9 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
     };
     uint32_t family = L4D2VR_OPENXR_CONTROLLER_FAMILY_UNKNOWN;
     float tilt = bmvr::g_ControllerPitchTilt;
+    // One turn yaw for every pose of this update (the other thread's stick
+    // turn may change it meanwhile); published with them as m_CtrlYawUsed.
+    const float turnYaw = m_RotationOffsetY.load(std::memory_order_acquire);
     auto sampleTrackedPose = [&](const vr::TrackedDevicePose_t& pose, vr::TrackedDeviceIndex_t idx, Sample& out) {
         out.valid = false;
         out.idx = vr::k_unTrackedDeviceIndexInvalid;
@@ -13982,7 +14024,7 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
         QAngle ang = HmdMatrixToSourceAnglesWithRoll(pose.mDeviceToAbsoluteTracking);
         if (!std::isfinite(ang.x) || !std::isfinite(ang.y) || !std::isfinite(ang.z))
             return;
-        ang.y = WrapYaw(ang.y + m_RotationOffsetY.load(std::memory_order_acquire));
+        ang.y = WrapYaw(ang.y + turnYaw);
         Vector fwd, right, up;
         QAngle::AngleVectors(ang, &fwd, &right, &up);
         if (tilt != 0.f)
@@ -14127,6 +14169,8 @@ void VR::UpdateControllerTracking(const vr::TrackedDevicePose_t& hmdPose)
         return;
 
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    m_CtrlYawUsed = turnYaw;
+    m_CtrlYawSet = true;
     {
         // Throw samples: the weapon hand's grip (where the grenade sits),
         // stamped with the runtime's pose time.
@@ -14357,6 +14401,9 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
     s.aimCrosshairValid = m_AimCrosshairValid;
     s.aimCrosshairWorld = m_AimCrosshairWorld;
     s.rotationOffsetY = PairYaw();
+    s.track = CurrentTrackFrame();
+    s.pairId = m_OpenXrStereoPairs;
+    s.seq = m_StereoFramePoseActive ? m_StereoFrameSeq : m_TrackingUpdateSeq.load(std::memory_order_relaxed);
     {
         const unsigned ms = MagReload::g_GunWristMs[1].load(std::memory_order_acquire);
         const DWORD now = GetTickCount();
@@ -14612,8 +14659,9 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
     if (!leftOk && !rightOk)
         return false;
 
+    const TrackFrame* track = snap ? &snap->track : nullptr;
     auto toWorld = [&](const Vector& tracking) {
-        return ControllerTrackingToWorld(body, tracking);
+        return ControllerTrackingToWorld(body, tracking, track);
     };
 
     Vector fwd, right, up;
@@ -15333,11 +15381,18 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
                 const bool beamOk = snap ? snap->havePoints : AimOverlayPointsNow(ba, bb, bd);
                 if (snap)
                     ba = snap->beamA;
-                Game::logMsg("SyncProbe p=%u e=%d t=%.2f snap=%d pairGun=%d eye=%.2f,%.2f,%.2f hud=%.2f,%.2f,%.2f wrist=%.2f,%.2f,%.2f wms=%u cap=%d,%.2f,%.2f,%.2f beam=%d,%.2f,%.2f,%.2f",
-                    s_pair, stereoEye, QpcNowMs(), snap ? 1 : 0, bmvr::g_GunPoseAtPair ? 1 : 0,
+                // Render-thread view of the pair state toWorld reads (PairYaw etc.)
+                // against the snapshot's; cap forward = drawn gun wrist x axis.
+                const float capYaw = atan2f(cap[4], cap[0]) * 57.29578f;
+                Game::logMsg("SyncProbe p=%u e=%d t=%.2f snap=%d pairGun=%d eye=%.2f,%.2f,%.2f hud=%.2f,%.2f,%.2f wrist=%.2f,%.2f,%.2f wms=%u cap=%d,%.2f,%.2f,%.2f beam=%d,%.2f,%.2f,%.2f"
+                    " sp=%u ss=%u now=%u act=%d pyNow=%.3f pySnap=%.3f view=%.3f capYaw=%.3f hudYaw=%.3f thr=%lu",
+                    s_pair, stereoEye, QpcNowMs(), snap ? 1 : 0, 0,
                     eyeOrig.x, eyeOrig.y, eyeOrig.z, hud.x, hud.y, hud.z,
                     drawn[3], drawn[7], drawn[11], ms ? GetTickCount() - ms : 9999u,
-                    capOk ? 1 : 0, cap[3], cap[7], cap[11], beamOk ? 1 : 0, ba.x, ba.y, ba.z);
+                    capOk ? 1 : 0, cap[3], cap[7], cap[11], beamOk ? 1 : 0, ba.x, ba.y, ba.z,
+                    snap ? snap->pairId : 0u, snap ? snap->seq : 0u, m_OpenXrStereoPairs,
+                    m_StereoFramePoseActive ? 1 : 0, PairYaw(), snap ? snap->rotationOffsetY : -1.f,
+                    snap ? snap->viewAngles.y : GetViewAngle().y, capYaw, rightAng.y, GetCurrentThreadId());
             }
         }
         DrawHandHud(device, stereoEye, w, h,
@@ -17557,9 +17612,11 @@ void VR::NoteViewmodelOffhandWorld(const Vector& worldOrigin, bool sideHandle)
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
     if (m_TwoHandActive)
         return;
-    const float gx = rel.Dot(m_ViewmodelForward);
-    const float gy = rel.Dot(m_ViewmodelRight);
-    const float gz = rel.Dot(m_ViewmodelUp);
+    Vector vf, vr, vu;
+    GunBasis(vf, vr, vu);
+    const float gx = rel.Dot(vf);
+    const float gy = rel.Dot(vr);
+    const float gz = rel.Dot(vu);
     const float scale = m_VRScale > 1.f ? m_VRScale : 39.37f;
     // A side handle (gluon) sits beside the gun hand, not ahead of it: only
     // a sanity distance applies.
@@ -19121,7 +19178,15 @@ void VR::BeginStereoFramePose(const Vector* body)
         m_StereoFrameRightCtrlAng = m_PhysicalRightAngAbs;
         m_StereoFrameLeftCtrlPos = m_LeftControllerPosAbs;
         m_StereoFrameRightCtrlPos = m_PhysicalRightPosAbs;
-        m_StereoFrameYaw = m_RotationOffsetY.load(std::memory_order_acquire);
+        // The yaw the latched controller poses / gun axes were built with (see
+        // m_CtrlYawUsed); live only without a controller update yet.
+        m_StereoFrameYaw = m_CtrlYawSet ? m_CtrlYawUsed : m_RotationOffsetY.load(std::memory_order_acquire);
+        m_StereoFrameSeq = m_TrackingUpdateSeq.load(std::memory_order_relaxed);
+        m_StereoFrameGunPos = m_RightControllerPosAbs;
+        m_StereoFrameGunAng = m_RightControllerAngAbs;
+        m_StereoFrameVmF = m_ViewmodelForward;
+        m_StereoFrameVmR = m_ViewmodelRight;
+        m_StereoFrameVmU = m_ViewmodelUp;
         m_StereoFrameZero = m_HmdPosAbsZero;
         m_StereoFrameOriginLatched = m_HmdOriginLatched;
         m_StereoFrameHeightUnits = bmvr::g_HeightOffsetCm * 0.01f * m_VRScale;
