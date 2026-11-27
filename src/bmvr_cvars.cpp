@@ -299,7 +299,7 @@ namespace bmvr
               Kind::Bool, 0.f, 1.f, &g_GodRayRadialMask, nullptr },
             { "bmvr_godray_samples", "VR test: god ray taps 0 = game's (64), 1 = 32, 2 = 16; only while in a level, the game's value is put back on level shutdown",
               Kind::Float, 0.f, 2.f, nullptr, &g_GodRaySamples },
-            { "bmvr_godray_blur_scale", "VR: god ray blur size: 0 full (stock), 1 half, 2 quarter",
+            { "bmvr_godray_blur_scale", "VR: god ray blur size: 0 full (stock), 1 half, 2 quarter (default)",
               Kind::Float, 0.f, 2.f, nullptr, &g_GodRayBlurScale },
             { "bmvr_godray_log", "VR debug: log the next N god ray blur/mask draws (eye, light index, screen position, mask result)",
               Kind::Float, 0.f, 20000.f, nullptr, &g_GodRayLog },

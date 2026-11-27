@@ -349,7 +349,7 @@ namespace bmvr
     bool g_XenGlobalFogOff = false;   // on since the Auto noise fix (user 2026-11-27)
     float g_XenFogNoiseMode = 3.f;
     bool g_GodRayRadialMask = true;
-    float g_GodRayBlurScale = 0.f;
+    float g_GodRayBlurScale = 2.f;   // quarter: blur 0.80 -> 0.17 ms, same look (user headset 2026-11-27)
     float g_GodRayLog = 0.f;
     float g_GodRaySamples = 0.f;
     float g_XenFogNoiseSize = 256.f;
