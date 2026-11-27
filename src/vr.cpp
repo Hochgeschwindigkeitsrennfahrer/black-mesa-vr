@@ -9654,6 +9654,29 @@ void VR::PhysicalLadderCentreHead(const Vector& body, ULONGLONG now, float dt)
         v.centreStartMs = now;
         v.centreFrom = 0.f;
         v.centred = 0.f;
+        // Target the ladder's own line, not the body: at the start of a climb
+        // LadderMove is still pulling the body onto the middle (longer under
+        // water: the engine's forced mount), so the centring chased a moving
+        // target and stopped short (2026-11-27 bm_c2a5a: 4.2 -> 0.7 units off).
+        v.centreOnLine = false;
+        if (m_Game && body.LengthSqr() > 1.f)
+        {
+            Vector bottoms[64], tops[64];
+            const int n = m_Game->CollectLadders(bottoms, tops, 64);
+            float best = 48.f * 48.f;
+            for (int i = 0; i < n; ++i)
+            {
+                if (body.z < fminf(bottoms[i].z, tops[i].z) - 72.f || body.z > fmaxf(bottoms[i].z, tops[i].z) + 72.f)
+                    continue;
+                const float dx = body.x - bottoms[i].x, dy = body.y - bottoms[i].y;
+                if (dx * dx + dy * dy < best)
+                {
+                    best = dx * dx + dy * dy;
+                    v.centreLine = bottoms[i];
+                    v.centreOnLine = true;
+                }
+            }
+        }
     }
     v.lastActiveMs = now;
     if (!v.centreStartMs || !bmvr::g_PhysicalLadders || !bmvr::g_LadderCentreHead || body.LengthSqr() <= 1.f)
@@ -9675,7 +9698,8 @@ void VR::PhysicalLadderCentreHead(const Vector& body, ULONGLONG now, float dt)
     {
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
         const Vector eye = ControllerTrackingToWorld(body, m_StereoFramePoseActive ? m_StereoFrameHmdPosAbs : m_HmdPosAbs);
-        lateral = (eye - body).Dot(axis);
+        const Vector target = v.centreOnLine ? Vector(v.centreLine.x, v.centreLine.y, body.z) : body;
+        lateral = (eye - target).Dot(axis);
         if (v.centred == 0.f)
         {
             v.centreFrom = lateral;
@@ -9698,8 +9722,8 @@ void VR::PhysicalLadderCentreHead(const Vector& body, ULONGLONG now, float dt)
     if (last)
     {
         if (v.centred != 0.f)
-            Game::logMsg("Ladder centre: head moved %.1f units sideways onto the ladder's middle (was %.1f off)",
-                v.centred, v.centreFrom);
+            Game::logMsg("Ladder centre: head moved %.1f units sideways onto the ladder's middle (was %.1f off, target %s, %.1f left)",
+                v.centred, v.centreFrom, v.centreOnLine ? "ladder line" : "body", v.centreFrom - v.centred);
         v.centreStartMs = 0;
     }
 }

@@ -1038,6 +1038,8 @@ public:
         ULONGLONG centreStartMs = 0;  // centring window start (0 = none)
         float centreFrom = 0.f;       // head's sideways offset when it started
         float centred = 0.f;          // moved so far this climb (units)
+        bool centreOnLine = false;    // target = the ladder's line (else the body)
+        Vector centreLine{};          // that line's bottom (only x/y used)
     } m_LadderView;
     // Physical crouching (PhysicalCrouch). ProcessInput: head this far below
     // the recenter height holds IN_DUCK (hysteresis). RenderView: while the
