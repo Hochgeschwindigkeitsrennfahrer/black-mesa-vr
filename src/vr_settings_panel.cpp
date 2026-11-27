@@ -391,6 +391,9 @@ namespace
             // User 2026-11-27 (laser stops in mid-air next to cover): per trigger press, what the
             // shot ray hit + the same aim from the eye (bmvr_log "AimHit"). Saved, so it can stay on.
             { "Log what the laser hits", RowKind::Toggle, "AimHitLog", &bmvr::g_AimHitLog, nullptr, 0, 0, 0, nullptr },
+            // User 2026-11-27 (ammo HUD a frame ahead of the gun hand, gun hand gone for a frame
+            // in heavy scenes): bmvr_log "Hand sync" lines + a 10 s summary. Saved.
+            { "Log hand/gun sync", RowKind::Toggle, "HandSyncLog", &bmvr::g_HandSyncLog, nullptr, 0, 0, 0, nullptr },
             { "Performance log (costs fps)", RowKind::Toggle, "PerfLog", &bmvr::g_PerfLog, nullptr, 0, 0, 0, nullptr },
             // Eye GPU ms every ~5 s (timestamp queries); with the always-on "Frame budget" CPU line it shows
             // whether a scene is CPU- or GPU-limited.
@@ -487,6 +490,7 @@ namespace
             // Where the health/HEV panel sits next to it with both hands on the gun
             // (user 2026-11-27), in the ammo panel's plane.
             { "Health HUD with two hands", RowKind::Choice, nullptr, nullptr, &bmvr::g_AmmoHudHealthSide, 1.f, 0.f, 3.f, "Above ammo|Left of ammo|Right of ammo|Below ammo" },
+            { "Health HUD gap", RowKind::Number, nullptr, nullptr, &bmvr::g_AmmoHudHealthGap, 0.05f, -1.f, 2.f, "%+.2f" },
             // A/B (user 2026-11-25): off = with both hands on a long gun the panel
             // stays on the gun's aim; on = the old gun-hand controller rotation.
             { "Two hands: ammo HUD follows hand", RowKind::Toggle, nullptr, &bmvr::g_TwoHandAmmoHudFollowsHand, nullptr, 0, 0, 0, nullptr },
@@ -500,6 +504,7 @@ namespace
             { "Finger straight", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanFingerStraight, 0.05f, 0.f, 0.5f, "%.2f" },
             { "Thumb curl", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanThumbCurl, 0.1f, 0.f, 2.f, "%.1f" },
             { "Thumb swing", RowKind::Number, nullptr, nullptr, &bmvr::g_VrGmanThumbSwing, 0.1f, 0.f, 1.5f, "%.1f" },
+            { "Finger twist", RowKind::Number, "VrGmanFingerTwist", nullptr, &bmvr::g_VrGmanFingerTwistDeg, 1.f, -30.f, 30.f, "%+.0f deg" },
             // Drawn at the bottom of every tab.
             { "Close", RowKind::Close, nullptr, nullptr, nullptr, 0, 0, 0, nullptr },
             // In the bottom bar, far left: resets the tab shown (second click confirms).

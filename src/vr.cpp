@@ -7543,7 +7543,7 @@ void VR::ProcessInput()
             const bool bound = BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "THROW", hint, sizeof(hint));
             if (!bound)
                 strncpy_s(hint, "THROW = UNBOUND", _TRUNCATE);
-            ShowUsageHint(UsageHint::CarryThrow, hint, 1, bound ? nullptr : kAltFireUnbound);
+            ShowUsageHint(UsageHint::CarryThrow, hint, 2, bound ? nullptr : kAltFireUnbound);
         }
         s_carryHintWas = carrying;
         if (m_OnGun && !s_gunHintWas)
@@ -7552,7 +7552,7 @@ void VR::ProcessInput()
             const bool bound = BoundButtonHint(bmvr::BindAction::AltFire, "ALT-FIRE", "FIRE", hint, sizeof(hint));
             if (!bound)
                 strncpy_s(hint, "FIRE = UNBOUND", _TRUNCATE);
-            ShowUsageHint(UsageHint::MountedFire, hint, 1, bound ? nullptr : kAltFireUnbound);
+            ShowUsageHint(UsageHint::MountedFire, hint, 2, bound ? nullptr : kAltFireUnbound);
         }
         s_gunHintWas = m_OnGun;
         if (!menuOwnsButtons && m_OnGun)
@@ -9323,7 +9323,7 @@ bool VR::RoomscaleWish(Vector& wish)
     }
 
     float excess = 0.f;
-    Vector dir{};
+    Vector dir(0.f, 0.f, 0.f);
     {
         std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
         if (!m_HmdOriginLatched || !m_HmdPoseValid)
@@ -9364,7 +9364,34 @@ void VR::RoomscaleFollow(const Vector& viewOrigin)
     const ULONGLONG now = GetTickCount64();
     Vector moved = body - r.lastBody;
     moved.z = 0.f;
-    const bool measured = r.haveBody;
+    bool measured = r.haveBody;
+    // The intro tram (player parented to it), trains and lifts carry the
+    // body: only the player's own walk may go into the head offset
+    // (absorbing the tram's move held the view in place while it drove on,
+    // user 2026-11-27). Own walk = m_vecVelocity x time; where the measured
+    // move is clearly more or other than that, the velocity's move is used.
+    LARGE_INTEGER qpc{}, freq{};
+    QueryPerformanceCounter(&qpc);
+    QueryPerformanceFrequency(&freq);
+    {
+        Vector vel(0.f, 0.f, 0.f);
+        const double dt = (r.lastQpc && freq.QuadPart) ? double(qpc.QuadPart - r.lastQpc) / double(freq.QuadPart) : 0.0;
+        if (measured && dt > 0.0 && dt < 0.25 && m_Game->LocalPlayerVelocity(vel))
+        {
+            Vector own(vel.x * float(dt), vel.y * float(dt), 0.f);
+            const Vector carry = moved - own;
+            if (carry.Length() > 0.4f + 0.3f * own.Length())
+            {
+                r.carriedUnits += carry.Length();
+                if (bmvr::g_RoomscaleTrace > 0)
+                    Game::logMsg("Roomscale trace: carried (%.2f %.2f), own (%.2f %.2f)", carry.x, carry.y, own.x, own.y);
+                moved = own;
+            }
+        }
+        else if (measured && dt >= 0.25)
+            measured = false;   // a stall: not a step to absorb
+    }
+    r.lastQpc = qpc.QuadPart;
     r.lastBody = body;
     r.haveBody = true;
     std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
@@ -9394,7 +9421,7 @@ void VR::RoomscaleFollow(const Vector& viewOrigin)
     {
         const Vector dir = h * (1.f / len);
         const float along = moved.Dot(dir);
-        Vector take{};
+        Vector take(0.f, 0.f, 0.f);   // SDK Vector(): no init
         if (along > 0.f)
         {
             // Closer to the head (also sliding along a wall): all of it.
@@ -9430,10 +9457,11 @@ void VR::RoomscaleFollow(const Vector& viewOrigin)
     }
     if (r.followedUnits + r.clampedUnits > 0.5f && now - r.lastLogMs > 5000)
     {
-        Game::logMsg("Roomscale: body followed the head %.1f u, view held at the body %.1f u (deadzone %.0f cm)",
-            r.followedUnits, r.clampedUnits, bmvr::g_RoomscaleDeadzoneCm);
+        Game::logMsg("Roomscale: body followed the head %.1f u, view held at the body %.1f u, carried %.1f u (deadzone %.0f cm)",
+            r.followedUnits, r.clampedUnits, r.carriedUnits, bmvr::g_RoomscaleDeadzoneCm);
         r.followedUnits = 0.f;
         r.clampedUnits = 0.f;
+        r.carriedUnits = 0.f;
         r.lastLogMs = now;
     }
 }
@@ -14207,6 +14235,105 @@ void VR::CaptureHandDrawSnap(HandDrawSnap& s)
     s.valid = true;
 }
 
+void VR::NoteViewmodelPoseForSync()
+{
+    if (!bmvr::g_HandSyncLog)
+        return;
+    HandSyncState& h = m_HandSync;
+    std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+    const bool rightGun = !bmvr::g_LeftHanded;
+    h.pos = rightGun ? m_PhysicalRightPosAbs : m_LeftControllerPosAbs;
+    h.ang = rightGun ? m_PhysicalRightAngAbs : m_LeftControllerAngAbs;
+    h.trackSeq = m_TrackingUpdateSeq.load(std::memory_order_relaxed);
+    h.qpcMs = QpcNowMs();
+    h.have = true;
+    ++h.vmCalls;
+}
+
+void VR::CheckHandSync(const HandDrawSnap& s)
+{
+    if (!bmvr::g_HandSyncLog)
+        return;
+    HandSyncState& h = m_HandSync;
+    const bool held = !m_EmptyHands && m_GameplayEligible;
+    if (held)
+    {
+        ++h.pairs;
+        if (h.vmCalls == 0)
+            ++h.noCall;
+        if (h.have && h.vmCalls > 0)
+        {
+            const bool rightGun = !bmvr::g_LeftHanded;
+            // Tracking-space poses; the HUD's own (before two-hand / ladder
+            // draw substitutions would differ on purpose, so read the latch).
+            Vector hudPos;
+            QAngle hudAng;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+                hudPos = rightGun ? m_StereoFrameRightCtrlPos : m_StereoFrameLeftCtrlPos;
+                hudAng = rightGun ? m_StereoFrameRightCtrlAng : m_StereoFrameLeftCtrlAng;
+            }
+            const float units = (hudPos - h.pos).Length();
+            const float cm = m_VRScale > 0.f ? units / m_VRScale * 100.f : 0.f;
+            Vector f1, f2;
+            QAngle::AngleVectors(hudAng, &f1, nullptr, nullptr);
+            QAngle::AngleVectors(h.ang, &f2, nullptr, nullptr);
+            const float dot = std::clamp(f1.Dot(f2), -1.f, 1.f);
+            const float deg = acosf(dot) * 57.29578f;
+            const uint32_t seqNow = m_TrackingUpdateSeq.load(std::memory_order_relaxed);
+            const uint32_t between = seqNow - h.trackSeq;
+            ++h.seqDiff[between == 0 ? 0 : (between == 1 ? 1 : 2)];
+            h.sumCm += cm;
+            if (cm > h.maxCm) h.maxCm = cm;
+            if (deg > h.maxDeg) h.maxDeg = deg;
+            if (cm > 0.5f || deg > 1.f)
+            {
+                ++h.off;
+                if (h.lines < 40 && (cm > 1.5f || deg > 3.f))
+                {
+                    ++h.lines;
+                    Game::logMsg("Hand sync: gun viewmodel pose %.1f cm / %.1f deg from the HUD pose, %u tracking update(s) between, %.1f ms after the viewmodel, vm calls %d",
+                        cm, deg, between, QpcNowMs() - h.qpcMs, h.vmCalls);
+                }
+            }
+        }
+    }
+    h.vmCalls = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (now >= h.nextLogMs)
+    {
+        if (h.nextLogMs != 0 && h.pairs > 0)
+            Game::logMsg("Hand sync (10 s): %d pairs with a weapon, %d with the viewmodel pose >0.5 cm/1 deg off the HUD (mean %.2f cm, max %.1f cm / %.1f deg), tracking updates between 0/1/2+ = %d/%d/%d, no viewmodel pose %d, an eye without viewmodel %d",
+                h.pairs, h.off, h.pairs ? h.sumCm / h.pairs : 0.f, h.maxCm, h.maxDeg,
+                h.seqDiff[0], h.seqDiff[1], h.seqDiff[2], h.noCall, h.eyeMissing);
+        h.pairs = h.off = h.noCall = h.eyeMissing = 0;
+        h.maxCm = h.maxDeg = h.sumCm = 0.f;
+        h.seqDiff[0] = h.seqDiff[1] = h.seqDiff[2] = 0;
+        h.nextLogMs = now + 10000;
+    }
+}
+
+void VR::NoteViewmodelDrawsForSync(int vmLeft, int vmRight, double pairMs)
+{
+    if (!bmvr::g_HandSyncLog || m_EmptyHands || !m_GameplayEligible || IsMenuUp())
+        return;
+    if (vmLeft > 0 && vmRight > 0)
+        return;
+    HandSyncState& h = m_HandSync;
+    ++h.eyeMissing;
+    if (h.missLines < 40)
+    {
+        ++h.missLines;
+        std::string model;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_ControllerMutex);
+            model = m_LastViewmodelModel;
+        }
+        Game::logMsg("Hand sync: pair without viewmodel draw: left %d right %d (pair %.1f ms, model %s)",
+            vmLeft, vmRight, pairMs, model.c_str());
+    }
+}
+
 void VR::MenuDrawBody(Vector& body, float& rotationOffsetY) const
 {
     // MC: the render thread draws frame N while the game thread has moved the
@@ -15735,14 +15862,34 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                     // right or below, along the ammo panel's own axes, so it turns with it.
                     handPanel = gunPanel;
                     const int side = static_cast<int>(bmvr::g_AmmoHudHealthSide + 0.5f);
-                    if (side == 1)
-                        handPanel.ul = gunPanel.ul - gunPanel.xaxis * (gunPanel.width * 1.08f);
-                    else if (side == 2)
-                        handPanel.ul = gunPanel.ul + gunPanel.xaxis * (gunPanel.width * 1.08f);
+                    // Beside: both panels' digits run wider than their square
+                    // panel (layoutRow centres them; health 1 row ~3x, ammo
+                    // ~1.8x), so space the centres by the drawn widths, not the
+                    // panels (user 2026-11-27: left/right clipped into the ammo).
+                    // "Health HUD gap" (per weapon) on top, in panel widths.
+                    const float W = gunPanel.width;
+                    const float gapExtra = bmvr::g_AmmoHudHealthGap * W;
+                    if (side == 1 || side == 2)
+                    {
+                        const int rows = 1 + ((armor >= 0 && armor <= 200) ? 1 : 0) + ((air >= 0 && air <= 100) ? 1 : 0);
+                        const float hRowH = (W - 0.16f * W - 0.06f * W * static_cast<float>(rows - 1)) / static_cast<float>(rows);
+                        const float healthW = hRowH * (18.f / 7.f) + 0.04f * W + hRowH;
+                        const float primaryH = (W - 0.16f * W - 0.06f * W) * 0.62f;
+                        const float lowerH = (W - 0.16f * W - 0.06f * W) - primaryH;
+                        const float ammoPrimaryW = primaryH * (18.f / 7.f) + 0.04f * W + primaryH;
+                        const bool showClip = clip >= 0 && clip <= 999;
+                        const int lowerCells = ((showClip && reserve >= 0 && reserve <= 999) ? 1 : 0)
+                            + ((secondary >= 0 && secondary <= 999) ? 1 : 0);
+                        const float lowerCellW = lowerH * (18.f / 7.f) + 0.04f * W + lowerH;
+                        const float ammoLowerW = lowerCells * lowerCellW + (lowerCells > 1 ? 0.08f * W : 0.f);
+                        const float ammoW = (std::max)({ W, ammoPrimaryW, ammoLowerW });
+                        const float shift = 0.5f * ammoW + 0.5f * (std::max)(W, healthW) + 0.08f * W + gapExtra;
+                        handPanel.ul = gunPanel.ul + gunPanel.xaxis * (side == 1 ? -shift : shift);
+                    }
                     else if (side == 3)
-                        handPanel.ul = gunPanel.ul + gunPanel.yDown * (gunPanel.height * 1.08f);
+                        handPanel.ul = gunPanel.ul + gunPanel.yDown * (gunPanel.height * 1.08f + gapExtra);
                     else
-                        handPanel.ul = gunPanel.ul - gunPanel.yDown * (gunPanel.height * 1.08f);
+                        handPanel.ul = gunPanel.ul - gunPanel.yDown * (gunPanel.height * 1.08f + gapExtra);
                 }
             }
             else
@@ -17454,6 +17601,7 @@ namespace ammo_hud
     {
         float fwd = 0.f, side = 0.f, up = 0.f, tilt = 0.f, turn = 0.f, roll = 0.f, size = 2.f;
         float health = 0.f;   // two-hand health panel: 0 above, 1 left, 2 right, 3 below
+        float healthGap = 0.f;   // extra space to the ammo panel, in panel widths
     };
     std::map<std::string, Place> g_Place;
     std::string g_HeldKey;   // weapon the panel rows show (render thread)
@@ -17501,8 +17649,8 @@ namespace ammo_hud
                 continue;
             char key[32]{};
             Place p;
-            if (sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f %f", key, static_cast<unsigned>(sizeof(key)),
-                    &p.fwd, &p.side, &p.up, &p.tilt, &p.turn, &p.roll, &p.size, &p.health) >= 8)
+            if (sscanf_s(line.c_str(), "%31s %f %f %f %f %f %f %f %f %f", key, static_cast<unsigned>(sizeof(key)),
+                    &p.fwd, &p.side, &p.up, &p.tilt, &p.turn, &p.roll, &p.size, &p.health, &p.healthGap) >= 8)
             {
                 // Lines from before the health column (7 values) keep health 0 = above.
                 g_Place[key] = p;
@@ -17521,13 +17669,14 @@ namespace ammo_hud
             return;
         }
         out << "# Ammo HUD placement per weapon (VR panel DEBUG rows \"AMMO HUD\"), on top of the built-in spot.\n";
-        out << "# key forward side(+ = away from the gun) up tilt turn roll size health   (units; degrees; size 2 = default;\n";
-        out << "# health = health panel beside the ammo panel with both hands on the gun: 0 above, 1 left, 2 right, 3 below)\n";
+        out << "# key forward side(+ = away from the gun) up tilt turn roll size health gap   (units; degrees; size 2 = default;\n";
+        out << "# health = health panel beside the ammo panel with both hands on the gun: 0 above, 1 left, 2 right, 3 below;\n";
+        out << "# gap = extra space between those two panels, in panel widths)\n";
         for (const auto& kv : g_Place)
         {
             const Place& p = kv.second;
             out << kv.first << " " << p.fwd << " " << p.side << " " << p.up << " " << p.tilt << " "
-                << p.turn << " " << p.roll << " " << p.size << " " << p.health << "\n";
+                << p.turn << " " << p.roll << " " << p.size << " " << p.health << " " << p.healthGap << "\n";
         }
     }
 
@@ -17548,18 +17697,21 @@ namespace ammo_hud
         bmvr::g_AmmoHudRoll = p.roll;
         bmvr::g_AmmoHudSize = p.size;
         bmvr::g_AmmoHudHealthSide = p.health;
+        bmvr::g_AmmoHudHealthGap = p.healthGap;
     }
 
     Place FromGlobals()
     {
         return Place{ bmvr::g_AmmoHudForward, bmvr::g_AmmoHudSide, bmvr::g_AmmoHudUp, bmvr::g_AmmoHudTilt,
-            bmvr::g_AmmoHudTurn, bmvr::g_AmmoHudRoll, bmvr::g_AmmoHudSize, bmvr::g_AmmoHudHealthSide };
+            bmvr::g_AmmoHudTurn, bmvr::g_AmmoHudRoll, bmvr::g_AmmoHudSize, bmvr::g_AmmoHudHealthSide,
+            bmvr::g_AmmoHudHealthGap };
     }
 
     bool Same(const Place& a, const Place& b)
     {
         return a.fwd == b.fwd && a.side == b.side && a.up == b.up && a.tilt == b.tilt
-            && a.turn == b.turn && a.roll == b.roll && a.size == b.size && a.health == b.health;
+            && a.turn == b.turn && a.roll == b.roll && a.size == b.size && a.health == b.health
+            && a.healthGap == b.healthGap;
     }
 }
 
@@ -17576,6 +17728,7 @@ bool bmvr::AmmoHudRowDefault(const float* f, float& def)
     else if (f == &g_AmmoHudRoll) def = b.roll;
     else if (f == &g_AmmoHudSize) def = b.size;
     else if (f == &g_AmmoHudHealthSide) def = b.health;
+    else if (f == &g_AmmoHudHealthGap) def = b.healthGap;
     else return false;
     return true;
 }
@@ -17608,8 +17761,8 @@ void VR::SyncAmmoHudRows()
     else
         ammo_hud::g_Place[key] = now;
     ammo_hud::Save();
-    Game::logMsg("Ammo HUD tune %s: fwd %+.2f side %+.2f up %+.2f tilt %+.0f turn %+.0f roll %+.0f size %.2f health %.0f",
-        key.c_str(), now.fwd, now.side, now.up, now.tilt, now.turn, now.roll, now.size, now.health);
+    Game::logMsg("Ammo HUD tune %s: fwd %+.2f side %+.2f up %+.2f tilt %+.0f turn %+.0f roll %+.0f size %.2f health %.0f gap %+.2f",
+        key.c_str(), now.fwd, now.side, now.up, now.tilt, now.turn, now.roll, now.size, now.health, now.healthGap);
 }
 
 void VR::GetRightGlovePalmOffsetMeters(Vector& meters) const
@@ -19296,6 +19449,7 @@ bool VR::QueueMcCompositeToRing(uint32_t band)
         ? &m_OpenXrStereoRenderPose : nullptr;
     HandDrawSnap hands{};
     CaptureHandDrawSnap(hands);
+    CheckHandSync(hands);
     auto* functor = new (std::nothrow) McMatFunctor(
         this, McMatFunctor::Kind::Composite, 0, band, false, pose, &hands);
     if (!functor)
@@ -22945,6 +23099,7 @@ void VR::SubmitVRTextures()
 void VR::UpdateTracking()
 {
     BMVR_PROF("vr UpdateTracking");
+    m_TrackingUpdateSeq.fetch_add(1, std::memory_order_relaxed);
     // Same as the controller flags (UpdateControllerTracking): no transient
     // "HMD pose invalid" that the other thread can see mid-update (the
     // hand/laser overlay skips its whole draw on it = hands gone a frame).

@@ -1129,6 +1129,27 @@ bool Game::LocalPlayerAbsOrigin(Vector& out)
     return out.LengthSqr() > 0.f;
 }
 
+bool Game::LocalPlayerVelocity(Vector& out)
+{
+    // DT_LocalPlayerExclusive m_vecVelocity[0] (Ghidra FUN_100b7240; datamap 0xF8 too).
+    constexpr int kVecVelocity = 0xF8;
+    if (!m_EngineClient || !m_ClientEntityList)
+        return false;
+    const int local = m_EngineClient->GetLocalPlayer();
+    void* player = local > 0 ? m_ClientEntityList->GetClientEntity(local) : nullptr;
+    if (!player)
+        return false;
+    BMVR_TRY
+    {
+        out = *reinterpret_cast<const Vector*>(static_cast<const char*>(player) + kVecVelocity);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+    return std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
+}
+
 float Game::TickInterval()
 {
     float t = 0.f;

@@ -103,6 +103,9 @@ public:
     int LocalPlayerFlags();
     int LocalPlayerWaterLevel();
     bool LocalPlayerAbsOrigin(Vector& out);
+    // m_vecVelocity of the local player: its own movement, without what a
+    // parent (intro tram) or pusher carries. False = unreadable.
+    bool LocalPlayerVelocity(Vector& out);
     // World-space bottom/top mount points of the map's func_useableladders
     // (CFuncLadder; entity list rescanned at most once a second).
     int CollectLadders(Vector* bottoms, Vector* tops, int maxLadders);

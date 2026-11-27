@@ -217,6 +217,8 @@ namespace bmvr
               Kind::Float, 0.f, 2.f, nullptr, &g_VrGmanThumbCurl },
             { "bmvr_gman_thumb_swing", "VR: sideways swing of the G-Man gesture thumb at its root, radians (0 = plain curl, goes through the fingers)",
               Kind::Float, 0.f, 1.5f, nullptr, &g_VrGmanThumbSwing },
+            { "bmvr_gman_finger_twist", "VR: G-Man gesture middle finger turned about its own length, degrees",
+              Kind::Float, -30.f, 30.f, nullptr, &g_VrGmanFingerTwistDeg },
             { "bmvr_gman_gesture_force", "VR test: grip shows the G-Man gesture everywhere (for tuning bmvr_gman_finger_straight)",
               Kind::Bool, 0.f, 1.f, &g_VrGmanGestureForce, nullptr },
             { "bmvr_snap_turn", "VR: snap turning (0 = smooth)",

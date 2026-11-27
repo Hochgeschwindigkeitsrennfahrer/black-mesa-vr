@@ -314,6 +314,13 @@ namespace bmvr
     // (class, model, surface, contents, distance) and the same aim traced from
     // the eye, to tell clip brushes and prop hulls from the muzzle sitting lower.
     extern bool g_AimHitLog;
+    // HandSyncLog=true (Debug tab "Log hand/gun sync"): per stereo pair, how
+    // far the gun viewmodel's controller pose (CalcViewModelView) is from the
+    // pose the ammo HUD / gloves draw with, and pairs where an eye drew no
+    // viewmodel while a weapon is held (bmvr_log "Hand sync"). User 2026-11-27:
+    // ammo HUD a frame ahead of the gun hand, gun hand missing for one frame
+    // in heavy scenes.
+    extern bool g_HandSyncLog;
     // OffCenterTest=true (flat only, diagnostic): while VR/offcenter_test_on
     // exists, the main view renders the PSVR2 left-eye off-centre subrect
     // (left 0, right 0.758 of the frustum) to check the engine's off-centre
@@ -840,6 +847,10 @@ namespace bmvr
     // Config VrGmanThumbCurl / VrGmanThumbSwing, cvars bmvr_gman_thumb_curl / _swing.
     extern float g_VrGmanThumbCurl;
     extern float g_VrGmanThumbSwing;
+    // Gesture middle finger turned about its own length, degrees (same visual
+    // direction on both hands; Black Mesa gloves). Config VrGmanFingerTwist,
+    // cvar bmvr_gman_finger_twist, dev row G-MAN GESTURE TUNING.
+    extern float g_VrGmanFingerTwistDeg;
     // Test aid (cvar bmvr_gman_gesture_force, not saved): gesture on without a G-Man in view.
     extern bool g_VrGmanGestureForce;
     // L4D2VR BuildControllerWorld local translation (meters, before model
@@ -913,7 +924,7 @@ namespace bmvr
     // (only with VrMagReload on). On by default.
     extern bool g_VrGrenadePin;
     // Small usage hints (VR::ShowUsageHint): reload steps ("PUMP IT"), and the
-    // first carried prop / mounted gun of a game start. On by default.
+    // first two carried props / mounted guns of a game start. On by default.
     // config.txt key VrUsageHints (old VrReloadHints migrated at startup).
     extern bool g_VrUsageHints;
     // Left glove takes Black Mesa's own reload-clip hand pose on a held magazine, the MP5 bolt
@@ -1006,6 +1017,8 @@ namespace bmvr
     // Health/HEV panel next to the ammo panel while the gun is held with both hands (HudHealthOnGun),
     // in the ammo panel's plane: 0 above, 1 left, 2 right, 3 below. Saved per weapon (VR/ammo_hud.txt).
     extern float g_AmmoHudHealthSide;
+    // Extra space between that health panel and the ammo panel, in panel widths (per weapon, 10th column).
+    extern float g_AmmoHudHealthGap;
     // Panel row `f` is one of the ammo HUD rows: `def` = its built-in value
     // for the weapon in the hand (what "Reset tab" puts back).
     bool AmmoHudRowDefault(const float* f, float& def);

@@ -81,6 +81,18 @@ namespace
         return out;
     }
 
+    // Rotation about a unit axis (joint frame).
+    VrHandMatrix4 MakeAxisRotation(const float axis[3], float radians)
+    {
+        VrHandMatrix4 out = VrHandMath::Identity();
+        const float ca = std::cos(radians), sa = std::sin(radians), t = 1.f - ca;
+        const float x = axis[0], y = axis[1], z = axis[2];
+        VrHandMath::Set(out, 0, 0, t * x * x + ca);     VrHandMath::Set(out, 0, 1, t * x * y - sa * z); VrHandMath::Set(out, 0, 2, t * x * z + sa * y);
+        VrHandMath::Set(out, 1, 0, t * x * y + sa * z); VrHandMath::Set(out, 1, 1, t * y * y + ca);     VrHandMath::Set(out, 1, 2, t * y * z - sa * x);
+        VrHandMath::Set(out, 2, 0, t * x * z - sa * y); VrHandMath::Set(out, 2, 1, t * y * z + sa * x); VrHandMath::Set(out, 2, 2, t * z * z + ca);
+        return out;
+    }
+
     VrHandMatrix4 MakeLocalZRotation(float radians)
     {
         VrHandMatrix4 out = VrHandMath::Identity();
@@ -154,6 +166,7 @@ namespace
         float lastGripCurlMin = -1.f;
         float lastGmanThumb[3]{};
         float lastStraight = 0.f;
+        float lastTwist = 0.f;
     };
 
     void BuildHandRig(const VrHandMeshAsset& asset, HandRig& rig)
@@ -274,7 +287,8 @@ namespace
         if (rig.paletteValid && outPalette.size() == n && rig.lastGripCurlMin == gripCurlMin
             && std::memcmp(curls, rig.lastCurl, sizeof(curls)) == 0
             && std::memcmp(gmanThumbState, rig.lastGmanThumb, sizeof(gmanThumbState)) == 0
-            && rig.lastStraight == straightMiddle)
+            && rig.lastStraight == straightMiddle
+            && rig.lastTwist == bmvr::g_VrGmanFingerTwistDeg)
             return true;
 
         static const float kMaxCurlRadians[vr::VRFinger_Count][3] =
@@ -354,6 +368,14 @@ namespace
                         + VrHandMath::Get(rig.bindLocal[joint], 1, r) * want[1]
                         + VrHandMath::Get(rig.bindLocal[joint], 2, r) * want[2];
                 localMatrices[joint] = VrHandMath::Multiply(rig.bindLocal[joint], MakeTurnTowards(bone, a, straightMiddle));
+                // Twist (user 2026-11-27: finger looked turned about its
+                // length): the root segment about its own bone, which turns
+                // the whole finger. Mirrored rigs: sign per hand.
+                if (segment == 0 && bmvr::g_VrGmanFingerTwistDeg != 0.f)
+                {
+                    const float twist = (rig.rightHand ? -1.f : 1.f) * DEG2RAD(bmvr::g_VrGmanFingerTwistDeg) * straightMiddle;
+                    localMatrices[joint] = VrHandMath::Multiply(localMatrices[joint], MakeAxisRotation(bone, twist));
+                }
             }
         }
 
@@ -376,6 +398,7 @@ namespace
         std::memcpy(rig.lastCurl, curls, sizeof(curls));
         std::memcpy(rig.lastGmanThumb, gmanThumbState, sizeof(gmanThumbState));
         rig.lastStraight = straightMiddle;
+        rig.lastTwist = bmvr::g_VrGmanFingerTwistDeg;
         rig.lastGripCurlMin = gripCurlMin;
         rig.paletteValid = true;
         return true;

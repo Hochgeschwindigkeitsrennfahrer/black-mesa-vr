@@ -1071,7 +1071,9 @@ public:
     struct RoomscaleState
     {
         bool haveBody = false;
-        Vector lastBody{};
+        Vector lastBody{0.f, 0.f, 0.f};
+        LONGLONG lastQpc = 0;       // time of lastBody (QPC), for velocity x dt
+        float carriedUnits = 0.f;   // body moves not from its own velocity (since the last summary)
         ULONGLONG wishUntilMs = 0;  // absorb body moves until (wish + settle)
         bool paused = true;         // last RoomscaleWish verdict, for the log
         const char* pauseWhy = "";
@@ -1335,6 +1337,28 @@ public:
         Vector gunHudShift{};
     };
     void CaptureHandDrawSnap(HandDrawSnap& s);
+    // HandSyncLog (bmvr::g_HandSyncLog). CalcViewModelView: the gun-hand
+    // controller pose the viewmodel is placed from; CaptureHandDrawSnap:
+    // compared with the pose the HUD/gloves draw with; StereoCostLog: the
+    // pair's viewmodel draws per eye.
+    void NoteViewmodelPoseForSync();
+    void CheckHandSync(const HandDrawSnap& s);
+    void NoteViewmodelDrawsForSync(int vmLeft, int vmRight, double pairMs);
+    struct HandSyncState
+    {
+        bool have = false;
+        Vector pos{ 0.f, 0.f, 0.f };
+        QAngle ang{ 0.f, 0.f, 0.f };
+        uint32_t trackSeq = 0;
+        double qpcMs = 0.0;
+        int vmCalls = 0;            // CalcViewModelView calls since the last pair
+        // 10 s summary
+        int pairs = 0, off = 0, noCall = 0, eyeMissing = 0, lines = 0, missLines = 0;
+        float maxCm = 0.f, maxDeg = 0.f, sumCm = 0.f;
+        int seqDiff[3] = { 0, 0, 0 }; // tracking updates between: 0, 1, 2+
+        ULONGLONG nextLogMs = 0;
+    } m_HandSync;
+    std::atomic<uint32_t> m_TrackingUpdateSeq{ 0 };
     // HUD values for drawing: the drawing frame's snapshot while one is drawn
     // (MC), else read live.
     bool HudValuesForDraw(int& health, int& armor, int& clip, int& reserve, int& secondary, int& air) const;
@@ -1582,7 +1606,7 @@ public:
     enum class UsageHint : uint8_t
     {
         ChargingHandle, RackSlide, Pump, FlickClose, TiltDump, // reload steps
-        CarryThrow, MountedFire,                               // first carry / mounted gun
+        CarryThrow, MountedFire,                               // first two carries / mounted guns
         Count
     };
     // With `detail`: the larger toast with a second line, 4 s (e.g. the action

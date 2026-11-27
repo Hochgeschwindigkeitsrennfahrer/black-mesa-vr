@@ -129,6 +129,7 @@ namespace bmvr
     float g_VrLaserStartForward = 0.f;
     bool g_AimDebug = false;
     bool g_AimHitLog = false;
+    bool g_HandSyncLog = false;
     bool g_OffCenterTest = false;
     bool g_OffCenterEyes = true;
     bool g_FakeRuntime = false;
@@ -389,6 +390,7 @@ namespace bmvr
     float g_VrGmanFingerStraight = 0.3f;
     float g_VrGmanThumbCurl = 1.f;
     float g_VrGmanThumbSwing = 0.6f;
+    float g_VrGmanFingerTwistDeg = 0.f;
     bool g_VrGmanGestureForce = false;
     // ~one hand-length back along aim after yaw 180 (user: gloves sat ahead
     // of the controller). Flip the Z sign in VR/config.txt if this goes the
@@ -464,6 +466,7 @@ namespace bmvr
     float g_LadderTuneOutCm = 0.f, g_LadderTuneUpCm = 0.f, g_LadderTuneCurl = 0.7f;
     float g_AmmoHudForward = 0.f, g_AmmoHudSide = 0.f, g_AmmoHudUp = 0.f, g_AmmoHudTilt = 0.f, g_AmmoHudTurn = 0.f, g_AmmoHudRoll = 0.f, g_AmmoHudSize = 2.f;
     float g_AmmoHudHealthSide = 0.f;
+    float g_AmmoHudHealthGap = 0.f;
     bool g_TwoHandAmmoHudFollowsHand = false;
     float g_SatchelGripCurl = 0.75f;
     float g_SatchelBagDepth = 1.5f;
@@ -1034,6 +1037,8 @@ namespace bmvr
                 g_AimDebug = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "AimHitLog") == 0)
                 g_AimHitLog = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "HandSyncLog") == 0)
+                g_HandSyncLog = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "VrShotOriginFix") == 0)
                 g_VrShotOriginFix = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "CrouchStickHold") == 0)
@@ -1415,6 +1420,12 @@ namespace bmvr
                 const float v = static_cast<float>(atof(val));
                 if (v >= 0.f && v <= 1.5f)
                     g_VrGmanThumbSwing = v;
+            }
+            else if (std::strcmp(n, "VrGmanFingerTwist") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= -30.f && v <= 30.f)
+                    g_VrGmanFingerTwistDeg = v;
             }
             else if (std::strcmp(n, "VrHandsPoseOffsetMeters") == 0)
             {

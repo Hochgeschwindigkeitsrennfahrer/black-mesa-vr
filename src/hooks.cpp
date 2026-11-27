@@ -2847,6 +2847,8 @@ namespace
         int dmeR = 0;
         int dmeEnt = 0;
         int dmeVm = 0;
+        int dmeVmL = 0;
+        int dmeVmR = 0;
         int dmeShadow = 0;
         int dmeBones32 = 0;
         int uniqEnt = 0;
@@ -2893,6 +2895,8 @@ namespace
         const double pairMs = leftMs + rightMs;
         const double blitMs = QpcMs(g_Cost.blitTicks);
         const double handsMs = QpcMs(g_Cost.handsTicks);
+        if (Hooks::m_VR)
+            Hooks::m_VR->NoteViewmodelDrawsForSync(g_Cost.dmeVmL, g_Cost.dmeVmR, pairMs);
         const double origMs = QpcMs(g_Cost.dmeOrigTicks);
         const double hookMs = QpcMs(g_Cost.dmeHookTicks);
         static DWORD s_lastLogMs;
@@ -11532,6 +11536,7 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
             // lag/bob and $origin are in the same frame as the hard-lock.
             const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos(ladderEye);
             const QAngle targetAng = m_VR->GetRecommendedViewmodelAbsAngle();
+            m_VR->NoteViewmodelPoseForSync();
             // Crowbar idle-force runs in SuppressViewmodelMovementAnims.
             // MP5 fire sequences must keep playing (never idle-force those).
             if (mp5)
@@ -11854,7 +11859,13 @@ void __fastcall Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, cons
         if (AuxSceneRtBound())
             ++g_Cost.dmeShadow;
         if (isViewmodel)
+        {
             ++g_Cost.dmeVm;
+            if (g_Cost.eye == 1)
+                ++g_Cost.dmeVmL;
+            else if (g_Cost.eye == 2)
+                ++g_Cost.dmeVmR;
+        }
         if (entityIndex > 1)
         {
             ++g_Cost.dmeEnt;
