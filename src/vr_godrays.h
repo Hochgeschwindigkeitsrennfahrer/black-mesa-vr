@@ -28,6 +28,15 @@ namespace bmvr
     // CreatePixelShader: the blur PS (first `add rN.xy, c10, -vM`, then
     // `mul rN.xy, rN, c9.x`, radial taps toward the light at c10.xy).
     bool GodRayIsBlurPs(const uint32_t* bytecode);
+    // CreatePixelShader: the final PS (blends the blur result into the eye:
+    // reads c10 + c11, dp2add for the distance to the light, pow falloff).
+    bool GodRayIsFinalPs(const uint32_t* bytecode);
+    // GodRayBlurScale (Debug row "God rays blur size"): the blur pass draws
+    // into a 1/divisor-size stand-in for the game's eye-sized _rt_lsBlur*
+    // (swapped at the draw, read back by the final pass with linear
+    // filtering). 1 = stock full size. The blur is 64 taps per pixel at eye
+    // resolution (~0.8 ms/frame for both eyes, 2026-11-27).
+    int GodRayBlurDivisor();
     // Replacement mask PS (oC0 = 0, oDepth = radial threshold; c104).
     const uint32_t* GodRayMaskPs(size_t* tokens);
     constexpr unsigned kGodRayConstReg = 104;

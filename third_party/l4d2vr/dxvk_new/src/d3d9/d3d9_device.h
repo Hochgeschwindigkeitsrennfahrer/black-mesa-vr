@@ -47,6 +47,7 @@ namespace dxvk {
   class D3D9InterfaceEx;
   class D3D9SwapChainEx;
   class D3D9CommonTexture;
+  class D3D9Texture2D;
   class D3D9CommonBuffer;
   class D3D9CommonShader;
   class D3D9ShaderModuleSet;
@@ -636,8 +637,20 @@ namespace dxvk {
     // Screen-aligned particles stay level with world up (see d3d9_device.cpp).
     bool BmvrParticleLevelBegin(float saved[28]);
     // God ray mask drawn with the radial-depth PS (vr_godrays.h); End restores the game's PS.
-    bool BmvrGodRayBegin(Com<D3D9PixelShader, false>& saved);
-    void BmvrGodRayEnd(Com<D3D9PixelShader, false>& saved);
+    struct BmvrGodRaySaved {
+      Com<D3D9PixelShader, false> ps;
+      bool psSwapped = false;
+      Com<D3D9Surface, false> rt0;
+      bool rtSwapped = false;
+      D3DVIEWPORT9 viewport = {};
+      RECT scissor = {};
+      IDirect3DBaseTexture9* tex[4] = {};
+      DWORD filter[4][3] = {};
+      unsigned texSwapped = 0;
+    };
+    bool BmvrGodRayBegin(BmvrGodRaySaved& saved);
+    void BmvrGodRayEnd(BmvrGodRaySaved& saved);
+    D3D9Texture2D* BmvrGodRaySmallBlur(D3D9CommonTexture* full, bool create);
     void BmvrParticleLevelEnd(const float saved[28]);
 
     HRESULT STDMETHODCALLTYPE SetPixelShaderConstantF(
@@ -1105,6 +1118,9 @@ namespace dxvk {
     void BmvrNoteMsaaAttachmentsWritten();
     bool m_bmvrMsRaster = false;
     Com<D3D9PixelShader, false> m_bmvrGrMaskPs;   // radial god ray mask (created on first use)
+    // GodRayBlurScale: the game's full-size _rt_lsBlur* -> our smaller stand-in.
+    std::unordered_map<D3D9CommonTexture*, Com<D3D9Texture2D, false>> m_bmvrGrSmall;
+    bool m_bmvrGrSmallLogged = false;
     bool m_bmvrGrMaskPsFailed = false;
     float m_bmvrLodBias = 0.0f;   // bmvr::g_LodBias as applied to the bound samplers (0 off the 3D views)
     void BmvrSetMsaaEyeRetired(IDirect3DSurface9* color, IDirect3DSurface9* depth, bool retire);

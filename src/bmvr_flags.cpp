@@ -349,6 +349,7 @@ namespace bmvr
     bool g_XenGlobalFogOff = true;
     float g_XenFogNoiseMode = 3.f;
     bool g_GodRayRadialMask = true;
+    float g_GodRayBlurScale = 0.f;
     float g_XenFogNoiseSize = 256.f;
     float g_XenFogWorldNear = 300.f;
     float g_XenFogWorldFar = 1200.f;
@@ -1395,6 +1396,12 @@ namespace bmvr
                 g_FlareEyeAxis = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "PixelVisPerEye") == 0)
                 g_PixelVisPerEye = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
+            else if (std::strcmp(n, "GodRayBlurScale") == 0)
+            {
+                const float v = static_cast<float>(std::atof(val));
+                if (v >= 0.f && v <= 2.f)
+                    g_GodRayBlurScale = v;
+            }
             else if (std::strcmp(n, "GodRayRadialMask") == 0)
                 g_GodRayRadialMask = (std::strcmp(val, "true") == 0 || std::strcmp(val, "1") == 0);
             else if (std::strcmp(n, "GlowCountDepthFix") == 0)

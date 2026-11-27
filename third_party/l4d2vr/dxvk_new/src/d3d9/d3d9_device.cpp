@@ -4747,19 +4747,96 @@ namespace dxvk {
     SetShaderConstants<DxsoProgramTypes::VertexShader, D3D9ConstantType::Float>(uint32_t(vs->bmvrParticleProj), saved + 12, 4);
   }
 
-  bool D3D9DeviceEx::BmvrGodRayBegin(Com<D3D9PixelShader, false>& saved) {
+  D3D9Texture2D* D3D9DeviceEx::BmvrGodRaySmallBlur(D3D9CommonTexture* full, bool create) {
+    const int scale = bmvr::GodRayBlurDivisor();
+    if (full == nullptr || scale <= 1)
+      return nullptr;
+    const auto* fd = full->Desc();
+    const UINT w = std::max<UINT>(1u, (fd->Width + scale - 1) / scale);
+    const UINT h = std::max<UINT>(1u, (fd->Height + scale - 1) / scale);
+    auto it = m_bmvrGrSmall.find(full);
+    if (it != m_bmvrGrSmall.end()) {
+      const auto* sd = it->second->GetCommonTexture()->Desc();
+      if (sd->Width == w && sd->Height == h && sd->Format == fd->Format)
+        return it->second.ptr();
+      if (!create)
+        return nullptr;
+      m_bmvrGrSmall.erase(it);
+    }
+    if (!create)
+      return nullptr;
+    if (m_bmvrGrSmall.size() >= 8)
+      m_bmvrGrSmall.clear();   // stale entries (map changes)
+    IDirect3DTexture9* t = nullptr;
+    if (FAILED(CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFORMAT(fd->Format), D3DPOOL_DEFAULT, &t, nullptr)) || !t) {
+      bmvr::Log("God rays: blur stand-in %ux%u could not be created, full size kept", w, h);
+      return nullptr;
+    }
+    Com<D3D9Texture2D, false> smallTex = static_cast<D3D9Texture2D*>(t);
+    t->Release();
+    if (!m_bmvrGrSmallLogged) {
+      m_bmvrGrSmallLogged = true;
+      bmvr::Log("God rays: blur at 1/%d size (%ux%u instead of %ux%u)", scale, w, h, fd->Width, fd->Height);
+    }
+    D3D9Texture2D* ptr = smallTex.ptr();
+    m_bmvrGrSmall.emplace(full, std::move(smallTex));
+    return ptr;
+  }
+
+  bool D3D9DeviceEx::BmvrGodRayBegin(BmvrGodRaySaved& saved) {
     auto* vs = m_state.vertexShader.ptr();
     auto* ps = m_state.pixelShader.ptr();
-    if (likely((!vs || !vs->bmvrGrMask) && (!ps || !ps->bmvrGrBlur)))
+    if (likely((!vs || !vs->bmvrGrMask) && (!ps || (!ps->bmvrGrBlur && !ps->bmvrGrFinal))))
       return false;
     const int eye = bmvr::CurrentDrawEye();
     static std::atomic<int> s_seen{0};
     if (s_seen.fetch_add(1) < 6)
-      bmvr::Log("God rays: %s draw, eye %d, light depth %.6f", (ps && ps->bmvrGrBlur) ? "blur" : "mask", eye,
+      bmvr::Log("God rays: %s draw, eye %d, light depth %.6f",
+        (ps && ps->bmvrGrBlur) ? "blur" : (ps && ps->bmvrGrFinal) ? "final" : "mask", eye,
         m_state.vsConsts->fConsts[27].data[2]);
-    if (ps && ps->bmvrGrBlur) {
-      bmvr::GodRayNoteBlur(eye, m_state.psConsts->fConsts[10].data);
-      return false;
+    bool any = false;
+    if (ps && (ps->bmvrGrBlur || ps->bmvrGrFinal)) {
+      if (ps->bmvrGrBlur)
+        bmvr::GodRayNoteBlur(eye, m_state.psConsts->fConsts[10].data);
+      // GodRayBlurScale: the blur writes our smaller target; anything that
+      // samples a blur result (final pass, a second blur pass) reads it,
+      // filtered linearly.
+      if (bmvr::GodRayBlurDivisor() > 1) {
+        for (DWORD i = 0; i < 4; i++) {
+          IDirect3DBaseTexture9* t = m_state.textures[i];
+          if (t == nullptr || t->GetType() != D3DRTYPE_TEXTURE)
+            continue;
+          D3D9Texture2D* smallTex = BmvrGodRaySmallBlur(GetCommonTexture(t), false);
+          if (smallTex == nullptr)
+            continue;
+          const DWORD st = RemapSamplerState(i);
+          saved.tex[i] = t;
+          saved.filter[i][0] = m_state.samplerStates[st][D3DSAMP_MINFILTER];
+          saved.filter[i][1] = m_state.samplerStates[st][D3DSAMP_MAGFILTER];
+          saved.filter[i][2] = m_state.samplerStates[st][D3DSAMP_MIPFILTER];
+          saved.texSwapped |= 1u << i;
+          SetStateTexture(st, smallTex);
+          SetStateSamplerState(st, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+          SetStateSamplerState(st, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+          SetStateSamplerState(st, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+          any = true;
+        }
+        if (ps->bmvrGrBlur && m_state.renderTargets[0] != nullptr) {
+          D3D9Surface* rt = m_state.renderTargets[0].ptr();
+          D3D9Texture2D* smallTex = BmvrGodRaySmallBlur(GetCommonTexture(rt), true);
+          IDirect3DSurface9* surf = nullptr;
+          if (smallTex != nullptr && SUCCEEDED(smallTex->GetSurfaceLevel(0, &surf)) && surf) {
+            saved.rt0 = rt;
+            saved.viewport = m_state.viewport;
+            saved.scissor = m_state.scissorRect;
+            saved.rtSwapped = true;
+            SetRenderTargetInternal(0, surf);
+            surf->Release();
+            any = true;
+          }
+        }
+      }
+      return any;
     }
     if (!bmvr::g_GodRayRadialMask || m_bmvrGrMaskPsFailed)
       return false;
@@ -4782,16 +4859,32 @@ namespace dxvk {
       m_bmvrGrMaskPs = static_cast<D3D9PixelShader*>(created);
       created->Release();
     }
-    saved = ps;
+    saved.ps = ps;
+    saved.psSwapped = true;
     SetPixelShader(m_bmvrGrMaskPs.ptr());
     SetShaderConstants<DxsoProgramTypes::PixelShader, D3D9ConstantType::Float>(
       bmvr::kGodRayConstReg, c, 2);
     return true;
   }
 
-  void D3D9DeviceEx::BmvrGodRayEnd(Com<D3D9PixelShader, false>& saved) {
-    SetPixelShader(saved.ptr());
-    saved = nullptr;
+  void D3D9DeviceEx::BmvrGodRayEnd(BmvrGodRaySaved& saved) {
+    if (saved.psSwapped)
+      SetPixelShader(saved.ps.ptr());
+    if (saved.rtSwapped) {
+      SetRenderTargetInternal(0, saved.rt0.ptr());
+      SetViewport(&saved.viewport);
+      SetScissorRect(&saved.scissor);
+    }
+    for (DWORD i = 0; i < 4; i++) {
+      if (!(saved.texSwapped & (1u << i)))
+        continue;
+      const DWORD st = RemapSamplerState(i);
+      SetStateTexture(st, saved.tex[i]);
+      SetStateSamplerState(st, D3DSAMP_MINFILTER, saved.filter[i][0]);
+      SetStateSamplerState(st, D3DSAMP_MAGFILTER, saved.filter[i][1]);
+      SetStateSamplerState(st, D3DSAMP_MIPFILTER, saved.filter[i][2]);
+    }
+    saved = BmvrGodRaySaved();
   }
 
   namespace {
@@ -4802,7 +4895,7 @@ namespace dxvk {
       bool godRay;
       float saved[12];
       float particleSaved[28];
-      Com<D3D9PixelShader, false> godRaySaved;
+      D3D9DeviceEx::BmvrGodRaySaved godRaySaved;
       explicit BmvrViewProjNormalScope(D3D9DeviceEx* d) : dev(d) {
         on = dev->BmvrViewProjNormalsBegin(saved);
         particle = dev->BmvrParticleLevelBegin(particleSaved);
@@ -5804,6 +5897,7 @@ namespace dxvk {
       bytecodeLength);
     shader->bmvrXenFog = bmvrUsePatch;
     shader->bmvrGrBlur = bmvr::GodRayIsBlurPs(reinterpret_cast<const uint32_t*>(pFunction));
+    shader->bmvrGrFinal = bmvr::GodRayIsFinalPs(reinterpret_cast<const uint32_t*>(pFunction));
     *ppShader = ref(shader);
 
     return D3D_OK;

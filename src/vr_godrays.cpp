@@ -163,6 +163,37 @@ namespace bmvr
         return add && mul && texld >= 4;
     }
 
+    bool GodRayIsFinalPs(const uint32_t* t)
+    {
+        if (!t || t[0] != 0xFFFF0300u)
+            return false;
+        bool c10 = false, c11 = false, dp2add = false, pw = false;
+        int texld = 0, count = 0;
+        ForEachInstruction(t, [&](const uint32_t* in, uint32_t op, uint32_t len) {
+            ++count;
+            if (op == 0x42)
+                ++texld;
+            if (op == 0x5A)
+                dp2add = true;
+            if (op == 0x20)
+                pw = true;
+            for (uint32_t k = 2; k <= len; ++k)
+                if (RegType(in[k]) == 2)
+                {
+                    c10 |= RegNum(in[k]) == 10;
+                    c11 |= RegNum(in[k]) == 11;
+                }
+            return count < 256;
+        });
+        return c10 && c11 && dp2add && pw && texld >= 1 && texld <= 4 && count < 64;
+    }
+
+    int GodRayBlurDivisor()
+    {
+        const int v = static_cast<int>(g_GodRayBlurScale + 0.5f);
+        return v == 1 ? 2 : v == 2 ? 4 : 1;
+    }
+
     const uint32_t* GodRayMaskPs(size_t* tokens)
     {
         if (tokens)

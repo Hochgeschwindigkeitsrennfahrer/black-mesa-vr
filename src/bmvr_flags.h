@@ -711,6 +711,9 @@ namespace bmvr
     // looked level toward the light (src/vr_godrays.h). false = stock depth
     // along the view axis (rays come and go with head pitch).
     extern bool g_GodRayRadialMask;
+    // God rays blur size (GodRayBlurScale): 0 full (stock), 1 half, 2 quarter
+    // (src/vr_godrays.h GodRayBlurDivisor).
+    extern float g_GodRayBlurScale;
     extern float g_XenFogNoiseSize;
     extern float g_XenFogWorldNear;
     extern float g_XenFogWorldFar;

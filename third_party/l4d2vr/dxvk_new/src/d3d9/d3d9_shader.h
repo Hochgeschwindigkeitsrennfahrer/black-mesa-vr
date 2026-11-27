@@ -203,6 +203,8 @@ namespace dxvk {
     bool bmvrXenFog = false;
     // BMVR: god ray blur PS (its c10 = the light's screen position).
     bool bmvrGrBlur = false;
+    // BMVR: god ray final PS (reads the blur result; vr_godrays.h).
+    bool bmvrGrFinal = false;
 
   };
 
