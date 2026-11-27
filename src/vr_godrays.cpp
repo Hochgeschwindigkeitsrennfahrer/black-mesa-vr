@@ -104,6 +104,17 @@ namespace bmvr
         EyeLights g_Eye[3];
         int g_LastEye = 0;
         bool g_Logged = false;
+        unsigned g_TraceSeq = 0;
+
+        // bmvr_godray_log: one line per draw while the budget lasts.
+        bool TraceTake()
+        {
+            if (!(g_GodRayLog >= 1.f))
+                return false;
+            g_GodRayLog -= 1.f;
+            ++g_TraceSeq;
+            return true;
+        }
 
         void EnterEye(int eye)
         {
@@ -111,6 +122,9 @@ namespace bmvr
                 return;
             g_LastEye = eye;
             EyeLights& e = g_Eye[eye];
+            if (g_GodRayLog >= 1.f)
+                Game::logMsg("God rays trace: enter eye %d (blurs stored %d, last %d, masks drawn %d)",
+                    eye, e.pending, e.count, e.maskIndex);
             if (e.pending > 0)
                 e.count = e.pending;
             e.pending = 0;
@@ -214,6 +228,8 @@ namespace bmvr
             e.uv[e.pending][1] = c10[1];
             ++e.pending;
         }
+        if (TraceTake())
+            Game::logMsg("God rays trace %u: blur eye %d #%d uv %.3f,%.3f", g_TraceSeq, eye, e.pending - 1, c10[0], c10[1]);
     }
 
     bool GodRayMaskConstants(int eye, float lightDepth, const float c51[4], const float m[16], float out[8])
@@ -221,18 +237,29 @@ namespace bmvr
         if (!g_GodRayRadialMask || (eye != 1 && eye != 2))
             return false;
         float u, v;
+        int k = 0, count = 0;
         {
             std::lock_guard<std::mutex> lock(g_Mutex);
             EnterEye(eye);
             EyeLights& e = g_Eye[eye];
-            const int k = e.maskIndex++;
+            k = e.maskIndex++;
+            count = e.count;
             if (k >= e.count)
+            {
+                if (TraceTake())
+                    Game::logMsg("God rays trace %u: mask eye %d #%d of %d stored: no blur position, stock mask", g_TraceSeq, eye, k, count);
                 return false;
+            }
             u = e.uv[k][0];
             v = e.uv[k][1];
         }
+        const bool trace = TraceTake();
         if (!(lightDepth > 0.f && lightDepth < 1.f) || !std::isfinite(u) || !std::isfinite(v))
+        {
+            if (trace)
+                Game::logMsg("God rays trace %u: mask eye %d #%d/%d uv %.3f,%.3f depth %.6f: rejected, stock mask", g_TraceSeq, eye, k, count, u, v, lightDepth);
             return false;
+        }
         // The light: its screen position at its depth, unprojected.
         const float p[4] = { 2.f * u - 1.f, 1.f - 2.f * v, lightDepth, 1.f };
         float w4[4];
@@ -244,7 +271,11 @@ namespace bmvr
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         const float viewZ = 1.f / w4[3];           // c55 row = 1 / view depth
         if (!(dist > 1.f && dist < 1e7f) || std::fabs(m[14]) < 1e-12f)
+        {
+            if (trace)
+                Game::logMsg("God rays trace %u: mask eye %d #%d/%d uv %.3f,%.3f depth %.6f dist %.1f: rejected, stock mask", g_TraceSeq, eye, k, count, u, v, lightDepth, dist);
             return false;
+        }
         // Reference axis: level, toward the light's yaw (a flat player
         // looking level at it: the look the maps were made with). A light
         // nearly overhead has no yaw: face it directly.
@@ -263,6 +294,10 @@ namespace bmvr
             a[2] = dz / dist;
         }
         const float along = dx * a[0] + dy * a[1] + dz * a[2];   // light depth along a
+        if (trace)
+            Game::logMsg("God rays trace %u: mask eye %d #%d/%d uv %.3f,%.3f depth %.6f light (%.0f %.0f %.0f) %.0f u away, view depth %.0f, level axis (%.2f %.2f %.2f) along %.0f%s",
+                g_TraceSeq, eye, k, count, u, v, lightDepth, w4[0] / w4[3], w4[1] / w4[3], w4[2] / w4[3], dist, viewZ,
+                a[0], a[1], a[2], along, along > 1.f ? "" : ": rejected, stock mask");
         if (!(along > 1.f))
             return false;
         out[0] = 1.f / m[14];                      // depth = w * (1 / c55.z) - c55.w / c55.z

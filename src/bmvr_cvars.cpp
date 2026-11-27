@@ -301,6 +301,8 @@ namespace bmvr
               Kind::Float, 0.f, 2.f, nullptr, &g_GodRaySamples },
             { "bmvr_godray_blur_scale", "VR: god ray blur size: 0 full (stock), 1 half, 2 quarter",
               Kind::Float, 0.f, 2.f, nullptr, &g_GodRayBlurScale },
+            { "bmvr_godray_log", "VR debug: log the next N god ray blur/mask draws (eye, light index, screen position, mask result)",
+              Kind::Float, 0.f, 20000.f, nullptr, &g_GodRayLog },
             { "bmvr_xen_fog_noise", "VR: Xen fog noise: 0 stock (each eye's view direction, at infinity in stereo), 1 from the centre eye (flat look, on the surfaces), 2 fixed to the world (bmvr_xen_fog_noise_size), 3 auto (world near, centre eye far)",
               Kind::Float, 0.f, 3.f, nullptr, &g_XenFogNoiseMode },
             { "bmvr_xen_fog_world_near", "VR: Xen fog noise auto mode: fixed to the world up to this distance from the eye, units",
