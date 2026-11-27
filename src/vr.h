@@ -407,7 +407,7 @@ public:
     // throw (set at the trigger release).
     std::atomic<unsigned> m_SnarkHandThrowUntil{ 0 };
     std::atomic<bool> m_ThrowFromLeft{ false }; // satchel: throw samples from the left hand
-    int MagReloadWeaponNow() const;
+    int MagReloadWeaponNow(bool holstered = false) const;
     // Left controller world pose for the viewmodel draw (render thread).
     bool OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const;
     bool ViewmodelIsShotgun() const { return (m_VmClassFlags.load(std::memory_order_relaxed) & kVmFlagShotgun) != 0; }

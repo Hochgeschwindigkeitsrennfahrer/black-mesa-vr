@@ -14597,6 +14597,8 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
         TryGetLadderPinDrawPos(false, body, rightPos);
     }
     const HandDrawSnap* snap = t_HandSnap;
+    // Set again by this eye's glove draw (no gloves drawn = no rung turn).
+    g_VrGloveRungXform[0].valid = g_VrGloveRungXform[1].valid = false;
     if (snap)
     {
         leftOk = snap->leftOk;
@@ -15310,6 +15312,34 @@ bool VR::DrawIndependentHandMarkers(IDirect3DSurface9* eyeSurf, int stereoEye, b
             bmvr::BeginRisky(L"hand_overlay");
         }
         applyHandOverlayState();
+        // Sync probe (bmvr_sync_probe N): what each consumer draws this eye, in world
+        // units (eye, HUD hand, gun wrist from the bones drawn last, the cuff
+        // cap's wrist, laser start). Offline: which frame each one moves on.
+        if (bmvr::g_SyncProbeEyes >= 1.f && (stereoEye == 1 || stereoEye == 2))
+        {
+            static unsigned s_pair = 0;
+            if (stereoEye == 1)
+                ++s_pair;
+            {
+                bmvr::g_SyncProbeEyes -= 1.f;
+                const Vector hud = toWorld(rightPos);
+                float drawn[12]{};
+                const unsigned ms = MagReload::g_GunWristMs[1].load(std::memory_order_acquire);
+                for (int k = 0; k < 12; ++k)
+                    drawn[k] = MagReload::g_GunWrist[1][k].load(std::memory_order_relaxed);
+                float cap[12]{};
+                const bool capOk = GunCapWristForDraw(cap);
+                Vector ba{}, bb{}, bd{};
+                const bool beamOk = snap ? snap->havePoints : AimOverlayPointsNow(ba, bb, bd);
+                if (snap)
+                    ba = snap->beamA;
+                Game::logMsg("SyncProbe p=%u e=%d t=%.2f snap=%d pairGun=%d eye=%.2f,%.2f,%.2f hud=%.2f,%.2f,%.2f wrist=%.2f,%.2f,%.2f wms=%u cap=%d,%.2f,%.2f,%.2f beam=%d,%.2f,%.2f,%.2f",
+                    s_pair, stereoEye, QpcNowMs(), snap ? 1 : 0, bmvr::g_GunPoseAtPair ? 1 : 0,
+                    eyeOrig.x, eyeOrig.y, eyeOrig.z, hud.x, hud.y, hud.z,
+                    drawn[3], drawn[7], drawn[11], ms ? GetTickCount() - ms : 9999u,
+                    capOk ? 1 : 0, cap[3], cap[7], cap[11], beamOk ? 1 : 0, ba.x, ba.y, ba.z);
+            }
+        }
         DrawHandHud(device, stereoEye, w, h,
             leftOk, toWorld(leftPos), leftAng,
             rightOk, toWorld(rightPos), rightAng,
@@ -16037,6 +16067,16 @@ void VR::DrawHandHud(IDirect3DDevice9* device, int stereoEye, UINT w, UINT h,
                     handHudOrigin,
                     rightDominant ? leftAng : rightAng,
                     !rightDominant, handPanel);
+                // On a rung the glove is turned onto it (WrapGloveOnRung,
+                // drawn just before this): the panel takes the same turn.
+                const VrGloveRungXform& xf = g_VrGloveRungXform[rightDominant ? 0 : 1];
+                if (handPanel.valid && xf.valid)
+                {
+                    handPanel.ul = xf.Point(handPanel.ul);
+                    handPanel.xaxis = xf.Dir(handPanel.xaxis);
+                    handPanel.yDown = xf.Dir(handPanel.yDown);
+                    handPanel.face = xf.Dir(handPanel.face);
+                }
             }
             if (handPanel.valid && !HudIsBackfacing(handPanel, eyeOrig))
             {
@@ -23546,6 +23586,7 @@ std::string bmvr::FoveationStatusText()
 
 // ---- Manual magazines (VrMagReload): MP5 + glock ----
 std::atomic<int> MagReload::g_Weapon{ MagReload::kWeaponNone };
+std::atomic<int> MagReload::g_HolsteredWeapon{ MagReload::kWeaponNone };
 std::atomic<int> MagReload::g_State{ MagReload::kLoaded };
 std::atomic<bool> MagReload::g_SlideLocked{ false };
 std::atomic<bool> MagReload::g_BoltGrab{ false };
@@ -23951,9 +23992,14 @@ bool VR::OffhandWorldPoseForDraw(Vector& pos, QAngle& ang) const
     return true;
 }
 
-int VR::MagReloadWeaponNow() const
+int VR::MagReloadWeaponNow(bool holstered) const
 {
-    if (!bmvr::PhysicalWeapon(bmvr::g_VrMagReload) || bmvr::g_LeftHanded || !m_HasHeldWeapon || m_EmptyHands || !m_GameplayEligible)
+    if (!bmvr::PhysicalWeapon(bmvr::g_VrMagReload) || bmvr::g_LeftHanded || !m_GameplayEligible)
+        return MagReload::kWeaponNone;
+    // holstered: the gun empty hands put away (still the game's active
+    // weapon). m_LastViewmodelModel can be stale (never cleared), harmless
+    // here: with empty hands no viewmodel shows, only its reload clips hide.
+    if (holstered ? !m_EmptyHands : (!m_HasHeldWeapon || m_EmptyHands))
         return MagReload::kWeaponNone;
     if (ViewmodelIsMp5())
         return MagReload::kWeaponMp5;
@@ -24046,6 +24092,7 @@ void VR::UpdateMagReload(uint32_t& buttons)
         g_BoltGrab.store(false);
     }
     const int weapon = MagReloadWeaponNow();
+    MagReload::g_HolsteredWeapon.store(weapon == kWeaponNone ? MagReloadWeaponNow(true) : kWeaponNone);
     if (weapon != s_lastWeapon)
     {
         s_lastWeapon = weapon;

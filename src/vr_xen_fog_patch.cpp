@@ -17,11 +17,19 @@ namespace
     //   add r6.xyz, rW.<comps>, c51     world position
     //   mul r6.xyz, r6, c100.x          x 1 / noise size
     //   nrm r8.xyz, r7                  direction from the anchor
-    //   lrp r6.xyz, c100.y, r6, r8      world mix (0 = direction)
-    // c100.y 0 + c100.z 0 = stock (each eye's own view direction, noise at
-    // infinity in stereo); c100.z 1 with c101 = the centre eye = the stock
-    // look from one point both eyes share (noise on the surfaces, follows the
-    // player like flat); c100.y 1 = fixed to the world, size c100.x.
+    //   dp3 r9.x, r7, r7
+    //   rsq r9.x, r9.x
+    //   rcp r9.x, r9.x                  distance from the anchor
+    //   mad_sat r9.x, r9.x, -c100.w, c101.w   world mix by distance
+    //   lrp r6.xyz, r9.x, r6, r8        world mix (0 = direction)
+    // World mix = saturate(c101.w - distance * c100.w): c100.w 0 gives the
+    // constant c101.w (0 = direction, 1 = world). c100.z 0 = stock (each
+    // eye's own view direction, noise at infinity in stereo); c100.z 1 with
+    // c101 = the centre eye = the stock look from one point both eyes share
+    // (noise on the surfaces, follows the player like flat); mix 1 = fixed
+    // to the world, size c100.x. Auto: world up close (it needs depth there,
+    // e.g. the bm_c4a1a1 lab floor), centre-eye direction far off (world
+    // noise blotches far walls, bm_c4a2c chasm), faded between near and far.
     // and the lookups read r6: the k-th component they write gets r6's k-th
     // (they compute dir * scale + time * scroll per component).
     constexpr uint32_t kTemp = 0u, kConst = 2u;
@@ -184,7 +192,11 @@ namespace bmvr
             0x03000002u, 0x80070006u, wYzww, 0xA0E40033u,              // add r6.xyz, rW.<comps>, c51
             0x03000005u, 0x80070006u, 0x80E40006u, 0xA0000064u,        // mul r6.xyz, r6, c100.x
             0x02000024u, 0x80070008u, 0x80E40007u,                     // nrm r8.xyz, r7
-            0x04000012u, 0x80070006u, 0xA0550064u, 0x80E40006u, 0x80E40008u,   // lrp r6.xyz, c100.y, r6, r8
+            0x03000008u, 0x80010009u, 0x80E40007u, 0x80E40007u,        // dp3 r9.x, r7, r7
+            0x02000007u, 0x80010009u, 0x80000009u,                     // rsq r9.x, r9.x
+            0x02000006u, 0x80010009u, 0x80000009u,                     // rcp r9.x, r9.x
+            0x04000004u, 0x80110009u, 0x80000009u, 0xA1FF0064u, 0xA0FF0065u,   // mad_sat r9.x, r9.x, -c100.w, c101.w
+            0x04000012u, 0x80070006u, 0x80000009u, 0x80E40006u, 0x80E40008u,   // lrp r6.xyz, r9.x, r6, r8
         };
         static_assert(std::size(insert) == kXenFogInsertTokens, "insert size");
         out.clear();

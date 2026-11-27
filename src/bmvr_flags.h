@@ -331,6 +331,10 @@ namespace bmvr
     // ammo HUD a frame ahead of the gun hand, gun hand missing for one frame
     // in heavy scenes.
     extern bool g_HandSyncLog;
+    // bmvr_sync_probe N: the next N eye draws log "SyncProbe" (eye, HUD hand,
+    // gun wrist, cuff-cap wrist, laser start in world units) for an offline
+    // frame-by-frame check of what each consumer draws (2026-11-27).
+    extern float g_SyncProbeEyes;
     // OffCenterTest=true (flat only, diagnostic): while VR/offcenter_test_on
     // exists, the main view renders the PSVR2 left-eye off-centre subrect
     // (left 0, right 0.758 of the frustum) to check the engine's off-centre
@@ -705,9 +709,14 @@ namespace bmvr
     // Xen fog stereo fix (src/vr_xen_fog.cpp), XenFogNoise: 0 stock (each
     // eye's view direction, noise at infinity), 1 direction from the centre eye
     // (stock look, on the surfaces in stereo; default), 2 fixed to the world
-    // with XenFogNoiseSize units per repeat. Live, Debug FIXES rows.
+    // with XenFogNoiseSize units per repeat, 3 Auto (default, user
+    // 2026-11-27): world up to XenFogWorldNear units from the centre eye,
+    // centre-eye direction from XenFogWorldFar on, faded between. Live, Debug
+    // FIXES rows.
     extern float g_XenFogNoiseMode;
     extern float g_XenFogNoiseSize;
+    extern float g_XenFogWorldNear;
+    extern float g_XenFogWorldFar;
     extern bool g_FlareEyeAxis;
     // Lens flare layers are turned so their streaks stay level with the world
     // horizon at the light, not with the eye's image (which rolls with the head).

@@ -1120,7 +1120,7 @@ namespace
     // the rung (the wrist tipping up or down). The centre of the middle
     // finger's curl (circle through its three joints) lands on the rung.
     void WrapGloveOnRung(const VrHandMeshAsset& asset, const std::vector<VrHandMatrixRows3x4>& palette,
-        VrHandMatrix4& world, bool rightHand, const Vector& rung, const Vector& axis)
+        VrHandMatrix4& world, bool rightHand, const Vector& rung, const Vector& axis, VrGloveRungXform& xf)
     {
         const char* suf = rightHand ? "r" : "l";
         auto idx = [&](const char* base) { return FindNameIndex(asset.jointNames, std::string(base) + suf); };
@@ -1184,6 +1184,10 @@ namespace
                 M[i][j] = VrHandMath::Get(world, i, j);
         const float t[3] = { M[0][3] - c.x, M[1][3] - c.y, M[2][3] - c.z };
         const float dst[3] = { rung.x, rung.y, rung.z };
+        std::memcpy(xf.R, R, sizeof(R));
+        xf.from = c;
+        xf.to = rung;
+        xf.valid = true;
         for (int i = 0; i < 3; ++i)
         {
             for (int j = 0; j < 3; ++j)
@@ -1316,6 +1320,7 @@ bool BmVrGloves::DrawForEye(
     float zFar,
     bool overlayNoDepth)
 {
+    g_VrGloveRungXform[0].valid = g_VrGloveRungXform[1].valid = false;
     if (!device || !m_Impl || !m_Impl->EnsureAssets())
         return false;
 
@@ -1569,7 +1574,7 @@ bool BmVrGloves::DrawForEye(
             posOffset,
             rotOffset);
         if (rungGrip)
-            WrapGloveOnRung(hand.asset, hand.palette, world, rightHand, rungPoint, rungAxis);
+            WrapGloveOnRung(hand.asset, hand.palette, world, rightHand, rungPoint, rungAxis, g_VrGloveRungXform[rightHand ? 1 : 0]);
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
         if (i == 0 && !gripCurl)
             StoreLeftFistCentre(hand.asset, hand.palette, world, *origins[0], *angles[0]);
@@ -1682,6 +1687,8 @@ bool BmVrGloves::DrawForEye(
     }
     return drew;
 }
+
+VrGloveRungXform g_VrGloveRungXform[2];
 
 void VrHands_UpdatePalmLight(int hand, const Vector& pos)
 {

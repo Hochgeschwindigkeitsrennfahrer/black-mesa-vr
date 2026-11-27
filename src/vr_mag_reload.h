@@ -57,6 +57,10 @@ namespace MagReload
 
     // Game thread -> draw.
     extern std::atomic<int> g_Weapon;      // weapon the state below is for
+    // Gun put away with empty hands (still the game's active weapon), else
+    // kWeaponNone: its stock reload clips stay hidden too, or the game's own
+    // refill played their shell / cylinder sounds (user 2026-11-27).
+    extern std::atomic<int> g_HolsteredWeapon;
     extern std::atomic<int> g_State;
     extern std::atomic<bool> g_SlideLocked; // draw the slide/bolt held back
     // Held back = this fraction of boltTravel: almost fully, so a short pull

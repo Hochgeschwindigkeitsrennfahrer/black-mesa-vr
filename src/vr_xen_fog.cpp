@@ -64,12 +64,20 @@ namespace bmvr
         const float size = g_XenFogNoiseSize < 16.f ? 16.f : g_XenFogNoiseSize;
         const int mode = static_cast<int>(g_XenFogNoiseMode + 0.5f);
         out[0] = 1.f / size;
-        out[1] = mode == 2 ? 1.f : 0.f;   // fixed to the world
-        out[2] = mode == 1 ? 1.f : 0.f;   // direction from the shared centre eye
-        out[3] = 0.f;
+        out[1] = 0.f;
+        out[2] = (mode == 1 || mode == 3) ? 1.f : 0.f;   // direction from the shared centre eye
+        out[3] = 0.f;                     // world mix slope (per unit of distance)
         out[4] = g_Anchor[0];
         out[5] = g_Anchor[1];
         out[6] = g_Anchor[2];
-        out[7] = 0.f;
+        out[7] = mode == 2 ? 1.f : 0.f;   // world mix (constant unless Auto)
+        if (mode == 3)
+        {
+            // Auto: mix = (far - distance) / (far - near), clamped.
+            const float nearU = g_XenFogWorldNear < 0.f ? 0.f : g_XenFogWorldNear;
+            const float farU = g_XenFogWorldFar < nearU + 16.f ? nearU + 16.f : g_XenFogWorldFar;
+            out[3] = 1.f / (farU - nearU);
+            out[7] = farU / (farU - nearU);
+        }
     }
 }

@@ -461,8 +461,11 @@ namespace
             { "Underwater world fix", RowKind::Toggle, nullptr, &bmvr::g_EyeUnderwaterWorld, nullptr, 0, 0, 0, nullptr },
             { "Xen ground fog off", RowKind::Toggle, nullptr, &bmvr::g_XenGlobalFogOff, nullptr, 0, 0, 0, nullptr },
             // User 2026-11-27: fog noise was looked up by view direction (at infinity in stereo).
-            { "Xen fog noise", RowKind::Choice, "XenFogNoise", nullptr, &bmvr::g_XenFogNoiseMode, 1.f, 0.f, 2.f, "Stock|Centre eye|World" },
+            // Auto (user 2026-11-27): the lab floor needs World, far walls blotch with it.
+            { "Xen fog noise", RowKind::Choice, "XenFogNoise", nullptr, &bmvr::g_XenFogNoiseMode, 1.f, 0.f, 3.f, "Stock|Centre eye|World|Auto" },
             { "Xen fog noise size", RowKind::Number, "XenFogNoiseSize", nullptr, &bmvr::g_XenFogNoiseSize, 32.f, 32.f, 2048.f, "%.0f u" },
+            { "Xen fog: world noise up to", RowKind::Number, "XenFogWorldNear", nullptr, &bmvr::g_XenFogWorldNear, 50.f, 0.f, 4000.f, "%.0f u" },
+            { "Xen fog: centre eye from", RowKind::Number, "XenFogWorldFar", nullptr, &bmvr::g_XenFogWorldFar, 100.f, 100.f, 8000.f, "%.0f u" },
             { "Particles after water", RowKind::Toggle, "ParticlesLast", &bmvr::g_ParticlesLast, nullptr, 0, 0, 0, nullptr },
             { "Titles glow + scanlines", RowKind::Toggle, nullptr, &bmvr::g_TitleGlow, nullptr, 0, 0, 0, nullptr },
             { "HEV boot-up HUD inset", RowKind::Number, nullptr, nullptr, &bmvr::g_BootHudInset, 25.f, 0.f, 500.f, "%.0f px" },
@@ -3617,6 +3620,30 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
         s_paintedModelGen = bmvr::ctlmodel::Generation();
         m_SettingsDirty = true;
     }
+    // Repaint cost (render thread, inside the eye's overlay): per 10 s while
+    // the panel is open, count + mean/max ms of paint, wings, upload (user
+    // 2026-11-27: panel frames p99 ~40 ms vs ~20 in play).
+    struct RepaintStats { int n = 0; double sum[3]{}, max[3]{}; DWORD since = 0; };
+    static RepaintStats s_rs;
+    auto qpcMs = []() {
+        LARGE_INTEGER f, c;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&c);
+        return static_cast<double>(c.QuadPart) * 1000.0 / static_cast<double>(f.QuadPart);
+    };
+    {
+        const DWORD t = GetTickCount();
+        if (!s_rs.since)
+            s_rs.since = t;
+        else if (t - s_rs.since >= 10000)
+        {
+            if (s_rs.n > 0)
+                Game::logMsg("VR settings panel repaints (10 s): %d, paint %.1f ms mean / %.1f max, wings %.1f / %.1f, upload %.1f / %.1f (tab %d)",
+                    s_rs.n, s_rs.sum[0] / s_rs.n, s_rs.max[0], s_rs.sum[1] / s_rs.n, s_rs.max[1], s_rs.sum[2] / s_rs.n, s_rs.max[2], g_Tab);
+            s_rs = RepaintStats{};
+            s_rs.since = t;
+        }
+    }
     // After a failed repaint, retry every 500 ms instead of every frame.
     static DWORD s_gfxRetryAt = 0;
     static int s_gfxFailLog = 0;
@@ -3637,9 +3664,13 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
             fail = "controller-picture canvas";
         else
         {
+            const double t0 = qpcMs();
             Paint(*body, m_SettingsHover, m_SettingsHoverZone);
+            GdiFlush();
+            const double t1 = qpcMs();
             if (wing)
                 ComposeWings(*body, *wide, m_SettingsHover);
+            const double t2 = qpcMs();
             Canvas& c = wing ? *wide : *body;
             // Test only: BMVR_TEST_PANEL_DUMP=1 saves every repaint as
             // VR/panel-tab<N>[-picker].bmp (full size, for screenshots).
@@ -3679,6 +3710,13 @@ void VR::DrawSettingsPanel(IDirect3DDevice9* device, int stereoEye, UINT w, UINT
                 }
             }
             fail = UploadPanel(device, c);
+            const double ms[3] = { t1 - t0, t2 - t1, qpcMs() - t2 };
+            ++s_rs.n;
+            for (int k = 0; k < 3; ++k)
+            {
+                s_rs.sum[k] += ms[k];
+                s_rs.max[k] = (std::max)(s_rs.max[k], ms[k]);
+            }
         }
         if (fail)
         {

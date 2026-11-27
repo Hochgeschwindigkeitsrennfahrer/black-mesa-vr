@@ -21,5 +21,5 @@ namespace bmvr
     XenFogPatchInfo XenFogPatchBytecode(const uint32_t* bytecode, std::vector<uint32_t>& out);
     constexpr unsigned kXenFogConstReg = 100;    // c100 + c101
     constexpr unsigned kXenFogConstCount = 2;
-    constexpr size_t kXenFogInsertTokens = 25;
+    constexpr size_t kXenFogInsertTokens = 40;
 }

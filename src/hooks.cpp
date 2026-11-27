@@ -3651,6 +3651,24 @@ namespace
         // drawn bones (HoldLeftHandOnMp5Body).
         // Manual magazines: the hands do the reload, so the stock reload clip
         // (also the game's own refill after firing dry) is not shown.
+        const int holsteredGun = MagReload::g_HolsteredWeapon.load(std::memory_order_relaxed);
+        if (label && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
+            && holsteredGun != MagReload::kWeaponNone)
+        {
+            // Empty hands: only the stock reload / shell clips, nothing else
+            // below (crossbow idle swaps need the drawn gun).
+            char lb[64]{};
+            for (int i = 0; i < 63 && label[i]; ++i)
+                lb[i] = static_cast<char>(tolower(static_cast<unsigned char>(label[i])));
+            if (std::strstr(lb, "reload") || (holsteredGun == MagReload::kWeaponShotgun && std::strstr(lb, "shell")))
+            {
+                static int s_log;
+                if (s_log++ < 20)
+                    Game::logMsg("Mag reload: stock clip '%s' not shown (gun put away)", label);
+                ForceViewmodelIdlePose(viewmodel, hdr);
+                return;
+            }
+        }
         if (label && Hooks::m_Game && viewmodel == static_cast<void*>(Hooks::m_Game->GetViewModelEntity())
             && MagReload::g_Weapon.load(std::memory_order_relaxed) != MagReload::kWeaponNone)
         {

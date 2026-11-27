@@ -334,7 +334,12 @@ namespace bmvr
     bool g_GlowCountDepthFix = true;
     // MulticoreMode: hands/laser of both eyes drawn from one per-frame snapshot (VR::HandDrawSnap).
     bool g_McHandSnapshot = true;
-    bool g_GunPoseAtPair = true;
+    // Off since 2026-11-27 (SyncProbe headless, live settings): placed at the
+    // pair, the drawn gun trailed the HUD/laser by ~0.7 frame of walking
+    // (1.6 u at 2.3 u/frame); off + the per-frame snapshot kept gun, HUD,
+    // laser and cuff cap on the same frame for hand steps and walking.
+    bool g_GunPoseAtPair = false;
+    float g_SyncProbeEyes = 0.f;
     bool g_SkyWaterPerEye = true;
     bool g_EyeUnderwaterWorld = true;
     bool g_WaterLineClipFix = true;
@@ -343,8 +348,10 @@ namespace bmvr
     bool g_WorldModelFix = true;
     volatile long g_ModelLeakSeen = 0;
     bool g_XenGlobalFogOff = true;
-    float g_XenFogNoiseMode = 1.f;
+    float g_XenFogNoiseMode = 3.f;
     float g_XenFogNoiseSize = 256.f;
+    float g_XenFogWorldNear = 300.f;
+    float g_XenFogWorldFar = 1200.f;
     bool g_FlareEyeAxis = true;
     bool g_FlareLevel = true;
     bool g_SpriteLevel = true;
@@ -1349,8 +1356,20 @@ namespace bmvr
             else if (std::strcmp(n, "XenFogNoise") == 0)
             {
                 const int v = std::atoi(val);
-                if (v >= 0 && v <= 2)
+                if (v >= 0 && v <= 3)
                     g_XenFogNoiseMode = static_cast<float>(v);
+            }
+            else if (std::strcmp(n, "XenFogWorldNear") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 0.f && v <= 8192.f)
+                    g_XenFogWorldNear = v;
+            }
+            else if (std::strcmp(n, "XenFogWorldFar") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 16.f && v <= 16384.f)
+                    g_XenFogWorldFar = v;
             }
             else if (std::strcmp(n, "XenFogNoiseSize") == 0)
             {
