@@ -53,7 +53,8 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
   with them as the scene was made; turn that off if it is too much for your VR legs.
 - **Physical crouching** (optional, General tab): crouch in real life to crouch in the game.
 - **Roomscale (beta, on by default):** walk around your play space and your body follows your head, also on trains
-  and trams. Stepping off your spot by accident (a drink in passthrough, a step aside) no longer leaves your view in a wall until you recenter. General > View.
+  and trams. Stepping off your spot without thinking (a drink in passthrough, a step aside) no longer lets your view drift away
+  from your in-game body, which you would only notice later when grabs missed or you slid into walls. General > View.
 - **Subtitles / closed captions** below your view when they are on in the game's audio options; height and size in
   General > View.
 - **Bare hands until you get the HEV suit** (and throughout Blue Shift), HEV gloves after that.
