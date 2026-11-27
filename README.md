@@ -42,7 +42,8 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
 - **Per-hand item holding and use.**
 - **Gun, hands, HUD and laser locked together:** all drawn from one tracking sample for both eyes, so nothing jitters
   or lags behind in heavy scenes or fast moves.
-- **Health, suit and ammo on your hands**, an ammo counter on the weapon, and a **short red flash over the view when
+- **Health, suit and ammo on your hands**, an ammo counter on the weapon (with health next to it while both hands hold
+  the gun), and a **short red flash over the view when
   you get hit**.
 - **Usage hints:** short messages the first times you carry a prop or take a mounted gun, naming your own alt-fire
   button, and when a reload step is missing ("PUMP IT"). General tab > Usage hints.
@@ -52,7 +53,7 @@ A macOS version lives here: https://github.com/armax9/black-mesa-vr-macos
   with them as the scene was made; turn that off if it is too much for your VR legs.
 - **Physical crouching** (optional, General tab): crouch in real life to crouch in the game.
 - **Roomscale (beta, on by default):** walk around your play space and your body follows your head, also on trains
-  and trams. General > View.
+  and trams. It also keeps your view from drifting through walls when you forgot to recenter. General > View.
 - **Subtitles / closed captions** below your view when they are on in the game's audio options; height and size in
   General > View.
 - **Bare hands until you get the HEV suit** (and throughout Blue Shift), HEV gloves after that.
@@ -133,10 +134,10 @@ defaults reach you with each update.
    - **Meta Link (Quest):** uses the Link / Oculus OpenXR runtime.
    - **Virtual Desktop:** Streamer → Options → **OpenXR Runtime = VDXR**. "SteamVR" in that dropdown shows the
      world upside-down.
-7. Launch Black Mesa from Steam. `bmvr_log.txt` next to `bms.exe` should appear and start with `BMVR d3d9.dll loaded`.
+7. Launch Black Mesa from Steam. `bmvr_log.txt` next to `bms.exe` should appear and start with `Black Mesa VR` and the release name.
 
 **Updating:** copy the new zip over the old install the same way. The zip has no `VR\config.txt`, so your settings
-are kept: that file holds only what you changed. Installs from before 2026-11-26 get it cleaned up once on the first
+are kept: that file holds only what you changed. Installs from before release 26768221.5 get it cleaned up once on the first
 start (old shipped defaults and comments removed, your own changes kept, the old file saved as `VR\config.txt.bak`).
 
 **Uninstall:** quit the game, then in the Black Mesa folder delete `d3d9.dll`, `BMVR_README.txt`, `bmvr_*` files,
@@ -156,7 +157,7 @@ keeps bare hands for the whole campaign, and the weapon wheel and wrist HUD turn
   fixed, or off because your GPU has no variable-rate shading. Without eye tracking it falls back to the lens centre
   by itself. Turning it on from off needs a game restart; the row tells you.
 - **MSAA: 2x** if your GPU has room. It costs about 2 ms per frame in a heavy room on an RX 9070; 4x roughly
-  doubles that. Keep **"MSAA on leaves + fences"** and **"MSAA skips particles"** on.
+  doubles that. Keep **"MSAA on leaves + fences"** on.
 - **Keep FXAA on next to MSAA.** MSAA smooths geometry edges; it cannot reach Black Mesa's lighting, so thin lit
   objects (railings) and specular sparkle need FXAA. Start with the **Sharp** preset.
 - **Reflections (shimmer): Balanced** (default). **Subtle** if shiny floors still shimmer, **Full** for the game's
@@ -195,6 +196,8 @@ text, one `Key=value` per line).
 - **Switching to an addon from the game's new menu (Blue Shift, Military, ...) does not work in VR:** the game
   restarts its engine in place, the menu then runs at a few fps and starting a game crashes. Start the addon directly
   instead, e.g. with the Steam launch option `-game bshift`.
+- **Subtitle height and size do not apply while other titles are on screen** (e.g. the intro credits on the tram).
+- **Roomscale is a beta:** please report spots where it misbehaves; turning it off brings back the old behaviour.
 - The first launch after an update recompiles shaders: expect some hitches in the first minutes.
 
 **Reporting a bug:** attach `bmvr_log.txt` (next to `bms.exe`). For visual problems, **Debug → Capture debug frame**
