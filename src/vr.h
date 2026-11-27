@@ -1437,6 +1437,12 @@ public:
     static constexpr float kMenuTriggerRearm = 0.5f;
     bool MenuTriggerClickHeld(bool& latch) const;
     void DrawMenuCursorOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf);
+    // "VR SETTINGS" button stamped on the in-game pause menu (top right):
+    // a click closes the pause menu and opens the VR settings panel.
+    bool PauseVrButtonShown() const;
+    static bool PauseVrButtonRect(int w, int h, RECT& r);
+    void DrawPauseVrButtonOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf);
+    void OpenPanelFromPauseButtonStep();
     void ApplyMenuNavigation();
     void QueueEscapeKey();
     void QueueVirtualKey(int vk);
@@ -1639,6 +1645,7 @@ public:
         const Vector& eyeOrig, const Vector& fwd, const Vector& right, const Vector& up);
     void SettingsPanelFrame(Vector& origin, Vector& fwd, Vector& right, Vector& up) const;
     static IDirect3DTexture9* SettingsGearTexture(IDirect3DDevice9* device);
+    static IDirect3DTexture9* PauseVrButtonTexture(IDirect3DDevice9* device, bool hover);
     bool m_SettingsOpen = false;
     // First-run welcome: once per map until the player opened the VR panel
     // from it, pause the game and show "hold <button> to open the VR menu"
@@ -2095,6 +2102,7 @@ private:
     float m_MenuCursorSmoothY = 0.f;
     int m_MenuCursorX = 0;
     int m_MenuCursorY = 0;
+    DWORD m_PauseButtonOpenMs = 0;   // pause menu's VR button clicked: open the panel once the menu is gone
     double m_MenuCursorSmoothMs = 0.0;
     bool m_MenuPointerLastValid = false;
     // Pointer moving (last change past the dead zone < 0.2 s ago): no dead zone.

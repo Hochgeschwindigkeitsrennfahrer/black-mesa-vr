@@ -2733,6 +2733,62 @@ IDirect3DTexture9* VR::SettingsGearTexture(IDirect3DDevice9* device)
     return g_Gfx.gearGpu;
 }
 
+IDirect3DTexture9* VR::PauseVrButtonTexture(IDirect3DDevice9* device, bool hover)
+{
+    // Own storage, not g_Gfx: this runs on the material thread (pause HUD
+    // stamp), the panel and toasts on the render thread. Render-target
+    // textures so StretchRect may read them.
+    static IDirect3DDevice9* s_device = nullptr;
+    static IDirect3DTexture9* s_tex[2] = {};
+    if (!device)
+        return nullptr;
+    if (s_device != device)
+    {
+        for (IDirect3DTexture9*& t : s_tex)
+            if (t) { t->Release(); t = nullptr; }
+        s_device = device;
+    }
+    IDirect3DTexture9*& tex = s_tex[hover ? 1 : 0];
+    if (tex)
+        return tex;
+    Canvas c(512, 128);
+    if (!c.ok())
+        return nullptr;
+    const int b = 6;
+    c.fill(0, 0, c.w, c.h, kAmber);
+    c.fill(b, b, c.w - b, c.h - b, hover ? kAmber : kBg);
+    c.text("VR SETTINGS", 0, 0, c.w, c.h, hover ? kBg : kAmber, 56, true, DT_CENTER);
+    c.setAlpha(240);
+    IDirect3DTexture9* sys = nullptr;
+    if (FAILED(device->CreateTexture(c.w, c.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr))
+        || FAILED(device->CreateTexture(c.w, c.h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, nullptr)))
+    {
+        if (sys) sys->Release();
+        if (tex) { tex->Release(); tex = nullptr; }
+        return nullptr;
+    }
+    D3DLOCKED_RECT lr{};
+    bool ok = SUCCEEDED(sys->LockRect(0, &lr, nullptr, 0));
+    if (ok)
+    {
+        for (int y = 0; y < c.h; ++y)
+            std::memcpy(static_cast<uint8_t*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch,
+                c.px + static_cast<size_t>(y) * c.w, static_cast<size_t>(c.w) * 4u);
+        sys->UnlockRect(0);
+        ok = SUCCEEDED(device->UpdateTexture(sys, tex));
+    }
+    sys->Release();
+    if (!ok)
+    {
+        tex->Release();
+        tex = nullptr;
+    }
+    static int s_log;
+    if (s_log++ < 2)
+        Game::logMsg("Pause VR button texture (%s): %s", hover ? "hover" : "normal", ok ? "ok" : "FAILED");
+    return tex;
+}
+
 void VR::OpenSettingsPanel()
 {
     // Test only: BMVR_TEST_PANEL_TAB=<n> opens the panel on tab n (headless screenshots).

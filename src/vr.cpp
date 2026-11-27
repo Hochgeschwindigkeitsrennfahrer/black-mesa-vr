@@ -7330,6 +7330,7 @@ void VR::ProcessInput()
     const bool menuStick = WeaponMenuStickHeld();
     UpdateWeaponMenu(menuStick, deltaMs);
     WelcomeStep(m_Game && SehIsPaused(m_Game->m_EngineClient));
+    OpenPanelFromPauseButtonStep();
     UpdateSettingsPanel();
 
     bool usedAnalogTurn = false;
@@ -13055,6 +13056,18 @@ void VR::ApplyMenuCursor()
                 break;
             }
         }
+        // The pause menu's VR SETTINGS button (ours, not Black Mesa's): no
+        // mouse click; close the menu and open the VR panel once it is gone.
+        RECT vrBtn{};
+        const POINT clickPt{ wx, wy };
+        if (pauseUi && PauseVrButtonShown() && PauseVrButtonRect(hudW, hudH, vrBtn) && PtInRect(&vrBtn, clickPt))
+        {
+            m_PauseButtonOpenMs = GetTickCount() ? GetTickCount() : 1;
+            m_PendingGameUi.store(2, std::memory_order_release);
+            Game::logMsg("Pause VR button clicked at %d,%d: gameui_hide queued, panel next", wx, wy);
+            m_MenuTriggerWasDown = click;
+            return;
+        }
         // VGUI reads the click position back through GetCursorPos (the hook
         // answers with the live pointer), and SetCursorPos does not move the
         // cursor while the window is unfocused under Wine. Report the
@@ -13194,6 +13207,76 @@ void VR::DrawMenuCursorOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* su
         const int span = (row < body * 3 / 4) ? (row + 1) : (std::max)(3, body - row);
         fill(x, y + row, x + span, y + row + 1, fillCol);
     }
+}
+
+bool VR::PauseVrButtonShown() const
+{
+    // In-game pause only (the VR panel needs a map); not the new QML UI,
+    // whose menu is not the VGUI layer this is stamped on.
+    return m_GameplayEligible && WantPauseWorldOverlay() && !bmvr::NewUiWindow();
+}
+
+bool VR::PauseVrButtonRect(int w, int h, RECT& r)
+{
+    if (w < 64 || h < 64)
+        return false;
+    // Right side of the menu canvas, top level with the top of the BLACK
+    // MESA logo text (y 430 of 1080, pause dump 2026-11-27): Black Mesa's
+    // pause menu is a list on the left, the rest of the canvas is empty.
+    const int bh = h * 6 / 100;
+    const int bw = bh * 4;   // texture is 512x128
+    const int margin = h * 5 / 100;
+    r.right = w - margin;
+    r.left = r.right - bw;
+    r.top = h * 398 / 1000;
+    r.bottom = r.top + bh;
+    return true;
+}
+
+void VR::DrawPauseVrButtonOnSurface(IDirect3DDevice9* device, IDirect3DSurface9* surf)
+{
+    if (!device || !surf || !PauseVrButtonShown())
+        return;
+    D3DSURFACE_DESC desc{};
+    RECT r{};
+    if (FAILED(surf->GetDesc(&desc)) || !PauseVrButtonRect(static_cast<int>(desc.Width), static_cast<int>(desc.Height), r))
+        return;
+    const POINT cur{ m_MenuCursorX, m_MenuCursorY };
+    const bool hover = m_MenuCursorValid && PtInRect(&r, cur);
+    IDirect3DTexture9* tex = PauseVrButtonTexture(device, hover);
+    if (!tex)
+        return;
+    IDirect3DSurface9* src = nullptr;
+    if (FAILED(tex->GetSurfaceLevel(0, &src)) || !src)
+        return;
+    const HRESULT hr = device->StretchRect(src, nullptr, surf, &r, D3DTEXF_LINEAR);
+    src->Release();
+    static int s_log;
+    if (s_log < 2 || (FAILED(hr) && s_log < 6))
+    {
+        ++s_log;
+        Game::logMsg("Pause VR button drawn at %ld,%ld-%ld,%ld on %ux%u hr=0x%08lx", r.left, r.top, r.right, r.bottom,
+            desc.Width, desc.Height, static_cast<unsigned long>(hr));
+    }
+}
+
+void VR::OpenPanelFromPauseButtonStep()
+{
+    if (!m_PauseButtonOpenMs)
+        return;
+    if (m_SettingsOpen || !m_GameplayEligible || GetTickCount() - m_PauseButtonOpenMs > 3000)
+    {
+        Game::logMsg("Pause VR button: panel not opened (open=%d eligible=%d, %lu ms)", m_SettingsOpen ? 1 : 0,
+            m_GameplayEligible ? 1 : 0, static_cast<unsigned long>(GetTickCount() - m_PauseButtonOpenMs));
+        m_PauseButtonOpenMs = 0;
+        return;
+    }
+    // Wait until Black Mesa's menu is gone: the panel closes itself while it is up.
+    if (PauseUiActive())
+        return;
+    m_PauseButtonOpenMs = 0;
+    Game::logMsg("Pause VR button -> VR settings panel");
+    OpenSettingsPanel();
 }
 
 bool VR::TryGetMeleeBladeViewAngles(QAngle& out) const
@@ -22015,7 +22098,10 @@ void VR::StampPauseOverlayCursor()
     if (bmvr::g_PauseMenuColourFromFrame && !title && !qml)
         PauseLayerColourFromBackbuffer(device, m_D9HUDSurface);
     if (!title)
+    {
+        DrawPauseVrButtonOnSurface(device, m_D9HUDSurface);
         DrawMenuCursorOnSurface(device, m_D9HUDSurface);
+    }
     device->Release();
 }
 
